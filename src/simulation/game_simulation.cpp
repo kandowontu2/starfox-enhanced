@@ -1456,8 +1456,8 @@ GameTickResult GameSimulation::tick_pregame_menu(
             | starfox::input::right | starfox::input::select
             | starfox::input::a | starfox::input::b)) != 0U;
     if (change_renderer) {
-        renderer_mode_ = renderer_mode_ == RendererMode::gpu
-            ? RendererMode::software : RendererMode::gpu;
+        set_renderer_mode(renderer_mode_ == RendererMode::gpu
+            ? RendererMode::software : RendererMode::gpu);
         queue_sound_effect(0x11U);
     }
 

@@ -2,6 +2,12 @@ cmake_minimum_required(VERSION 3.22)
 
 project(starfox_enhanced VERSION 0.0.8 LANGUAGES CXX)
 
+# The PS5 payload SDK toolchain (cmake/toolchains/ps5-radv.cmake) sets PROSPERO.
+if(PROSPERO)
+    set(STARFOX_PS5 TRUE)
+    include(cmake/PS5.cmake)
+endif()
+
 if(WINDOWS_STORE)
     # Apply the UWP ABI to the entire dependency graph, not only the SDL entry
     # point. The redistributable UWP framework still uses the pre-17.10 mutex
@@ -28,7 +34,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "NintendoSwitch")
     set(SWITCH TRUE)
 endif()
 
-if(WINDOWS_STORE OR ANDROID OR IOS OR SWITCH OR VITA)
+if(WINDOWS_STORE OR ANDROID OR IOS OR SWITCH OR VITA OR STARFOX_PS5)
     set(STARFOX_BUILD_TOOLS_DEFAULT OFF)
 else()
     set(STARFOX_BUILD_TOOLS_DEFAULT ON)
@@ -449,7 +455,13 @@ if(STARFOX_BUILD_RUNTIME)
                 DOWNLOAD_EXTRACT_TIMESTAMP TRUE
                 ${STARFOX_SDL3_PATCH_COMMAND})
         endif()
+        if(STARFOX_PS5)
+            starfox_prepare_ps5_sdl()
+        endif()
         FetchContent_MakeAvailable(SDL3)
+        if(STARFOX_PS5)
+            starfox_attach_ps5_sdl()
+        endif()
         if(APPLE OR STARFOX_METAL_INTEROP)
             # URL-based FetchContent patch hooks did not update iOS's SDL
             # source in CI. Inject the narrow native-handle functions into
@@ -1021,7 +1033,7 @@ if(STARFOX_BUILD_RUNTIME)
         endif()
 
         if(NOT ANDROID AND NOT IOS AND NOT WINDOWS_STORE
-           AND NOT SWITCH AND NOT VITA)
+           AND NOT SWITCH AND NOT VITA AND NOT STARFOX_PS5)
             add_executable(starfox_asset_builder src/app/asset_builder.cpp)
             target_link_libraries(starfox_asset_builder PRIVATE
                 starfox_core starfox_embedded_assets)
@@ -1169,6 +1181,10 @@ if(STARFOX_BUILD_RUNTIME)
             NAME "Star Fox Enhanced")
     endif()
 
+    if(STARFOX_PS5)
+        starfox_add_ps5_title(starfox_pc)
+    endif()
+
     install(TARGETS starfox_pc
         RUNTIME DESTINATION .
         LIBRARY DESTINATION .
@@ -1199,6 +1215,9 @@ if(STARFOX_BUILD_TESTS)
     target_include_directories(starfox_irq_palette_tests PRIVATE include)
     target_compile_features(starfox_irq_palette_tests PRIVATE cxx_std_20)
     add_test(NAME starfox_irq_palette_tests COMMAND starfox_irq_palette_tests)
+    add_executable(starfox_ps5_port_tests tests/ps5_port_tests.cpp)
+    target_link_libraries(starfox_ps5_port_tests PRIVATE starfox_core)
+    add_test(NAME starfox_ps5_port_tests COMMAND starfox_ps5_port_tests)
     add_executable(starfox_comms_timing_check tools/check_comms_timing.cpp)
     target_link_libraries(starfox_comms_timing_check PRIVATE starfox_core)
     add_executable(starfox_bps_tests tests/bps_tests.cpp)
@@ -1663,6 +1682,8 @@ if(STARFOX_BUILD_TESTS)
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_backdrop_region_inks.py")
         add_test(NAME starfox_android_package_oracle
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_android_package.py")
+        add_test(NAME starfox_ps5_sdl_patch
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ps5_sdl_patch.py")
         add_test(NAME starfox_quest_package_oracle
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_quest_package.py")
         if(UNIX AND NOT CMAKE_CROSSCOMPILING)

@@ -13,6 +13,9 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#if defined(STARFOX_PS5)
+extern "C" const char* StarfoxPS5_DataPath(void);
+#endif
 #if defined(__ANDROID__)
 #include <sys/system_properties.h>
 #endif
@@ -135,7 +138,7 @@ std::filesystem::path legacy_bundle_directory;
 #endif
 
 std::filesystem::path desktop_data_directory() {
-#if defined(STARFOX_UWP) || defined(__ANDROID__) || defined(SDL_PLATFORM_IOS) || defined(SDL_PLATFORM_VITA) || defined(__SWITCH__)
+#if defined(STARFOX_UWP) || defined(__ANDROID__) || defined(SDL_PLATFORM_IOS) || defined(SDL_PLATFORM_VITA) || defined(__SWITCH__) || defined(STARFOX_PS5)
     return {};
 #else
     if (!portable_directory.empty()) return portable_directory;
@@ -178,7 +181,9 @@ std::filesystem::path legacy_bindings_path() {
 }
 
 std::filesystem::path legacy_documents_path(std::string_view filename) {
-#if defined(SDL_PLATFORM_VITA)
+#if defined(STARFOX_PS5)
+    return std::filesystem::path{StarfoxPS5_DataPath()} / filename;
+#elif defined(SDL_PLATFORM_VITA)
     return std::filesystem::path{"ux0:data/StarFoxEnhanced"} / filename;
 #elif defined(STARFOX_UWP)
     // Xbox UWP package files are read-only. SDL maps its preference path to
@@ -305,7 +310,7 @@ std::filesystem::path single_instance_lock_path() {
 }
 
 void set_portable_data_directory(const std::filesystem::path& directory) {
-#if defined(STARFOX_UWP) || defined(__ANDROID__) || defined(SDL_PLATFORM_IOS) || defined(SDL_PLATFORM_VITA) || defined(__SWITCH__)
+#if defined(STARFOX_UWP) || defined(__ANDROID__) || defined(SDL_PLATFORM_IOS) || defined(SDL_PLATFORM_VITA) || defined(__SWITCH__) || defined(STARFOX_PS5)
     static_cast<void>(directory);
 #else
     if (directory.empty() || !directory.is_absolute()) {

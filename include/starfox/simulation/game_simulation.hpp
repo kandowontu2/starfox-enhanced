@@ -496,8 +496,19 @@ public:
     [[nodiscard]] RendererMode renderer_mode() const noexcept {
         return renderer_mode_;
     }
+    // Platforms without a CPU presentation path (the PS5's only renderer is
+    // SDL GPU on RADV) keep the hardware renderer whatever is requested.
+    [[nodiscard]] static constexpr RendererMode constrain_renderer_mode(
+        RendererMode requested, bool hardware_only) noexcept {
+        return hardware_only ? RendererMode::gpu : requested;
+    }
+#if defined(STARFOX_PS5)
+    static constexpr bool hardware_renderer_only = true;
+#else
+    static constexpr bool hardware_renderer_only = false;
+#endif
     void set_renderer_mode(RendererMode mode) noexcept {
-        renderer_mode_ = mode;
+        renderer_mode_ = constrain_renderer_mode(mode, hardware_renderer_only);
     }
     [[nodiscard]] bool msu1_music() const noexcept { return msu1_music_; }
     void set_msu1_music(bool enabled) noexcept {
