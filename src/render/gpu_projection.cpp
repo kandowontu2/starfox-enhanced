@@ -1,4 +1,5 @@
 #include "starfox/render/gpu_projection.hpp"
+#include "starfox/compat/bit_cast.hpp"
 #include "starfox/render/temporal_jitter.hpp"
 #include "starfox/render/grid_projection.hpp"
 #include <cmath>
@@ -557,7 +558,7 @@ void* GpuProjection::enqueue_point_spans(void* command,std::uint32_t height,
         const Uint32 settings[]{height,scale,colour,tag,kind?kind:line_start?1U:0U,
             Uint32(line_start?line_start[0]:0),Uint32(line_start?line_start[1]:0),kind?count:0U,
             raster_mapping[0],raster_mapping[1],raster_mapping[2],0,
-            std::bit_cast<Uint32>(jitter[0]),std::bit_cast<Uint32>(jitter[1]),0,0};
+            starfox::bit_cast<Uint32>(jitter[0]),starfox::bit_cast<Uint32>(jitter[1]),0,0};
         SDL_PushGPUComputeUniformData(cmd,0,settings,sizeof(settings));
         SDL_GPUStorageBufferReadWriteBinding binding{};binding.buffer=impl_->grid_spans;binding.cycle=true;
         auto* pass=SDL_BeginGPUComputePass(cmd,nullptr,0,&binding,1);Impl::require(pass);

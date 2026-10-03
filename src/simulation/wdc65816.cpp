@@ -1,4 +1,5 @@
 #include "starfox/simulation/wdc65816.hpp"
+#include "starfox/compat/bit_cast.hpp"
 #include "starfox/simulation/irq_palette.hpp"
 
 #include "starfox/assets/decrunch.hpp"
@@ -1203,7 +1204,7 @@ struct Wdc65816::Impl {
     }
 
     static std::int16_t signed16(std::uint16_t value) noexcept {
-        return std::bit_cast<std::int16_t>(value);
+        return starfox::bit_cast<std::int16_t>(value);
     }
 
     static std::int16_t arithmetic_shift_right(
@@ -2975,7 +2976,7 @@ void Wdc65816::capture_bg2_horizontal_offsets(
                 static_cast<std::uint16_t>(record + 1U)])
             | (static_cast<std::uint16_t>(impl_->wram[
                    static_cast<std::uint16_t>(record + 2U)]) << 8U));
-        impl_->ppu.bg2_horizontal_offsets[line] = std::bit_cast<std::int16_t>(value);
+        impl_->ppu.bg2_horizontal_offsets[line] = starfox::bit_cast<std::int16_t>(value);
     }
 }
 

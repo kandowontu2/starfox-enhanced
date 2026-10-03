@@ -1,4 +1,5 @@
 #include "starfox/audio/spc700_audio.hpp"
+#include "starfox/compat/bit_cast.hpp"
 #include "starfox/render/effects.hpp"
 #include "starfox/render/frame_persistence.hpp"
 #include <functional>
@@ -62,6 +63,7 @@
 #include "starfox/render/model_smoothing.hpp"
 #include "starfox/simulation/game_simulation.hpp"
 #include "starfox/simulation/math.hpp"
+#include "starfox/simulation/rumble_sequencer.hpp"
 #include "starfox/timing/fixed_step.hpp"
 #include "starfox/state/archive.hpp"
 #include "starfox/state/container.hpp"
@@ -4951,50 +4953,19 @@ private:
 class RumbleOutput {
 public:
     explicit RumbleOutput(const starfox::assets::SymbolMap& symbols)
-        : command_(address(symbols, "RUMBLE_CMD")),
-          time_(address(symbols, "RUMBLE_TIME")),
-          index_(address(symbols, "RUMBLE_INDEX")),
-          table_(address(symbols, "RUMBLE_TABLE")) {}
+        : sequencer_(symbols) {}
 
     void advance(starfox::simulation::MapVm& map, SDL_Gamepad* gamepad,
         bool enabled) noexcept {
-        if (!available() || !enabled || gamepad == nullptr) {
+        if (!sequencer_.available() || !enabled || gamepad == nullptr) {
             stop(gamepad);
             return;
         }
-        auto output = std::uint8_t{};
-        auto sequence_index = map.read_native_byte(index_);
-        for (std::size_t guard = 0U; guard < 4U; ++guard) {
-            if (sequence_index == 0U) {
-                output = map.read_native_byte(time_) == 0U
-                    ? 0U : map.read_native_byte(command_);
-                break;
-            }
-            output = map.read_native_byte(
-                table_ + static_cast<std::uint32_t>(sequence_index - 1U));
-            sequence_index = static_cast<std::uint8_t>(sequence_index + 1U);
-            map.write_native_byte(index_, sequence_index);
-            if (output == 0x19U) {
-                map.write_native_byte(index_, 0U);
-                output = 0U;
-                break;
-            }
-            if (output != 0x91U) break;
-            sequence_index = 1U;
-            map.write_native_byte(index_, sequence_index);
-        }
-        const auto remaining = map.read_native_byte(time_);
-        if (remaining != 0U) {
-            map.write_native_byte(time_,
-                static_cast<std::uint8_t>(remaining - 1U));
-        }
-        const auto high_frequency = static_cast<std::uint16_t>(
-            (output & 0x0fU) * 0x1111U);
-        const auto low_frequency = static_cast<std::uint16_t>(
-            ((output >> 4U) & 0x0fU) * 0x1111U);
+        const auto effect=sequencer_.advance(map,true);
+        if(!effect) {stop(gamepad);return;}
         static_cast<void>(SDL_RumbleGamepad(
-            gamepad, low_frequency, high_frequency, 40U));
-        active_ = output != 0U;
+            gamepad,effect->low_frequency,effect->high_frequency,effect->duration_ms));
+        active_ = effect->active();
     }
 
     void stop(SDL_Gamepad* gamepad) noexcept {
@@ -5006,19 +4977,7 @@ public:
     }
 
 private:
-    static std::uint32_t address(
-        const starfox::assets::SymbolMap& symbols, const char* name) noexcept {
-        const auto found = symbols.find(name);
-        return found.empty() ? 0U : found.front();
-    }
-    [[nodiscard]] bool available() const noexcept {
-        return command_ != 0U && time_ != 0U && index_ != 0U && table_ != 0U;
-    }
-
-    std::uint32_t command_{};
-    std::uint32_t time_{};
-    std::uint32_t index_{};
-    std::uint32_t table_{};
+    starfox::simulation::RumbleSequencer sequencer_;
     bool active_{};
 };
 
@@ -5456,7 +5415,7 @@ std::int16_t interpolate_source_word(
     const auto value = static_cast<std::int64_t>(std::lround(
         static_cast<double>(previous)
         + source_word_difference(current, previous) * alpha));
-    return std::bit_cast<std::int16_t>(static_cast<std::uint16_t>(value));
+    return starfox::bit_cast<std::int16_t>(static_cast<std::uint16_t>(value));
 }
 
 starfox::simulation::CircleEffectState interpolate_circle_effect(
@@ -10975,12 +10934,12 @@ int main(int argc, char** argv) {
                 if ((object.strategy_flags[0] & 0x40U) != 0U) {
                     if(record_models && &target==&superfx_frame) {
                         auto text=text_renderer.prepare_projected(object.colour_table,object.extended[21],
-                            std::bit_cast<std::int8_t>(object.texture_scroll_x),make_pose(item,false));
+                            starfox::bit_cast<std::int8_t>(object.texture_scroll_x),make_pose(item,false));
                         if(!text.glyphs.empty() && std::getenv("STARFOX_TRACE_GPU")) std::cerr<<"GPU projected text recorded\n";
                         recorded_scene.append_text(raster_commands,{std::move(text),target.draw_scale()});
                     } else {
                         text_renderer.draw(object.colour_table, object.extended[21],
-                            std::bit_cast<std::int8_t>(object.texture_scroll_x),make_pose(item, false), target);
+                            starfox::bit_cast<std::int8_t>(object.texture_scroll_x),make_pose(item, false), target);
                     }
                     continue;
                 }
@@ -11024,7 +10983,7 @@ int main(int argc, char** argv) {
                 }
                 if ((object.strategy_flags[0] & 0x20U) != 0U) {
                     auto size_adjustment = static_cast<std::int16_t>(
-                        std::bit_cast<std::int8_t>(object.texture_scroll_x));
+                        starfox::bit_cast<std::int8_t>(object.texture_scroll_x));
                     for (std::uint8_t shift = 0; shift < base_header.shift; ++shift) {
                         size_adjustment = starfox::simulation::add16(
                             size_adjustment, size_adjustment);

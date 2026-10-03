@@ -1,0 +1,35 @@
+# Newly authored C rear module. Local metres; pivot in geometry.json.
+mtllib cockpit-c.mtl
+o floor
+v -0.540000000 0.009000000 0.850000000
+v 0.540000000 0.009000000 0.850000000
+v 0.560000000 0.009000000 -0.850000000
+v -0.560000000 0.009000000 -0.850000000
+v -0.540000000 -0.009000000 0.850000000
+v 0.540000000 -0.009000000 0.850000000
+v 0.560000000 -0.009000000 -0.850000000
+v -0.560000000 -0.009000000 -0.850000000
+usemtl panel_floor
+f 1 2 3
+usemtl panel_floor
+f 1 3 4
+usemtl edge_floor
+f 5 7 6
+usemtl edge_floor
+f 5 8 7
+usemtl edge_floor
+f 1 5 6
+usemtl edge_floor
+f 1 6 2
+usemtl edge_floor
+f 2 6 7
+usemtl edge_floor
+f 2 7 3
+usemtl edge_floor
+f 3 7 8
+usemtl edge_floor
+f 3 8 4
+usemtl edge_floor
+f 4 8 5
+usemtl edge_floor
+f 4 5 1

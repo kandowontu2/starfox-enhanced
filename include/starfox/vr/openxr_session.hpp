@@ -22,6 +22,7 @@ struct SessionApi {
     PFN_xrBeginFrame begin_frame{xrBeginFrame};
     PFN_xrEndFrame end_frame{xrEndFrame};
     PFN_xrLocateViews locate_views{xrLocateViews};
+    PFN_xrRequestExitSession request_exit{xrRequestExitSession};
 };
 struct StereoFrame {
     XrTime display_time{};
@@ -41,6 +42,13 @@ public:
     bool initialize(XrInstance,XrSystemId,const void* graphics_binding);
     void close() noexcept;
     bool poll_events(); // transitions READY/STOPPING, records exit/loss
+    // Ask the runtime to end the session cleanly (xrRequestExitSession). The
+    // caller keeps pumping poll_events()/frames: the runtime answers with
+    // STOPPING (we xrEndSession) then EXITING, which sets exit_requested().
+    // A session that never began (or already stopped) has nothing to stop and
+    // is marked exiting immediately. Returns false if the runtime refused.
+    bool request_exit();
+    bool exit_in_progress() const noexcept {return exit_asked_;}
     std::optional<StereoFrame> begin_frame();
     // Submit only completed/released swapchain layers. Invisible/untracked
     // frames always submit zero layers, while retaining frame pacing.
@@ -58,7 +66,7 @@ private:
     XrSpace space_{XR_NULL_HANDLE};
     XrSessionState state_{XR_SESSION_STATE_UNKNOWN};
     XrEnvironmentBlendMode blend_{XR_ENVIRONMENT_BLEND_MODE_OPAQUE};
-    bool running_{},exit_{},frame_active_{},renderable_{};
+    bool running_{},exit_{},frame_active_{},renderable_{},exit_asked_{};
     XrTime frame_time_{};
     std::vector<XrTime> origin_changes_;
     std::string status_{"OpenXR session not initialized"};

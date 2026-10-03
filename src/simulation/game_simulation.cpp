@@ -1,4 +1,5 @@
 #include "starfox/render/pixel_filter.hpp"
+#include "starfox/compat/bit_cast.hpp"
 #include "starfox/render/environment_effects.hpp"
 #include "starfox/simulation/game_simulation.hpp"
 #include "starfox/simulation/irq_palette.hpp"
@@ -65,7 +66,7 @@ constexpr std::uint16_t staff_roll = 49U;
 } // namespace msu_track
 
 std::int16_t signed_word(std::uint16_t value) noexcept {
-    return std::bit_cast<std::int16_t>(value);
+    return starfox::bit_cast<std::int16_t>(value);
 }
 
 input::ButtonMask map_control_type_buttons(
@@ -1692,7 +1693,7 @@ void GameSimulation::detonate_god_nuke() {
         if (object.shape == nuke_shape_
             || object.strategy_address == nuke_explosion_strategy_
             || (object.collision_flags & friend_collision) != 0U
-            || std::bit_cast<std::int8_t>(object.health) < 0) {
+            || starfox::bit_cast<std::int8_t>(object.health) < 0) {
             continue;
         }
 
@@ -2049,7 +2050,7 @@ PlanetPresentationState GameSimulation::planet_presentation_state() const noexce
 void GameSimulation::calculate_meters() {
     map_.write_native_byte(meter_shield_up_, map_.read_native_byte(shield_up_));
     const auto collision_box = map_.read_native_word(player_collision_box_);
-    const auto health = std::bit_cast<std::int8_t>(
+    const auto health = starfox::bit_cast<std::int8_t>(
         map_.read_native_byte(collision_box + 42U));
     map_.write_native_byte(meter_damage_,
         health < 0 ? 0U : static_cast<std::uint8_t>(health));
@@ -5203,7 +5204,7 @@ void GameSimulation::calculate_view() {
         return signed_word(map_.read_native_word(address));
     };
     const auto write_word = [this](std::uint32_t address, std::int16_t value) {
-        map_.write_native_word(address, std::bit_cast<std::uint16_t>(value));
+        map_.write_native_word(address, starfox::bit_cast<std::uint16_t>(value));
     };
     auto rotation_x = read_word(output_rotation_);
     if (map_.read_native_byte(no_x_rotation_) != 0U) {
@@ -5219,7 +5220,7 @@ void GameSimulation::calculate_view() {
     if ((map_.read_native_byte(view_type_) & 2U) == 0U) {
         std::array<std::int16_t, 3> position{};
         for (std::size_t index = 0; index < 3U; ++index) {
-            const auto shake = std::bit_cast<std::int8_t>(
+            const auto shake = starfox::bit_cast<std::int8_t>(
                 map_.read_native_byte(view_shake_ + static_cast<std::uint32_t>(index)));
             position[index] = add16(
                 read_word(previous_view_position_ + static_cast<std::uint32_t>(index * 2U)),
@@ -5899,7 +5900,7 @@ GameTickResult GameSimulation::tick(const input::TickInput& input) {
     // strategies prepare the next frame. FOXIRQ3 publishes this saved value.
     if(map_.read_native_byte(background3_scroll_flag_)!=0U) {
         const auto view=map_.read_native_word(view_point_);
-        const auto x=std::bit_cast<std::int16_t>(map_.read_native_word(
+        const auto x=starfox::bit_cast<std::int16_t>(map_.read_native_word(
             static_cast<std::uint16_t>(view+12U)));
         map_.write_native_word(background3_scroll_,static_cast<std::uint16_t>(
             arithmetic_shift_right(x,3U)-4));

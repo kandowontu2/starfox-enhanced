@@ -27,19 +27,44 @@ std::optional<std::array<EyeCamera,2>> sbs_eye_cameras(float vertical_fov,
     }
     return result;
 }
-bool PositionAnchor::apply(std::array<XrView,2>& views) noexcept {
+bool PositionAnchor::apply(std::array<XrView,2>& views,float translation_scale) noexcept {
+    if(!std::isfinite(translation_scale) || translation_scale<0 || translation_scale>2) return false;
     for(const auto& eye:views) for(float value:{eye.pose.position.x,eye.pose.position.y,eye.pose.position.z})
         if(!std::isfinite(value)) return false;
-    if(!origin_) origin_=XrVector3f{
-        views[0].pose.position.x*.5F+views[1].pose.position.x*.5F,
-        views[0].pose.position.y*.5F+views[1].pose.position.y*.5F,
-        views[0].pose.position.z*.5F+views[1].pose.position.z*.5F};
-    for(auto& eye:views) {
-        eye.pose.position.x-=origin_->x;
-        eye.pose.position.y-=origin_->y;
-        eye.pose.position.z-=origin_->z;
+    if(!origin_) {
+        origin_=XrVector3f{views[0].pose.position.x*.5F+views[1].pose.position.x*.5F,
+            views[0].pose.position.y*.5F+views[1].pose.position.y*.5F,
+            views[0].pose.position.z*.5F+views[1].pose.position.z*.5F};
+        if(keep_height_) {origin_->y=height_;keep_height_=false;}
+        if(capture_heading_) {
+            const auto& q=views[0].pose.orientation;
+            yaw_=std::atan2(2*(q.w*q.y+q.x*q.z),1-2*(q.y*q.y+q.x*q.x));
+            capture_heading_=false;
+        }
     }
+    // Scale the shared centre displacement, never the eye offsets / IPD.
+    const float extra=translation_scale-1.F;
+    translation_offset_={
+        ((views[0].pose.position.x+views[1].pose.position.x)*.5F-origin_->x)*extra,
+        ((views[0].pose.position.y+views[1].pose.position.y)*.5F-origin_->y)*extra,
+        ((views[0].pose.position.z+views[1].pose.position.z)*.5F-origin_->z)*extra};
+    for(auto& eye:views) eye.pose=anchored(eye.pose);
     return true;
+}
+XrPosef PositionAnchor::anchored(XrPosef pose) const noexcept {
+    if(origin_) {
+        pose.position.x+=translation_offset_.x-origin_->x;
+        pose.position.y+=translation_offset_.y-origin_->y;
+        pose.position.z+=translation_offset_.z-origin_->z;
+    }
+    if(yaw_!=0) {
+        const float c=std::cos(yaw_),s=std::sin(yaw_);
+        const auto p=pose.position;
+        pose.position.x=c*p.x-s*p.z;pose.position.z=s*p.x+c*p.z;
+        const auto q=pose.orientation;const float h=std::sin(-yaw_*.5F),w=std::cos(yaw_*.5F);
+        pose.orientation={w*q.x+h*q.z,w*q.y+h*q.w,w*q.z-h*q.x,w*q.w-h*q.y};
+    }
+    return pose;
 }
 std::optional<EyeCamera> model_eye_camera(const EyeCamera& camera,const Matrix4& model) noexcept {
     for(const auto* matrix:{&camera.view,&camera.projection,&model})

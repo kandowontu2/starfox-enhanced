@@ -45,7 +45,7 @@ public:
     VulkanScenePipeline& operator=(const VulkanScenePipeline&)=delete;
     bool initialize(VkDevice,PFN_vkGetDeviceProcAddr,VkRenderPass,bool depth_test=false,
         SceneTopology topology=SceneTopology::triangles,VkDescriptorSetLayout textures=VK_NULL_HANDLE,
-        SceneBlend blend=SceneBlend::opaque,VulkanPipelineCache* cache=nullptr);
+        SceneBlend blend=SceneBlend::opaque,VulkanPipelineCache* cache=nullptr,bool depth_write=true);
     void close() noexcept;
     bool record(VkCommandBuffer,VkExtent2D,VkBuffer,uint32_t vertices,const EyeCamera&,VkDescriptorSet textures=VK_NULL_HANDLE) const;
     // Draw a primitive-aligned subrange without uploading another buffer.

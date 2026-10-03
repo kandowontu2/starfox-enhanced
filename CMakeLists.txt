@@ -37,6 +37,8 @@ endif()
 option(STARFOX_BUILD_TESTS "Build deterministic timing tests" ON)
 option(STARFOX_BUILD_RUNTIME "Build the SDL3 native PC runtime" ON)
 option(STARFOX_BUILD_VR "Build the OpenXR VR integration and runtime diagnostic" OFF)
+option(STARFOX_BUILD_STEAM_FRAME
+    "Build the native Linux ARM64 Steam Frame OpenXR player" OFF)
 option(STARFOX_BUILD_TOOLS "Build host-side trace and asset tools"
     ${STARFOX_BUILD_TOOLS_DEFAULT})
 option(STARFOX_EMBED_RUNTIME_ASSETS
@@ -47,6 +49,18 @@ option(STARFOX_PACKAGE_MSU1_MUSIC
 option(STARFOX_ENABLE_XBRZ
     "Fetch and compile the GPLv3 xBRZ backend for the 2D presentation filter"
     ON)
+if(STARFOX_BUILD_STEAM_FRAME)
+    if(NOT STARFOX_BUILD_VR)
+        message(FATAL_ERROR "STARFOX_BUILD_STEAM_FRAME requires STARFOX_BUILD_VR=ON")
+    endif()
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        message(FATAL_ERROR "STARFOX_BUILD_STEAM_FRAME requires a Linux target")
+    endif()
+    if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)$"
+       OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+        message(FATAL_ERROR "STARFOX_BUILD_STEAM_FRAME requires a 64-bit ARM target")
+    endif()
+endif()
 if(ANDROID AND STARFOX_BUILD_VR AND CMAKE_GENERATOR MATCHES "Ninja")
     # The Quest runner has limited RAM; compiling several large simulation/VR
     # translation units at once makes the hosted runner terminate mid-build.
@@ -121,6 +135,27 @@ set(STARFOX_RETAIL_GERMANY_V10_PATCH_FILE
     "${CMAKE_CURRENT_SOURCE_DIR}/assets/patches/retail-germany-v10-to-usa-v12.bps")
 
 include(FetchContent)
+if(APPLE AND (STARFOX_BUILD_RUNTIME OR STARFOX_BUILD_VR))
+    # SDL enables Objective-C++ for its Apple sources. Enable it in the root
+    # project first so newer CMake versions publish compiler rules to this
+    # directory before SDL's nested project configures.
+    enable_language(OBJCXX)
+endif()
+# Standalone desktop VR needs SDL for gamepad/audio support even when the flat
+# runtime is not built. Use the same pinned source archive without applying the
+# flat runtime's SDL interop patches. Android continues to consume its official
+# AAR/Prefab target below.
+if(STARFOX_BUILD_VR AND NOT STARFOX_BUILD_RUNTIME AND NOT ANDROID)
+    set(SDL_SHARED OFF CACHE BOOL "Avoid a runtime SDL shared library" FORCE)
+    set(SDL_STATIC ON CACHE BOOL "Link SDL into the standalone VR executable" FORCE)
+    set(SDL_TEST_LIBRARY OFF CACHE BOOL "Do not build the SDL test library" FORCE)
+    FetchContent_Declare(
+        SDL3
+        URL https://github.com/libsdl-org/SDL/releases/download/release-3.4.14/SDL3-3.4.14.tar.gz
+        URL_HASH SHA256=30d4aa2b3037718142b32dffd4e72f917ebb6cc5227150e7bb9c45efb2153aeb
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+    FetchContent_MakeAvailable(SDL3)
+endif()
 if(STARFOX_BUILD_VR)
     include(cmake/OpenXR.cmake)
 endif()
@@ -264,6 +299,7 @@ add_library(starfox_core
     src/simulation/particle_system.cpp
     src/simulation/path_vm.cpp
     src/simulation/prng.cpp
+    src/simulation/rumble_sequencer.cpp
     src/simulation/strategy_scheduler.cpp
     src/simulation/wdc65816.cpp
     src/timing/fixed_step.cpp
@@ -1195,6 +1231,20 @@ if(STARFOX_BUILD_TESTS)
         list(APPEND STARFOX_SMOKE_BASELINE "STARFOX_TEST_${setting}=0")
     endforeach()
     enable_testing()
+    add_executable(starfox_bit_cast_compat_tests tests/bit_cast_compat_tests.cpp)
+    target_include_directories(starfox_bit_cast_compat_tests PRIVATE include)
+    target_compile_features(starfox_bit_cast_compat_tests PRIVATE cxx_std_20)
+    target_compile_definitions(starfox_bit_cast_compat_tests
+        PRIVATE STARFOX_FORCE_BIT_CAST_BUILTIN=1)
+    add_test(NAME starfox_bit_cast_compat_tests COMMAND starfox_bit_cast_compat_tests)
+    if(STARFOX_BUILD_VR AND NOT ANDROID)
+        add_executable(starfox_desktop_paths_tests
+            tests/desktop_paths_tests.cpp src/vr/desktop_paths.cpp)
+        target_include_directories(starfox_desktop_paths_tests PRIVATE src/vr)
+        target_compile_features(starfox_desktop_paths_tests PRIVATE cxx_std_20)
+        add_test(NAME starfox_desktop_paths_tests COMMAND starfox_desktop_paths_tests)
+        set_tests_properties(starfox_desktop_paths_tests PROPERTIES LABELS "vr;paths")
+    endif()
     add_executable(starfox_irq_palette_tests tests/irq_palette_tests.cpp)
     target_include_directories(starfox_irq_palette_tests PRIVATE include)
     target_compile_features(starfox_irq_palette_tests PRIVATE cxx_std_20)
@@ -1333,6 +1383,10 @@ if(STARFOX_BUILD_TESTS)
     add_test(NAME starfox_raster_commands_tests COMMAND starfox_raster_commands_tests)
     target_link_libraries(starfox_core_tests PRIVATE starfox_core)
     add_test(NAME starfox_core_tests COMMAND starfox_core_tests)
+
+    add_executable(starfox_rumble_sequencer_tests tests/rumble_sequencer_tests.cpp)
+    target_link_libraries(starfox_rumble_sequencer_tests PRIVATE starfox_core)
+    add_test(NAME starfox_rumble_sequencer_tests COMMAND starfox_rumble_sequencer_tests)
 
     add_executable(starfox_msu1_pack_tests tests/msu1_pack_tests.cpp)
     target_link_libraries(starfox_msu1_pack_tests PRIVATE starfox_core)
@@ -1655,6 +1709,14 @@ if(STARFOX_BUILD_TESTS)
 
     find_package(Python3 COMPONENTS Interpreter)
     if(Python3_Interpreter_FOUND)
+        add_test(NAME starfox_steam_frame_cmake_guards
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_steam_frame_cmake_guards.py"
+                --cmake "${CMAKE_COMMAND}"
+                --generator "${CMAKE_GENERATOR}")
+        add_test(NAME starfox_steam_frame_package_validation
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_steam_frame_package_validation.py")
         add_test(NAME starfox_backdrop_catalog
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_backdrop_catalog.py")
         add_test(NAME starfox_enhanced_palette_trace

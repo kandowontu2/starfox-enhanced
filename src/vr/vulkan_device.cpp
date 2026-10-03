@@ -29,6 +29,7 @@ void VulkanDevice::close() noexcept {
     }
     if(binding_.instance && destroy_instance_) destroy_instance_(binding_.instance,nullptr);
     binding_={XR_TYPE_GRAPHICS_BINDING_VULKAN2_KHR};queue_={};version_=0;
+    timestamp_valid_bits_=0;timestamp_period_ns_=0.;
     external_shadows_=false;luid_.reset();
     destroy_instance_=nullptr;destroy_device_=nullptr;wait_idle_=nullptr;
 }
@@ -78,6 +79,8 @@ bool VulkanDevice::initialize(XrInstance xr,XrSystemId system,PFN_vkGetInstanceP
         });
         require(family!=families.end(),"Headset adapter has no combined graphics/compute queue");
         binding_.queueFamilyIndex=std::uint32_t(family-families.begin());binding_.queueIndex=0;
+        timestamp_valid_bits_=family->timestampValidBits;
+        timestamp_period_ns_=properties.limits.timestampPeriod;
         const float priority=1;
         VkDeviceQueueCreateInfo queue_info{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
         queue_info.queueFamilyIndex=binding_.queueFamilyIndex;queue_info.queueCount=1;queue_info.pQueuePriorities=&priority;

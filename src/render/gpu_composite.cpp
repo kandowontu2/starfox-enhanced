@@ -1,4 +1,5 @@
 #include "starfox/render/gpu_composite.hpp"
+#include "starfox/compat/bit_cast.hpp"
 #include "starfox/render/temporal_jitter.hpp"
 #include <algorithm>
 #include <array>
@@ -313,11 +314,11 @@ struct GpuComposite::Impl {
             settings.clip_right,settings.clip_bottom,settings.mosaic_origin_x,settings.mosaic_origin_y,
             late?1:0,background?1:0,1,background?Sint32(background->margin_origin):0,
             background?Sint32(background->margin_width):0,background && background->repair_transparent_margins?1:0,has_depth?1:0,has_motion?1:0,
-            worldOnly?1:0,std::bit_cast<Sint32>(jitter[0]),std::bit_cast<Sint32>(jitter[1]),background && background->match_right_margin?1:0,Sint32(sourceReferenceWidth),Sint32(sourceReferenceHeight),Sint32(width),Sint32(height),
+            worldOnly?1:0,starfox::bit_cast<Sint32>(jitter[0]),starfox::bit_cast<Sint32>(jitter[1]),background && background->match_right_margin?1:0,Sint32(sourceReferenceWidth),Sint32(sourceReferenceHeight),Sint32(width),Sint32(height),
             late?Sint32(late->width):0,late?Sint32(late->height):0,
             background?Sint32(background->raster.width):0,background?Sint32(background->raster.height):0,
-            gpuUniform?1:0,std::bit_cast<Sint32>(uniformValue),gpuStriped?1:0,
-            std::bit_cast<Sint32>(stripeValue),Sint32(stripes[0].first),Sint32(stripes[0].second),
+            gpuUniform?1:0,starfox::bit_cast<Sint32>(uniformValue),gpuStriped?1:0,
+            starfox::bit_cast<Sint32>(stripeValue),Sint32(stripes[0].first),Sint32(stripes[0].second),
             Sint32(stripes[1].first),Sint32(stripes[1].second)};
         SDL_GPUStorageTextureReadWriteBinding texture{};texture.texture=rgba;
         SDL_GPUStorageBufferReadWriteBinding outputs[5]{};outputs[0].buffer=buffers[2];outputs[1].buffer=buffers[3];outputs[2].buffer=buffers[5];outputs[3].buffer=buffers[6];outputs[4].buffer=buffers[7];

@@ -1,4 +1,5 @@
 #include "starfox/render/gpu_background.hpp"
+#include "starfox/compat/bit_cast.hpp"
 #include "starfox/render/temporal_jitter.hpp"
 #include <algorithm>
 #include <array>
@@ -130,9 +131,9 @@ GpuRasterOutput GpuBackground::enqueue(void* device,void* command,const simulati
                 s.extend_horizontal?int(logical_width):std::min(int(logical_width),std::max(s.horizontal_origin+256,0)),
                 (ppu.mosaic&2)?int((ppu.mosaic>>4)+1):1,ppu.bg2_tile_size_16?16:8,int(s.priority),
                 int(s.tag),(ppu.main_screen&2)?1:0,s.transparent_cgram_black?1:0,int(flags),
-                std::bit_cast<std::int32_t>(s.single_occurrence_top_rows),int(s.unique_regions.size()),ppu.bg2_scroll_x,ppu.bg2_scroll_y,
+                starfox::bit_cast<std::int32_t>(s.single_occurrence_top_rows),int(s.unique_regions.size()),ppu.bg2_scroll_x,ppu.bg2_scroll_y,
                 int(s.terrain_source_rows[0]),int(s.terrain_source_rows[1]),int(logical_width),int(logical_height),
-                std::bit_cast<std::int32_t>(s.raster_jitter[0]),std::bit_cast<std::int32_t>(s.raster_jitter[1]),int(s.sky_source_min),0};
+                starfox::bit_cast<std::int32_t>(s.raster_jitter[0]),starfox::bit_cast<std::int32_t>(s.raster_jitter[1]),int(s.sky_source_min),0};
             for(unsigned phase=0;phase<2;++phase) {
                 data[3]=int(phase);SDL_PushGPUComputeUniformData(cmd,0,data.data(),sizeof(data));
                 SDL_GPUStorageBufferReadWriteBinding outputs[2]{};
@@ -162,7 +163,7 @@ GpuRasterOutput GpuBackground::enqueue(void* device,void* command,const simulati
             (bg1?ppu.bg1_tile_size_16:ppu.bg3_tile_size_16)?16:8,int(s.priority),int(s.tag),
             (ppu.main_screen&mask) && (!bg1 || (ppu.background_mode>=1 && ppu.background_mode<=3))?1:0,
             bg1 && s.transparent_cgram_black?1:0,bg1 && s.text_outline?1:0,int(logical_width),int(logical_height),
-            std::bit_cast<std::int32_t>(s.raster_jitter[0]),std::bit_cast<std::int32_t>(s.raster_jitter[1])};
+            starfox::bit_cast<std::int32_t>(s.raster_jitter[0]),starfox::bit_cast<std::int32_t>(s.raster_jitter[1])};
         SDL_PushGPUComputeUniformData(cmd,0,constants.data(),sizeof(constants));
         SDL_GPUStorageBufferReadWriteBinding output{};output.buffer=impl_->pixels;output.cycle=true;
         auto* pass=SDL_BeginGPUComputePass(cmd,nullptr,0,&output,1);Impl::require(pass);

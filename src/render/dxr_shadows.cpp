@@ -1,4 +1,5 @@
 #include "starfox/render/dxr_shadows.hpp"
+#include "starfox/compat/bit_cast.hpp"
 #include "starfox/render/environment_effects.hpp"
 #include "starfox/render/gpu_scene.hpp"
 #include <bit>
@@ -224,7 +225,7 @@ struct DxrShadows::Impl {
                 std::memcpy(coverage_bytes.data()+texels_at+i*4,&index,4);
             }
             std::memcpy(coverage_bytes.data()+palette_at,palette,1024);
-            const std::uint32_t material_settings[4]={std::bit_cast<std::uint32_t>(roughness),metallic,face_size,palette_at+1152};
+            const std::uint32_t material_settings[4]={starfox::bit_cast<std::uint32_t>(roughness),metallic,face_size,palette_at+1152};
             std::memcpy(coverage_bytes.data()+palette_at+1024,material_settings,16);
             for(unsigned row=0;row<3;++row) {
                 const float values[4]={environment_rotation[row*3],environment_rotation[row*3+1],environment_rotation[row*3+2],0};
@@ -277,7 +278,7 @@ struct DxrShadows::Impl {
                 const std::int32_t header[16]={p.bg2_screen_base,p.bg2_character_base,
                     (p.bg2_screen_size&1)?64:32,(p.bg2_screen_size&2)?64:32,p.bg2_tile_size_16?16:8,
                     s.scroll_x,s.scroll_y,int(flags),int(s.unique_regions.size()),int(s.single_occurrence_top_rows),
-                    int(black),int(s.sky_source_min),std::bit_cast<std::int32_t>(intercept),std::bit_cast<std::int32_t>(slope),int(cgram_at),0};
+                    int(black),int(s.sky_source_min),starfox::bit_cast<std::int32_t>(intercept),starfox::bit_cast<std::int32_t>(slope),int(cgram_at),0};
                 std::memcpy(coverage_bytes.data()+at,header,64);
                 std::memcpy(coverage_bytes.data()+at+64,p.vram.data(),65536);
                 for(unsigned row=0;row<224;++row) {
@@ -385,7 +386,7 @@ struct DxrShadows::Impl {
         settings.camera={float(camera.width),float(camera.height),float(camera.focal_length),float(camera.center_x)};
         settings.options={float(camera.center_y),ground?1.f:0.f,float(camera.vertical_focal_length()),coverage?1.f:0.f};
         if (ground) { settings.point=floats(ground->point); settings.normal=floats(ground->normal); }
-        if(reflection) {settings.point.w=std::bit_cast<float>(environment);settings.normal.w=float(external?stride:12);}
+        if(reflection) {settings.point.w=starfox::bit_cast<float>(environment);settings.normal.w=float(external?stride:12);}
         light=light*(1.0/std::sqrt(dot(light,light)));
         const auto reference=std::abs(light.y)<.9?Vec3{0,1,0}:Vec3{1,0,0};
         auto tangent=cross(light,reference); tangent=tangent*(1.0/std::sqrt(dot(tangent,tangent)));

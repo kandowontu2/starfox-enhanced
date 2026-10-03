@@ -1,6 +1,10 @@
 #include "starfox/render/sdl_dxr_shadows.hpp"
 #if defined(STARFOX_SDL_GPU_EFFECTS) && defined(STARFOX_DXR)
 #define STARFOX_NATIVE_SDL_DXR 1
+#define WIN32_LEAN_AND_MEAN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include "starfox/render/sdl_d3d12_bridge.h"
 #include <SDL3/SDL.h>
 #include <windows.h>

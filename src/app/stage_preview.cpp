@@ -1,4 +1,5 @@
 #include "starfox/assets/rom.hpp"
+#include "starfox/compat/bit_cast.hpp"
 #include "starfox/assets/shape_decoder.hpp"
 #include "starfox/input/buttons.hpp"
 #include "starfox/render/framebuffer.hpp"
@@ -500,7 +501,7 @@ int main(int argc, char** argv) {
             }
             if ((object.strategy_flags[0] & 0x40U) != 0U) {
                 text_renderer.draw(object.colour_table, object.extended[21],
-                    std::bit_cast<std::int8_t>(object.texture_scroll_x),
+                    starfox::bit_cast<std::int8_t>(object.texture_scroll_x),
                     make_pose(item, false), framebuffer);
                 ++rendered;
                 continue;
@@ -524,7 +525,7 @@ int main(int argc, char** argv) {
             auto pose = make_pose(item, false);
             if ((object.strategy_flags[0] & 0x20U) != 0U) {
                 auto size_adjustment = static_cast<std::int16_t>(
-                    std::bit_cast<std::int8_t>(object.texture_scroll_x));
+                    starfox::bit_cast<std::int8_t>(object.texture_scroll_x));
                 for (std::uint8_t shift = 0; shift < base_header.shift; ++shift) {
                     size_adjustment = starfox::simulation::add16(
                         size_adjustment, size_adjustment);
@@ -550,7 +551,7 @@ int main(int argc, char** argv) {
                           << static_cast<unsigned>(object.strategy_flags[0]) << std::dec
                           << " depth=" << static_cast<unsigned>(object.extended[21])
                           << " tx=" << static_cast<int>(
-                              std::bit_cast<std::int8_t>(object.texture_scroll_x))
+                              starfox::bit_cast<std::int8_t>(object.texture_scroll_x))
                           << " size=" << found->second.header.size
                           << " textures=" << found->second.textures.size()
                           << " velocity=(" << object.velocity_x << ',' << object.velocity_y

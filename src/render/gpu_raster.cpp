@@ -1,4 +1,5 @@
 #include "starfox/render/gpu_raster.hpp"
+#include "starfox/compat/bit_cast.hpp"
 #include "starfox/render/temporal_jitter.hpp"
 #include <cstring>
 #include <bit>
@@ -289,7 +290,7 @@ struct GpuRaster::Impl {
                 SDL_DispatchGPUCompute(bin_pass,std::max(1U,(work+63)/64),1,1);SDL_EndGPUComputePass(bin_pass);
             }
         }
-        const Uint32 settings[]{batch.width(),batch.height(),keep_surfaces?1U:0U,(gpu_bins?1U:0U)|(coverage?0x40000000U:0U),0,0,keep_surfaces?1U:0U,0,Uint32(batch.texels.size()),custom?output_width:0,custom?output_height:0,0,0,0,0,0,0,0,0,0,std::bit_cast<Uint32>(jitter[0]),std::bit_cast<Uint32>(jitter[1]),0,0};
+        const Uint32 settings[]{batch.width(),batch.height(),keep_surfaces?1U:0U,(gpu_bins?1U:0U)|(coverage?0x40000000U:0U),0,0,keep_surfaces?1U:0U,0,Uint32(batch.texels.size()),custom?output_width:0,custom?output_height:0,0,0,0,0,0,0,0,0,0,starfox::bit_cast<Uint32>(jitter[0]),starfox::bit_cast<Uint32>(jitter[1]),0,0};
         SDL_PushGPUComputeUniformData(command,0,settings,sizeof(settings));
         buffer(6,16);
         SDL_GPUStorageBufferReadWriteBinding outputs[3]{};outputs[0].buffer=buffers[4];outputs[1].buffer=buffers[5];outputs[2].buffer=buffers[6];
@@ -484,11 +485,11 @@ GpuRasterOutput GpuRaster::enqueue_row_spans(void* device,void* command,void* sp
             wave_rows?(1U|(std::uint32_t(std::uint16_t(wave_offset))<<1U)|((wave_frame&15U)<<17U)):(tiled?0x80000000U:0U),
             texels?texel_bytes:0U,custom?outputWidth:0,custom?outputHeight:0,0,
             output_depth?1U:0U,geometry_depth?geometry_depth->count:0U,background && background->geometry_depth?1U:0U,0,
-            std::bit_cast<Uint32>(geometry_depth?geometry_depth->focal_x:1.f),
-            std::bit_cast<Uint32>(geometry_depth?geometry_depth->focal_y:1.f),
-            std::bit_cast<Uint32>(geometry_depth?geometry_depth->center_x:0.f),
-            std::bit_cast<Uint32>(geometry_depth?geometry_depth->center_y:0.f),
-            std::bit_cast<Uint32>(jitter[0]),std::bit_cast<Uint32>(jitter[1]),0,0};
+            starfox::bit_cast<Uint32>(geometry_depth?geometry_depth->focal_x:1.f),
+            starfox::bit_cast<Uint32>(geometry_depth?geometry_depth->focal_y:1.f),
+            starfox::bit_cast<Uint32>(geometry_depth?geometry_depth->center_x:0.f),
+            starfox::bit_cast<Uint32>(geometry_depth?geometry_depth->center_y:0.f),
+            starfox::bit_cast<Uint32>(jitter[0]),starfox::bit_cast<Uint32>(jitter[1]),0,0};
         SDL_PushGPUComputeUniformData(cmd,0,settings,sizeof(settings));
         SDL_GPUStorageBufferReadWriteBinding outputs[3]{};
         outputs[0].buffer=impl_->buffers[4];outputs[1].buffer=impl_->buffers[5];

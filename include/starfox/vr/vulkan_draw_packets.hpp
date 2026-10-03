@@ -22,9 +22,11 @@ public:
     void set_pipeline_cache(VulkanPipelineCache* cache) noexcept {cache_=cache;}
     bool initialize(VkDevice,PFN_vkGetDeviceProcAddr,const VkPhysicalDeviceMemoryProperties&,
         VkRenderPass,std::span<const DrawPacket>,std::span<const uint32_t> object_keys={},
-        bool depth_test=true);
+        bool depth_test=true,bool depth_write=true);
     // depth_test=false is an ordered layer pass: neither reads nor writes
-    // scene depth. Geometry reuse is independent of this pipeline policy.
+    // scene depth. depth_write=false with testing retains ordered coplanar HUD
+    // composition while still allowing cabin geometry to occlude it.
+    // Geometry reuse is independent of this pipeline policy.
     // Optional unique keys cover every packet, including empty packets. Keys
     // may encode a source handle plus a draw-pass identity. They only locate
     // reuse candidates: exact geometry comparison is still required,

@@ -124,6 +124,8 @@ struct LiveGame {
 };
 }
 int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& host) {
+    // The Steam Frame player has its own loop, so this one stays as it was.
+    if(host.steam_frame) return run_steam_frame_application(argc,argv,host);
     if(host.stop_requested && host.stop_requested()) return 0;
     bool graphics=false,loader_only=false,render_clear=false,render_triangle=false,render_model=false,render_game=false;
     const char* model_rom=nullptr;const char* model_symbols=nullptr;const char* model_name=nullptr;const char* msu_path=nullptr;

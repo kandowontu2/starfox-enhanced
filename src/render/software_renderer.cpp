@@ -1,4 +1,5 @@
 #include "starfox/render/software_renderer.hpp"
+#include "starfox/compat/bit_cast.hpp"
 #include "starfox/render/face_material.hpp"
 #include "starfox/render/source_shading.hpp"
 #include "starfox/render/shadow_scene.hpp"
@@ -253,7 +254,7 @@ bool source_visibility(
         rounded_word(c.y), rounded_word(a.y));
     const auto cross = static_cast<std::int64_t>(bx) * cy
         - static_cast<std::int64_t>(by) * cx;
-    const auto signed_area = std::bit_cast<std::int32_t>(
+    const auto signed_area = starfox::bit_cast<std::int32_t>(
         static_cast<std::uint32_t>(cross));
     const auto odd_behind = (transformed[visibility.a].z < 0.0)
         != ((transformed[visibility.b].z < 0.0)
@@ -1469,7 +1470,7 @@ void apply_source_depth_tables(
             + static_cast<std::uint16_t>(object_depth_offset - 1U) * 4U);
     }
     for (std::size_t index = 0; index < pose.depth_thresholds.size(); ++index) {
-        const auto encoded = std::bit_cast<std::int8_t>(
+        const auto encoded = starfox::bit_cast<std::int8_t>(
             rom.read8(data_bank | static_cast<std::uint16_t>(
                 threshold_pointer + static_cast<std::uint16_t>(index))));
         pose.depth_thresholds[index] = static_cast<std::int16_t>(

@@ -635,6 +635,112 @@ jobs:
           files: StarFoxEnhanced-0.0.8-vita.zip
           draft: true
 
+  linux-vr-host-tests:
+    if: ${{ !inputs.quest_only }}
+    name: Linux host VR regression tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned SDL build requirements
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config python3 \
+            libasound2-dev libpulse-dev libx11-dev libxext-dev \
+            libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev \
+            libxss-dev libxtst-dev libxkbcommon-dev libgl1-mesa-dev \
+            libgles2-mesa-dev libegl1-mesa-dev libdbus-1-dev libudev-dev \
+            libvulkan1 mesa-vulkan-drivers
+          mapfile -t lavapipe_icds < <(find /usr/share/vulkan/icd.d -maxdepth 1 \
+            -type f -name 'lvp_icd*.json' -print | sort)
+          if [ "${#lavapipe_icds[@]}" -eq 0 ]; then
+            echo "Mesa Lavapipe ICD JSON was not installed"
+            exit 1
+          fi
+          echo "VK_ICD_FILENAMES=${lavapipe_icds[0]}" >> "$GITHUB_ENV"
+          echo "Native Vulkan timestamp regression uses ${lavapipe_icds[0]}"
+      - name: Build PCVR and run asset-free shared regressions
+        shell: bash
+        run: |
+          cmake -S . -B "$RUNNER_TEMP/starfox-frame-host-vr" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSTARFOX_BUILD_RUNTIME=ON \
+            -DSTARFOX_BUILD_VR=ON \
+            -DSTARFOX_BUILD_TESTS=ON \
+            -DBUILD_TESTING=ON \
+            -DSTARFOX_REQUIRE_LAVAPIPE_TIMESTAMP_TEST=ON \
+            -DSTARFOX_BUILD_TOOLS=OFF \
+            -DSTARFOX_EMBED_RUNTIME_ASSETS=OFF \
+            -DSTARFOX_PACKAGE_MSU1_MUSIC=OFF
+          cmake --build "$RUNNER_TEMP/starfox-frame-host-vr" \
+            --target starfox_pcvr starfox_desktop_paths_tests starfox_vr_application_tests \
+              starfox_vr_game_input_check starfox_vr_cockpit_input_check starfox_vr_cockpit_geometry_check starfox_vr_rumble_parity_check \
+              starfox_vr_presentation_check starfox_vr_input_check starfox_vr_camera_check \
+              starfox_vr_swapchain_check starfox_vr_session_check starfox_vr_device_check \
+              starfox_vr_targets_check starfox_vr_runtime_tests starfox_vr_timestamp_check \
+              starfox_vr_profile_output_check \
+              starfox_vr_packet_check starfox_vr_decal_check starfox_vr_mesh_check \
+              starfox_vr_standard_check \
+              starfox_rumble_sequencer_tests \
+            --parallel 2
+          ctest --test-dir "$RUNNER_TEMP/starfox-frame-host-vr" --output-on-failure \
+            -R '^starfox_(pcvr_help|vr_profile_cli|vr_profile_output_check|desktop_paths_tests|vr_application_tests|vr_presentation_check|vr_input_check|vr_cockpit_input_check|vr_cockpit_geometry_check|vr_cockpit_depth_check|vr_cockpit_assets|vr_camera_check|vr_swapchain_check|vr_session_check|vr_device_check|vr_targets_check|vr_packet_check|vr_decal_check|vr_mesh_check|vr_standard_check|vr_runtime_tests|vr_timestamp_math|vr_timestamp_query|vr_timestamp_query_required|rumble_sequencer_tests|steam_frame_cmake_guards)$'
+          "$RUNNER_TEMP/starfox-frame-host-vr/starfox_pcvr" --help
+
+  steam-frame-arm64:
+    if: ${{ !inputs.quest_only }}
+    name: Sniper sysroot ARM64 baseline, OpenXR player, and package
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install host cross-build tools
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang lld llvm cmake ninja-build python3 curl tar coreutils \
+            binutils pkg-config
+      - name: Cross-build and validate clean Frame package
+        env:
+          STARFOX_CMAKE_DEBUG_TRY_COMPILE: "1"
+        shell: bash
+        run: |
+          chmod +x tools/build_steam_frame.sh tools/package/LAUNCH-STEAM-FRAME.sh
+          tools/build_steam_frame.sh . \
+            "$RUNNER_TEMP/starfox-steam-frame-build" \
+            "$RUNNER_TEMP/starfox-steam-frame-package"
+      - name: Preserve cross-build diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: StarFoxEnhanced-steam-frame-configure-failure
+          path: |
+            ${{ runner.temp }}/starfox-steam-frame-build/sysroot-link-normalization.json
+            ${{ runner.temp }}/starfox-steam-frame-build/sniper-sysroot/.starfox-sysroot-link-normalization.json
+            ${{ runner.temp }}/starfox-steam-frame-build/flat/CMakeCache.txt
+            ${{ runner.temp }}/starfox-steam-frame-build/flat/CMakeFiles/CMakeConfigureLog.yaml
+            ${{ runner.temp }}/starfox-steam-frame-build/flat/CMakeFiles/CMakeError.log
+            ${{ runner.temp }}/starfox-steam-frame-build/flat/CMakeFiles/CMakeScratch/
+            ${{ runner.temp }}/starfox-steam-frame-build/steam-frame-vr/CMakeCache.txt
+            ${{ runner.temp }}/starfox-steam-frame-build/steam-frame-vr/CMakeFiles/CMakeConfigureLog.yaml
+            ${{ runner.temp }}/starfox-steam-frame-build/steam-frame-vr/CMakeFiles/CMakeError.log
+            ${{ runner.temp }}/starfox-steam-frame-build/steam-frame-vr/CMakeFiles/CMakeScratch/
+          if-no-files-found: warn
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: StarFoxEnhanced-0.0.8-steam-frame-arm64
+          path: ${{ runner.temp }}/starfox-steam-frame-package/
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: StarFoxEnhanced-0.0.8-steam-frame-hardware-diagnostics
+          path: ${{ runner.temp }}/starfox-steam-frame-build/diagnostics/
+          if-no-files-found: error
+          retention-days: 7
+
   release-checksums:
     name: Release package checksums
     needs: [windows-x64, windows-x86, xbox-uwp-x64, linux-x64, macos-universal, ios-device, android-arm64, quest-arm64, windows-pcvr, switch-homebrew, vita-homebrew]

@@ -1,4 +1,5 @@
 #include "starfox/render/sdl_gpu_effects.hpp"
+#include "starfox/compat/bit_cast.hpp"
 #include "starfox/render/gpu_scalefx.hpp"
 #if defined(STARFOX_SDL_GPU_EFFECTS)
 #include <SDL3/SDL.h>
@@ -625,7 +626,7 @@ struct SdlGpuEffects::Impl {
             const float decay=reset?0.f:s.persistence_mode==2?1.f:
                 float(std::exp2(-(s.presentation_seconds-history_time)/.35));
             auto temporal=p;
-            temporal.pad0=std::bit_cast<Sint32>(decay);
+            temporal.pad0=starfox::bit_cast<Sint32>(decay);
             temporal.pad1=int(std::min(s.persistence_intensity,100U));
             temporal.chromatic=(s.persistence_models?1U:0U)|(s.persistence_world?2U:0U)|(reset?4U:0U);
             dispatch(temporal,32,images[current],images[1-current],history[history_index],nullptr,history[1-history_index]);

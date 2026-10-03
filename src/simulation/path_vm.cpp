@@ -1,4 +1,5 @@
 #include "starfox/simulation/path_vm.hpp"
+#include "starfox/compat/bit_cast.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -41,11 +42,11 @@ void set_flag(GameObject& object, unsigned bit, bool enabled) noexcept {
 }
 
 std::uint8_t bits(std::int8_t value) noexcept {
-    return std::bit_cast<std::uint8_t>(value);
+    return starfox::bit_cast<std::uint8_t>(value);
 }
 
 std::int8_t signed_byte(std::uint8_t value) noexcept {
-    return std::bit_cast<std::int8_t>(value);
+    return starfox::bit_cast<std::int8_t>(value);
 }
 
 std::int8_t multiply_original(std::int8_t left, std::int8_t right) noexcept {
@@ -65,7 +66,7 @@ std::int8_t multiply_original(std::int8_t left, std::int8_t right) noexcept {
 }
 
 std::int16_t signed_difference16(std::uint16_t left, std::uint16_t right) noexcept {
-    return std::bit_cast<std::int16_t>(static_cast<std::uint16_t>(left - right));
+    return starfox::bit_cast<std::int16_t>(static_cast<std::uint16_t>(left - right));
 }
 
 std::int8_t signed_difference8(std::uint8_t left, std::uint8_t right) noexcept {
@@ -245,11 +246,11 @@ bool PathVm::is_attached(ObjectHandle object) const noexcept {
 }
 
 std::uint16_t PathVm::path_offset(ObjectHandle object) const {
-    return std::bit_cast<std::uint16_t>(objects_->at(object).scratch_words[1]);
+    return starfox::bit_cast<std::uint16_t>(objects_->at(object).scratch_words[1]);
 }
 
 void PathVm::set_path_offset(ObjectHandle object, std::uint16_t offset) {
-    objects_->at(object).scratch_words[1] = std::bit_cast<std::int16_t>(offset);
+    objects_->at(object).scratch_words[1] = starfox::bit_cast<std::int16_t>(offset);
 }
 
 std::uint8_t PathVm::read8(std::uint16_t offset) const {
@@ -264,7 +265,7 @@ std::uint16_t PathVm::read16(std::uint16_t offset) const {
 }
 
 std::int16_t PathVm::read_i16(std::uint16_t offset) const {
-    return std::bit_cast<std::int16_t>(read16(offset));
+    return starfox::bit_cast<std::int16_t>(read16(offset));
 }
 
 std::uint8_t PathVm::chase_byte(std::uint8_t current, std::uint8_t target) const noexcept {
@@ -851,9 +852,9 @@ void PathVm::tick(ObjectHandle handle) {
                 objects_->write_path_byte(handle, offset,
                     bits(static_cast<std::int8_t>(value / 2)));
             } else {
-                const auto value = std::bit_cast<std::int16_t>(objects_->read_path_word(handle, offset));
+                const auto value = starfox::bit_cast<std::int16_t>(objects_->read_path_word(handle, offset));
                 objects_->write_path_word(handle, offset,
-                    std::bit_cast<std::uint16_t>(static_cast<std::int16_t>(value / 2)));
+                    starfox::bit_cast<std::uint16_t>(static_cast<std::int16_t>(value / 2)));
             }
             advance(3);
             continue;

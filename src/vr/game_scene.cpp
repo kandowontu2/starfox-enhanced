@@ -1,4 +1,5 @@
 #include "starfox/vr/game_scene.hpp"
+#include "starfox/compat/bit_cast.hpp"
 #include "starfox/render/grid_projection.hpp"
 #include <bit>
 #include <limits>
@@ -9,7 +10,7 @@ GameSceneHistory::GameSceneHistory(const simulation::GameSimulation& game,
     const assets::RomImage& rom,const assets::SymbolMap& symbols)
     :game_(game),rom_(rom),trig_(simulation::TrigTables::load(rom,symbols)) {
     constexpr std::array names{"VIEWPOSX","VIEWPOSY","VIEWPOSZ",
-        "VIEWROTXW","VIEWROTYW","VIEWROTZW","VIEWFLOATY","GAMEFRAME","PLAYERFLYMODE","SHADOWHEIGHT","BG2SCROLL","PVIEWPOSY"};
+        "VIEWROTXW","VIEWROTYW","VIEWROTZW","VIEWFLOATY","GAMEFRAME","PLAYERFLYMODE","SHADOWHEIGHT","BG2SCROLL","PVIEWPOSY","C_TYPE"};
     for(size_t i=0;i<names.size();++i) {
         bool found=false;
         for(const auto address:symbols.find(names[i])) {
@@ -17,7 +18,8 @@ GameSceneHistory::GameSceneHistory(const simulation::GameSimulation& game,
                 addresses_[i]=address;found=true;break;
             }
         }
-        if(!found) throw std::runtime_error(std::string("Missing scene RAM symbol: ")+names[i]);
+        // C_TYPE only feeds the Steam Frame's cockpit steering; a bundle without it is fine elsewhere.
+        if(!found && std::string_view(names[i])!="C_TYPE") throw std::runtime_error(std::string("Missing scene RAM symbol: ")+names[i]);
     }
     constexpr std::array tracking_names{"PLAYERONPLANET_STRAT","PLAYERINSPACE_STRAT"};
     for(size_t i=0;i<tracking_names.size();++i) {
@@ -129,7 +131,7 @@ GameSceneHistory::GameSceneHistory(const simulation::GameSimulation& game,
             && (entry.front()&0xff0000U)==(background_lists.front()&0xff0000U))
             unique_backgrounds_[i]=static_cast<uint16_t>(entry.front()-background_lists.front());
     }
-    capture();previous_=current_;
+    capture();older_=previous_=current_;
 }
 
 void GameSceneHistory::capture() {
@@ -138,14 +140,15 @@ void GameSceneHistory::capture() {
     auto next=std::make_shared<GameSceneSnapshot>();
     next->revision=current_?current_->revision+1:0;
     const auto word=[&](size_t index) {return game_.map().peek_ram_word(addresses_[index]).value();};
-    next->camera={std::bit_cast<int16_t>(word(0)),std::bit_cast<int16_t>(word(1)),
-        std::bit_cast<int16_t>(word(2)),word(3),word(4),word(5)};
+    next->camera={starfox::bit_cast<int16_t>(word(0)),starfox::bit_cast<int16_t>(word(1)),
+        starfox::bit_cast<int16_t>(word(2)),word(3),word(4),word(5)};
     next->view_matrix=simulation::rotation_matrix_q15(trig_,
-        std::bit_cast<int16_t>(word(3)),std::bit_cast<int16_t>(word(4)),std::bit_cast<int16_t>(word(5)));
-    next->view_float_y=std::bit_cast<int16_t>(word(6));
-    next->background_vertical_scroll=std::bit_cast<int16_t>(word(10));
+        starfox::bit_cast<int16_t>(word(3)),starfox::bit_cast<int16_t>(word(4)),starfox::bit_cast<int16_t>(word(5)));
+    next->view_float_y=starfox::bit_cast<int16_t>(word(6));
+    if(addresses_[12]) next->control_type=game_.map().peek_ram_byte(addresses_[12]).value()&3U;
+    next->background_vertical_scroll=starfox::bit_cast<int16_t>(word(10));
     next->shadows_enabled=(game_.map().peek_ram_byte(addresses_[8]).value()&8U)!=0;
-    next->shadow_height=std::bit_cast<int16_t>(word(9));
+    next->shadow_height=starfox::bit_cast<int16_t>(word(9));
     next->game_frame=game_.map().peek_ram_byte(addresses_[7]).value()&0x7fU;
     next->flow=game_.flow_state();next->player=game_.player();
     next->background_colour_subtract=game_.game_over_background_subtract();
@@ -334,7 +337,7 @@ void GameSceneHistory::capture() {
         && ex_title_intro_background_!=0
         && game_.map().background()==ex_title_intro_background_;
     next->dust_points=game_.dust().points();
-    next->dots_mode=std::bit_cast<int8_t>(game_.map().peek_ram_byte(dust_addresses_[0]).value());
+    next->dots_mode=starfox::bit_cast<int8_t>(game_.map().peek_ram_byte(dust_addresses_[0]).value());
     if(next->meters.extended) {
         if(dust_addresses_[1] && game_.map().peek_ram_word(dust_addresses_[1]).value()!=0)
             next->dust_point_count=simulation::kMaximumDustPoints;
@@ -349,6 +352,21 @@ void GameSceneHistory::capture() {
             || next->flow==simulation::GameFlowState::intro
             || next->flow==simulation::GameFlowState::stage_results);
     next->model_palette=game_.palette_words();next->cgram=next->ppu->cgram;
+    if(game_.objects().is_active(next->player)) {
+        const auto& player=game_.objects().at(next->player);
+        render::ObjectPresentationSnapshot reference;
+        reference.transform={player.world_x,player.world_y,player.world_z,
+            uint16_t(player.rotation_x<<8U),uint16_t(player.rotation_y<<8U),uint16_t(player.rotation_z<<8U)};
+        reference.rotation_matrix=simulation::transpose_q15(simulation::rotation_matrix_q15(trig_,
+            simulation::wrap16(-int32_t(reference.transform.pitch)),
+            simulation::wrap16(-int32_t(reference.transform.yaw)),
+            simulation::wrap16(-int32_t(reference.transform.roll))));
+        reference.strategy_address=player.strategy_address;reference.shape=player.shape;
+        reference.type=player.type;reference.generation=game_.objects().generation(next->player);
+        next->pilot_reference=reference;
+        next->pilot_tracking=player.strategy_address && (player.strategy_address==tracking_strategies_[0]
+            || player.strategy_address==tracking_strategies_[1]);
+    }
     next->transforms=render::capture_object_snapshots(game_.objects(),trig_);
     if(const auto player=next->transforms.find(next->player);player!=next->transforms.end()) {
         const auto strategy=player->second.strategy_address;
@@ -356,7 +374,7 @@ void GameSceneHistory::capture() {
             // Normal source flight follows only a fraction of player Y.
             // Remove that deliberate screen drift from the shared VR camera,
             // preserving shake, camera orbit and every scripted strategy.
-            const int correction=int(player->second.transform.y)-std::bit_cast<int16_t>(word(11));
+            const int correction=int(player->second.transform.y)-starfox::bit_cast<int16_t>(word(11));
             next->camera.y=simulation::wrap16(int(next->camera.y)+correction);
             if(next->background_landscape) next->landscape_grid_height=next->camera.y;
         }
@@ -364,12 +382,12 @@ void GameSceneHistory::capture() {
     const auto model_word=[&](size_t i) {return model_addresses_[i]?game_.map().peek_ram_word(model_addresses_[i]).value():uint16_t{};};
     const auto model_byte=[&](size_t i) {return model_addresses_[i]?game_.map().peek_ram_byte(model_addresses_[i]).value():uint8_t{};};
     render::RenderPose common;
-    common.vanish_x=std::bit_cast<int16_t>(model_word(0));common.vanish_y=std::bit_cast<int16_t>(model_word(1));
+    common.vanish_x=starfox::bit_cast<int16_t>(model_word(0));common.vanish_y=starfox::bit_cast<int16_t>(model_word(1));
     next->source_vanishing_point={static_cast<int16_t>(common.vanish_x),static_cast<int16_t>(common.vanish_y)};
     common.scale=next->model_scale;
     common.wireframe_mode=model_byte(4);common.wobble_mode=model_byte(5);
     common.wave_mode=model_byte(6)!=0;common.cel_mode=model_byte(7)!=0;
-    common.wave_offset=std::bit_cast<int16_t>(model_word(8));common.colour_warp=model_word(9)!=0;
+    common.wave_offset=starfox::bit_cast<int16_t>(model_word(8));common.colour_warp=model_word(9)!=0;
     if(model_addresses_[10]) common.projected_points_address=static_cast<uint16_t>(model_addresses_[10]);
     const auto thresholds=model_word(2),colours=model_word(3);
     next->objects.reserve(game_.draw_order().size());
@@ -418,6 +436,6 @@ void GameSceneHistory::capture() {
         }
         grid_history.finish(frame,endpoint);
     }
-    previous_=current_;current_=std::move(next);grid_line_history_=grid_history;
+    older_=previous_;previous_=current_;current_=std::move(next);grid_line_history_=grid_history;
 }
 }

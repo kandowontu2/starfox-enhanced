@@ -1,4 +1,5 @@
 #include "starfox/render/gpu_model.hpp"
+#include "starfox/compat/bit_cast.hpp"
 #include "starfox/render/packed_projection.hpp"
 #include "starfox/render/packed_faces.hpp"
 #include "starfox/render/gpu_bsp.hpp"
@@ -228,8 +229,8 @@ struct GpuModel::Impl {
         const std::array<double,4> camera{pose.x,pose.y,pose.z,settings.focal_length};
         const std::array<double,4> view{pose.vanish_x,pose.vanish_y,double(pose.simple_sprite_world_size),double(scale)};
         for(unsigned i=0;i<4;++i) {
-            const auto camera_bits=std::bit_cast<std::uint64_t>(camera[i]);
-            const auto view_bits=std::bit_cast<std::uint64_t>(view[i]);
+            const auto camera_bits=starfox::bit_cast<std::uint64_t>(camera[i]);
+            const auto view_bits=starfox::bit_cast<std::uint64_t>(view[i]);
             config.camera_lo[i]=Uint32(camera_bits);config.camera_hi[i]=Uint32(camera_bits>>32);
             config.view_lo[i]=Uint32(view_bits);config.view_hi[i]=Uint32(view_bits>>32);
         }
@@ -544,7 +545,7 @@ GpuRasterOutput GpuModel::enqueue(void* device,void* command,const assets::Shape
             ss.fractional_normal=!pose.use_rotation_matrix || pose.subpixel_projection;
             if(ss.fractional_normal) {
                 const auto& normal_pose=vertices.continuous_poses[1];
-                for(unsigned i=0;i<3;++i) {ss.row0[i]=std::bit_cast<std::int32_t>(normal_pose.row0[i]);ss.row1[i]=std::bit_cast<std::int32_t>(normal_pose.row1[i]);ss.row2[i]=std::bit_cast<std::int32_t>(normal_pose.row2[i]);}
+                for(unsigned i=0;i<3;++i) {ss.row0[i]=starfox::bit_cast<std::int32_t>(normal_pose.row0[i]);ss.row1[i]=starfox::bit_cast<std::int32_t>(normal_pose.row1[i]);ss.row2[i]=starfox::bit_cast<std::int32_t>(normal_pose.row2[i]);}
             } else for(unsigned i=0;i<3;++i) {ss.row0[i]=pose.rotation_matrix[i];ss.row1[i]=pose.rotation_matrix[3+i];ss.row2[i]=pose.rotation_matrix[6+i];}
             materials=impl_->emit_surface(cmd,vertices.continuous?projected:camera,ss);
         }

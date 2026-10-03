@@ -53,4 +53,30 @@ private:
     bool frame_{};
     std::string status_{"OpenXR swapchains not initialized"};
 };
+// A separate, mono UI swapchain. Its image is released only after the caller's
+// GPU fence completes; timeouts retain ownership across frame-loop retries.
+class OpenXrQuad {
+public:
+    explicit OpenXrQuad(SwapchainApi api={}):api_(api) {}
+    ~OpenXrQuad() {close();}
+    OpenXrQuad(const OpenXrQuad&)=delete;
+    OpenXrQuad& operator=(const OpenXrQuad&)=delete;
+    bool initialize(XrSession,int64_t format,uint32_t width=1024,uint32_t height=896);
+    void close() noexcept;
+    bool enumerate_images(uint32_t capacity,uint32_t* count,XrSwapchainImageBaseHeader*);
+    ImageWait acquire(XrDuration timeout=0);
+    bool release();
+    ImageWait cancel(XrDuration timeout=0);
+    uint32_t image_count() const noexcept {return count_;}
+    std::optional<uint32_t> image_index() const noexcept {return ready_?std::optional<uint32_t>(index_):std::nullopt;}
+    const XrCompositionLayerQuad* layer(XrSpace,XrPosef,float width=1.15F) noexcept;
+    const std::string& status() const noexcept {return status_;}
+private:
+    SwapchainApi api_;
+    XrCompositionLayerQuad layer_{XR_TYPE_COMPOSITION_LAYER_QUAD};
+    uint32_t count_{},index_{};
+    bool acquired_{},ready_{},released_{};
+    std::string status_;
+};
+
 }

@@ -1,4 +1,5 @@
 #include "starfox/vr/eye_camera.hpp"
+#include "starfox/vr/presentation.hpp"
 #include "starfox/vr/shadow_camera.hpp"
 #include "starfox/vr/source_shadow_environment.hpp"
 #include "starfox/vr/game_model_pose.hpp"
@@ -22,6 +23,22 @@ std::array<float,4> project(const Matrix4& m,std::array<float,4> p) {
 }
 int main() {
     try {
+        {
+            const auto panel=panel_matrix();close(panel[0]*256,1.15F);close(panel[14],-1.75F);
+            std::array<XrView,2> views{};
+            for(unsigned eye=0;eye<2;++eye) {
+                views[eye].pose.orientation={0,std::sqrt(.5F),0,std::sqrt(.5F)};
+                views[eye].pose.position={2,1,eye?.032F:-.032F};
+            }
+            WorldPanelAnchor anchor;const auto pose=anchor.pose(views);
+            close(pose.position.x,.25F);close(pose.position.y,1);close(pose.position.z,0);
+            views[0].pose.position.x+=1;views[1].pose.position.x+=1;
+            close(anchor.pose(views).position.x,.25F);anchor.reset();close(anchor.pose(views).position.x,1.25F);
+            PositionAnchor head;head.reset(true);const auto raw=views;require(head.apply(views));
+            close(views[0].pose.orientation.y,0);close(views[0].pose.orientation.w,1);
+            close(views[1].pose.position.x-views[0].pose.position.x,-.064F);
+            close(raw[0].pose.position.x,3); // runtime poses were copied, not rewritten
+        }
         {
             EyeCamera camera{};
             for(unsigned i=0;i<16;++i) {camera.view[i]=float(i);camera.projection[i]=float(32+i);}
@@ -94,10 +111,45 @@ int main() {
             require(anchor.apply(moved));
             close(moved[0].pose.position.x,.168F);close(moved[1].pose.position.x,.232F);
             close(moved[0].pose.position.y,-.1F);
+            const auto raw=views;
+            for(float factor:{0.F,.5F,1.F,1.5F,2.F}) {
+                PositionAnchor calibrated;auto initial=raw;require(calibrated.apply(initial,factor));
+                auto translated=raw;
+                for(auto& eye:translated) {eye.pose.position.x+=.4F;eye.pose.position.z-=.2F;}
+                require(calibrated.apply(translated,factor));
+                close((translated[0].pose.position.x+translated[1].pose.position.x)*.5F,.4F*factor);
+                close(translated[1].pose.position.x-translated[0].pose.position.x,.064F);
+                close(translated[0].pose.position.z,-.2F*factor);
+                require(translated[0].fov.angleLeft==raw[0].fov.angleLeft);
+            }
             PositionAnchor invalid;
             auto bad=views;bad[1].pose.position.x=std::numeric_limits<float>::quiet_NaN();
             require(!invalid.apply(bad));
             require(invalid.apply(views));close(views[0].pose.position.x,-.032F);
+        }
+        {
+            // Recentre keeps standing height; recalibration (3 s hold) takes it.
+            PositionAnchor anchor;
+            std::array<XrView,2> views{};
+            views[0].pose.position={-.032F,1.7F,0.F};views[1].pose.position={.032F,1.7F,0.F};
+            require(anchor.apply(views));close(views[0].pose.position.y,0);
+            const auto moved=[&](float x,float y,float z) {
+                std::array<XrView,2> out{};
+                out[0].pose.position={x-.032F,y,z};out[1].pose.position={x+.032F,y,z};return out;
+            };
+            anchor.reset(true,true);
+            auto crouched=moved(.5F,1.2F,-1.F);require(anchor.apply(crouched));
+            close(crouched[0].pose.position.x,-.032F);close(crouched[0].pose.position.z,0);
+            close(crouched[0].pose.position.y,-.5F); // Horizontal re-centred, height kept.
+            anchor.reset(true,true);anchor.reset(true,true); // Repeated requests before apply.
+            auto again=moved(-.25F,1.2F,.5F);require(anchor.apply(again));
+            close(again[1].pose.position.x,.032F);close(again[0].pose.position.z,0);
+            close(again[0].pose.position.y,-.5F);
+            anchor.reset(true,true);anchor.reset(true,false); // Height recalibration wins.
+            auto calibrated=moved(0.F,1.2F,0.F);require(anchor.apply(calibrated));
+            close(calibrated[0].pose.position.y,0);
+            PositionAnchor first;first.reset(true,true); // Nothing to keep yet: live height.
+            auto fresh=moved(1.F,1.3F,1.F);require(first.apply(fresh));close(fresh[0].pose.position.y,0);
         }
         XrView eye{XR_TYPE_VIEW};eye.pose.orientation.w=1;
         eye.fov={-0.7f,0.9f,0.8f,-0.6f};

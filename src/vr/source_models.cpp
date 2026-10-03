@@ -1,4 +1,5 @@
 #include "starfox/vr/source_models.hpp"
+#include "starfox/compat/bit_cast.hpp"
 #include <stdexcept>
 #include <bit>
 #include <cmath>
@@ -8,8 +9,8 @@
 #include "starfox/vr/vulkan_connected_grid.hpp"
 namespace starfox::vr {
 SourceModelPackets SourceModels::assemble_world_interpolated(const GameSceneSnapshot& previous,
-    const GameSceneSnapshot& current,double alpha,bool srgb,bool surround_stars) {
-    auto result=assemble_interpolated(previous,current,alpha,srgb,256,surround_stars);
+    const GameSceneSnapshot& current,double alpha,bool srgb,bool surround_stars,bool cpu_pilot_rig) {
+    auto result=assemble_interpolated(previous,current,alpha,srgb,256,surround_stars,cpu_pilot_rig);
     auto dust=assemble_dust_interpolated(previous,current,alpha,srgb,256,true);
     const bool controls=current.flow==simulation::GameFlowState::controls_type
         || current.flow==simulation::GameFlowState::controls_choice;
@@ -54,7 +55,7 @@ bool text_packet(const assets::RomImage& rom,uint32_t font,uint32_t messages,
     if(!model) {error="Invalid scaled text transform";return false;}
     packet.model=*model;
     if(object.colour_table<0x8000) return true;
-    const int size=127+std::bit_cast<int8_t>(object.texture_scroll_x);
+    const int size=127+starfox::bit_cast<int8_t>(object.texture_scroll_x);
     std::vector<uint8_t> tokens;
     for(uint32_t i=0;i<256;++i) {
         const auto token=rom.read8((messages&0xff0000U)+object.colour_table+i);
@@ -141,6 +142,8 @@ SourceModels::SourceModels(const assets::RomImage& rom,const assets::SymbolMap& 
     interpolation_.flash_player=symbol("FLASHPLAYER_STRAT");
     interpolation_.discrete_rotation_shape=static_cast<uint16_t>(symbol("UP_DOOR"));
     intro_laser_shape_=static_cast<uint16_t>(symbol("RELFASTELASER"));
+    pilot_shape_=static_cast<uint16_t>(symbol("MY_DEMOS"));
+    for(unsigned i=0;const char* name:{"MYSHIP_4","MYSHIP_L","MYSHIP_R","MYSHIP_B"}) flight_shapes_[i++]=static_cast<uint16_t>(symbol(name));
     intro_showcase_strategies_={symbol("ZACOINTRO_ISTRAT"),symbol("ZACO2INTRO_ISTRAT"),
         symbol("ZACOINTRO_STRAT"),symbol("ZACO2INTRO_STRAT")};
     if(symbol("M_NANMODE")) interpolation_.crosshair=symbol("TEST_ISTRAT");
@@ -324,7 +327,7 @@ DrawPacket SourceModels::grid_pose(const GameSceneSnapshot& scene,const timing::
         // carry the discarded sub-unit camera motion into the eye shader.
         for(const double value:{camera.x,camera.y,camera.z}) {
             const auto remainder=float(value-std::trunc(value));
-            packet.geometry.texels.push_back(std::bit_cast<uint32_t>(-remainder));
+            packet.geometry.texels.push_back(starfox::bit_cast<uint32_t>(-remainder));
         }
         SceneVertex base{};
         render::FaceMaterial material{{14,14,false},nullptr};
@@ -411,13 +414,13 @@ DrawPacket SourceModels::dust_pose(const GameSceneSnapshot& scene,const timing::
             || scene.flow==simulation::GameFlowState::controls_choice;
         if(controls) packet.model=source_layer_matrix(float(scene.source_vanishing_point[0])+16.F,
             float(scene.source_vanishing_point[1])+16.F).value();
-        for(double value:{camera.x,camera.y,camera.z}) packet.geometry.texels.push_back(std::bit_cast<uint32_t>(float(value)));
+        for(double value:{camera.x,camera.y,camera.z}) packet.geometry.texels.push_back(starfox::bit_cast<uint32_t>(float(value)));
         for(auto value:m) packet.geometry.texels.push_back(uint32_t(int32_t(value)));
         for(unsigned index=0;index<64;++index) {
             const auto shade=rom_->read8(star_colours_+index);
             SceneVertex colour{};render::FaceMaterial material{{shade,shade,false},nullptr};
             if(!apply_scene_material(colour,material,palette,112,1,srgb)) throw std::runtime_error("Invalid GPU dust colour");
-            for(float value:colour.color) packet.geometry.texels.push_back(std::bit_cast<uint32_t>(value));
+            for(float value:colour.color) packet.geometry.texels.push_back(starfox::bit_cast<uint32_t>(value));
         }
         if(dust_vertices_ && !dust_vertices_->empty()
             && bool(dust_vertices_->front().texture[3]&16384U)==controls && dust_source_points_.size()==scene.dust_point_count
@@ -486,7 +489,7 @@ SourceModelPackets SourceModels::assemble(const GameSceneSnapshot& scene,bool sr
     const auto shadows=scene.shadows_enabled?interpolate_scene_poses(scene,scene,1.,interpolation_,true):std::vector<render::RenderPose>{};
     return assemble_poses(scene,{},shadows,srgb,units,1.);
 }
-SourceModelPackets SourceModels::assemble_interpolated(const GameSceneSnapshot& previous,const GameSceneSnapshot& scene,double alpha,bool srgb,float units,bool fixed_landscape_height) {
+SourceModelPackets SourceModels::assemble_interpolated(const GameSceneSnapshot& previous,const GameSceneSnapshot& scene,double alpha,bool srgb,float units,bool fixed_landscape_height,bool cpu_pilot_rig) {
     if(!std::isfinite(alpha)) throw std::invalid_argument("Invalid scene interpolation fraction");
     if(previous.flow!=scene.flow || timing::camera_transform_is_discontinuous(previous.camera,scene.camera)) alpha=1.;
     auto rules=interpolation_;rules.fixed_landscape_height=fixed_landscape_height;
@@ -509,9 +512,9 @@ SourceModelPackets SourceModels::assemble_interpolated(const GameSceneSnapshot& 
         }
     }
     const auto shadows=scene.shadows_enabled?interpolate_scene_poses(previous,scene,alpha,rules,true):std::vector<render::RenderPose>{};
-    return assemble_poses(scene,poses,shadows,srgb,units,alpha);
+    return assemble_poses(scene,poses,shadows,srgb,units,alpha,cpu_pilot_rig);
 }
-SourceModelPackets SourceModels::assemble_poses(const GameSceneSnapshot& scene,std::span<const render::RenderPose> poses,std::span<const render::RenderPose> shadows,bool srgb,float units,double alpha) {
+SourceModelPackets SourceModels::assemble_poses(const GameSceneSnapshot& scene,std::span<const render::RenderPose> poses,std::span<const render::RenderPose> shadows,bool srgb,float units,double alpha,bool cpu_pilot_rig) {
     SourceModelPackets result;
     ++cache_epoch_;
     auto words=scene.cgram;
@@ -551,10 +554,17 @@ SourceModelPackets SourceModels::assemble_poses(const GameSceneSnapshot& scene,s
         if(scene.colour_table_override && !crosshair) colour=*scene.colour_table_override;
         else if((flags&2U) && !(flags&0x20U)) colour=colours_[(flags&1U)?1:2];
         else if(flags&1U) colour=colours_[0];
+        // The cockpit encloses the detailed cutscene Arwing in place of the
+        // in-flight ship, with the same pose, palette and hit-flash colours.
+        // Only the in-flight ship shapes; the flash's blink uses other shapes.
+        const bool pilot_hull=cpu_pilot_rig && !shadow && pilot_shape_ && (item.handle==scene.player
+            || (interpolation_.flash_player && object.strategy_address==interpolation_.flash_player))
+            && std::find(flight_shapes_.begin(),flight_shapes_.end(),object.shape)!=flight_shapes_.end();
+        const uint32_t shape=pilot_hull?pilot_shape_:object.shape;
         try {
-            const uint64_t base_key=(uint64_t(object.shape)<<32U)|colour;
+            const uint64_t base_key=(uint64_t(shape)<<32U)|colour;
             auto base=shapes_.find(base_key);
-            if(base==shapes_.end()) base=shapes_.emplace(base_key,decoder_.decode(object.shape,{},colour)).first;
+            if(base==shapes_.end()) base=shapes_.emplace(base_key,decoder_.decode(shape,{},colour)).first;
             const auto header=base->second.header;
             const auto selected=shadow?header.shadow_pointer:assets::ShapeDecoder::select_lod_pointer(header,item.source_pose.source_depth);
             const uint64_t lod_key=base_key|(uint64_t(selected)<<16U);
@@ -574,7 +584,7 @@ SourceModelPackets SourceModels::assemble_poses(const GameSceneSnapshot& scene,s
             pose.collapse_to_axis_line=scene.flow==simulation::GameFlowState::intro
                 && intro_laser_shape_ && object.shape==intro_laser_shape_ && pose.z<1024.;
             if(pose.simple_scaled_sprite) {
-                auto adjustment=static_cast<int16_t>(std::bit_cast<int8_t>(object.texture_scroll_x));
+                auto adjustment=static_cast<int16_t>(starfox::bit_cast<int8_t>(object.texture_scroll_x));
                 for(unsigned shift=0;shift<header.shift;++shift) adjustment=simulation::add16(adjustment,adjustment);
                 auto diameter=simulation::add16(header.size,adjustment);
                 diameter=simulation::add16(diameter,diameter);
@@ -582,7 +592,8 @@ SourceModelPackets SourceModels::assemble_poses(const GameSceneSnapshot& scene,s
                 pose.simple_sprite_colour=object.extended[21];
             }
             const uint32_t pass_key=uint32_t(item.handle)|(shadow?source_shadow_pass:0U);
-            if(compute_solids_ && (!shadow || compute_shadows_) && !pose.simple_scaled_sprite
+            if(compute_solids_ && !(cpu_pilot_rig && !shadow && (item.handle==scene.player
+                || (interpolation_.flash_player && object.strategy_address==interpolation_.flash_player))) && (!shadow || compute_shadows_) && !pose.simple_scaled_sprite
                 && !lod->second.faces.empty()
                 && pose.effect_clip_right<=pose.effect_clip_left) {
                 SourceSpanModel prepared;
@@ -672,7 +683,7 @@ SourceModelPackets SourceModels::assemble_poses(const GameSceneSnapshot& scene,s
                 }
             }
             if(!reused && !build_draw_packet(lod->second,pose,palette,112,1,srgb,units,packet,error)) {
-                defer("shape "+std::to_string(object.shape)+" LOD "+std::to_string(selected)+": "+error);continue;
+                defer("shape "+std::to_string(shape)+" LOD "+std::to_string(selected)+": "+error);continue;
             }
             if(!reused && interpolation_.crosshair && object.strategy_address==interpolation_.crosshair) {
                 // Reticle stations belong to the game's camera plane, not

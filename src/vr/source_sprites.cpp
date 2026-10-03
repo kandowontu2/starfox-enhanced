@@ -1,14 +1,103 @@
 #include "starfox/vr/source_sprites.hpp"
 #include "starfox/vr/packed_vram.hpp"
+#include "starfox/vr/frame_menu.hpp"
+#include "starfox/vr/game_scene.hpp"
 #include "starfox/vr/background_tiles.hpp"
 #include "starfox/render/palette.hpp"
 #include "starfox/render/scaled_text_renderer.hpp"
 #include "starfox/render/sprite_renderer.hpp"
+#include "starfox/render/hud_layout.hpp"
 #include "starfox/simulation/game_simulation.hpp"
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
 namespace starfox::vr {
+std::vector<DrawPacket> layout_a_menu_packets(const assets::RomImage& rom,const assets::SymbolMap& symbols,
+    const FrameMenu& menu,bool srgb) {
+    std::array<uint16_t,256> palette{};palette[1]=0x7fff;palette[2]=0x03ff;
+    std::vector<DrawPacket> rows;
+    const unsigned visible_rows=std::min(6U,menu.row_count());
+    const int footer=67+18*int(visible_rows);
+    rows.push_back(layout_a_surface(true,menu.selection-menu.first_visible_row(),srgb,visible_rows));
+    const auto add=[&](std::string_view text,int y,uint8_t ink) {
+        auto row=source_ui_text_packet(rom,symbols,text,16,y,240,ink,palette,15,srgb,true);
+        row.model=identity_matrix;rows.push_back(std::move(row));
+    };
+    const auto first=menu.first_visible_row();
+    if(menu.language>=1 && menu.language<=4) {
+        const auto add_unicode=[&](std::u32string_view text,int y,uint8_t ink) {
+            auto row=source_unicode_ui_text_packet(rom,symbols,text,16,y,ink,palette,15,srgb);
+            row.model=identity_matrix;rows.push_back(std::move(row));
+        };
+        const auto labels=menu.localized_labels();add_unicode(menu.translate(menu.title()),35,1);
+        for(unsigned i=first;i<labels.size() && i<first+6;++i)
+            add_unicode((i==menu.selection?U"> ":U"  ")+labels[i],67+int(i-first)*18,i==menu.selection?2:1);
+        const auto help=menu.localized_help();add_unicode(help[0],footer+8,1);add_unicode(help[1],footer+26,1);
+    } else {
+        add(menu.title(),35,1);const auto labels=menu.labels();
+        for(unsigned i=first;i<labels.size() && i<first+6;++i)
+            add((i==menu.selection?"> ":"  ")+labels[i],67+int(i-first)*18,i==menu.selection?2:1);
+        add("STICK: MOVE",footer+8,1);add("MENU: SELECT",footer+26,1);
+    }
+    return rows;
+}
+std::vector<DrawPacket> layout_a_instrument_packets(const assets::RomImage& rom,const assets::SymbolMap& symbols,
+    const GameSceneSnapshot& scene,render::ScaledTextRenderer& text,bool srgb) {
+    const auto layout=layout_a_hud(scene.meters.extended);
+    std::vector<DrawPacket> packets;
+    // Source portraits, glyph shadows and meters provide their own framing.
+    // Leave unoccupied gameplay HUD pixels open to the world.
+    auto oam=source_sprite_packet(*scene.ppu,scene.display_brightness,{},srgb,&scene.meters,&layout,SourceSpritePass::hud);
+    oam.model=overlay_panel_matrix();packets.push_back(std::move(oam));
+    auto meters=source_meter_packet(scene.meters,scene.ppu->cgram,scene.display_brightness,srgb,256,false,&layout);
+    meters.model=overlay_panel_matrix();
+    // Inner FX meter origin is (16,16) in the full PPU canvas. Offsets above
+    // move each group identically after that authored composition.
+    meters.model[12]+=16*meters.model[0];meters.model[13]+=16*meters.model[5];
+    packets.push_back(std::move(meters));
+    if(replace_native_dialogue(scene)) {
+        auto dialogue=source_dialogue_packets(rom,symbols,scene.dialogue,text,scene.ppu->cgram,scene.display_brightness,srgb);
+        for(auto& packet:dialogue) {
+            packet.model=overlay_panel_matrix();
+            packet.model[12]+=layout[render::HudElement::comms].x*packet.model[0];
+            packet.model[13]+=layout[render::HudElement::comms].y*packet.model[5];
+            packets.push_back(std::move(packet));
+        }
+    }
+    return packets;
+}
+render::HudLayout layout_a_hud(bool extended) {
+    render::HudLayout layout;
+    layout[render::HudElement::lives]={int16_t(extended?-21:-10),int16_t(extended?15:173)};
+    layout[render::HudElement::shield]={int16_t(extended?22:15),int16_t(extended?4:7)};
+    layout[render::HudElement::bombs_boost]={int16_t(extended?-37:-104),8};
+    layout[render::HudElement::comms]={-35,-12};
+    return layout;
+}
+DrawPacket layout_a_surface(bool menu,unsigned selection,bool srgb,unsigned menu_rows) {
+    DrawPacket packet;packet.model={1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
+    const auto rect=[&](float x,float y,float w,float h,uint32_t rgb,float alpha=1.F) {
+        std::array<float,4> colour{float((rgb>>16)&255)/255,float((rgb>>8)&255)/255,float(rgb&255)/255,alpha};
+        if(srgb) for(unsigned i=0;i<3;++i) colour[i]=colour[i]<=.04045F?colour[i]/12.92F:std::pow((colour[i]+.055F)/1.055F,2.4F);
+        for(unsigned c:{0U,1U,2U,0U,2U,3U}) {
+            SceneVertex v{};v.position[0]=x+((c==1 || c==2)?w:0);v.position[1]=y+(c>=2?h:0);
+            std::copy(colour.begin(),colour.end(),v.color);packet.geometry.vertices.push_back(v);
+        }
+    };
+    menu_rows=std::clamp(menu_rows,1U,6U);
+    const float footer=67.F+18.F*menu_rows;
+    const float top=menu?(menu_rows<=2?24.F:1.F):136.F,bottom=menu?footer+48.F:214.F;
+    rect(1,top,254,bottom-top,0x071017,.95F);
+    rect(1,top,254,1,0x8b9ca9);rect(1,bottom-1,254,1,0x8b9ca9);
+    rect(1,top,1,bottom-top,0x8b9ca9);rect(254,top,1,bottom-top,0x8b9ca9);
+    if(menu) {
+        rect(12,55,232,1,0x3d505f);rect(12,footer,232,1,0x3d505f);
+        const float y=65.F+18.F*std::min(selection,menu_rows-1);
+        rect(10,y,236,16,0x283326);rect(10,y,2,16,0xffff69);
+    }
+    return packet;
+}
+
 std::vector<DrawPacket> source_dialogue_packets(const assets::RomImage& rom,
     const assets::SymbolMap& symbols,const simulation::DialogueState& dialogue,
     render::ScaledTextRenderer& layout,const std::array<uint16_t,256>& cgram,
@@ -198,7 +287,7 @@ DrawPacket source_unicode_ui_text_packet(const assets::RomImage& rom,const asset
 }
 DrawPacket source_ui_text_packet(const assets::RomImage& rom,const assets::SymbolMap& symbols,
     std::string_view text,int x,int y,int right_clip,uint8_t ink,
-    const std::array<uint16_t,256>& cgram,unsigned brightness,bool srgb) {
+    const std::array<uint16_t,256>& cgram,unsigned brightness,bool srgb,bool frame_glyphs) {
     DrawPacket packet;
     if(brightness>15) throw std::invalid_argument("Invalid text brightness");
     text=text.substr(0,256);
@@ -209,7 +298,7 @@ DrawPacket source_ui_text_packet(const assets::RomImage& rom,const assets::Symbo
     };
     const auto widths=symbol("FONT0WID"),font=symbol("FONT0FON"),translation=symbol("FONT0TRN");
     const auto width=[&](uint8_t c)->unsigned {
-        if(c==':' || c=='/' || c=='>') return 5;
+        if(c==':' || c=='/' || c=='>' || (frame_glyphs && (c=='(' || c==')' || c=='+'))) return 5;
         return c==32?5:c<32?0:rom.read8(widths+rom.read8(translation+c-32));
     };
     const auto colour=render::decode_bgr555_palette(cgram)[ink];
@@ -241,6 +330,9 @@ DrawPacket source_ui_text_packet(const assets::RomImage& rom,const assets::Symbo
                     if(row>=12) return 0;
                     if(c==':') return row==3 || row==4 || row==8 || row==9?0x6000U:0U;
                     if(c=='/') return 0x8000U>>(3-row*4/12);
+                    if(frame_glyphs && c=='(') return row==1 || row==10?0x2000U:row==2 || row==9?0x4000U:row>=3 && row<=8?0x8000U:0U;
+                    if(frame_glyphs && c==')') return row==1 || row==10?0x8000U:row==2 || row==9?0x4000U:row>=3 && row<=8?0x2000U:0U;
+                    if(frame_glyphs && c=='+') return row==5?0xf800U:row>=2 && row<=9?0x2000U:0U;
                     if(c=='>') return row>=2 && row<=9?0x8000U>>(row<=5?row-2:9-row):0U;
                     return rom.read16(glyph+row*2);
                 };
@@ -287,7 +379,8 @@ DrawPacket source_meter_packet(const simulation::MeterState& meters,
     return packet;
 }
 DrawPacket source_sprite_packet(const simulation::SnesPpuState& ppu,unsigned brightness,
-    std::optional<unsigned> priority,bool srgb,const simulation::MeterState* meters) {
+    std::optional<unsigned> priority,bool srgb,const simulation::MeterState* meters,
+    const render::HudLayout* layout,SourceSpritePass pass) {
     if(brightness>15 || (priority && *priority>3)) throw std::invalid_argument("Invalid source sprite options");
     DrawPacket packet;packet.model={1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
     if(!(ppu.main_screen&16)) return packet;
@@ -308,6 +401,21 @@ DrawPacket source_sprite_packet(const simulation::SnesPpuState& ppu,unsigned bri
             const unsigned span=(maximum&0x80)?maximum>>1:maximum;
             x=256-18-int(span+4)-33+int(glyph-0x71)*8;
         }
+        const auto tile=uint16_t(ppu.oam[low+2])|uint16_t((attr&1U)<<8);
+        const auto y_byte=ppu.oam[low+1];
+        const bool reticle=(tile&0x7fU)==0x61U;
+        const bool warning=(tile&0x7fU)==0x3eU && (x==119 || x==127)
+            && (y_byte==24 || y_byte==33 || y_byte==184 || y_byte==193);
+        const bool lives=tile==189 || tile==226 || tile==229 || tile==230;
+        std::optional<render::HudElement> element;
+        if(!reticle && !warning) {
+            if(boss_label) element=render::HudElement::boss_health;
+            else if(lives || (y_byte<32 && x<128)) element=render::HudElement::lives;
+            else if(y_byte>=168) element=x<128?render::HudElement::shield:render::HudElement::bombs_boost;
+            else if(y_byte>=128 && x<128) element=render::HudElement::comms;
+        }
+        if((pass==SourceSpritePass::hud && !element) || (pass==SourceSpritePass::world && element)) continue;
+        const auto offset=layout && element?(*layout)[*element]:render::HudOffset{};
         const int size=int(sizes[selection][(high>>1)&1]);
         const int left=std::max(x,0),right=std::min(x+size,256);
         if(right<=left) continue;
@@ -317,7 +425,7 @@ DrawPacket source_sprite_packet(const simulation::SnesPpuState& ppu,unsigned bri
             if(bottom<=top) continue;
             const int corners[4][2]{{left,top},{right,top},{right,bottom},{left,bottom}};
             for(unsigned corner:{0U,1U,2U,0U,2U,3U}) {
-                SceneVertex v{};v.position[0]=float(corners[corner][0]);v.position[1]=float(corners[corner][1]);
+                SceneVertex v{};v.position[0]=float(corners[corner][0]+offset.x);v.position[1]=float(corners[corner][1]+offset.y);
                 v.uv[0]=float(corners[corner][0]-x);v.uv[1]=float(corners[corner][1]-y);
                 v.texture[1]=ppu.object_select|((uint32_t(ppu.oam[low+2])|((attr&1U)<<8))<<8);
                 v.texture[2]=attr|(uint32_t(size)<<8);v.texture[3]=16|(srgb?2:0);

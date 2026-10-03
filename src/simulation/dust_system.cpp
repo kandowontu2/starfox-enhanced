@@ -1,4 +1,5 @@
 #include "starfox/simulation/dust_system.hpp"
+#include "starfox/compat/bit_cast.hpp"
 #include "starfox/state/archive.hpp"
 
 #include <bit>
@@ -43,9 +44,9 @@ void DustSystem::reset() noexcept {
     random_ = 0x19f8U;
     carry_ = false;
     for (auto& point : points_) {
-        point.x = std::bit_cast<std::int16_t>(next_random());
-        point.y = std::bit_cast<std::int16_t>(next_random());
-        point.z = std::bit_cast<std::int16_t>(next_random());
+        point.x = starfox::bit_cast<std::int16_t>(next_random());
+        point.y = starfox::bit_cast<std::int16_t>(next_random());
+        point.z = starfox::bit_cast<std::int16_t>(next_random());
     }
     // MINITDUST stores the initial seed in m_rand before it fills the point
     // array; MSHOWDUST begins recycling from that saved seed.
@@ -59,9 +60,9 @@ void DustSystem::recycle(
     const MatrixQ15& world_matrix) noexcept {
     const std::array<std::int16_t, 3> local{
         wrap16(arithmetic_shift_right(
-            std::bit_cast<std::int16_t>(next_random()), 5U)),
+            starfox::bit_cast<std::int16_t>(next_random()), 5U)),
         wrap16(arithmetic_shift_right(
-            std::bit_cast<std::int16_t>(next_random()), 5U)),
+            starfox::bit_cast<std::int16_t>(next_random()), 5U)),
         static_cast<std::int16_t>((next_random() >> 5U) + 512U),
     };
     const auto world_offset = transform_q15(transpose_q15(world_matrix), local);

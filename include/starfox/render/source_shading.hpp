@@ -1,4 +1,6 @@
 #pragma once
+
+#include "starfox/compat/bit_cast.hpp"
 #include "starfox/render/software_renderer.hpp"
 #include <bit>
 
@@ -19,7 +21,7 @@ inline SourceShading source_shading(const RenderPose& pose) noexcept {
         // initlight consumes rows, unlike point rotation's columns.
         const auto transformed=simulation::transform_q15(simulation::transpose_q15(matrix),{18'917,18'917,18'917});
         for(std::size_t i=0;i<result.light.size();++i)
-            result.light[i]=std::bit_cast<std::int8_t>(static_cast<std::uint8_t>(std::bit_cast<std::uint16_t>(transformed[i])>>8U));
+            result.light[i]=starfox::bit_cast<std::int8_t>(static_cast<std::uint8_t>(starfox::bit_cast<std::uint16_t>(transformed[i])>>8U));
     }
     return result;
 }
