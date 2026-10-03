@@ -252,6 +252,7 @@ add_library(starfox_core
     src/render/scaled_text_renderer.cpp
     src/render/software_renderer.cpp
     src/render/face_material.cpp
+    src/render/asteroid_models.cpp
     src/render/sprite_renderer.cpp
     src/simulation/math.cpp
     src/simulation/dust_system.cpp
@@ -1380,6 +1381,16 @@ if(STARFOX_BUILD_TESTS)
         target_link_options(starfox_intro_pacing_tests PRIVATE "/STACK:16777216")
     endif()
 
+    add_executable(starfox_asteroid_models_tests tests/asteroid_models_tests.cpp)
+    target_link_libraries(starfox_asteroid_models_tests PRIVATE starfox_core)
+    add_test(NAME starfox_asteroid_models_tests COMMAND starfox_asteroid_models_tests)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/upstream-ultrastarfox/SF.SFC"
+       AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/upstream-ultrastarfox/SYMBOLS.TXT")
+        add_test(NAME starfox_upstream_asteroid_models
+            COMMAND starfox_asteroid_models_tests
+                    "${CMAKE_CURRENT_SOURCE_DIR}/upstream-ultrastarfox/SF.SFC"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/upstream-ultrastarfox/SYMBOLS.TXT")
+    endif()
     add_executable(starfox_stereo_output_tests tests/stereo_output_tests.cpp)
     target_link_libraries(starfox_stereo_output_tests PRIVATE starfox_core)
     add_test(NAME starfox_stereo_output_tests COMMAND starfox_stereo_output_tests)
@@ -1671,6 +1682,8 @@ if(STARFOX_BUILD_TESTS)
                     "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_embed_runtime_assets.py"
                     --compiler "${CMAKE_CXX_COMPILER}")
         endif()
+        add_test(NAME starfox_asteroid_models_generated
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_asteroid_models.py" --check)
         add_test(NAME starfox_scramble_sequence_oracle
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scramble_sequence.py")
         if(STARFOX_BUILD_RUNTIME AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/upstream-ultrastarfox/SF.SFC")

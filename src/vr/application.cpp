@@ -796,6 +796,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                     // The startup/runtime panel replaces the scene. Do not
                     // compile or upload invisible game resources while it is open.
                     if(!startup.open || startup.preview) {
+                    live->models.set_asteroid_models(startup.asteroid_model_mode());
                     auto packets=live->models.assemble_world_interpolated(*live->history->previous(),*live->history->current(),alpha,srgb,true);
                     if(live->game.paused()) {
                         if(!sandbox.active()) {

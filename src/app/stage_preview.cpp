@@ -2,6 +2,7 @@
 #include "starfox/assets/shape_decoder.hpp"
 #include "starfox/input/buttons.hpp"
 #include "starfox/render/framebuffer.hpp"
+#include "starfox/render/asteroid_models.hpp"
 #include "starfox/render/background_renderer.hpp"
 #include "starfox/render/dust_renderer.hpp"
 #include "starfox/render/palette.hpp"
@@ -576,7 +577,14 @@ int main(int argc, char** argv) {
                     std::cout << '\n';
                 }
             }
-            renderer.draw(found->second, pose, framebuffer, false);
+            const auto* drawn = &found->second;
+            if (const auto* mode = std::getenv("STARFOX_ASTEROID_MODELS"); mode != nullptr) {
+                if (const auto* model = starfox::render::substitute_asteroid_model(found->second, pose,
+                        static_cast<starfox::render::AsteroidModels>(std::atoi(mode)))) {
+                    drawn = model;
+                }
+            }
+            renderer.draw(*drawn, pose, framebuffer, false);
             ++rendered;
         }
         if (continue_scene) {

@@ -1239,6 +1239,14 @@ GameTickResult GameSimulation::tick_pregame_menu(
             + ((menu_input.pressed & starfox::input::left) ? 3U : 1U)) % 4U));
         queue_sound_effect(0x11U);
     }
+    if (graphics_page && pregame_selection_ == 42U
+        && (menu_input.pressed & (starfox::input::a | starfox::input::select
+            | starfox::input::left | starfox::input::right))) {
+        const auto count = render::asteroid_model_mode_count;
+        set_asteroid_models(static_cast<std::uint8_t>((static_cast<unsigned>(asteroid_models_)
+            + ((menu_input.pressed & starfox::input::left) ? count - 1U : 1U)) % count));
+        queue_sound_effect(0x11U);
+    }
     if (graphics_page && pregame_selection_ == 28U
         && (menu_input.pressed & (starfox::input::a | starfox::input::select
             | starfox::input::left | starfox::input::right))) {

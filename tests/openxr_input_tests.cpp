@@ -136,15 +136,21 @@ int main() try {
             }
         }
         menu.page=Page::options;menu.selection=6;click();require(menu.page==Page::three_d && !menu.ray_tracing);
-        require(menu.row_count()==4 && menu.labels().back()=="BACK" && !menu.preview);
+        require(menu.row_count()==5 && menu.labels().back()=="BACK" && !menu.preview);
         click();require(menu.model_effect==1 && !menu.ray_tracing);
         menu.selection=2;click();require(menu.preview);menu.sample(press,true);require(menu.preview);
         click();require(!menu.preview);
-        menu.selection=3;click();require(!menu.ray_tracing && menu.page==Page::options);
-        menu.ray_tracing_available=true;click();require(menu.page==Page::three_d);
+        menu.selection=3;click();require(menu.page==Page::three_d && menu.asteroid_models==1
+            && menu.labels()[3]=="3D ASTEROIDS: SUPER FX LOW");
+        click();require(menu.labels()[3]=="3D ASTEROIDS: SUPER FX MEDIUM");
+        click();require(menu.labels()[3]=="3D ASTEROIDS: SUPER FX HIGH");
+        click();require(menu.asteroid_models==0 && menu.labels()[3]=="3D ASTEROIDS: SPRITE");
+        menu.selection=4;click();require(!menu.ray_tracing && menu.page==Page::options);
+        menu.ray_tracing_available=true;click();require(menu.page==Page::three_d && menu.row_count()==6);
         menu.selection=3;click();require(menu.ray_tracing);
         menu.sample(press,true);require(menu.ray_tracing);
-        menu.selection=4;click();require(menu.page==Page::options && menu.selection==6);
+        menu.selection=4;click();require(menu.asteroid_models==1 && menu.page==Page::three_d);
+        menu.selection=5;click();require(menu.page==Page::options && menu.selection==6);
         menu.selection=7;click();require(menu.page==Page::two_d);
         click();require(menu.world_effect==4);
         menu.selection=1;click();require(menu.world_intensity==0);
@@ -179,11 +185,12 @@ int main() try {
         require(restored.restore_preferences(preferences));
         require(restored.preferences()==preferences);
         require(restored.steer_sensitivity_index==1);
+        require(restored.asteroid_models==1 && restored.asteroid_model_mode()==starfox::render::AsteroidModels::super_fx_low);
         require(restored.ray_tracing && !restored.ray_tracing_available);
         require(restored.enhanced_sky);
         require(!restored.ray_tracing_enabled());
         restored.page=Page::three_d;
-        require(restored.row_count()==4 && restored.labels().back()=="BACK" && !restored.preview);
+        require(restored.row_count()==5 && restored.labels().back()=="BACK" && !restored.preview);
         restored.ray_tracing_available=true;
         require(restored.ray_tracing_enabled());
         restored.ray_tracing=false;
@@ -193,9 +200,14 @@ int main() try {
         std::array<uint8_t,16> legacy{};std::copy(preferences.begin(),preferences.begin()+16,legacy.begin());
         legacy[4]=1;legacy[11]&=1;legacy[15]&=1;
         StartupMenu migrated;require(migrated.restore_preferences(legacy) && !migrated.ray_tracing && !migrated.infinite_lives);
-        auto version4=preferences;version4[4]=4;version4[11]&=3;
+        std::array<uint8_t,20> version4{};std::copy(preferences.begin(),preferences.begin()+20,version4.begin());
+        version4[4]=4;version4[11]&=3;
         require(migrated.restore_preferences(version4) && !migrated.enhanced_sky
-            && migrated.model_effect==menu.model_effect && migrated.world_effect==menu.world_effect);
+            && migrated.model_effect==menu.model_effect && migrated.world_effect==menu.world_effect
+            && migrated.asteroid_models==0);
+        // Version 6 carries the asteroid mode; a 20-byte record cannot claim it.
+        auto short_version6=version4;short_version6[4]=6;
+        require(!migrated.restore_preferences(short_version6));
         require(restored.open && !restored.runtime && !restored.extended
             && !restored.alternate_available && restored.page==Page::main
             && restored.selection==0 && restored.selected_level==0);

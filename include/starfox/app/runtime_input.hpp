@@ -192,6 +192,7 @@ struct PregameSettings {
     std::uint8_t material{};
     std::array<std::uint8_t,6> environment{};
     bool planet_select_cheat{};
+    std::uint8_t asteroid_models{}; // render::AsteroidModels: 0=SPRITE, 1-3=SUPER FX LOW/MEDIUM/HIGH.
 
     [[nodiscard]] bool operator==(const PregameSettings&) const = default;
 };

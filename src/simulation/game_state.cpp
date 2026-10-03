@@ -155,6 +155,7 @@ std::unique_ptr<GameSimulation> GameSimulation::restored_state(
     result->fsr1_mode_ = fsr1_mode_;
     result->fsr1_menu_ = fsr1_menu_;
     result->reflective_surfaces_ = reflective_surfaces_;
+    result->asteroid_models_ = asteroid_models_;
     result->neural_filter_available_ = neural_filter_available_;
     result->neural_filter_requested_ = neural_filter_requested_;
     return result;

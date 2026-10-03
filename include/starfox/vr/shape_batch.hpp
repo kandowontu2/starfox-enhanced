@@ -8,7 +8,7 @@ namespace starfox::vr {
 struct ShapeDrawRange {
     std::size_t source_face{};
     uint32_t first_vertex{},vertex_count{};
-    int8_t visibility_index{};
+    int16_t visibility_index{};
 };
 enum class DeferredPrimitive {line,sprite,texture,empty};
 struct DeferredFace {std::size_t source_face;DeferredPrimitive reason;int group_visibility{-1};};

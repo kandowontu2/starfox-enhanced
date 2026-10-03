@@ -1,9 +1,12 @@
+#include "starfox/render/asteroid_models.hpp"
 #include "starfox/app/runtime_input.hpp"
 #include "starfox/app/touch_overlay.hpp"
 #include "starfox/input/buttons.hpp"
 #include "starfox/render/effect_types.hpp"
 #include "starfox/render/display_aspect.hpp"
 
+#include <string_view>
+#include <iterator>
 #include <SDL3/SDL.h>
 
 #include <array>
@@ -797,6 +800,34 @@ int main() {
         settings.language = 6;
         require(!starfox::app::save_pregame_settings(pregame_test_path, settings),
             "invalid language setting was saved");
+    }
+    {
+        // ASTEROID_MODELS is optional: it round-trips, rejects unknown modes,
+        // and a file written without it (every upstream build) loads as SPRITE.
+        auto settings = saved_pregame;
+        settings.asteroid_models = 1U;
+        require(starfox::app::save_pregame_settings(pregame_test_path, settings)
+            && starfox::app::load_pregame_settings(pregame_test_path, loaded_pregame)
+            && loaded_pregame == settings, "asteroid models did not round-trip");
+        settings.asteroid_models = starfox::render::asteroid_model_mode_count;
+        require(!starfox::app::save_pregame_settings(pregame_test_path, settings),
+            "invalid asteroid mode was saved");
+        settings.asteroid_models = 1U;
+        require(starfox::app::save_pregame_settings(pregame_test_path, settings), "asteroid settings not saved");
+        std::string text;
+        {
+            std::ifstream input{pregame_test_path};
+            text.assign(std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{});
+        }
+        const auto key = text.find("ASTEROID_MODELS 1\n");
+        require(key != std::string::npos, "asteroid mode missing from settings file");
+        text.erase(key, std::string_view{"ASTEROID_MODELS 1\n"}.size());
+        {
+            std::ofstream output{pregame_test_path, std::ios::trunc};
+            output << text;
+        }
+        require(starfox::app::load_pregame_settings(pregame_test_path, loaded_pregame)
+            && loaded_pregame.asteroid_models == 0U, "settings without ASTEROID_MODELS did not default to sprites");
     }
     for (std::uint8_t style = 0; style < starfox::render::effect_count; ++style) {
         auto settings = saved_pregame;

@@ -11,7 +11,7 @@ struct ShapeMeshFace {
     std::vector<uint32_t> indices;
     assets::Vec3i normal;
     uint8_t colour_id{};
-    int8_t visibility_index{};
+    int16_t visibility_index{};
     bool sprite{};
     uint8_t sprite_visibility_parameter{},sprite_size{};
 };

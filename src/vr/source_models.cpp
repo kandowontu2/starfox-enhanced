@@ -581,9 +581,13 @@ SourceModelPackets SourceModels::assemble_poses(const GameSceneSnapshot& scene,s
                 pose.simple_sprite_world_size=diameter?diameter:1;
                 pose.simple_sprite_colour=object.extended[21];
             }
+            // Optional 3D asteroids replace whole-object sprites before any
+            // geometry is built, so every VR path draws them as solids.
+            const assets::Shape* drawn=&lod->second;
+            if(!shadow) if(const auto* model=render::substitute_asteroid_model(lod->second,pose,asteroid_models_)) drawn=model;
             const uint32_t pass_key=uint32_t(item.handle)|(shadow?source_shadow_pass:0U);
             if(compute_solids_ && (!shadow || compute_shadows_) && !pose.simple_scaled_sprite
-                && !lod->second.faces.empty()
+                && !drawn->faces.empty()
                 && pose.effect_clip_right<=pose.effect_clip_left) {
                 SourceSpanModel prepared;
                 auto continuous_pose=pose;continuous_pose.continuous_geometry=true;
@@ -595,12 +599,12 @@ SourceModelPackets SourceModels::assemble_poses(const GameSceneSnapshot& scene,s
                 bool ready;
                 if(pose.collapse_to_axis_line) {
                     axis=std::make_shared<SourceAxisInputs>();
-                    ready=prepare_source_axis_model(lod->second,continuous_pose,settings,224,192,prepared,*axis,error);
-                } else ready=prepare_source_span_model(lod->second,base_pose,settings,224,192,prepared,error,ordinary);
+                    ready=prepare_source_axis_model(*drawn,continuous_pose,settings,224,192,prepared,*axis,error);
+                } else ready=prepare_source_span_model(*drawn,base_pose,settings,224,192,prepared,error,ordinary);
                 std::shared_ptr<SourceWarpInputs> warp;
                 if(ready && warp_requested) {
                     warp=std::make_shared<SourceWarpInputs>();
-                    ready=prepare_source_warp_inputs(lod->second,continuous_pose,settings,prepared.projection,prepared.bsp,*warp,error,
+                    ready=prepare_source_warp_inputs(*drawn,continuous_pose,settings,prepared.projection,prepared.bsp,*warp,error,
                         prepared.fragmented?&prepared.faces:nullptr,prepared.source_vertex_count);
                     if(ready) ready=std::all_of(warp->templates.primitives.begin(),warp->templates.primitives.end(),
                         [](auto primitive){return primitive==render::PackedPrimitive::polygon
@@ -654,9 +658,9 @@ SourceModelPackets SourceModels::assemble_poses(const GameSceneSnapshot& scene,s
                 const auto model=game_model_matrix(pose,units);
                 if(!model) {defer("Invalid native model transform");continue;}
                 packet.model=*model;packet.shading=render::source_shading(pose);
-                key.shape=&lod->second;key.scale=pose.scale;
-                key.animation=pose.animation_frame%std::max(std::size_t(1),lod->second.frames.size());
-                const bool colour_animated=std::any_of(lod->second.colour_materials.begin(),lod->second.colour_materials.end(),
+                key.shape=drawn;key.scale=pose.scale;
+                key.animation=pose.animation_frame%std::max(std::size_t(1),drawn->frames.size());
+                const bool colour_animated=std::any_of(drawn->colour_materials.begin(),drawn->colour_materials.end(),
                     [](const auto& m){return !m.animation_frames.empty();});
                 key.colour_frame=colour_animated?pose.colour_frame:0;
                 key.scroll_x=pose.texture_scroll_x;key.scroll_y=pose.texture_scroll_y;
@@ -671,7 +675,7 @@ SourceModelPackets SourceModels::assemble_poses(const GameSceneSnapshot& scene,s
                     packet.geometry=cached->second.geometry;cached->second.used=cache_epoch_;reused=true;
                 }
             }
-            if(!reused && !build_draw_packet(lod->second,pose,palette,112,1,srgb,units,packet,error)) {
+            if(!reused && !build_draw_packet(*drawn,pose,palette,112,1,srgb,units,packet,error)) {
                 defer("shape "+std::to_string(object.shape)+" LOD "+std::to_string(selected)+": "+error);continue;
             }
             if(!reused && interpolation_.crosshair && object.strategy_address==interpolation_.crosshair) {

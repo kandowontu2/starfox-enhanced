@@ -59,6 +59,7 @@
 #include "starfox/render/terrain_profile.hpp"
 #include "starfox/render/sprite_renderer.hpp"
 #include "starfox/render/colour_math.hpp"
+#include "starfox/render/asteroid_models.hpp"
 #include "starfox/render/model_smoothing.hpp"
 #include "starfox/simulation/game_simulation.hpp"
 #include "starfox/simulation/math.hpp"
@@ -6095,6 +6096,7 @@ int main(int argc, char** argv) {
                 game.material(),
                 game.environment(),
                 game.planet_select_cheat(),
+                static_cast<std::uint8_t>(game.asteroid_models()),
             };
         };
         {
@@ -6236,6 +6238,7 @@ int main(int argc, char** argv) {
             game.set_bloom(saved_pregame.bloom);
             game.set_bloom_2d(saved_pregame.bloom_2d);
             game.set_model_smoothing(saved_pregame.model_smoothing);
+            game.set_asteroid_models(saved_pregame.asteroid_models);
             game.set_language(saved_pregame.language);
             if (const auto* language = std::getenv("STARFOX_TEST_LANGUAGE"))
                 game.set_language(static_cast<std::uint8_t>(std::atoi(language)));
@@ -6268,6 +6271,8 @@ int main(int argc, char** argv) {
                 game.set_hdr_effect(static_cast<std::uint8_t>(std::atoi(hdr)));
             if (const auto* smoothing = std::getenv("STARFOX_TEST_MODEL_SMOOTHING"))
                 game.set_model_smoothing(static_cast<std::uint8_t>(std::atoi(smoothing)));
+            if (const auto* asteroids = std::getenv("STARFOX_TEST_ASTEROID_MODELS"))
+                game.set_asteroid_models(static_cast<std::uint8_t>(std::atoi(asteroids)));
             if (const auto* separated = std::getenv("STARFOX_TEST_SEPARATED_MODELS"))
                 game.set_smooth_polys(std::atoi(separated) != 0);
             if (saved_pregame.effect == static_cast<std::uint8_t>(starfox::render::Effect::bloom)
@@ -11037,10 +11042,25 @@ int main(int argc, char** argv) {
                     pose.simple_sprite_colour = object.extended[21];
                     pose.simple_sprite_world_size = diameter;
                 }
-                draw_model(found->second, pose, target, false,
-                    &target == &superfx_frame
-                            && surface_effects
-                        ? &superfx_surfaces : nullptr,
+                const auto* drawn_shape = &found->second;
+                if (const auto* model = starfox::render::substitute_asteroid_model(
+                        found->second, pose, game.asteroid_models())) {
+                    drawn_shape = model;
+                }
+                auto* surfaces = &target == &superfx_frame && surface_effects
+                    ? &superfx_surfaces : nullptr;
+                if (drawn_shape != &found->second) {
+                    // The GPU model path rasterises each model over the whole
+                    // frame (~0.4 ms per rock at 4x), so a field of rocks cost
+                    // more than everything else combined. Project rocks into
+                    // the shared raster command stream instead: consecutive
+                    // rocks share one raster pass, still in painter order
+                    // with the other models. Asteroids never cast shadows,
+                    // so they also stay out of the ray and shadow scenes.
+                    renderer.draw(*drawn_shape, pose, target, false, surfaces, nullptr);
+                    continue;
+                }
+                draw_model(*drawn_shape, pose, target, false, surfaces,
                     capture_shadow_scene ? &shadow_scene : nullptr,
                     starfox::render::GpuModelIdentity{item.handle,
                         game.objects().generation(item.handle), object.shape,
@@ -12273,7 +12293,7 @@ int main(int argc, char** argv) {
                             ? starfox::render::effect_group(game.pregame_selection()==12U?game.effect():game.world_effect())
                             : game.pregame_page() == starfox::simulation::PregamePage::two_d
                                 ? "2D OPTIONS" : "3D OPTIONS", 27, 10U);
-                        std::array<std::int32_t, 42> row_y;
+                        std::array<std::int32_t, 43> row_y;
                         row_y.fill(-1);
                         const auto selected_row=std::size_t(std::find(visual_order.begin(),visual_order.end(),game.pregame_selection())-visual_order.begin());
                         const auto first_visible=!main_page && visual_order.size()>14
@@ -12387,6 +12407,9 @@ int main(int argc, char** argv) {
                             game.pregame_selection() == 18U);
                         draw_graphics_row("3D SMOOTHING", starfox::render::bloom_names[game.model_smoothing()], row_y[19],
                             game.pregame_selection() == 19U);
+                        draw_graphics_row("3D ASTEROIDS", starfox::render::asteroid_model_names[
+                            static_cast<std::size_t>(game.asteroid_models())], row_y[42],
+                            game.pregame_selection() == 42U);
                         draw_graphics_row("2D OPTIONS", "A  OPEN", row_y[20], game.pregame_selection() == 20U);
                         draw_graphics_row("3D OPTIONS", "A  OPEN", row_y[21], game.pregame_selection() == 21U);
                         draw_graphics_row("MODEL EFFECT INTENSITY", std::to_string(game.effect_intensity()) + "%", row_y[22], game.pregame_selection() == 22U);
