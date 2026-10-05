@@ -1,8 +1,11 @@
 #include "starfox/platform/nintendo_3ds/pica_raster.hpp"
 #include "starfox/platform/nintendo_3ds/frame_profile.hpp"
+#include <bit>
 #include <cstring>
+#include <type_traits>
 
 namespace starfox::platform::nintendo_3ds {
+static_assert(std::is_same_v<std::uint8_t,unsigned char>,"RGBA byte views require the standard unsigned-char alias");
 namespace {
 constexpr unsigned native_height=224;
 unsigned darkest(const std::array<std::uint16_t,256>& palette) {
@@ -188,39 +191,64 @@ PicaFrame PicaRaster::prepare(std::shared_ptr<const simulation::SnesPpuState> so
     }
     const auto& bitmap=decode?*next:*indexed_;
     const bool recolour=decode || palette_!=source->cgram || brightness_!=brightness || subtract_!=subtract;
-    auto pixels=std::vector<std::uint8_t>{},layers=std::vector<std::uint8_t>{};bool visible=visible_;
+    auto pixels=std::vector<std::uint32_t>{};auto layers=std::vector<std::uint8_t>{};bool visible=visible_;
     auto occupied=occupied_;
     if(decode) for(auto& bounds:occupied) bounds={pica_raster_strip_width,screen_height,0,0};
     if(decode) layers.assign(std::size_t(width)*screen_height,0);
     if(recolour) {
         STARFOX_3DS_FRAME_PHASE(bg_colour);
-        pixels.assign(std::size_t(width)*screen_height*4,0);visible=false;
-        std::array<std::array<std::uint8_t,3>,256> normal{},background{};
+        pixels.assign(std::size_t(width)*screen_height,0);visible=false;
+        std::array<std::uint32_t,256> normal{},background{};
+        const auto packed=[](std::array<std::uint8_t,3> rgb) {
+            // bit_cast preserves RGBA byte order on either endian host; the
+            // native ARM store is aligned by vector<uint32_t>'s actual type.
+            return std::bit_cast<std::uint32_t>(std::array<std::uint8_t,4>{rgb[0],rgb[1],rgb[2],255});
+        };
         for(unsigned ink=0;ink<normal.size();++ink) {
-            normal[ink]=colour(source->cgram[ink],brightness,0);
-            background[ink]=colour(source->cgram[ink],brightness,subtract);
+            normal[ink]=packed(colour(source->cgram[ink],brightness,0));
+            background[ink]=packed(colour(source->cgram[ink],brightness,subtract));
         }
-        for(unsigned y=0;y<screen_height;++y) for(unsigned page=0;page<pages;++page)
-            for(unsigned x=boundaries[page];x<boundaries[page+1];++x) {
-            const int logical_y=int(y)-8;
-            if(batch.space==PicaSpace::screen && (logical_y<0 || logical_y>=int(native_height))) continue;
-            const unsigned sy=unsigned(std::clamp(logical_y,0,int(native_height-1)));
-            const auto offset=std::size_t(sy)*width+x;
-            if(sy<batch.first_row || sy>=batch.last_row || !bitmap.write_coverage()[offset]) continue;
-            const auto ink=bitmap.pixels()[offset];
-            const auto tag=bitmap.layer_tags()[offset];
-            const auto layer=tag==unsigned(render::PixelLayer::two_d)?16U:unsigned(tag&63);
-            if(!pica_source_layer(layer) || !layer) throw std::logic_error("Unclassified 3DS PPU source pixel");
-            const auto& rgb=layer==2?background[ink]:normal[ink];
-            const auto out=(std::size_t(y)*width+x)*4;
-            std::copy(rgb.begin(),rgb.end(),pixels.begin()+out);pixels[out+3]=255;visible=true;
-            if(decode) {
-                layers[std::size_t(y)*width+x]=std::uint8_t(layer);
-                auto& bounds=occupied[page];const auto local=x-boundaries[page];
-                bounds[0]=std::min(bounds[0],local);bounds[1]=std::min(bounds[1],y);
-                bounds[2]=std::max(bounds[2],local+1);bounds[3]=std::max(bounds[3],y+1);
+        const auto convert=[&]<bool Decode>() {
+            const auto indices=bitmap.pixels().data();
+            const auto coverage=bitmap.write_coverage().data();
+            const auto tags=bitmap.layer_tags().data();
+            for(unsigned y=0;y<screen_height;++y) {
+                const int logical_y=int(y)-8;
+                if(batch.space==PicaSpace::screen && (logical_y<0 || logical_y>=int(native_height))) continue;
+                const unsigned sy=unsigned(std::clamp(logical_y,0,int(native_height-1)));
+                if(sy<batch.first_row || sy>=batch.last_row) continue;
+                const auto in=std::size_t(sy)*width,out=std::size_t(y)*width;
+                for(unsigned page=0;page<pages;++page) {
+                    const auto first=boundaries[page],end=boundaries[page+1];
+                    unsigned occupied_first=end,occupied_end=first;
+                    for(unsigned x=first;x<end;++x) {
+                        unsigned layer;
+                        if constexpr(Decode) {
+                            if(!coverage[in+x]) continue;
+                            const auto tag=tags[in+x];
+                            layer=tag==unsigned(render::PixelLayer::two_d)?16U:unsigned(tag&63);
+                            if(!pica_source_layer(layer) || !layer) throw std::logic_error("Unclassified 3DS PPU source pixel");
+                            layers[out+x]=std::uint8_t(layer);
+                            if(occupied_first==end) occupied_first=x;
+                            occupied_end=x+1;
+                        } else {
+                            // A palette-only update retains the successful
+                            // decode's already validated coverage/ownership.
+                            layer=layers_[out+x];if(!layer) continue;
+                        }
+                        const auto ink=indices[in+x];
+                        pixels[out+x]=(layer==2?background:normal)[ink];visible=true;
+                    }
+                    if constexpr(Decode) if(occupied_first!=end) {
+                        auto& bounds=occupied[page];
+                        bounds[0]=std::min(bounds[0],occupied_first-first);bounds[1]=std::min(bounds[1],y);
+                        bounds[2]=std::max(bounds[2],occupied_end-first);bounds[3]=std::max(bounds[3],y+1);
+                    }
+                }
             }
-        }
+        };
+        if(decode) convert.template operator()<true>();
+        else convert.template operator()<false>();
     }
     // All allocating work precedes publication. Shader/native upload errors
     // are the presenter's responsibility; no failed source decode is published.
@@ -241,7 +269,9 @@ PicaFrame PicaRaster::prepare(std::shared_ptr<const simulation::SnesPpuState> so
             vertices_[vertex++]={{left+start+bounds[0]+uv[corner][0]*size,bounds[1]+uv[corner][1]*height,0},{1,1,1,1},uv[corner]};
         draws_[strips]={strips*6,6,strips,pica_identity,batch.space,false,false,true};
         const auto offset=std::size_t(bounds[1])*width+start+bounds[0];
-        images_[strips]={std::span<const std::uint8_t>(rgba_).subspan(offset*4),size,height,width*4,4,false,
+        // Reading an object's representation through unsigned-byte storage is
+        // legal; its backing allocation remains the correctly typed word vector.
+        images_[strips]={std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(rgba_.data()),rgba_.size()*4).subspan(offset*4),size,height,width*4,4,false,
             std::span<const std::uint8_t>(layers_).subspan(offset),width};
         ++strips;
     };

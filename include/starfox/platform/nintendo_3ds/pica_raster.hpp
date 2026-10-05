@@ -62,7 +62,9 @@ private:
     std::shared_ptr<const simulation::SnesPpuState> source_;
     PpuBatch batch_;
     std::unique_ptr<render::Framebuffer> indexed_;
-    std::vector<std::uint8_t> rgba_;
+    // Naturally aligned, typed word writes; public images borrow its exact
+    // byte representation. Never cast a byte vector to an aliased word array.
+    std::vector<std::uint32_t> rgba_;
     std::vector<std::uint8_t> layers_;
     std::array<PicaVertex,pica_raster_max_strips*6> vertices_{};
     std::array<PicaDraw,pica_raster_max_strips> draws_{};
