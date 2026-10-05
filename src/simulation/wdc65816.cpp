@@ -9,6 +9,7 @@
 #include "starfox/state/container.hpp"
 
 #include "owned_65816_step.hpp"
+#include "owned_bus_transfer.hpp"
 
 #include <algorithm>
 #include <array>
@@ -2786,6 +2787,14 @@ std::uint8_t Wdc65816::read8(std::uint32_t address) const {
 std::uint16_t Wdc65816::read16(std::uint32_t address) const {
     return static_cast<std::uint16_t>(read8(address))
         | (static_cast<std::uint16_t>(read8(address + 1U)) << 8U);
+}
+
+void Wdc65816::read_bytes(std::uint32_t address, std::span<std::uint8_t> output) const {
+    detail::read_bus_bytes(impl_->bus, address, output);
+}
+
+void Wdc65816::write_bytes(std::uint32_t address, std::span<const std::uint8_t> input) {
+    detail::write_bus_bytes(impl_->bus, address, input);
 }
 
 std::optional<std::uint8_t> Wdc65816::peek_ram8(std::uint32_t address) const noexcept {

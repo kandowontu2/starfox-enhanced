@@ -18,6 +18,7 @@ on:
       - 'tests/background_scanline_tests.cpp'
       - 'tests/tunnel_scanline_tests.cpp'
       - 'tests/object_record_tests.cpp'
+      - 'tests/bus_transfer_tests.cpp'
       - 'include/starfox/simulation/**'
       - 'tests/framebuffer_extents_tests.cpp'
       - 'include/starfox/render/framebuffer.hpp'

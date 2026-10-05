@@ -696,17 +696,14 @@ void MapVm::sync_objects_to_cpu() {
         std::array<std::uint8_t, 57> record;
         const auto bytes = std::span{record}.first(object_size_);
         objects_->read_base_record(handle, bytes);
-        // Keep every bus write and its order, including the later reference
-        // fixups: open-bus state and CPU-visible records must remain identical.
-        for (std::uint16_t offset = 4; offset < object_size_; ++offset)
-            cpu_.write8(base + offset, bytes[offset]);
+        // Preserve sequential bus effects and the later reference fixups.
+        // Ordinary mapped pages need only one adapter/page lookup per record.
+        cpu_.write_bytes(base + 4U, bytes.subspan(4));
         const auto& object = objects_->at(handle);
         cpu_.write16(base + 6U, original_object_pointer(object.attached));
         cpu_.write16(base + 25U, original_object_pointer(object.immune_object));
         cpu_.write16(base + 27U, original_object_pointer(object.collision_object));
-        for (std::size_t offset = 0; offset < extended_object_bytes_; ++offset) {
-            cpu_.write8(extended_base + offset, object.extended[offset]);
-        }
+        cpu_.write_bytes(extended_base, std::span{object.extended}.first(extended_object_bytes_));
         cpu_.write16(extended_base + 19U, original_object_pointer(object.fire_object));
     }
     for (std::size_t index = 0; index < free.size(); ++index) {
@@ -745,16 +742,14 @@ void MapVm::sync_objects_from_cpu() {
             + static_cast<std::uint32_t>(handle - 1U) * object_size_;
         std::array<std::uint8_t, 57> record;
         const auto bytes = std::span{record}.first(object_size_);
-        for (std::uint16_t offset = 4; offset < object_size_; ++offset)
-            bytes[offset] = cpu_.read8(base + offset);
+        cpu_.read_bytes(base + 4U, bytes.subspan(4));
         objects_->write_base_record(handle, bytes);
         auto& object = objects_->at(handle);
         object.attached = object_handle(cpu_.read16(base + 6U));
         object.immune_object = object_handle(cpu_.read16(base + 25U));
         object.collision_object = object_handle(cpu_.read16(base + 27U));
         const auto extended_bytes = std::span{record}.first(extended_object_bytes_);
-        for (std::size_t offset = 0; offset < extended_object_bytes_; ++offset)
-            extended_bytes[offset] = cpu_.read8(extended_base + offset);
+        cpu_.read_bytes(extended_base, extended_bytes);
         objects_->write_extended_record(handle, extended_bytes);
         object.fire_object = object_handle(cpu_.read16(extended_base + 19U));
     }
