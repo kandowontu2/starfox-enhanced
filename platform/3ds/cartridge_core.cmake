@@ -12,11 +12,13 @@ FetchContent_Declare(snes_spc
     SOURCE_SUBDIR _starfox_no_upstream_project)
 FetchContent_MakeAvailable(retro_cpu snes_spc)
 include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/SpcState.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/spc_timers.cmake")
 add_library(starfox_3ds_spc STATIC
-    "${STARFOX_SPC_SOURCE}/spc.cpp" "${STARFOX_SPC_SOURCE}/SNES_SPC.cpp"
+    "${STARFOX_SPC_SOURCE}/spc.cpp" "${STARFOX_3DS_SPC_TIMERS_SOURCE}"
     "${STARFOX_SPC_SOURCE}/SNES_SPC_misc.cpp" "${STARFOX_SPC_SOURCE}/SNES_SPC_state.cpp"
     "${STARFOX_SPC_SOURCE}/SPC_DSP.cpp" "${STARFOX_SPC_SOURCE}/SPC_Filter.cpp")
 target_include_directories(starfox_3ds_spc SYSTEM PUBLIC "${STARFOX_SPC_SOURCE}")
+target_include_directories(starfox_3ds_spc PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../../include")
 add_library(starfox_3ds_cpu STATIC "${retro_cpu_SOURCE_DIR}/cpu.cc"
     "${retro_cpu_SOURCE_DIR}/cpu/65816/cpu_65c816.cc")
 # Compile the pinned CPU and its paged memory bus together so operand accesses

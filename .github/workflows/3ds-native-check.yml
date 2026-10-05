@@ -39,6 +39,7 @@ on:
       - 'tests/test_3ds_package.py'
       - 'tests/test_3ds_stack.py'
       - 'tools/check_3ds_stack.py'
+      - 'tools/check_3ds_spc_timers.py'
       - 'tests/nintendo_3ds_game_assets_tests.cpp'
       - 'src/simulation/**'
       - 'src/audio/spc700_audio.cpp'
@@ -123,6 +124,7 @@ jobs:
                 "$DEVKITARM/bin/arm-none-eabi-readelf" -h "build/3ds-native/$target.elf"
                 "$DEVKITARM/bin/arm-none-eabi-size" "build/3ds-native/$target.elf"
               done
+              python3 tools/check_3ds_spc_timers.py build/3ds-native
             '
           python3 tools/check_3ds_stack.py build/3ds-native
       - name: Validate and package the Original 3DS test candidate
