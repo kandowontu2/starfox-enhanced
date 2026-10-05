@@ -75,6 +75,11 @@ def main():
     for target in ("frontend_check", "gpu_check", "game_core_check", "test_player"):
         path = args.build / f"starfox_3ds_{target}.elf"
         reservations[path.name] = stack_reservation(path.read_bytes())
+    # Older packages legitimately predate this additional arithmetic probe;
+    # when present, it must retain the same actual linked stack reservation.
+    saturation = args.build / "starfox_3ds_spc_saturation_check.elf"
+    if saturation.exists():
+        reservations[saturation.name] = stack_reservation(saturation.read_bytes())
     frames = compiler_frames(args.build)
     print(json.dumps({"status": "passed", "main_stack_bytes": reservations,
                       "compiler_frame_count": len(frames), "largest_frames": frames[:20],

@@ -45,6 +45,7 @@ on:
       - 'tests/test_3ds_stack.py'
       - 'tools/check_3ds_stack.py'
       - 'tools/check_3ds_spc_timers.py'
+      - 'tools/check_3ds_spc_saturation.py'
       - 'tests/nintendo_3ds_game_assets_tests.cpp'
       - 'src/simulation/**'
       - 'src/audio/spc700_audio.cpp'
@@ -116,7 +117,7 @@ jobs:
             -e STARFOX_3DS_ENABLE_IPO=OFF \
             -v "$GITHUB_WORKSPACE:/src" -w /src "$CTR_IMAGE" \
             bash tools/build_3ds_frontend.sh . build/3ds-native
-          for target in starfox_3ds_frontend_check starfox_3ds_gpu_check starfox_3ds_game_core_check starfox_3ds_test_player; do
+          for target in starfox_3ds_frontend_check starfox_3ds_spc_saturation_check starfox_3ds_gpu_check starfox_3ds_game_core_check starfox_3ds_test_player; do
             test -s "build/3ds-native/$target.elf"
             test -s "build/3ds-native/$target.3dsx"
           done
@@ -125,11 +126,12 @@ jobs:
         run: |
           docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
             -v "$GITHUB_WORKSPACE:/src" -w /src "$CTR_IMAGE" bash -euc '
-              for target in starfox_3ds_frontend_check starfox_3ds_gpu_check starfox_3ds_game_core_check starfox_3ds_test_player; do
+              for target in starfox_3ds_frontend_check starfox_3ds_spc_saturation_check starfox_3ds_gpu_check starfox_3ds_game_core_check starfox_3ds_test_player; do
                 "$DEVKITARM/bin/arm-none-eabi-readelf" -h "build/3ds-native/$target.elf"
                 "$DEVKITARM/bin/arm-none-eabi-size" "build/3ds-native/$target.elf"
               done
               python3 tools/check_3ds_spc_timers.py build/3ds-native
+              python3 tools/check_3ds_spc_saturation.py build/3ds-native
             '
           python3 tools/check_3ds_stack.py build/3ds-native
       - name: Validate and package the Original 3DS test candidate
@@ -180,6 +182,15 @@ jobs:
             build/3ds-native/starfox_3ds_frontend_check.3dsx
             build/3ds-native/frontend-check.smdh
             platform/3ds/CSND-CHECK.md
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload small asset-free native SPC arithmetic check
+        uses: actions/upload-artifact@v4
+        with:
+          name: StarFoxEnhanced-3ds-spc-saturation-check
+          path: |
+            build/3ds-native/starfox_3ds_spc_saturation_check.3dsx
+            build/3ds-native/spc-saturation-check.smdh
           if-no-files-found: error
           retention-days: 14
       - name: Upload native compiler settings for the performance experiment
