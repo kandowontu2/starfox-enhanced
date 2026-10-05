@@ -32,6 +32,8 @@ public:
     // Reject whole-geometry overflow without publishing a partial receiver.
     std::optional<PicaFrame> prepare_tiles(const GamePresentation&,const PicaFrame& bg2,
         unsigned available_guard,unsigned vertex_budget);
+    std::optional<PicaFrame> prepare_water_tiles(const GamePresentation&,const PicaFrame& bg2,
+        unsigned available_guard,unsigned vertex_budget);
     PicaFrame prepare_water(const GamePresentation&,const PicaFrame& bg2,unsigned available_guard);
     PicaFrame prepare_corridor(const GamePresentation&,const PicaFrame& bg2,unsigned available_guard);
 private:

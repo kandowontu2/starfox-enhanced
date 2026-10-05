@@ -42,6 +42,48 @@ std::array<unsigned,5> source_pixel(const PicaFrame& frame,unsigned x,unsigned y
     }
     return result;
 }
+std::vector<std::array<unsigned,5>> flat_painter_pixels(const PicaFrame& frame) {
+    // Independent pixel-centre triangle/nearest-texture oracle. The previous
+    // raster-only image-offset sampler cannot validate a compact tile atlas.
+    // Include the entire mono LCD, not only its canonical 256x224 window.
+    std::vector<std::array<unsigned,5>> result(top_width*screen_height);
+    for(const auto& draw:frame.draws) {
+        require(draw.space!=PicaSpace::world,"Flat source oracle received finite geometry");
+        if(draw.texture==pica_no_texture) continue;
+        const auto& image=frame.textures[draw.texture];
+        for(unsigned i=draw.first;i<draw.first+draw.count;i+=3) {
+            std::array<std::array<double,2>,3> p{};
+            for(unsigned k=0;k<3;++k) {
+                const auto& v=frame.vertices[i+k];p[k]={v.position[0],v.position[1]};
+            }
+            const auto cross=[](auto a,auto b,auto s){return (b[0]-a[0])*(s[1]-a[1])-(b[1]-a[1])*(s[0]-a[0]);};
+            const double area=cross(p[0],p[1],p[2]);if(std::abs(area)<1.e-12) continue;
+            const int x0=std::max(0,int(std::floor(std::min({p[0][0],p[1][0],p[2][0]}))));
+            const int x1=std::min(int(top_width),int(std::ceil(std::max({p[0][0],p[1][0],p[2][0]}))));
+            const int y0=std::max(0,int(std::floor(std::min({p[0][1],p[1][1],p[2][1]}))));
+            const int y1=std::min(int(screen_height),int(std::ceil(std::max({p[0][1],p[1][1],p[2][1]}))));
+            for(int y=y0;y<y1;++y) for(int x=x0;x<x1;++x) {
+                const std::array sample{double(x)+.5,double(y)+.5};
+                const std::array weights{cross(p[1],p[2],sample)/area,cross(p[2],p[0],sample)/area,cross(p[0],p[1],sample)/area};
+                if(std::any_of(weights.begin(),weights.end(),[](double w){return w< -1.e-5;})) continue;
+                double u=0,v=0;
+                for(unsigned k=0;k<3;++k) {u+=weights[k]*frame.vertices[i+k].uv[0];v+=weights[k]*frame.vertices[i+k].uv[1];}
+                const unsigned tx=unsigned(std::clamp(u*image.width,0.,double(image.width-1)));
+                const unsigned ty=unsigned(std::clamp(v*image.height,0.,double(image.height-1)));
+                const auto at=std::size_t(ty)*image.pitch+tx*4;
+                if(image.pixels[at+3]) result[std::size_t(y)*top_width+unsigned(x)]={
+                    image.pixels[at],image.pixels[at+1],image.pixels[at+2],image.pixels[at+3],
+                    image.source_layers.empty()?draw.source_layer:image.source_layers[std::size_t(ty)*image.layer_pitch+tx]};
+            }
+        }
+    }
+    return result;
+}
+unsigned remaining_layer_vertices(std::initializer_list<PicaFrame> groups) {
+    std::size_t occupied=0;for(const auto& group:groups) occupied+=group.vertices.size();
+    require(occupied<=pica_vertex_limit,"Non-layer source geometry exceeded whole-scene vertex limit");
+    return pica_vertex_limit-unsigned(occupied);
+}
 void auxiliary_checks(const assets::RomImage& rom,const assets::SymbolMap& symbols) {
     context="Synthetic particle/transaction fixture using actual cartridge assets";
     GameSession session(rom,symbols,[](auto){},"LEVEL1_1");GameModels models(session.rom(),session.symbols());
@@ -91,7 +133,7 @@ void fixture(const assets::RomImage& rom,const assets::SymbolMap& symbols,const 
     bool all_optics=false) {
     GameSession session(rom,symbols,[](auto){},map);GameModels models(session.rom(),session.symbols());
     PicaRaster background,objects,native_bitmap,priority_oracle;PicaComposite composite;PicaWindow window;
-    PicaColourEffects colour;GameLayers cartridge_layers;GameDots dots(session.rom(),session.symbols());
+    PicaColourEffects colour;GameLayers cartridge_layers,reference_layers;GameDots dots(session.rom(),session.symbols());
     unsigned frames{},models_seen{},shadows{},glyphs{},particles{},vertices{},draws{},textures{};
     unsigned dust_points{},grid_points{},connected_points{},combined_vertices{},combined_draws{},combined_textures{};
     unsigned panorama_frames{},combined_resident_bytes{},optical_frames{},optical_resident_bytes{};
@@ -140,7 +182,8 @@ void fixture(const assets::RomImage& rom,const assets::SymbolMap& symbols,const 
         require(composed.vertices.size()==back.vertices.size()+frame.vertices.size()+front.vertices.size()+effects.vertices.size()+mask.vertices.size()
             && std::equal(frame.vertices.begin(),frame.vertices.end(),composed.vertices.begin()+back.vertices.size()),
             "Native layer composition lost/reprojected cartridge model geometry");
-        const auto ordered=cartridge_layers.prepare(source);
+        const auto layer_budget=remaining_layer_vertices({frame,dot_frame,effects,mask});
+        const auto ordered=cartridge_layers.prepare(source,layer_budget);
         if(native_panorama_scene(source)) {
             ++panorama_frames;
             const auto policy=game_layer_plan(source);std::vector<PpuPass> flattened;
@@ -152,11 +195,9 @@ void fixture(const assets::RomImage& rom,const assets::SymbolMap& symbols,const 
                     "Actual source panorama pulled mixed sprite ownership into infinity or duplicated A8 residency");
             const auto mode=source.raster->ppu->background_mode;
             if(!panorama_modes_checked[mode] && !ordered.before_models.draws.empty()) {
-                const auto mono=priority_oracle.prepare(source.raster->ppu,policy.before_models,source.plan,
-                    source.raster->brightness,source.current->background_colour_subtract);
-                for(unsigned y=0;y<224;++y) for(unsigned x=0;x<256;++x)
-                    require(source_pixel(ordered.before_models,x,y)==source_pixel(mono,x,y),
-                        "Actual cartridge split scenery changed canonical mono pixels or source ownership");
+                const auto mono=reference_layers.prepare(source,0);
+                require(flat_painter_pixels(ordered.before_models)==flat_painter_pixels(mono.before_models),
+                    "Actual cartridge tile/split scenery changed mono LCD pixels, margins or source ownership");
                 panorama_modes_checked[mode]=true;
             }
         }
@@ -228,11 +269,11 @@ void fixture(const assets::RomImage& rom,const assets::SymbolMap& symbols,const 
             wide.plan=plan_frame(1,true,ScreenUse::world,settings);
             const auto phase_context=context;
             context+=" maximum-optics source layers";
-            const auto layers=wide_layers.prepare(wide);
             context=phase_context+" maximum-optics geometry/grid";
             const auto geometry=wide_models.prepare(wide),ink=wide_dots.prepare(wide);
             const auto tint=wide_colour.prepare(wide.raster->circle,wide.raster->colour_math,wide.raster->brightness,wide.plan);
             const auto wipe=wide_window.prepare(wide.raster->wipe,wide.plan,WindowCoverage::full_scene);
+            const auto layers=wide_layers.prepare(wide,remaining_layer_vertices({geometry,ink,tint,wipe}));
             context=phase_context+" maximum-optics complete composition";
             const auto composed_wide=wide_composite.prepare(wide.plan,
                 std::array{layers.before_models,ink,geometry,layers.after_models,tint,wipe},wide.dashboard,layers.clear);
@@ -288,7 +329,7 @@ void fixture(const assets::RomImage& rom,const assets::SymbolMap& symbols,const 
             background.prepare(source.raster->ppu,bg,source.plan,source.raster->brightness,source.current->background_colour_subtract);
             objects.prepare(source.raster->ppu,obj,source.plan,source.raster->brightness);
             colour.prepare(source.raster->circle,source.raster->colour_math,source.raster->brightness,source.plan);
-            cartridge_layers.prepare(source);
+            cartridge_layers.prepare(source,layer_budget);
             const auto priority_work=cartridge_layers.work();
             require(priority_work[0].decodes==ordered_work[0].decodes && priority_work[1].decodes==ordered_work[1].decodes
                 && priority_work[0].colour_updates==ordered_work[0].colour_updates && priority_work[1].colour_updates==ordered_work[1].colour_updates,
@@ -345,4 +386,5 @@ int main(int argc,char** argv) try {
     if(argc>=4) fixture(rom,symbols,argv[3],phases,argc==6);
     else {fixture(rom,symbols,"BOOT");fixture(rom,symbols,"LEVEL1_1");}
     std::cout<<checks<<" native model-stream checks passed; NOT full compositor, ARM gameplay or hardware acceptance\n";
+    return 0;
 } catch(const std::exception& error) {std::cerr<<context<<": "<<error.what()<<'\n';return 1;}

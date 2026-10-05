@@ -305,6 +305,92 @@ std::optional<PicaFrame> GameScenery::prepare_tiles(const GamePresentation& sour
     vertices_=std::move(vertices);draws_=std::move(draws);images_=std::move(images);
     return PicaFrame{source.plan,vertices_,draws_,images_,bg2.clear};
 }
+std::optional<PicaFrame> GameScenery::prepare_water_tiles(const GamePresentation& source,const PicaFrame& bg2,
+    unsigned available_guard,unsigned vertex_budget) {
+    vertex_budget=std::min(vertex_budget,pica_vertex_limit);
+    const double distance=source_water_height(source)*source.plan.focal_y;
+    if(!same_pica_plan(source.plan,bg2.plan) || available_guard<source_water_guard(source))
+        throw std::invalid_argument("3DS water atlas does not cover its eye receivers");
+    if(bg2.draws.empty()) {
+        if(!bg2.vertices.empty() || !bg2.textures.empty()) throw std::invalid_argument("Incomplete empty water atlas");
+        vertices_.clear();draws_.clear();images_.clear();return PicaFrame{source.plan,{},{},{},bg2.clear};
+    }
+    if(bg2.draws.size()!=1 || bg2.textures.size()!=1 || bg2.vertices.size()%6)
+        throw std::invalid_argument("Water atlas requires isolated source quads");
+    const auto& draw=bg2.draws.front();const auto& image=bg2.textures.front();
+    if(draw.first || draw.count!=bg2.vertices.size() || draw.texture || draw.source_layer!=2
+        || draw.space!=PicaSpace::scenery || draw.depth_test || draw.depth_write || draw.alpha_blend
+        || draw.projected_uv || draw.screen_dither || draw.clip || draw.colour_op
+        || draw.model!=pica_identity || image.channels!=4 || image.repeat || !image.source_layers.empty())
+        throw std::invalid_argument("Invalid water tile ownership");
+    static_cast<void>(pica_texture_layout(image));
+    for(unsigned at=0;at<bg2.vertices.size();at+=6) {
+        const auto& a=bg2.vertices[at];const auto& b=bg2.vertices[at+1];const auto& c=bg2.vertices[at+2];
+        const auto& d=bg2.vertices[at+5];
+        if(!(a.position[0]<c.position[0] && a.position[1]<c.position[1])
+            || a.position[0]< -double(available_guard) || c.position[0]>400+double(available_guard)
+            || a.position[1]<0 || c.position[1]>240 || a.position[2] || c.position[2]
+            || b.position!=Point3{c.position[0],a.position[1],0} || d.position!=Point3{a.position[0],c.position[1],0}
+            || a!=bg2.vertices[at+3] || c!=bg2.vertices[at+4]
+            || a.colour!=std::array<float,4>{1,1,1,1} || b.colour!=a.colour || c.colour!=a.colour || d.colour!=a.colour
+            || b.uv!=std::array<float,2>{c.uv[0],a.uv[1]} || d.uv!=std::array<float,2>{a.uv[0],c.uv[1]})
+            throw std::invalid_argument("Water atlas changed an axis-aligned source tile");
+    }
+    using Point=std::array<double,2>;
+    const auto clip=[](std::array<Point,8>& polygon,unsigned count,double y,bool below) {
+        const auto old=polygon;unsigned next=0;
+        if(!count) return next;
+        auto a=old[count-1];double da=a[1]-y;
+        const auto add=[&](Point p) {
+            if(next==polygon.size()) throw std::logic_error("Water tile clipping exceeded bounded geometry");
+            polygon[next++]=p;
+        };
+        for(unsigned i=0;i<count;++i) {
+            const auto b=old[i];const double db=b[1]-y;const bool ia=below?da>=0:da<=0,ib=below?db>=0:db<=0;
+            if(ia!=ib) {const double t=da/(da-db);add({std::lerp(a[0],b[0],t),y});}
+            if(ib) add(b);
+            a=b;da=db;
+        }
+        return next;
+    };
+    std::vector<PicaVertex> vertices;vertices.reserve(std::min<std::size_t>(vertex_budget,bg2.vertices.size()*2));
+    std::vector<PicaDraw> draws;
+    // Same two finite planes and narrow far-horizon band as prepare_water.
+    // Do not retain the entire old water image underneath the finite surfaces.
+    for(int side:{0,-1,1}) {
+        const unsigned first=unsigned(vertices.size());
+        for(unsigned at=0;at<bg2.vertices.size();at+=6) {
+            const auto& a=bg2.vertices[at];const auto& c=bg2.vertices[at+2];
+            const double x0=a.position[0],y0=a.position[1],x1=c.position[0],y1=c.position[1];
+            std::array<Point,8> polygon{{{x0,y0},{x1,y0},{x1,y1},{x0,y1}}};unsigned count=4;
+            if(!side) {
+                count=clip(polygon,count,120-distance/source.plan.far_plane,true);
+                count=clip(polygon,count,120+distance/source.plan.far_plane,false);
+            } else {
+                count=clip(polygon,count,120+side*distance/source.plan.far_plane,side>0);
+                count=clip(polygon,count,120+side*distance/source.plan.near_plane,side<0);
+            }
+            const unsigned extra=count>=3?(count-2)*3:0;
+            if(extra>vertex_budget-vertices.size()) return {};
+            for(unsigned corner=1;corner+1<count;++corner) for(unsigned i:{0U,corner,corner+1}) {
+                const auto p=polygon[i];const double z=side?distance/(side*(p[1]-120)):0;
+                const Point3 position=side?Point3{float((p[0]-200)*z/source.plan.focal_x),
+                    float((120-p[1])*z/source.plan.focal_y),float(z)}:Point3{float(p[0]),float(p[1]),0};
+                vertices.push_back({position,{1,1,1,1},{float(a.uv[0]+(c.uv[0]-double(a.uv[0]))*(p[0]-x0)/(x1-x0)),
+                    float(a.uv[1]+(c.uv[1]-double(a.uv[1]))*(p[1]-y0)/(y1-y0))}});
+            }
+        }
+        if(vertices.size()!=first) {
+            PicaDraw next;next.first=first;next.count=unsigned(vertices.size())-first;next.texture=0;next.source_layer=2;
+            next.space=side?PicaSpace::world:PicaSpace::scenery;next.projected_uv=side!=0;
+            next.depth_test=next.depth_write=side!=0;draws.push_back(next);
+        }
+    }
+    std::vector<PicaImage> images(bg2.textures.begin(),bg2.textures.end());
+    validate_pica_group({source.plan,vertices,draws,images,bg2.clear},512U*256U*4U);
+    vertices_=std::move(vertices);draws_=std::move(draws);images_=std::move(images);
+    return PicaFrame{source.plan,vertices_,draws_,images_,bg2.clear};
+}
 PicaFrame GameScenery::prepare_water(const GamePresentation& source,const PicaFrame& bg2,unsigned available_guard) {
     const double height=source_water_height(source),distance=height*source.plan.focal_y;
     if(!same_pica_plan(source.plan,bg2.plan) || available_guard<source_water_guard(source))

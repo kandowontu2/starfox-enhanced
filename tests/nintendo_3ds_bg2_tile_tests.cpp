@@ -242,6 +242,65 @@ void rolled_offsets_and_carry() {
         require(ppu->vram==unchanged.vram && ppu->cgram==unchanged.cgram,"Rolled tile planning changed source memory");
     }
 }
+void water_offsets_and_edges() {
+    for(unsigned number=0;number<16;++number) {
+        auto ppu=fixture(number);ppu->background_mode=1;
+        ppu->bg2_scanline_scroll_enabled=true;ppu->bg2_horizontal_offsets_enabled=true;
+        // Mode 1 ignores stale Mode-2 offset tables. The canonical window
+        // wraps, while wide margins retain one bridge and repeat its edge ink.
+        ppu->bg2_vertical_offsets_enabled=true;
+        for(unsigned y=0;y<224;++y) {
+            ppu->bg2_horizontal_offsets[y]=std::int16_t((y/32)*7-400);
+            ppu->bg2_scanline_scroll_y[y]=std::int16_t(y<112?-231:257);
+        }
+        PpuBatch batch;batch.space=PicaSpace::scenery;batch.expand_horizontal=true;
+        batch.water_receiver=batch.compact_strips=true;
+        batch.passes.push_back({PpuLayer::bg2,int(number%3)-1});
+        PicaBg2Tiles owner;const auto plan=plan_frame(1,true,ScreenUse::world);
+        const auto unchanged=*ppu;
+        parity(ppu,batch,plan,number%16,number%5,owner,true,80);
+        const auto before=owner.work();auto fade=std::make_shared<simulation::SnesPpuState>(*ppu);fade->cgram[17]^=31;
+        parity(fade,batch,plan,7,3,owner,true,80);
+        require(owner.work().decodes==before.decodes,"Water palette fade rebuilt source geometry");
+        const auto saved=owner.prepare(fade,batch,plan,7,3,pica_vertex_limit,80,true);
+        const auto pixels=sample(*saved,560,-80);
+        const auto work=owner.work();
+        const auto narrower=owner.prepare(fade,batch,plan_frame(0,true,ScreenUse::world),7,3,pica_vertex_limit,32,true);
+        require(narrower && owner.coverage_guard()==80 && sample(*narrower,560,-80)==pixels,
+            "Narrower eye plan discarded complete cached source coverage");
+        require(owner.work().decodes==work.decodes && owner.work().colour_updates==work.colour_updates,
+            "Slider-only guard reduction reran atlas source decoding");
+        require(!owner.prepare(fade,batch,plan,7,3,5,80,true),"Water atlas overflow published partial artwork");
+        require(sample(*saved,560,-80)==pixels,"Water atlas rejection invalidated borrowed artwork");
+        require(ppu->vram==unchanged.vram && ppu->cgram==unchanged.cgram,"Water tile planning changed cartridge memory");
+    }
+}
+void mode1_panorama_atlas() {
+    for(unsigned number=0;number<16;++number) {
+        auto ppu=fixture(number);ppu->background_mode=1;
+        ppu->bg2_scanline_scroll_enabled=(number&1)!=0;
+        ppu->bg2_horizontal_offsets_enabled=(number&2)!=0;
+        for(unsigned y=0;y<224;++y) {
+            ppu->bg2_horizontal_offsets[y]=std::int16_t((y/32)*7-400);
+            ppu->bg2_scanline_scroll_y[y]=std::int16_t(y<112?-231:257);
+        }
+        PpuBatch batch;batch.space=PicaSpace::scenery;batch.expand_horizontal=true;
+        batch.visible_scenery_only=true;batch.passes.push_back({PpuLayer::bg2,int(number%3)-1});
+        PicaBg2Tiles owner;const auto plan=plan_frame(1,true,ScreenUse::world);
+        // No finite receiver/complete-roll request: an ordinary Mode-1
+        // panorama must still match source HDMA and clamped wide margins.
+        parity(ppu,batch,plan,15,0,owner,false,40);
+        const auto before=owner.work();auto changed=std::make_shared<simulation::SnesPpuState>(*ppu);
+        changed->cgram[17]^=31;parity(changed,batch,plan,7,3,owner,false,40);
+        require(owner.work().decodes==before.decodes,"Mode-1 panorama palette fade rebuilt geometry");
+        // Uniform merging depends on actual character ink, not just VRAM's
+        // tilemap. Character changes must rebuild geometry, not only colours.
+        changed=std::make_shared<simulation::SnesPpuState>(*changed);
+        changed->vram[(changed->bg2_character_base*2+32)&65535]^=255;
+        parity(changed,batch,plan,15,0,owner,false,40);
+        require(owner.work().decodes==before.decodes+1,"Mode-1 atlas reused stale uniform-character geometry");
+    }
+}
 }
 // Only count native owner preparation, not fixture creation or pixel oracles.
 void* operator new(std::size_t count) {
@@ -267,7 +326,7 @@ int main() try {
         }
         require(ppu->vram==unchanged.vram && ppu->cgram==unchanged.cgram && ppu->oam==unchanged.oam,"Native tile planning mutated cartridge memory");
     }
-    rejection_and_reuse();painter_integration();constant_vertical_offsets();rolled_offsets_and_carry();
+    rejection_and_reuse();painter_integration();constant_vertical_offsets();rolled_offsets_and_carry();water_offsets_and_edges();mode1_panorama_atlas();
     std::cout<<"Native BG2 tile planner/atlas: "<<checks<<" exact pixel, palette, ownership, HDMA, flips, budget and fallback checks PASS\n";
     return 0;
 } catch(const std::exception& error) {count_allocations=false;std::cerr<<error.what()<<'\n';return 1;}

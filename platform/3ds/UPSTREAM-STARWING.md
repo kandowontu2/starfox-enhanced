@@ -31,13 +31,30 @@ Its finite quads retain our source camera plane, near/far clipping, homogeneous
 UV/Q pixel registration and both eye frusta. The entire infinity artwork is
 drawn before every finite receiver, with the same source BG2 stencil/depth.
 
-Source mosaic, water/corridors/tunnels, unique moons/planets/sky halves and
+Isolated Mode-1 BG2 panorama groups now use their own source tile atlas,
+including per-scanline horizontal/vertical offsets and the original clamped
+wide-margin bridge cross-section. This does not turn a panorama into a water
+plane or change its existing infinity projection. Both source priorities remain
+in their original position among the screen-space OBJ/BG3 groups.
+Mode-1 water receivers can also use this atlas. Their source camera height,
+both signed finite planes, subpixel infinity band and near/far clipping retain
+the same semantics as the raster receiver. Homogeneous source UV/Q registration
+and source-layer/depth ownership remain exact; a complete receiver must fit
+before the raster owner is retired. Palette-only changes recolour without
+replanning, while character changes rebuild any uniform-character merging.
+
+Source mosaic, corridors/tunnels, unique moons/planets/sky halves and
 mixed-priority painter groups retain the existing exact raster path. The flat
 screen/infinity path still declines nonconstant roll and lower ground carry;
-the complete terrain planner is explicitly selected only for outdoor receivers.
+the complete Mode-2 terrain planner is explicitly selected for outdoor receivers.
 Capacity or atlas-budget rejection also falls back to the complete reference
 scene before publishing partial geometry, including the finite vertices in the
 caller's remaining whole-scene budget. We retain our finite-ground/sky stereo
 semantics rather than copying the upstream flat BG2 depth policy.
+
+In particular, Original Corneria's early BG3/Mode-1 launch sequence is an
+authored tunnel (`tunnel_scene`), not a water receiver or panorama. That sequence
+still uses the corridor raster. An enabled synthetic Mode-1 atlas does not prove
+that this real tunnel has been accelerated.
 
 Host equivalence and ARM compilation do not establish physical-console speed.

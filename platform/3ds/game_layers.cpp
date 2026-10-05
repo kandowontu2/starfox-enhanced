@@ -196,24 +196,24 @@ PicaFrame GameLayers::prepare_groups(const GamePresentation& frame,std::span<con
     for(unsigned i=0;i<owners.size();++i) {
         auto& owner=*owners[i];const auto& batch=batches[i];
         const auto guard=batch.water_receiver?source_water_guard(frame):batch.corridor_receiver?source_corridor_guard(frame):pica_raster_base_guard;
-        // Ordinary remaining raster groups use at most four six-vertex strips.
-        // Finite receivers can emit more geometry, so disable this reservation
-        // policy for every group when any receiver is present.
-        const bool ordinary=std::none_of(batches.begin(),batches.end(),[](const auto& group) {
-            return group.water_receiver || group.corridor_receiver;
-        });
-        const unsigned reserve=unsigned(batches.size()-i-1)*pica_raster_max_strips*6;
-        const unsigned budget=ordinary && tile_vertex_budget>reserve?tile_vertex_budget-reserve:0;
+        // Reserve complete raster fallbacks for later groups, including all
+        // three water regions. Never spend another group's finite-quad budget.
+        const bool corridors=std::any_of(batches.begin(),batches.end(),[](const auto& group) {return group.corridor_receiver;});
+        unsigned reserve=0;
+        for(unsigned later=i+1;later<batches.size();++later)
+            reserve+=pica_raster_max_strips*(batches[later].water_receiver?3*12:6);
+        const unsigned budget=!corridors && tile_vertex_budget>reserve?tile_vertex_budget-reserve:0;
         const auto tiles=budget?owner.tiles.prepare(frame.raster->ppu,batch,frame.plan,frame.raster->brightness,
-            frame.current->background_colour_subtract,budget):std::optional<PicaFrame>{};
+            frame.current->background_colour_subtract,budget,guard,batch.water_receiver):std::optional<PicaFrame>{};
+        const auto ready=tiles && batch.water_receiver?owner.receiver.prepare_water_tiles(frame,*tiles,owner.tiles.coverage_guard(),budget):tiles;
         PicaFrame prepared;
-        if(tiles) {
+        if(ready) {
             const auto work=owner.raster.work();retired.decodes+=work.decodes;retired.colour_updates+=work.colour_updates;
-            owner.raster=PicaRaster{};prepared=*tiles;
+            owner.raster=PicaRaster{};prepared=*ready;
         } else prepared=owner.raster.prepare(frame.raster->ppu,batch,frame.plan,frame.raster->brightness,
             frame.current->background_colour_subtract,guard,true);
         tile_vertex_budget=prepared.vertices.size()<tile_vertex_budget?tile_vertex_budget-unsigned(prepared.vertices.size()):0;
-        if(batch.water_receiver) prepared=owner.receiver.prepare_water(frame,prepared,owner.raster.coverage_guard());
+        if(batch.water_receiver && !ready) prepared=owner.receiver.prepare_water(frame,prepared,owner.raster.coverage_guard());
         else if(batch.corridor_receiver) prepared=owner.receiver.prepare_corridor(frame,prepared,owner.raster.coverage_guard());
         else if(batch.space==PicaSpace::scenery) {
             auto& images=owner.isolated_images;images.assign(prepared.textures.begin(),prepared.textures.end());

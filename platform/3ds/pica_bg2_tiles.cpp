@@ -12,7 +12,7 @@ bool same_range(const simulation::SnesPpuState& a,const simulation::SnesPpuState
 }
 bool same_geometry(const simulation::SnesPpuState& a,const simulation::SnesPpuState& b) {
     const unsigned pages=((a.bg2_screen_size&1)?2:1)*((a.bg2_screen_size&2)?2:1);
-    return (a.main_screen&2)==(b.main_screen&2) && a.bg2_screen_base==b.bg2_screen_base
+    return a.background_mode==b.background_mode && (a.main_screen&2)==(b.main_screen&2) && a.bg2_screen_base==b.bg2_screen_base
         && a.bg2_screen_size==b.bg2_screen_size && a.bg2_tile_size_16==b.bg2_tile_size_16
         && a.bg2_scroll_x==b.bg2_scroll_x && a.bg2_scroll_y==b.bg2_scroll_y
         && a.bg2_horizontal_offsets_enabled==b.bg2_horizontal_offsets_enabled
@@ -31,25 +31,36 @@ std::optional<PicaFrame> PicaBg2Tiles::prepare(std::shared_ptr<const simulation:
     unsigned source_guard,bool complete_roll) {
     if(!source || brightness>15 || subtract>31) throw std::invalid_argument("Invalid 3DS GPU tile source");
     vertex_budget=std::min(vertex_budget,pica_vertex_limit);
-    if(batch.passes.size()!=1 || (batch.space!=PicaSpace::screen && batch.space!=PicaSpace::scenery) || batch.water_receiver
-        || batch.corridor_receiver || batch.compact_strips
+    const bool water=batch.water_receiver && batch.space==PicaSpace::scenery && source->background_mode==1
+        && batch.expand_horizontal && complete_roll;
+    const bool mode1_scenery=source->background_mode==1 && batch.space==PicaSpace::scenery;
+    const bool complete_plan=complete_roll || mode1_scenery;
+    if(batch.passes.size()!=1 || (batch.space!=PicaSpace::screen && batch.space!=PicaSpace::scenery)
+        || (batch.water_receiver && !water) || batch.corridor_receiver || (batch.compact_strips && !water)
         || batch.first_row!=0 || batch.last_row!=224) return {};
     const auto& pass=batch.passes.front();
     if(pass.layer!=PpuLayer::bg2 || !pass.wrap_horizontal || pass.transparent_black
         || pass.mosaic_inset || pass.guard_inset || pass.single_occurrence_top_rows || pass.single_occurrence_sky_half
-        || source->background_mode!=2 || (source->mosaic&2)
+        || (source->background_mode!=2 && !mode1_scenery) || (source->mosaic&2) || (water && !pass.extend_horizontal)
         || source->tunnel_scene || pass.priority< -1 || pass.priority>1) return {};
     if(plan.eye_count!=(plan.stereo?2U:1U)) throw std::invalid_argument("Invalid 3DS GPU tile eye plan");
     for(unsigned eye=0;eye<plan.eye_count;++eye) static_cast<void>(PicaProjection(plan,eye));
     if(source_guard>(pica_raster_max_width-top_width)/2) throw std::invalid_argument("3DS tile guard exceeds source storage");
     const unsigned guard=std::max(source_guard,batch.space==PicaSpace::scenery?pica_scenery_guard(plan):pica_raster_base_guard);
-    const unsigned width=batch.expand_horizontal && pass.extend_horizontal?top_width+2*guard:256;
+    unsigned width=batch.expand_horizontal && pass.extend_horizontal?top_width+2*guard:256;
     const auto scroll=pass.scroll.value_or(std::array{source->bg2_scroll_x,source->bg2_scroll_y});
-    const bool decode=!source_ || batch!=batch_ || width_!=width || complete_roll_!=complete_roll
-        || !same_geometry(*source_,*source) || (complete_roll && (source_->bg2_character_base!=source->bg2_character_base
+    bool decode=!source_ || batch!=batch_ || complete_roll_!=complete_plan
+        || !same_geometry(*source_,*source) || (complete_plan && (source_->bg2_character_base!=source->bg2_character_base
             || !same_range(*source_,*source,source->bg2_character_base*2,32768)));
+    // Slider-only presentations may need less guard than an already decoded
+    // frame. Retain sufficient coverage, as PicaRaster does, rather than
+    // alternating source traversals while the game's PPU remains unchanged.
+    if(!decode) width=std::max(width,width_);
+    decode=decode || width_!=width;
     std::vector<Bg2TileRect> rectangles;
-    const auto planner=complete_roll?plan_rolled_bg2_tiles:plan_bg2_tiles;
+    // Mode 1 panorama HDMA uses the source's clamped bridge margins too,
+    // but keeps the existing infinity projection; it is not a water plane.
+    const auto planner=complete_plan?plan_rolled_bg2_tiles:plan_bg2_tiles;
     if(decode && !planner(*source,scroll[0],scroll[1],width,int((width-256)/2),pass.priority,
         rectangles,std::min(4096U,vertex_budget/6))) return {};
     const auto& rects=decode?rectangles:rectangles_;
@@ -115,9 +126,10 @@ std::optional<PicaFrame> PicaBg2Tiles::prepare(std::shared_ptr<const simulation:
         for(const auto& rect:rects) {
             const auto key=std::uint16_t(rect.solid_index?8192+rect.solid_index:rect.character*8+rect.bank);
             const unsigned slot=unsigned(std::lower_bound(active_keys.begin(),active_keys.end(),key)-active_keys.begin());
-            const float tx=rect.solid_index?float(slot%32*8)+.5F:float(slot%32*8+rect.source_x+(rect.reverse_x?1:0));
+            const float tx=rect.solid_index?float(slot%32*8)+.5F:rect.constant_x?float(slot%32*8+rect.source_x)+.5F
+                :float(slot%32*8+rect.source_x+(rect.reverse_x?1:0));
             const float ty=rect.solid_index?float(slot/32*8)+.5F:float(slot/32*8+rect.source_y+(rect.reverse_y?1:0));
-            const float dx=rect.solid_index?0:rect.reverse_x?-float(rect.width):float(rect.width);
+            const float dx=rect.solid_index || rect.constant_x?0:rect.reverse_x?-float(rect.width):float(rect.width);
             const float dy=rect.solid_index?0:rect.reverse_y?-float(rect.height):float(rect.height);
             const auto emit=[&](float y,float height,float first_y,float last_y) {
                 for(unsigned corner:{0U,1U,2U,0U,2U,3U}) {
@@ -142,7 +154,7 @@ std::optional<PicaFrame> PicaBg2Tiles::prepare(std::shared_ptr<const simulation:
     if(decode) {vertices_.swap(vertices);keys_.swap(keys);batch_=std::move(*next_batch);}
     if(recolour) {pixels_.swap(pixels);++work_.colour_updates;}
     source_=std::move(source);width_=width;
-    complete_roll_=complete_roll;
+    complete_roll_=complete_plan;
     brightness_=brightness;subtract_=subtract;
     image_={pixels_,atlas_width,atlas_height,atlas_width*4,4};
     draw_={0,unsigned(vertices_.size()),0,pica_identity,batch.space,false,false,false};draw_.source_layer=2;

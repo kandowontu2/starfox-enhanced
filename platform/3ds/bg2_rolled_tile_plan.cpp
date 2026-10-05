@@ -45,7 +45,7 @@ bool emit_rows(const Rows& rows,std::vector<Bg2TileRect>& output,unsigned capaci
 bool plan_rolled_bg2_tiles(const simulation::SnesPpuState& ppu,int scroll_x,int scroll_y,
     unsigned width,int origin,int priority,std::vector<Bg2TileRect>& output,unsigned capacity) {
     output.clear();
-    if(ppu.background_mode!=2 || (ppu.mosaic&2) || ppu.tunnel_scene || !width || width>4096 || origin<0 || origin>4096
+    if((ppu.background_mode!=1 && ppu.background_mode!=2) || (ppu.mosaic&2) || ppu.tunnel_scene || !width || width>4096 || origin<0 || origin>4096
         || priority< -1 || priority>1 || scroll_x< -32768 || scroll_x>32767 || scroll_y< -32768 || scroll_y>32767
         || capacity>16384) return false;
     if(!(ppu.main_screen&2)) return true;
@@ -53,9 +53,11 @@ bool plan_rolled_bg2_tiles(const simulation::SnesPpuState& ppu,int scroll_x,int 
     const unsigned edge=ppu.bg2_tile_size_16?16:8,shift=ppu.bg2_tile_size_16?4:3;
     const unsigned x_mask=columns*edge-1,y_mask=rows*edge-1,pages_wide=columns/32;
     constexpr int missing=std::numeric_limits<int>::min();
-    const bool expanded=width>256 && ppu.bg2_vertical_offsets_enabled;
+    const bool vertical=ppu.background_mode==2 && ppu.bg2_vertical_offsets_enabled;
+    const bool expanded=width>256 && vertical;
+    const bool water_margin=ppu.background_mode==1 && ppu.bg2_scanline_scroll_enabled && width>256;
     std::array<std::uint16_t,32> offsets{};
-    if(ppu.bg2_vertical_offsets_enabled) for(unsigned i=0;i<32;++i) offsets[i]=word(ppu,0x2fa0+i);
+    if(vertical) for(unsigned i=0;i<32;++i) offsets[i]=word(ppu,0x2fa0+i);
     const auto difference=[](int a,int b){int delta=(a-b)&8191;return delta>4095?delta-8192:delta;};
     unsigned first=32,last=32,count=0;double sx=0,sy=0,sxx=0,sxy=0;int raw_previous=0,unwrapped=0;
     for(unsigned i=0;i<32;++i) if(offsets[i]&0x4000) {
@@ -71,7 +73,7 @@ bool plan_rolled_bg2_tiles(const simulation::SnesPpuState& ppu,int scroll_x,int 
     const int span=first<32 && last!=first?int(last-first):1;
     const auto wrap=[](int value){value%=8192;return value<0?value+8192:value;};
     std::vector<int> column_y(width,missing);
-    for(unsigned x=0;x<width && ppu.bg2_vertical_offsets_enabled;++x) {
+    for(unsigned x=0;x<width && vertical;++x) {
         const int coordinate=int(x)-origin+(scroll_x&7);
         if(expanded && count) column_y[x]=wrap(int(std::lround(intercept+slope*double(coordinate)/8.)));
         else {
@@ -141,8 +143,17 @@ bool plan_rolled_bg2_tiles(const simulation::SnesPpuState& ppu,int scroll_x,int 
         const int band_x=row_x(band_top),band_y=row_y(band_top);unsigned band_end=band_top+1;
         while(band_end<224 && row_x(band_end)==band_x && row_y(band_end)==band_y) ++band_end;
         for(unsigned x=0;x<width;) {
-            const unsigned sx_value=unsigned(int(x)-origin+band_x)&x_mask;
+            const int logical=int(x)-origin;
+            const bool margin=water_margin && (logical<0 || logical>=256);
+            const int unwrapped=int(unsigned(128+band_x)&x_mask)+logical-128;
+            const unsigned sx_value=margin?unsigned(std::clamp(unwrapped,0,int(x_mask))):unsigned(logical+band_x)&x_mask;
+            const bool constant_x=margin && (unwrapped<0 || unwrapped>=int(x_mask));
             unsigned width_here=std::min(width-x,8-(sx_value&7));
+            if(margin) {
+                const unsigned boundary=logical<0?std::min(width,unsigned(origin)):width;
+                if(constant_x) width_here=std::min(boundary-x,unwrapped<0?unsigned(1-unwrapped):boundary-x);
+                else width_here=std::min(width_here,boundary-x);
+            } else if(water_margin) width_here=std::min(width_here,unsigned(origin+256)-x);
             for(unsigned dx=1;dx<width_here;++dx) if(column_y[x+dx]!=column_y[x] || wrapped_at[x+dx]!=wrapped_at[x]) {width_here=dx;break;}
             for(unsigned y=band_top;y<band_end && y<wrapped_at[x];) {
                 const unsigned sy_value=source_y(x,y),height=std::min({band_end-y,8-(sy_value&7),wrapped_at[x]-y});
@@ -153,7 +164,7 @@ bool plan_rolled_bg2_tiles(const simulation::SnesPpuState& ppu,int scroll_x,int 
                     } else if(ink<0) {
                         if(next.size()==capacity) return false;
                         next.push_back({x,y,width_here,height,std::uint16_t(sample[0]),std::uint8_t(sample[1]),
-                            std::uint8_t(sample[2]),std::uint8_t(sample[3]),bool(sample[4]),bool(sample[5]),0});
+                            std::uint8_t(sample[2]),std::uint8_t(sample[3]),bool(sample[4]),bool(sample[5]),0,constant_x});
                     }
                 }
                 y+=height;

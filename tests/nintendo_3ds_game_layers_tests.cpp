@@ -45,7 +45,7 @@ std::pair<std::array<std::uint8_t,4>,unsigned> pixel(const PicaFrame& group,int 
     }
     return result;
 }
-std::pair<std::array<std::uint8_t,4>,unsigned> mono_receiver_pixel(const PicaFrame& group,unsigned x,unsigned y) {
+std::pair<std::array<std::uint8_t,4>,unsigned> mono_receiver_pixel(const PicaFrame& group,int x,int y) {
     std::pair<std::array<std::uint8_t,4>,unsigned> result{};
     const std::array<double,2> sample{double(x)+72.5,double(y)+8.5};
     for(const auto& draw:group.draws) {
@@ -385,6 +385,64 @@ void unique_landscape_policy() {
     frame.current=frame.previous=scene;bool failed=false;
     try {static_cast<void>(game_layer_plan(frame));} catch(const std::invalid_argument&) {failed=true;}
     require(failed,"Ambiguous source sky half silently substituted another atlas policy");
+}
+void atlas_water_depth() {
+    for(unsigned height:{64U,128U}) for(unsigned size:{0U,3U}) {
+        auto frame=source(simulation::GameFlowState::gameplay,1);
+        auto scene=std::make_shared<vr::GameSceneSnapshot>(*frame.current);
+        scene->background_water_surround=true;scene->camera.y=std::int16_t(-int(height));scene->shadow_height=0;
+        frame.current=frame.previous=scene;frame.plan=plan_frame(1,true,ScreenUse::world);
+        auto ppu=std::make_shared<simulation::SnesPpuState>(*frame.raster->ppu);
+        ppu->main_screen=2;ppu->bg2_screen_size=std::uint8_t(size);
+        ppu->bg2_scanline_scroll_enabled=ppu->bg2_horizontal_offsets_enabled=true;
+        for(unsigned y=0;y<224;++y) {
+            ppu->bg2_horizontal_offsets[y]=std::int16_t(-400+int(y/32)*9);
+            ppu->bg2_scanline_scroll_y[y]=std::int16_t(y<112?-230:257);
+        }
+        for(unsigned y=0;y<8;++y) ppu->vram[0x2040+y*2]=std::uint8_t(y%2?0xaa:0x55);
+        const unsigned pages=((size&1)?2:1)*((size&2)?2:1);
+        for(unsigned i=0;i<pages*1024;++i) {
+            const unsigned character=i%13==7?2:i%11==3?0:1;
+            const unsigned tile=character|((i%8)<<10)|((i%2)<<13)|((i%4)<<14),at=0x6400+i*2;
+            ppu->vram[at]=std::uint8_t(tile);ppu->vram[at+1]=std::uint8_t(tile>>8);
+        }
+        ppu->cgram[33]=0; // Opaque black is still source water, not a hole.
+        auto raster=std::make_shared<GameRasterSnapshot>(*frame.raster);raster->ppu=ppu;frame.raster=raster;
+        GameLayers native,baseline;
+        const auto gpu=native.prepare(frame,pica_vertex_limit),cpu=baseline.prepare(frame);
+        require(!gpu.before_models.textures.empty() && gpu.before_models.textures[0].width==256,
+            "Mode-1 source water did not use its compact atlas");
+        for(const auto& draw:gpu.before_models.draws) {
+            require(draw.source_layer==2,"Water atlas mixed another painter layer into its finite planes");
+            if(draw.space==PicaSpace::world) {
+                require(draw.projected_uv && draw.depth_test && draw.depth_write,"Water atlas omitted stereo/depth/UV projection");
+                for(unsigned i=draw.first;i<draw.first+draw.count;++i) {
+                    const auto p=gpu.before_models.vertices[i].position;
+                    require(std::abs(std::abs(p[1])-height)<.02 && p[2]>=frame.plan.near_plane-.02
+                        && p[2]<=frame.plan.far_plane+.02,"Water atlas changed its source planes or near/far bounds");
+                }
+            }
+        }
+        for(int y=-7;y<232;y+=7) for(int x=-71;x<328;x+=9)
+            require(mono_receiver_pixel(gpu.before_models,x,y)==mono_receiver_pixel(cpu.before_models,x,y),
+                "Water atlas changed wide source pixels, bridge edges, priority holes or opaque black");
+        const auto fallback=native.prepare(frame,5);
+        for(int y:{-7,1,111,219,231}) for(int x:{-71,1,127,251,327})
+            require(mono_receiver_pixel(fallback.before_models,x,y)==mono_receiver_pixel(cpu.before_models,x,y),
+                "Water vertex-budget fallback lost complete source coverage");
+        PicaBg2Tiles tiles;GameScenery receiver;
+        const auto policy=game_layer_plan(frame);
+        auto batch=*std::find_if(policy.before_model_groups.begin(),policy.before_model_groups.end(),
+            [](const auto& group){return group.water_receiver;});
+        const auto atlas=tiles.prepare(ppu,batch,frame.plan,15,0,pica_vertex_limit,source_water_guard(frame),true);
+        require(bool(atlas),"Water receiver transaction lacks its source atlas");
+        const auto ready=receiver.prepare_water_tiles(frame,*atlas,tiles.coverage_guard(),pica_vertex_limit);
+        require(bool(ready),"Water receiver transaction failed");
+        const auto saved=std::vector<PicaVertex>(ready->vertices.begin(),ready->vertices.end());
+        require(!receiver.prepare_water_tiles(frame,*atlas,tiles.coverage_guard(),1),"Water receiver overflow published partial geometry");
+        require(saved.size()==ready->vertices.size() && std::equal(saved.begin(),saved.end(),ready->vertices.begin()),
+            "Water receiver rejection invalidated its previous complete frame");
+    }
 }
 void water_depth() {
     auto frame=source(simulation::GameFlowState::gameplay,1);
@@ -919,6 +977,50 @@ void panorama_depth() {
     raster->boss_roll=false;auto ppu=std::make_shared<simulation::SnesPpuState>(*raster->ppu);raster->ppu=ppu;ppu->tunnel_scene=true;
     require(!native_panorama_scene(frame),"Corridor artwork was projected at infinity");
 }
+void panorama_atlas_priority_pixels() {
+    using enum simulation::GameFlowState;
+    Canvas lower;
+    for(unsigned mode:{1U,2U}) for(bool hdma:{false,true}) {
+        auto frame=source(gameplay,mode);
+        auto ppu=std::make_shared<simulation::SnesPpuState>(*frame.raster->ppu);
+        ppu->bg2_horizontal_offsets_enabled=ppu->bg2_scanline_scroll_enabled=hdma;
+        for(unsigned y=0;y<224;++y) {
+            ppu->bg2_horizontal_offsets[y]=std::int16_t((y/32)*7-400);
+            ppu->bg2_scanline_scroll_y[y]=std::int16_t(y<112?-231:257);
+        }
+        // Source OBJ crosses the low/high BG2 boundary, with opaque black
+        // BG2 ink and transparent tile zero both present. Preserve priorities.
+        for(unsigned object=0;object<3;++object) {
+            ppu->oam[object*4]=std::uint8_t(56+object*4);ppu->oam[object*4+1]=40;
+            ppu->oam[object*4+2]=1;ppu->oam[object*4+3]=std::uint8_t(object<<4);
+        }
+        ppu->cgram[33]=0;
+        auto raster=std::make_shared<GameRasterSnapshot>(*frame.raster);raster->ppu=ppu;frame.raster=raster;
+        GameLayers native,reference;const auto expected=reference.prepare(frame);
+        const auto prepared=native.prepare(frame,pica_vertex_limit);
+        validate_pica_frame(prepared.before_models,lower.view());
+        require(std::any_of(prepared.before_models.draws.begin(),prepared.before_models.draws.end(),[&](const auto& draw) {
+            return draw.space==PicaSpace::scenery && prepared.before_models.textures[draw.texture].width==256;
+        }),"Mode-1/2 panorama never selected a compact source tile atlas");
+        for(int y=-8;y<232;++y) for(int x=-32;x<288;++x)
+            require(mono_receiver_pixel(prepared.before_models,x,y)==mono_receiver_pixel(expected.before_models,x,y),
+                "Panorama atlas changed source mono pixels, edges, priority or opaque black");
+        require(prepared.after_models.vertices.size()==expected.after_models.vertices.size()
+            && prepared.clear==expected.clear,"Panorama atlas changed foreground or backdrop policy");
+        const auto work=native.work();
+        raster=std::make_shared<GameRasterSnapshot>(*raster);raster->brightness=0;frame.raster=raster;
+        const auto faded=native.prepare(frame,pica_vertex_limit);
+        require(native.work()[0].decodes==work[0].decodes,"Panorama atlas fade decoded source geometry again");
+        for(const auto& image:faded.before_models.textures) for(unsigned i=0;i<image.pixels.size();i+=4)
+            require(image.pixels[i]==0 && image.pixels[i+1]==0 && image.pixels[i+2]==0,
+                "Panorama atlas did not apply the native brightness fade");
+        raster=std::make_shared<GameRasterSnapshot>(*raster);raster->brightness=15;frame.raster=raster;
+        const auto fallback=native.prepare(frame,5);
+        require(fallback.before_models.vertices.size()==expected.before_models.vertices.size()
+            && fallback.before_models.textures.size()==expected.before_models.textures.size(),
+            "Panorama budget rejection published incomplete painter groups");
+    }
+}
 void offscreen_landscape_receiver() {
     Canvas lower;
     for(int horizon:{241,230,120,-7}) {
@@ -1083,6 +1185,6 @@ void receiver_eye_coverage() {
 }
 }
 int main() try {
-    priority_pixels();map_single_occurrence();policy_contracts();margins_and_cache();landscape_depth();atlas_landscape_depth();unique_landscape_policy();water_depth();water_priority_pixels();water_eye_coverage();corridor_source_symbols();corridor_depth();corridor_eye_coverage();corridor_eye_coverage(true);corridor_eye_coverage(false,true);corridor_eye_coverage(true,true);corridor_eye_coverage(false,true,true);corridor_eye_coverage(true,true,true);colony_depth();panorama_depth();offscreen_landscape_receiver();ex_menu_panorama_depth();receiver_eye_coverage();
+    priority_pixels();map_single_occurrence();policy_contracts();margins_and_cache();landscape_depth();atlas_landscape_depth();unique_landscape_policy();atlas_water_depth();water_depth();water_priority_pixels();water_eye_coverage();corridor_source_symbols();corridor_depth();corridor_eye_coverage();corridor_eye_coverage(true);corridor_eye_coverage(false,true);corridor_eye_coverage(true,true);corridor_eye_coverage(false,true,true);corridor_eye_coverage(true,true,true);colony_depth();panorama_depth();panorama_atlas_priority_pixels();offscreen_landscape_receiver();ex_menu_panorama_depth();receiver_eye_coverage();
     std::cout<<checks<<" 3DS actual source painter-policy checks passed; not full terrain/menu/hardware acceptance\n";
 } catch(const std::exception& error) {std::cerr<<scenario<<error.what()<<'\n';return 1;}
