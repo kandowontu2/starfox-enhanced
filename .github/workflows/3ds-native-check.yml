@@ -8,6 +8,7 @@ on:
       - 'include/starfox/platform/nintendo_3ds/**'
       - 'tests/nintendo_3ds*.cpp'
       - 'tests/nintendo_3ds*.cmake'
+      - 'tests/3ds_audio_stubs/**'
       - 'tools/check_3ds*.cpp'
       - '.github/workflows/3ds-native-check.yml'
       - 'tests/nintendo_3ds_pica_tests.cpp'
@@ -171,6 +172,16 @@ jobs:
             build/3ds-native/gpu-check.smdh
           if-no-files-found: error
           retention-days: 7
+      - name: Upload small asset-free NDSP and CSND compatibility check
+        uses: actions/upload-artifact@v4
+        with:
+          name: StarFoxEnhanced-3ds-audio-compatibility-check
+          path: |
+            build/3ds-native/starfox_3ds_frontend_check.3dsx
+            build/3ds-native/frontend-check.smdh
+            platform/3ds/CSND-CHECK.md
+          if-no-files-found: error
+          retention-days: 14
       - name: Upload native compiler settings for the performance experiment
         uses: actions/upload-artifact@v4
         if: always()

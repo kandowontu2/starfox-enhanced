@@ -1,5 +1,5 @@
 #include "native_audio.hpp"
-#include <atomic>
+#include "native_audio_owner.hpp"
 #include <cstdio>
 #include <string>
 // Use the actual libctru headers, with its C linkage, without pulling in
@@ -20,13 +20,6 @@ static_assert(NDSP_WBUF_FREE==int(AudioBufferState::free)
     && NDSP_WBUF_QUEUED==int(AudioBufferState::queued)
     && NDSP_WBUF_PLAYING==int(AudioBufferState::playing)
     && NDSP_WBUF_DONE==int(AudioBufferState::done));
-std::atomic_flag output_owned=ATOMIC_FLAG_INIT;
-struct OutputLease {
-    OutputLease() {
-        if(output_owned.test_and_set()) throw std::logic_error("3DS audio output already owned");
-    }
-    ~OutputLease() {output_owned.clear();}
-};
 struct LinearDeleter {
     void operator()(std::int16_t* data) const noexcept {if(data) linearFree(data);}
 };
@@ -37,7 +30,7 @@ std::runtime_error dsp_error(const char* operation,Result result,bool startup=fa
 }
 } // namespace
 struct NativeAudio::Impl {
-    OutputLease lease;
+    detail::AudioOutputLease lease;
     std::unique_ptr<std::int16_t,LinearDeleter> pcm{
         static_cast<std::int16_t*>(linearAlloc(AudioPcm::storage_bytes))};
     std::array<ndspWaveBuf,AudioPcm::blocks> waves{};

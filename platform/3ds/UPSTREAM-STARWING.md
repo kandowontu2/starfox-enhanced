@@ -58,3 +58,13 @@ still uses the corridor raster. An enabled synthetic Mode-1 atlas does not prove
 that this real tunnel has been accelerated.
 
 Host equivalence and ARM compilation do not establish physical-console speed.
+
+## Audio compatibility investigation
+
+The same pinned reference's `audio_3ds.cpp` documents a retail NDSP startup
+abort and implements a CSND output alternative. That motivates our separate
+asset-free CSND check (`CSND-CHECK.md`), not a claim that our own NDSP owner
+fails identically. Esteban PDN is credited for identifying this compatibility
+path. We do not copy its estimated looping-ring cursor, midpoint frame insertion,
+dropped-packet policy or SPC worker scheduling. The gameplay sink and both
+accurate SPC stems remain unchanged until a streaming adapter is accepted.
