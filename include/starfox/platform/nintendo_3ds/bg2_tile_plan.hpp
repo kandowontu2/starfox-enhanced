@@ -12,7 +12,8 @@ struct Bg2TileRect {
     std::uint8_t bank{},source_x{},source_y{};
     bool reverse_x{},reverse_y{};
 };
-// The first integration deliberately accepts only ordinary Mode-2 artwork.
+// The first integration accepts ordinary Mode-2 artwork, including complete
+// constant offset tables whose lower source characters need no ground carry.
 // Rolled ground/corridors/mosaic need our finite-depth/unique-region semantics,
 // not the upstream flat-screen approximation. Failure publishes no rectangles.
 bool plan_bg2_tiles(const simulation::SnesPpuState&,int scroll_x,int scroll_y,

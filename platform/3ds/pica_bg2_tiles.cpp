@@ -17,8 +17,12 @@ bool same_geometry(const simulation::SnesPpuState& a,const simulation::SnesPpuSt
         && a.bg2_scroll_x==b.bg2_scroll_x && a.bg2_scroll_y==b.bg2_scroll_y
         && a.bg2_horizontal_offsets_enabled==b.bg2_horizontal_offsets_enabled
         && a.bg2_scanline_scroll_enabled==b.bg2_scanline_scroll_enabled
+        && a.bg2_vertical_offsets_enabled==b.bg2_vertical_offsets_enabled
         && (!a.bg2_horizontal_offsets_enabled || a.bg2_horizontal_offsets==b.bg2_horizontal_offsets)
         && (!a.bg2_scanline_scroll_enabled || a.bg2_scanline_scroll_y==b.bg2_scanline_scroll_y)
+        && (!a.bg2_vertical_offsets_enabled || (same_range(a,b,0x5f40,64)
+            && a.bg2_character_base==b.bg2_character_base
+            && same_range(a,b,a.bg2_character_base*2,32768)))
         && same_range(a,b,a.bg2_screen_base*2,pages*2048);
 }
 }
@@ -31,7 +35,7 @@ std::optional<PicaFrame> PicaBg2Tiles::prepare(std::shared_ptr<const simulation:
     const auto& pass=batch.passes.front();
     if(pass.layer!=PpuLayer::bg2 || !pass.wrap_horizontal || pass.transparent_black
         || pass.mosaic_inset || pass.guard_inset || pass.single_occurrence_top_rows || pass.single_occurrence_sky_half
-        || source->background_mode!=2 || (source->mosaic&2) || source->bg2_vertical_offsets_enabled
+        || source->background_mode!=2 || (source->mosaic&2)
         || source->tunnel_scene || pass.priority< -1 || pass.priority>1) return {};
     if(plan.eye_count!=(plan.stereo?2U:1U)) throw std::invalid_argument("Invalid 3DS GPU tile eye plan");
     for(unsigned eye=0;eye<plan.eye_count;++eye) static_cast<void>(PicaProjection(plan,eye));
@@ -47,20 +51,25 @@ std::optional<PicaFrame> PicaBg2Tiles::prepare(std::shared_ptr<const simulation:
         [](const auto& rect){return rect.y==0 || rect.y+rect.height==224;})):0;
     if((rects.size()+edge_quads)*6>vertex_budget) return {};
     std::vector<std::uint16_t> keys;
-    for(const auto& rect:rects) keys.push_back(std::uint16_t(rect.character*8+rect.bank));
-    std::sort(keys.begin(),keys.end());keys.erase(std::unique(keys.begin(),keys.end()),keys.end());
+    if(decode) {
+        keys.reserve(rects.size());
+        for(const auto& rect:rects) keys.push_back(std::uint16_t(rect.character*8+rect.bank));
+        std::sort(keys.begin(),keys.end());keys.erase(std::unique(keys.begin(),keys.end()),keys.end());
+    }
+    const auto& active_keys=decode?keys:keys_;
     // A bounded compact atlas avoids replacing a half-MiB LCD layer with a
     // full 2-MiB all-characters/all-palettes allocation on Original 3DS.
-    if(keys.size()>1024) return {};
-    const unsigned atlas_width=256,atlas_height=std::max(8U,unsigned((keys.size()+31)/32)*8);
-    const bool recolour=!source_ || keys!=keys_ || brightness_!=brightness || subtract_!=subtract
+    if(active_keys.size()>1024) return {};
+    const unsigned atlas_width=256,atlas_height=std::max(8U,unsigned((active_keys.size()+31)/32)*8);
+    const bool rekey=decode && keys!=keys_;
+    const bool recolour=!source_ || rekey || brightness_!=brightness || subtract_!=subtract
         || source_->cgram!=source->cgram || source_->bg2_character_base!=source->bg2_character_base
         || !same_range(*source_,*source,source->bg2_character_base*2,32768);
     std::vector<std::uint8_t> pixels;
     if(recolour) {
         pixels.assign(std::size_t(atlas_width)*atlas_height*4,0);
-        for(unsigned slot=0;slot<keys.size();++slot) {
-            const unsigned character=keys[slot]/8,bank=keys[slot]%8;
+        for(unsigned slot=0;slot<active_keys.size();++slot) {
+            const unsigned character=active_keys[slot]/8,bank=active_keys[slot]%8;
             const unsigned base=source->bg2_character_base*2+character*32;
             for(unsigned y=0;y<8;++y) {
                 const unsigned a=source->vram[(base+y*2)&65535],b=source->vram[(base+y*2+1)&65535];
@@ -82,12 +91,12 @@ std::optional<PicaFrame> PicaBg2Tiles::prepare(std::shared_ptr<const simulation:
     }
     std::vector<PicaVertex> vertices;
     // Atlas growth/reordering changes normalized UVs even if scrolling did not.
-    if(decode || keys!=keys_) {
+    if(decode) {
         vertices.reserve((rects.size()+edge_quads)*6);
         const float left=(float(top_width)-width)*.5F;
         for(const auto& rect:rects) {
             const auto key=std::uint16_t(rect.character*8+rect.bank);
-            const unsigned slot=unsigned(std::lower_bound(keys.begin(),keys.end(),key)-keys.begin());
+            const unsigned slot=unsigned(std::lower_bound(active_keys.begin(),active_keys.end(),key)-active_keys.begin());
             const float tx=float(slot%32*8+rect.source_x+(rect.reverse_x?1:0));
             const float ty=float(slot/32*8+rect.source_y+(rect.reverse_y?1:0));
             const float dx=rect.reverse_x?-float(rect.width):float(rect.width);
@@ -109,11 +118,12 @@ std::optional<PicaFrame> PicaBg2Tiles::prepare(std::shared_ptr<const simulation:
             }
         }
     }
-    auto next_batch=batch; // Complete all allocating work before publication.
+    std::optional<PpuBatch> next_batch;
+    if(decode) next_batch=batch; // Complete all allocating work before publication.
     if(decode) {rectangles_.swap(rectangles);++work_.decodes;}
-    if(decode || keys!=keys_) vertices_.swap(vertices);
+    if(decode) {vertices_.swap(vertices);keys_.swap(keys);batch_=std::move(*next_batch);}
     if(recolour) {pixels_.swap(pixels);++work_.colour_updates;}
-    keys_.swap(keys);source_=std::move(source);batch_=std::move(next_batch);width_=width;
+    source_=std::move(source);width_=width;
     brightness_=brightness;subtract_=subtract;
     image_={pixels_,atlas_width,atlas_height,atlas_width*4,4};
     draw_={0,unsigned(vertices_.size()),0,pica_identity,batch.space,false,false,false};draw_.source_layer=2;

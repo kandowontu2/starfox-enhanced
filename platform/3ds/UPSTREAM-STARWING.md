@@ -21,6 +21,9 @@ timing, source audio, the pre-game menu or native model stereo projection.
 The first enabled path covers isolated, ordinary Mode-2 BG2 at screen depth or
 our existing infinity projection. Extra LCD rows clamp the same source scanline;
 both eye frusta retain their full source-derived coverage.
+Complete constant vertical-offset tables are supported with their actual source
+offset, not BG2VOFS. Sloped/gapped tables, lower tilemap wraps, priority holes and
+transparent lower characters that need reference ground continuation fall back intact.
 Source mosaic, rolled/finite terrain, tunnel geometry, unique moons/planets and
 mixed-priority painter groups retain the existing exact raster path. Capacity
 or atlas-budget rejection also falls back before publishing partial geometry.

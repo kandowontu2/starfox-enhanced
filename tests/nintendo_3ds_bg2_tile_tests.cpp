@@ -1,11 +1,16 @@
 #include "starfox/platform/nintendo_3ds/pica_bg2_tiles.hpp"
 #include "starfox/platform/nintendo_3ds/game_layers.hpp"
+#include <atomic>
+#include <cstdlib>
 #include <iostream>
+#include <new>
 
 namespace {
 using namespace starfox;
 using namespace platform::nintendo_3ds;
 std::uint64_t checks{};
+std::atomic<std::size_t> allocations{};
+bool count_allocations{};
 void require(bool value,const char* why) {++checks;if(!value) throw std::runtime_error(why);}
 unsigned seed=0x8d37264f;
 unsigned random_word() {seed^=seed<<13;seed^=seed>>17;seed^=seed<<5;return seed;}
@@ -60,6 +65,11 @@ void parity(std::shared_ptr<const simulation::SnesPpuState> ppu,const PpuBatch& 
             }
             expected[3]=255;expected[4]=2;
         }
+        if(actual[std::size_t(y)*width+x]!=expected) {
+            std::cerr<<"Mismatch x="<<x<<" y="<<y<<" width="<<width<<" vertical="<<ppu->bg2_vertical_offsets_enabled
+                <<" brightness="<<brightness<<" expected="<<unsigned(expected[0])<<','<<unsigned(expected[3])
+                <<" actual="<<unsigned(actual[std::size_t(y)*width+x][0])<<','<<unsigned(actual[std::size_t(y)*width+x][3])<<'\n';
+        }
         require(actual[std::size_t(y)*width+x]==expected,"GPU atlas disagrees with original indexed pixels/coverage/palette/ownership");
     }
     unsigned bytes=512*256*4;
@@ -92,6 +102,15 @@ void rejection_and_reuse() {
     auto ppu=fixture(0);PpuBatch batch;batch.expand_horizontal=true;batch.passes.push_back({PpuLayer::bg2});
     PicaBg2Tiles owner;const auto plan=plan_frame(1,true,ScreenUse::world);
     auto frame=owner.prepare(ppu,batch,plan,15,0,pica_vertex_limit);require(bool(frame),"Initial cache fixture failed");
+    const auto* vertices=frame->vertices.data();const auto* pixels=frame->textures[0].pixels.data();
+    allocations=0;count_allocations=true;
+    bool stable=true;
+    for(unsigned i=0;i<2048;++i) {
+        const auto warm=owner.prepare(ppu,batch,plan,15,0,pica_vertex_limit);
+        stable&=warm && warm->vertices.data()==vertices && warm->textures[0].pixels.data()==pixels;
+    }
+    count_allocations=false;
+    require(stable && allocations==0,"Warmed tile preparation allocated or replaced its complete geometry/atlas");
     const auto old_pixels=sample(*frame,464,-32);
     const auto before=owner.work();
     auto changed=std::make_shared<simulation::SnesPpuState>(*ppu);changed->oam[0]^=7;
@@ -144,7 +163,57 @@ void painter_integration() {
     require(native_landscape_scene(source) && !terrain.before_models.textures.empty()
         && terrain.before_models.textures[0].width!=256,"Unrolled finite terrain incorrectly used the flat tile atlas");
 }
+void constant_vertical_offsets() {
+    for(unsigned number=0;number<8;++number) {
+        auto ppu=fixture(number);ppu->bg2_character_base=0x1000;
+        for(unsigned character=0;character<64;++character) for(unsigned y=0;y<8;++y) {
+            const unsigned at=0x2000+character*32+y*2;
+            ppu->vram[at]=255;ppu->vram[at+1]=ppu->vram[at+16]=ppu->vram[at+17]=0;
+        }
+        ppu->bg2_vertical_offsets_enabled=true;
+        for(unsigned i=0;i<32;++i) {ppu->vram[0x5f40+i*2]=16;ppu->vram[0x5f41+i*2]=0x40;}
+        // A valid offset overrides both a pass's VOFS and scanline HDMA.
+        ppu->bg2_scanline_scroll_enabled=true;ppu->bg2_scanline_scroll_y.fill(-511);
+        PpuBatch batch;batch.expand_horizontal=(number&1)!=0;batch.space=PicaSpace::scenery;
+        batch.passes.push_back({PpuLayer::bg2,(number&1)?-1:int(number%3)-1});batch.passes[0].scroll=std::array<std::int16_t,2>{-7,257};
+        PicaBg2Tiles owner;const auto plan=plan_frame(1,true,ScreenUse::world);
+        parity(ppu,batch,plan,15,0,owner);
+        const auto before=owner.work();auto fade=std::make_shared<simulation::SnesPpuState>(*ppu);fade->cgram[1]^=31;
+        parity(fade,batch,plan,7,3,owner);
+        require(owner.work().decodes==before.decodes,"Constant offset palette fade rebuilt its geometry");
+        if(!(number&1)) continue;
+        const auto saved=owner.prepare(fade,batch,plan,7,3,pica_vertex_limit);
+        const auto saved_pixels=sample(*saved,464,-32);
+        auto priority_policy=batch;priority_policy.passes[0].priority=0;
+        require(!owner.prepare(fade,priority_policy,plan,7,3,pica_vertex_limit),"Lower priority holes lost reference carry");
+        for(unsigned rejection=0;rejection<4;++rejection) {
+            auto bad=std::make_shared<simulation::SnesPpuState>(*fade);
+            if(rejection==0) bad->vram[0x5f42]=17; // A real slope, not flat space.
+            if(rejection==1) bad->vram[0x5f43]=0; // A register-fallback gap.
+            if(rejection==2) for(unsigned i=0;i<32;++i) {bad->vram[0x5f40+i*2]=255;bad->vram[0x5f41+i*2]=0x43;}
+            if(rejection==3) for(unsigned character=0;character<64;++character) for(unsigned y=0;y<8;++y)
+                bad->vram[0x2000+character*32+y*2]=0; // New zero texels need reference carry.
+            require(!owner.prepare(bad,batch,plan,7,3,pica_vertex_limit),"Offset/carry policy incorrectly bypassed raster fallback");
+            require(sample(*saved,464,-32)==saved_pixels,"Offset/carry rejection invalidated the previous complete atlas");
+        }
+        auto shifted=std::make_shared<simulation::SnesPpuState>(*fade);
+        for(unsigned i=0;i<32;++i) shifted->vram[0x5f40+i*2]=24;
+        parity(shifted,batch,plan,7,3,owner);
+        require(owner.work().decodes==before.decodes+1,"Updated offset table did not invalidate native geometry");
+    }
 }
+}
+// Only count native owner preparation, not fixture creation or pixel oracles.
+void* operator new(std::size_t count) {
+    if(count_allocations) ++allocations;
+    if(auto* memory=std::malloc(std::max(count,std::size_t{1}))) return memory;
+    throw std::bad_alloc{};
+}
+void* operator new[](std::size_t count) {return ::operator new(count);}
+void operator delete(void* memory) noexcept {std::free(memory);}
+void operator delete[](void* memory) noexcept {std::free(memory);}
+void operator delete(void* memory,std::size_t) noexcept {std::free(memory);}
+void operator delete[](void* memory,std::size_t) noexcept {std::free(memory);}
 int main() try {
     for(unsigned number=0;number<64;++number) {
         const auto ppu=fixture(number);const auto unchanged=*ppu;
@@ -158,7 +227,7 @@ int main() try {
         }
         require(ppu->vram==unchanged.vram && ppu->cgram==unchanged.cgram && ppu->oam==unchanged.oam,"Native tile planning mutated cartridge memory");
     }
-    rejection_and_reuse();painter_integration();
+    rejection_and_reuse();painter_integration();constant_vertical_offsets();
     std::cout<<"Native BG2 tile planner/atlas: "<<checks<<" exact pixel, palette, ownership, HDMA, flips, budget and fallback checks PASS\n";
     return 0;
-} catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
+} catch(const std::exception& error) {count_allocations=false;std::cerr<<error.what()<<'\n';return 1;}
