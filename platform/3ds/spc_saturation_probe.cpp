@@ -2,6 +2,7 @@
 // output substitute. The game still runs both complete accurate SPC stems.
 #include "native_display.hpp"
 #include "starfox/platform/nintendo_3ds/spc_saturation_checks.hpp"
+#include "starfox/platform/nintendo_3ds/spc_counter_checks.hpp"
 #include <3ds.h>
 #include <fstream>
 
@@ -15,14 +16,25 @@ int main() {
     const auto began=svcGetSystemTick();
     std::string result;
     try {
+#ifdef STARFOX_3DS_COUNTER_CHECK
+        const auto count=check_spc_counters();
+#else
         const auto count=check_spc_saturation();
+#endif
         result="PASS / "+std::to_string(count)+" EXACT INPUTS";
     } catch(const std::exception& error) {result=std::string("FAIL / ")+error.what();}
     const auto elapsed=svcGetSystemTick()-began;
     // A uniquely named, small bounded report, never a settings/save overwrite.
-    std::ofstream report("sdmc:/starfox-spc-saturation-"+std::to_string(began)+".txt");
+#ifdef STARFOX_3DS_COUNTER_CHECK
+    constexpr auto reportPrefix="sdmc:/starfox-spc-counters-";
+    constexpr auto reportTitle="Original 3DS native DSP counter remainder check";
+#else
+    constexpr auto reportPrefix="sdmc:/starfox-spc-saturation-";
+    constexpr auto reportTitle="Original 3DS native signed-saturation check";
+#endif
+    std::ofstream report(reportPrefix+std::to_string(began)+".txt");
     if(report) {
-        report<<"Original 3DS native signed-saturation check\n"<<result<<"\nclock_hz="<<SYSCLOCK_ARM11
+        report<<reportTitle<<"\n"<<result<<"\nclock_hz="<<SYSCLOCK_ARM11
             <<"\nelapsed_ticks="<<elapsed
             <<"\nscope=ARM arithmetic execution; not physical FPS, streaming audio or whole-game acceptance\n";
         report.flush();

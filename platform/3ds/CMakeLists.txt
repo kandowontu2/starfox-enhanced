@@ -84,6 +84,16 @@ if(STARFOX_3DS_BUILD_NATIVE)
         DESCRIPTION "Asset-free native signed-saturation arithmetic check - not the game"
         AUTHOR "kandowontu")
     ctr_create_3dsx(starfox_3ds_spc_saturation_check SMDH "${CMAKE_CURRENT_BINARY_DIR}/spc-saturation-check.smdh")
+    add_executable(starfox_3ds_spc_counters_check spc_saturation_probe.cpp native_display.cpp)
+    target_compile_definitions(starfox_3ds_spc_counters_check PRIVATE STARFOX_3DS_COUNTER_CHECK=1)
+    target_include_directories(starfox_3ds_spc_counters_check SYSTEM PRIVATE "${STARFOX_CTRU_INCLUDE}")
+    target_link_libraries(starfox_3ds_spc_counters_check PRIVATE starfox_3ds_frontend "${STARFOX_CTRU_LIBRARY}" m)
+    set_target_properties(starfox_3ds_spc_counters_check PROPERTIES SUFFIX ".elf")
+    ctr_generate_smdh(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/spc-counters-check.smdh"
+        NAME "Star Fox Enhanced - DSP counter check"
+        DESCRIPTION "Asset-free exact DSP integer remainder check"
+        AUTHOR "Star Fox Enhanced contributors")
+    ctr_create_3dsx(starfox_3ds_spc_counters_check SMDH "${CMAKE_CURRENT_BINARY_DIR}/spc-counters-check.smdh")
     if(STARFOX_3DS_BUILD_GAME_CORE)
         include(companion_manifest.cmake)
         add_executable(starfox_3ds_game_core_check game_core_probe.cpp native_display.cpp "${companion_header}")
@@ -159,7 +169,7 @@ if(STARFOX_3DS_BUILD_NATIVE)
     # Keep compiler frame evidence alongside the real ARM binaries. The package
     # gate checks the linked libctru stack reservation, not just host builds.
     foreach(target starfox_3ds_frontend starfox_3ds_source_geometry starfox_3ds_raster
-            starfox_3ds_native_audio starfox_3ds_frontend_check starfox_3ds_spc_saturation_check
+            starfox_3ds_native_audio starfox_3ds_frontend_check starfox_3ds_spc_saturation_check starfox_3ds_spc_counters_check
             starfox_3ds_cartridge_core starfox_3ds_spc starfox_3ds_cpu
             starfox_3ds_native_gpu starfox_3ds_gpu_check
             starfox_3ds_game_core_check starfox_3ds_test_player)
@@ -292,6 +302,9 @@ elseif(STARFOX_3DS_BUILD_HOST_TESTS)
         add_executable(starfox_3ds_spc_saturation_tests ../../tests/nintendo_3ds_spc_saturation_tests.cpp)
         target_link_libraries(starfox_3ds_spc_saturation_tests PRIVATE starfox_3ds_frontend)
         add_test(NAME starfox_3ds_spc_saturation_tests COMMAND starfox_3ds_spc_saturation_tests)
+        add_executable(starfox_3ds_spc_counters_tests ../../tests/nintendo_3ds_spc_counters_tests.cpp)
+        target_link_libraries(starfox_3ds_spc_counters_tests PRIVATE starfox_3ds_frontend)
+        add_test(NAME starfox_3ds_spc_counters_tests COMMAND starfox_3ds_spc_counters_tests)
         add_executable(starfox_3ds_game_menu_tests ../../tests/nintendo_3ds_game_menu_tests.cpp)
         target_link_libraries(starfox_3ds_game_menu_tests PRIVATE starfox_3ds_cartridge_core)
         add_test(NAME starfox_3ds_game_menu_tests COMMAND starfox_3ds_game_menu_tests)
