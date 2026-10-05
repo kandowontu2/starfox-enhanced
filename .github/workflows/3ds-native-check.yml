@@ -9,6 +9,7 @@ on:
       - 'tests/nintendo_3ds*.cpp'
       - 'tests/nintendo_3ds*.cmake'
       - 'tests/3ds_audio_stubs/**'
+      - 'tests/3ds_display_stubs/**'
       - 'tools/check_3ds*.cpp'
       - '.github/workflows/3ds-native-check.yml'
       - 'tests/nintendo_3ds_pica_tests.cpp'
@@ -61,7 +62,7 @@ permissions:
   contents: read
 jobs:
   native-diagnostics:
-    name: Original 3DS native checks and experimental test package
+    name: New 3DS stereo / old-model mono native checks and test package
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
@@ -144,7 +145,7 @@ jobs:
               python3 tools/check_3ds_spc_output.py build/3ds-native --native
             '
           python3 tools/check_3ds_stack.py build/3ds-native
-      - name: Validate and package the Original 3DS test candidate
+      - name: Validate and package the New 3DS stereo / old-model mono test candidate
         shell: bash
         run: |
           python3 tools/package_3ds_test.py \
@@ -152,19 +153,19 @@ jobs:
             --3dsx build/3ds-native/starfox_3ds_test_player.3dsx \
             --smdh build/3ds-native/test-player.smdh \
             --source-commit "$GITHUB_SHA" \
-            --output StarFoxEnhanced-original-3ds-test.zip
-          unzip -t StarFoxEnhanced-original-3ds-test.zip
+            --output StarFoxEnhanced-3ds-test.zip
+          unzip -t StarFoxEnhanced-3ds-test.zip
       - name: Upload experimental player for hardware testing, not a verified release
         uses: actions/upload-artifact@v4
         with:
-          name: StarFoxEnhanced-original-3ds-test
-          path: StarFoxEnhanced-original-3ds-test.zip
+          name: StarFoxEnhanced-3ds-test
+          path: StarFoxEnhanced-3ds-test.zip
           if-no-files-found: error
           retention-days: 14
       - name: Upload native executables and diagnostic tools
         uses: actions/upload-artifact@v4
         with:
-          name: StarFoxEnhanced-original-3ds-native-diagnostics
+          name: StarFoxEnhanced-3ds-native-diagnostics
           path: |
             build/3ds-native/*.elf
             build/3ds-native/starfox_3ds_frontend_check.3dsx

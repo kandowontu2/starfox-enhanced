@@ -4,7 +4,7 @@ option(STARFOX_3DS_BUILD_NATIVE "Build the asset-free libctru diagnostic (not th
 option(STARFOX_3DS_BUILD_GPU_CHECK "Include the native Citro3D diagnostic (not the game)" ON)
 option(STARFOX_3DS_BUILD_HOST_TESTS "Build platform-independent projection/LCD tests" ON)
 option(STARFOX_3DS_BUILD_GAME_CORE "Link the actual cartridge VM/SPC/game session bring-up target" ${STARFOX_3DS_BUILD_NATIVE})
-option(STARFOX_3DS_BUILD_TEST_PLAYER "Build an experimental full-menu player for Original 3DS hardware testing" OFF)
+option(STARFOX_3DS_BUILD_TEST_PLAYER "Build an experimental full-menu player: New 3DS stereo, original models mono" OFF)
 option(STARFOX_3DS_PROFILE_FRAMES "Write bounded native phase timings to a separate diagnostic CSV" OFF)
 option(STARFOX_3DS_ENABLE_IPO "Optimize the real native/core graph across translation units" OFF)
 if(STARFOX_3DS_ENABLE_IPO)
@@ -130,7 +130,7 @@ if(STARFOX_3DS_BUILD_NATIVE)
             set_target_properties(starfox_3ds_test_player PROPERTIES SUFFIX ".elf")
             ctr_generate_smdh(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/test-player.smdh"
                 NAME "Star Fox Enhanced - TEST"
-                DESCRIPTION "Experimental Original 3DS player - hardware testing required"
+                DESCRIPTION "Experimental New 3DS stereo / old 3DS mono - testing required"
                 AUTHOR "kandowontu")
             ctr_create_3dsx(starfox_3ds_test_player SMDH "${CMAKE_CURRENT_BINARY_DIR}/test-player.smdh")
         endif()
@@ -207,6 +207,10 @@ elseif(STARFOX_3DS_BUILD_HOST_TESTS)
     add_executable(starfox_3ds_frontend_tests ../../tests/nintendo_3ds_frontend_tests.cpp)
     target_link_libraries(starfox_3ds_frontend_tests PRIVATE starfox_3ds_frontend)
     add_test(NAME starfox_3ds_frontend_tests COMMAND starfox_3ds_frontend_tests)
+    add_executable(starfox_3ds_display_tests ../../tests/nintendo_3ds_display_tests.cpp native_display.cpp)
+    target_include_directories(starfox_3ds_display_tests PRIVATE ../../tests/3ds_display_stubs .)
+    target_link_libraries(starfox_3ds_display_tests PRIVATE starfox_3ds_frontend)
+    add_test(NAME starfox_3ds_display_tests COMMAND starfox_3ds_display_tests)
     add_executable(starfox_3ds_game_remap_tests ../../tests/nintendo_3ds_game_remap_tests.cpp)
     target_link_libraries(starfox_3ds_game_remap_tests PRIVATE starfox_3ds_frontend)
     add_test(NAME starfox_3ds_game_remap_tests COMMAND starfox_3ds_game_remap_tests)

@@ -1,6 +1,7 @@
 #include "starfox/platform/nintendo_3ds/game_routing.hpp"
 #include "starfox/platform/nintendo_3ds/pica_projection.hpp"
 #include "starfox/platform/nintendo_3ds/presentation_clock.hpp"
+#include "starfox/platform/nintendo_3ds/hardware_profile.hpp"
 #include <algorithm>
 #include <climits>
 #include <filesystem>
@@ -25,6 +26,26 @@ bool near(double a,double b,double tolerance=1.e-5) {return std::abs(a-b)<tolera
 Rgb pixel(ImageView view,unsigned x,unsigned y) {
     const auto at=std::size_t(y)*view.pitch+x*3;
     return {view.pixels[at],view.pixels[at+1],view.pixels[at+2]};
+}
+void hardware_profile_tests() {
+    require(hardware_profile(std::nullopt)==HardwareProfile{},"Failed model query enabled New-only features");
+    for(unsigned model=0;model<256;++model) {
+        const auto profile=hardware_profile(std::uint8_t(model));
+        const bool new_cpu=model==2 || model==4 || model==5;
+        const bool stereo=model==2 || model==4;
+        require(profile.cpu_speedup==new_cpu,"CPU speedup does not match New hardware");
+        require(profile.stereo==stereo,"Original/2DS/unknown model enabled stereo");
+        for(float slider:{0.F,.125F,.5F,1.F,2.F,-1.F,std::numeric_limits<float>::quiet_NaN()})
+            for(auto use:{ScreenUse::setup,ScreenUse::front_end,ScreenUse::menu_preview,ScreenUse::world}) {
+                const auto frame=plan_frame(slider,profile.stereo,use);
+                const bool world=use==ScreenUse::menu_preview || use==ScreenUse::world;
+                const bool two_eyes=stereo && world && std::isfinite(slider) && slider>0;
+                require(frame.stereo==two_eyes && frame.eye_count==(two_eyes?2U:1U),
+                    "Hardware policy did not remove the inactive eye");
+                if(!two_eyes) require(frame.slider==0 && frame.eyes[0].x==0 && frame.eyes[0].projection_offset==0,
+                    "Mono fallback retained stereo displacement");
+            }
+    }
 }
 void stereo_tests() {
     for(float slider:{0.F,.25F,.5F,1.F}) {
@@ -401,7 +422,7 @@ void captures(const std::filesystem::path& directory) {
 } // namespace
 int main(int argc,char** argv) {
     try {
-        stereo_tests();pica_projection_tests();stereo_culling_and_clipping_tests();
+        hardware_profile_tests();stereo_tests();pica_projection_tests();stereo_culling_and_clipping_tests();
         routing_and_input_tests();lcd_tests();hud_tests();dashboard_cache_tests();radio_artwork_cache_tests();presentation_clock_tests();
         if(argc==3 && std::string_view(argv[1])=="--capture") captures(argv[2]);
         else if(argc!=1) throw std::invalid_argument("Usage: frontend_tests [--capture directory]");

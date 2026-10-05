@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Package an explicit Original 3DS hardware-test player, never private assets."""
+"""Package an explicit New 3DS stereo / original-model mono test, never private assets."""
 from __future__ import annotations
 
 import argparse
@@ -54,7 +54,11 @@ def package(elf: Path, three_dsx: Path, smdh: Path, source_commit: str, output: 
         raise ValueError("Output must be a new .zip file; existing packages are never overwritten")
     info = validate_native(elf, three_dsx, smdh)
     info.update(source_commit=source_commit, experimental=True, hardware_accepted=False,
-                target="Original Nintendo 3DS / 3DS XL; slider-off 2DS fallback",
+                target="New Nintendo 3DS / New 3DS XL stereo; original 3DS / XL and 2DS mono",
+                hardware_policy={"new_3ds": "CPU/cache speedup and slider-controlled stereo",
+                                 "new_2ds_xl": "CPU/cache speedup, mono",
+                                 "original_3ds_xl_2ds": "standard CPU, mono; slider ignored",
+                                 "unknown": "standard CPU, mono"},
                 private_assets_included=False)
     instructions = Path(__file__).resolve().parents[1] / "platform/3ds/TESTING.md"
     attribution = instructions.with_name("UPSTREAM-STARWING.md")
@@ -100,7 +104,7 @@ def main() -> None:
         parser.exit(1, f"3DS package rejected: {error}\n")
     print(f"Validated experimental 3DS package: {args.output}")
     print(f"3DSX {info['three_dsx_bytes']} bytes SHA256 {info['three_dsx_sha256']}")
-    print("Original 3DS/XL hardware acceptance and full-flow rendering validation remain required.")
+    print("New 3DS stereo / original-model mono hardware acceptance and full-flow validation remain required.")
 
 
 if __name__ == "__main__":

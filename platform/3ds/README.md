@@ -1,19 +1,86 @@
-# Nintendo 3DS / 3DS XL frontend
+# Nintendo 3DS frontend
 
-The primary target is **original Nintendo 3DS and 3DS XL**, not New 3DS.
+The primary stereo target is **New Nintendo 3DS and New 3DS XL**. Original
+3DS/XL and both 2DS models use a mono top screen: the slider is ignored on
+original models, and no second-eye rendering is requested. New 3DS/XL and
+New 2DS XL request libctru's CPU/cache speedup; old or unknown models do not.
+The request is reapplied after Home/sleep and disabled on exit. Cartridge
+timing, audio rates and the real pre-game menu remain unchanged.
 This directory contains a host-verified cartridge game session and native
 LCD/input/audio and PICA200 GPU diagnostics. The new cartridge-core bring-up
 target connects the actual simulation, SPC and dashboard to a console entry
 point. All three diagnostics, including the actual menu integration below,
 compile/link with the actual ARM SDK at the accepted October 4 menu checkpoint
-on `codex/3ds-native-bringup`. Original-device acceptance is still pending.
+on `codex/3ds-native-bringup`. Physical-device acceptance is still pending.
 **There is no hardware-verified 3DS release yet.** An opt-in
 `STARFOX_3DS_BUILD_TEST_PLAYER` target builds the real menu/game owner without
 the diagnostic banner covering its upper LCD. CI packages it separately as
-`StarFoxEnhanced-original-3ds-test.zip`, explicitly experimental, with native
+`StarFoxEnhanced-3ds-test.zip`, explicitly experimental, with native
 ELF/3DSX/SMDH validation, source commit and checksums. No ROM/BIN is embedded
 or included. [Installation and hardware checks](TESTING.md) describe the SD
 layout and controls. This is a test candidate, not full-port acceptance.
+
+This target policy supersedes the earlier Original-3DS stereo experiments
+documented below. Historical packages do not gain this change retroactively.
+CPU speedup alone does not establish stable 60 FPS; measure New-model stereo
+and old-model mono separately before claiming playable performance.
+
+## Opt-in native frame profiling
+
+`STARFOX_3DS_PROFILE_FRAMES=ON` enables separate raw ARM11-clock timing for
+source video/logic, scene capture, both SPC drivers plus mixing/output, raster
+publication, models, BG layers, dots, composition and GPU presentation. The
+native build helper accepts the same environment variable; it defaults OFF.
+The bring-up CI candidate enables it for investigation, not an FPS claim.
+Profiling does not change source ticks, SPC rates/voices, scene content or
+slider projection. The disabled scopes do not read the clock.
+
+The opt-in player writes `native-frame-profile-<startup tick>.csv` in the
+existing companion SD folder. It never replaces saves, settings or assets.
+Output is limited to 512 one-second windows; unavailable/full storage stops
+logging without terminating play. Timing parents include their children:
+`frame` includes `advance`, and `advance` includes logic/audio/raster work.
+Do not sum those overlapping columns. Source counters are cumulative for the
+current owner; flow/BG identify the state sampled at window completion, so a
+transition window may contain more than one scene. CSV serialization occurs
+after the measured frame, and diagnostic SD traffic can perturb later timings.
+Emulator measurements still do not prove physical Original 3DS performance.
+
+## Native IPO performance experiment
+
+`STARFOX_3DS_ENABLE_IPO=ON` asks CMake to verify link-time optimization support
+with the active compiler/ABI, then enables it across the actual cartridge CPU,
+SPC, source PPU/geometry, frontend and player targets. Unsupported explicit
+requests fail configuration; the option defaults OFF. The native helper accepts
+the same ON/OFF environment variable. This does not select an approximate DSP,
+fast-math, lower audio rate, fewer source ticks, mono output or reduced scenery.
+
+Bring-up CI retains the native compiler commands and cache alongside its
+existing tests, linked-stack and package checks. Compare
+the same ordinary native route and phase CSV against the non-IPO baseline
+before claiming a speed gain. Compilation and emulator timing are not physical
+Original 3DS/XL performance acceptance or a verified release.
+
+The first full native IPO candidate passed the unchanged host, ARM stack and
+package gates, but its ordinary-route emulator comparison did not establish
+a useful overall speed gain. Gameplay still presented at approximately 1 FPS.
+Keep the option default OFF; this is not a completed performance fix or a
+tester-ready port. Continue with measured source/audio/PPU work rather than
+attributing successful linking or a smaller executable to higher frame rates.
+
+Native PPU raster caches now compare the wrapped character/map ranges used by
+each painter pass, plus its relevant OAM, scroll, mosaic, palette and Mode-2
+offset inputs. Unrelated VRAM writes do not force a background decode/recolour.
+Mode-3 BG1 still depends on all 64 KiB; both OBJ banks retain large-sprite tile
+carry. Fresh-decode comparisons cover modes 1–3, every map size, 8/16-pixel tiles,
+wrapped ranges, sprites, fades, re-enabling layers and tunnel offsets. These
+correctness checks do not establish a native frame-rate gain. The candidate
+passed the full host/ARM/stack/package gates, then completed the ordinary route
+with IPO OFF against the earlier non-IPO baseline. Its dominant gameplay
+frame/layer costs remained effectively unchanged and the emulator still showed
+approximately 1 FPS. This is not a completed speed fix or a tester-ready port;
+continue with changing-layer preparation, accurate SPC and VM costs rather than
+removing content or changing source timing to conceal the remaining work.
 
 ## Native EX span follow-up
 
@@ -33,11 +100,12 @@ near/far clipping, an eye-only visible face, palette/window ordering and
 transaction rollback. All twenty freshly rebuilt host suites pass. Private
 local cartridge catalogue checks include 2,697 Original and 3,511 EX models,
 335,232 poses including the EX combinations, with no conversion failure;
-per-model peaks are 13,206 vertices / 125 draws / 39 textures. These are
+per-model peaks after coalescing are 9,348 vertices / 125 draws / 39 textures. These are
 individual-model resource checks, not a complete-scene memory or performance
 claim. The shared generator also retains all three pre-extraction raster
-fingerprints across 4,608 frames. Actual ARM/GPU acceptance of this follow-up
-is still pending; R11 predates it and must not be relabeled as containing it.
+fingerprints across 4,608 frames. R11 predates it and must not be relabeled as
+containing it. Corrected R12 ARM/emulator bring-up is described below; full
+Original/EX scene/effect and physical-device acceptance remains pending.
 The asset-free native GPU diagnostic now exposes these eight span modes via
 L/R on a sloping face, alongside unchanged textured cubes. Its small separate
 CI artifact allows native effect checks without downloading debug ELFs.
@@ -54,6 +122,17 @@ and audio state remain unchanged by these presentation-only stress fixtures.
 This does not establish every scene, physical FPS or total-process peak RAM.
 The first EX ARM checkpoint `2cb9e0d21c2c211be29071a5162c453d2346a2ab`
 predates this resource correction, despite passing build/package gates.
+
+Corrected checkpoint `542464e547faee2e1c946d5136f48d48d64396ea` passes
+native CI 37234599486, independent player-package checks, the asset-free native
+eight-mode GPU probe and a fresh normal-menu Original map/briefing/campaign-entry
+replay in isolated Original-3DS-profile Azahar. Map and briefing outer margins
+are uniform in the source colours; the retained entry sample has distinct
+upper-eye geometry and exactly matching lower HUDs. The first timed capture
+attempt selected emulator popups and was rejected; the fresh replay uses only
+the unique owned game window. These are emulator bring-up checks, not full
+campaign coverage, physical slider comfort, device FPS or total peak RAM.
+The local experimental handoff is `build/StarFoxEnhanced-original-3ds-test-r12.zip`.
 
 ## Bounded texture replacements
 
@@ -1180,7 +1259,7 @@ remote CI run, release publication or console installation was performed.
 4. Retain the now-linked `GameHud` bridge in the game presenter, verify EX
    player-two reserve/bomb export and complete native overlay routing. Apply split-HUD
    selection only when `game_routing(...).move_hud` is true.
-5. Profile **original** 3DS memory/CPU/GPU budgets. Reuse buffers; upload static
+5. Profile **New 3DS stereo** and **original-model mono** memory/CPU/GPU budgets separately. Reuse buffers; upload static
    geometry/textures once; update the dashboard only when its contents change;
    render no second eye at zero. Keep native resolution and original game timing
    as the baseline. Set a presentation target only after hardware measurements.
@@ -1191,8 +1270,9 @@ remote CI run, release publication or console installation was performed.
 The existing desktop Vulkan/D3D/Metal and OpenXR paths cannot be enabled on
 PICA200 unchanged. SDL's current 3DS renderer is software-only, so merely
 compiling the PC SDL runtime would not meet this port's stereo/performance goals.
-New 3DS speedup is deliberately disabled in the diagnostic to keep the baseline
-consistent with the requested original hardware.
+New 3DS speedup was disabled in the earlier Original-target experiments. The
+current model policy enables it only on detected New models, without changing
+source game timing or requiring New-only instructions or memory allocation.
 
 The suggested [OpenCTR SDK](https://openctr.github.io/) was evaluated on
 October 3. Its [published binaries](https://github.com/OpenCTR/OpenCTR/releases)

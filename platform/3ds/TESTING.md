@@ -1,13 +1,17 @@
-# Star Fox Enhanced — Original 3DS hardware-test candidate
+# Star Fox Enhanced — New 3DS stereo / original-model mono test candidate
 
 This is an experimental native player, not a verified release. It contains
 the real pre-game menu, cartridge simulation, SPC audio, native 3D geometry,
 slider-controlled stereoscopic top screen and configurable lower-screen HUD.
-It does not require a New 3DS. Original 3DS/XL performance and device behavior
-have not been established; source scenery/effect transitions still need testing.
+New 3DS/XL is now the stereo/performance target. Its normal CPU/cache speedup
+is requested automatically. Original 3DS/XL ignores the slider and renders
+only one eye; 2DS is also mono. New 2DS XL uses the CPU speedup but stays mono.
+The same package supports all models, with no changed cartridge timing.
+Physical performance and source scenery/effect transitions still need testing;
+this is not a promise of stable 60 FPS.
 
 For EX menu testing, also try Background choices 21, 25 and 35 (orbital),
-19/27/28/31 (unique space) and 2 (stars). The 3D slider should move their
+19/27/28/31 (unique space) and 2 (stars). On New 3DS/XL, the 3D slider should move their
 background into depth while the native menu text remains at screen depth.
 Other menu/map/Controls routing remains unchanged. Source checks pass; the
 physical LCD result still needs testing.
@@ -47,11 +51,72 @@ emulator route: map and briefing margins no longer duplicate their artwork,
 and initial campaign geometry retains distinct eyes with an unchanged lower
 HUD. Full Original/EX stage-flow and physical-device checks remain in progress.
 Do not treat an earlier package's host/link checks as proof that its displayed
-artwork is correct. The local current candidate is
-`build/StarFoxEnhanced-original-3ds-test-r11.zip`; check its source commit
-`033594c200f8625711b310270684bc4ef7c1c8e0` in `BUILD-INFO.json`.
+artwork is correct. The historical R12 candidate is
+`build/StarFoxEnhanced-original-3ds-test-r12.zip`; its source commit is
+`542464e547faee2e1c946d5136f48d48d64396ea` in `BUILD-INFO.json`.
+R12 adds the EX span consumer and bounded-run resource corrections. Its ARM
+build/package gates pass, and fresh native emulator tests cover the asset-free
+eight-mode effect probe and normal Original menu/map/briefing/campaign entry.
+An earlier capture attempt selected emulator popup windows and was rejected;
+the fresh actual-game-window captures pass margin and eye/HUD checks. These
+are not complete-stage, physical-device performance or total-memory results.
 
-1. Use a 3DS/3DS XL with an existing homebrew setup and Homebrew Launcher.
+For current hardware testing, use **StarFoxEnhanced-3ds-test** from the latest
+successful **3DS native bring-up checks** on `codex/3ds-native-bringup`.
+Check `BUILD-INFO.json`: its target must say New Nintendo 3DS stereo with
+original-model mono, and its hardware policy must match the description above.
+R38 and older packages predate this change. No ROM, asset BIN or DSP firmware
+is bundled. If an artifact has expired, request a current package.
+
+The following R35 details are historical Original-target measurements, not the
+current New-model candidate or evidence of its performance. R35 used artifact
+`StarFoxEnhanced-original-3ds-test` from
+[native check run 37304639533](https://github.com/kandowontu2/starfox-enhanced/actions/runs/37304639533).
+Its ZIP contains `BUILD-INFO.json` with source commit
+`14326c557288ddda2e4a431e7f1638d9237e6bef`. Do not substitute an older ZIP.
+R35 retains the real menu/audio/stereo/HUD and includes the source timing,
+object synchronization, page transfers and tunnel-row follow-ups. It adds
+packed exact RGBA writes and row-level crop-bound updates; palette-only fades
+retain decoded layer ownership. Independent scalar and frozen-renderer checks
+preserve colours, transparency and bounds, and real Original/EX route snapshots
+retain their complete RGBA/ownership/VM/SPC digest at slider 0/0.5/1. These are
+not complete-stage or native-pixel acceptance. Exact signed saturation remains
+in the private native DSP copy, without removing voices, samples, filters or
+either accurate SPC stem. All 35 host tests and the native ARM/stack/package
+checks pass. R35's bounded native emulator replay reduces corridor colour
+conversion from 24.413 to 14.391 ms/call (168 calls each), with unchanged
+decode/source/audio costs. Matching window-end flow/background is not a
+physical-console or exact-pose whole-game FPS result. Its separate asset-free diagnostic adds
+an opt-in CSND compatibility test; **gameplay still uses NDSP**. The separate
+R34 native arithmetic probe passed 4,326,406 exact inputs under emulation. This
+does not establish console audio or gameplay speed. R34's bounded same-input
+native emulator replay shows a modest reduction in audio component cost,
+with exact host source/audio parity. Window source poses/call counts differ;
+this is not a sustained-console or exact-pose whole-frame FPS result. The
+earlier bounded R32 replay reaches
+Corneria's launch tunnel and outdoor section with reduced decode/logic cost;
+it is **not** proof of sustained Original-3DS FPS, complete stages or physical
+audio/slider/sleep behavior. This remains a test candidate, not a release.
+If the CI artifact has expired, request a current package instead of assuming
+an older build contains these fixes. No ROM, asset BIN or DSP firmware is bundled.
+
+For a console with an NDSP initialization crash, the separate small
+`StarFoxEnhanced-3ds-audio-compatibility-check` artifact from that same run
+offers a Y-triggered CSND left/right test without game data. See
+[CSND-CHECK.md](CSND-CHECK.md) before running it. That is a compatibility check,
+not proof that the full player uses CSND or that streaming/sleep behavior works.
+
+The separate `StarFoxEnhanced-3ds-spc-saturation-check` artifact from R34 is
+an optional **arithmetic check, not a game or sound-output test**. Copy its
+`.3dsx` and `.smdh` together into their own folder under the SD card's `/3ds/`.
+It needs no cartridge assets or DSP firmware. It reports PASS/FAIL and writes
+one uniquely named `starfox-spc-saturation-*.txt` to the SD root; share that
+small report if the result fails. Select + Start exits. Do not mistake this
+result for sustained FPS, streaming audio, full process-RAM or hardware
+acceptance of the player.
+
+1. Prefer a New 3DS/New 3DS XL with an existing homebrew setup and Homebrew Launcher.
+   Original 3DS/XL and 2DS use the same package in mono.
    This package does not modify firmware or install a CIA.
 2. Extract the ZIP to the SD card root. The program is
    `/3ds/starfox-enhanced/starfox-enhanced.3dsx`.
@@ -75,7 +140,9 @@ Back up existing `starfox-enhanced` settings/save files before testing.
 
 - Face buttons and L/R follow the SNES/Nintendo physical arrangement.
 - Circle Pad and D-pad steer. Start pauses the game.
-- The 3D slider changes stereo strength without advancing the game twice.
+- On New 3DS/XL the 3D slider changes stereo strength without advancing the
+  game twice. Slider zero skips the right eye. On Original 3DS/XL the slider
+  is ignored, including during preview and gameplay; the top screen stays mono.
   Slider-off and 2DS use one mono eye. Begin testing at modest separation.
 - Select + Y opens the native quick menu (resume/options/save/load).
 - Select + Start exits. Home/sleep should suspend and resume safely.
@@ -83,10 +150,14 @@ Back up existing `starfox-enhanced` settings/save files before testing.
   the lower HUD. Hold the mapped in-game L+R in setup for five seconds to reset
   settings; cartridge saves are retained.
 
-## Check on an Original 3DS/XL
+## Check on New 3DS/XL; separately check old-model mono
 
 Please report model, build commit from `BUILD-INFO.json`, Original/EX,
-stage/scene, render FPS setting and stereo separation/convergence.
+stage/scene, model, render FPS setting and stereo separation/convergence.
+On New 3DS/XL compare slider 0, halfway and full. On Original 3DS/XL verify
+both slider extremes stay mono. On New 2DS XL verify mono gameplay. Check
+Home-menu return, lid-close/wake and clean exit on each model. Do not compare
+New and old emulator timings as though they were the same hardware baseline.
 
 - Preview OFF should keep the plain menu responsive; preview ON should show
   RENDERING during preparation. Start Game, experience switching and restart

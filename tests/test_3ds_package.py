@@ -46,6 +46,12 @@ class PackageTests(unittest.TestCase):
         self.assertFalse(info["hardware_accepted"])
         self.assertFalse(info["private_assets_included"])
         self.assertEqual(info["source_commit"], COMMIT)
+        self.assertIn("New Nintendo 3DS", info["target"])
+        self.assertEqual(info["hardware_policy"], {
+            "new_3ds": "CPU/cache speedup and slider-controlled stereo",
+            "new_2ds_xl": "CPU/cache speedup, mono",
+            "original_3ds_xl_2ds": "standard CPU, mono; slider ignored",
+            "unknown": "standard CPU, mono"})
         with zipfile.ZipFile(self.output) as archive:
             self.assertEqual(set(archive.namelist()), {MODULE.APP_DIR + "starfox-enhanced.3dsx",
                 MODULE.APP_DIR + "starfox-enhanced.smdh", "README.txt", "BUILD-INFO.json", "SHA256SUMS.txt"})

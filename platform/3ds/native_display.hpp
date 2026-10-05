@@ -1,5 +1,6 @@
 #pragma once
 #include "starfox/platform/nintendo_3ds/frontend.hpp"
+#include "starfox/platform/nintendo_3ds/hardware_profile.hpp"
 
 namespace starfox::platform::nintendo_3ds {
 struct NativeInput {
@@ -15,8 +16,11 @@ public:
     NativeDisplay(const NativeDisplay&)=delete;
     NativeDisplay& operator=(const NativeDisplay&)=delete;
     NativeInput poll();
+    [[nodiscard]] HardwareProfile profile() const noexcept {return profile_;}
     void present(const FramePlan&,ImageView left,ImageView right,ImageView lower);
 private:
-    bool stereoscopic_hardware_{};
+    struct Runtime;
+    HardwareProfile profile_{};
+    std::unique_ptr<Runtime> runtime_;
 };
 } // namespace starfox::platform::nintendo_3ds
