@@ -1,4 +1,5 @@
 #include "starfox/platform/nintendo_3ds/pica_raster.hpp"
+#include "starfox/platform/nintendo_3ds/frame_profile.hpp"
 #include <cstring>
 
 namespace starfox::platform::nintendo_3ds {
@@ -146,6 +147,7 @@ PicaFrame PicaRaster::prepare(std::shared_ptr<const simulation::SnesPpuState> so
     const int origin=int((width-256)/2);
     auto next=std::unique_ptr<render::Framebuffer>{};
     if(decode) {
+        STARFOX_3DS_FRAME_PHASE(bg_decode);
         next=std::make_unique<render::Framebuffer>(width,native_height);
         next->enable_layer_tags(true);next->begin_write_coverage();
         const render::BackgroundRenderer backgrounds;const render::SpriteRenderer sprites;
@@ -191,6 +193,7 @@ PicaFrame PicaRaster::prepare(std::shared_ptr<const simulation::SnesPpuState> so
     if(decode) for(auto& bounds:occupied) bounds={pica_raster_strip_width,screen_height,0,0};
     if(decode) layers.assign(std::size_t(width)*screen_height,0);
     if(recolour) {
+        STARFOX_3DS_FRAME_PHASE(bg_colour);
         pixels.assign(std::size_t(width)*screen_height*4,0);visible=false;
         std::array<std::array<std::uint8_t,3>,256> normal{},background{};
         for(unsigned ink=0;ink<normal.size();++ink) {

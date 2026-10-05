@@ -1,6 +1,7 @@
 #include "starfox/simulation/wdc65816.hpp"
 #include "starfox/compat/bit_cast.hpp"
 #include "starfox/simulation/irq_palette.hpp"
+#include "starfox/platform/nintendo_3ds/frame_profile.hpp"
 
 #include "starfox/assets/decrunch.hpp"
 #include "starfox/assets/bps.hpp"
@@ -3004,6 +3005,7 @@ std::size_t Wdc65816::call(
     std::size_t instruction_limit,
     bool service_transfer_flag,
     bool long_return) {
+    STARFOX_3DS_FRAME_PHASE(cpu);
     impl_->task_active = false;
     auto& cpu = impl_->cpu;
     cpu.SetRegister("p", registers.status);
@@ -3166,6 +3168,7 @@ Wdc65816TaskResult Wdc65816::run_task(
     std::span<const std::uint32_t> stop_addresses,
     std::size_t instruction_limit,
     bool service_transfer_flag) {
+    STARFOX_3DS_FRAME_PHASE(cpu);
     auto& cpu = impl_->cpu;
     Wdc65816TaskResult result;
     std::array<std::uint32_t, 32> recent_program_counters{};

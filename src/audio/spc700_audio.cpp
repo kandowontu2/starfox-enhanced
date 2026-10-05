@@ -1,6 +1,7 @@
 #include "starfox/audio/spc700_audio.hpp"
 #include "starfox/state/archive.hpp"
 #include "starfox/state/container.hpp"
+#include "starfox/platform/nintendo_3ds/frame_profile.hpp"
 
 #include <spc.h>
 #include <SPC_Filter.h>
@@ -272,7 +273,10 @@ struct Spc700Audio::Impl {
         int last_clock = 0;
         auto finish_frame = [&] {
             if (!loaded) return;
-            spc_end_frame(spc, kClocksPerLogicTick);
+            {
+                STARFOX_3DS_FRAME_PHASE(spc_emulate);
+                spc_end_frame(spc, kClocksPerLogicTick);
+            }
             if (rendered_frames != nullptr) ++*rendered_frames;
             // A later upload calls spc_load_spc and replaces the output
             // buffer. Clear this completed bank's samples now; startup audio
@@ -314,7 +318,10 @@ struct Spc700Audio::Impl {
                 const auto clock = std::clamp(
                     static_cast<int>(write.clock_offset), last_clock,
                     kClocksPerLogicTick);
-                spc_write_port(spc, clock, write.port, write.value);
+                {
+                    STARFOX_3DS_FRAME_PHASE(spc_emulate);
+                    spc_write_port(spc, clock, write.port, write.value);
+                }
                 last_clock = clock;
             }
             if (!was_loaded && loaded) {
@@ -327,14 +334,20 @@ struct Spc700Audio::Impl {
         }
 
         if (!loaded) return;
-        spc_end_frame(spc, kClocksPerLogicTick);
+        {
+            STARFOX_3DS_FRAME_PHASE(spc_emulate);
+            spc_end_frame(spc, kClocksPerLogicTick);
+        }
         if (rendered_frames != nullptr) ++*rendered_frames;
         const auto generated = std::clamp(spc_sample_count(spc), 0,
                                           static_cast<int>(output.size()));
         if (generated < static_cast<int>(output.size())) {
             std::fill(output.begin() + generated, output.end(), 0);
         }
-        spc_filter_run(filter, output.data(), static_cast<int>(output.size()));
+        {
+            STARFOX_3DS_FRAME_PHASE(spc_filter);
+            spc_filter_run(filter, output.data(), static_cast<int>(output.size()));
+        }
     }
 };
 
@@ -381,10 +394,16 @@ void Spc700Audio::load_state(std::span<const std::uint8_t> bytes) {
 
 void Spc700Audio::render_stems_logic_tick(
     std::span<const simulation::ApuPortWrite> writes) {
-    music_impl_->render(last_music_samples_,
-        writes, false, nullptr, Impl::CommandStream::music);
-    effects_impl_->render(last_effect_samples_,
-        writes, false, nullptr, Impl::CommandStream::effects);
+    {
+        STARFOX_3DS_FRAME_PHASE(music);
+        music_impl_->render(last_music_samples_,
+            writes, false, nullptr, Impl::CommandStream::music);
+    }
+    {
+        STARFOX_3DS_FRAME_PHASE(effects);
+        effects_impl_->render(last_effect_samples_,
+            writes, false, nullptr, Impl::CommandStream::effects);
+    }
     if (last_music_samples_.size() != last_effect_samples_.size()) {
         throw std::runtime_error{"SPC music/effect stem size mismatch"};
     }

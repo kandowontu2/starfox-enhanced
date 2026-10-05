@@ -58,9 +58,15 @@ void measure(const assets::RomImage& rom, const assets::SymbolMap& symbols, cons
     }
     if (rasters != frames || blocks != frames / 3U || !logic)
         throw std::runtime_error("Actual source cadence changed in CPU timing fixture");
-    for (auto phase : {FramePhase::logic, FramePhase::video, FramePhase::capture, FramePhase::audio}) {
+    for (unsigned index = 0; index < unsigned(FramePhase::count); ++index) {
+        const auto phase = FramePhase(index);
         const auto& sample = profile.totals()[unsigned(phase)];
-        if (!sample.calls) throw std::runtime_error("Missing actual phase timer; enable native frame profiling");
+        if (!sample.calls) {
+            if (phase == FramePhase::logic || phase == FramePhase::video
+                || phase == FramePhase::capture || phase == FramePhase::audio)
+                throw std::runtime_error("Missing actual phase timer; enable native frame profiling");
+            continue;
+        }
         std::cout << map << ',' << frame_phase_names[unsigned(phase)] << ',' << sample.calls
             << ',' << double(sample.ticks) / 1000000.0 << ',' << rasters << ',' << logic << ',' << blocks
             << ',' << std::hex << trace << std::dec << std::endl;

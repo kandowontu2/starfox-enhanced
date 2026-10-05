@@ -9,11 +9,15 @@ namespace starfox::platform::nintendo_3ds {
 // or desktop wall time. Parent phases deliberately include their children.
 enum class FramePhase : unsigned {
     frame, advance, video, logic, capture, audio, raster, checkpoint, menu,
-    models, layers, dots, composite, present, count
+    models, layers, dots, composite, present,
+    cpu, strategies, view, cull, audio_irq, music, effects, spc_emulate,
+    spc_filter, bg_decode, bg_colour, count
 };
 inline constexpr std::array<std::string_view, unsigned(FramePhase::count)> frame_phase_names{
     "frame", "advance", "video", "logic", "capture", "audio", "raster",
-    "checkpoint", "menu", "models", "layers", "dots", "composite", "present"
+    "checkpoint", "menu", "models", "layers", "dots", "composite", "present",
+    "cpu", "strategies", "view", "cull", "audio_irq", "music", "effects",
+    "spc_emulate", "spc_filter", "bg_decode", "bg_colour"
 };
 struct FramePhaseTotals {
     std::uint64_t calls{}, ticks{}, maximum{};
@@ -35,7 +39,8 @@ public:
     }
     [[nodiscard]] const auto& totals() const noexcept { return totals_; }
     [[nodiscard]] bool stopped() const noexcept { return stopped_; }
-    // At most 512 one-second windows and 14 bounded-width rows per window.
+    // At most 512 one-second windows and FramePhase::count bounded-width rows
+    // per window. New phases are appended so existing phase indices stay stable.
     // A failed/full stream is disabled, never allowed to terminate the game.
     bool write_window(std::ostream& stream, std::uint64_t time, int flow, unsigned background,
                       unsigned video_phases, unsigned logic_ticks, unsigned audio_blocks) noexcept {

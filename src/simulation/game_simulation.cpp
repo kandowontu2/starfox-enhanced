@@ -3,6 +3,7 @@
 #include "starfox/render/environment_effects.hpp"
 #include "starfox/simulation/game_simulation.hpp"
 #include "starfox/simulation/irq_palette.hpp"
+#include "starfox/platform/nintendo_3ds/frame_profile.hpp"
 
 #include "starfox/assets/decrunch.hpp"
 #include "starfox/input/buttons.hpp"
@@ -2401,6 +2402,7 @@ void GameSimulation::stop_music_on_player_death() {
 }
 
 void GameSimulation::service_audio_irq(std::vector<std::uint8_t>& commands) {
+    STARFOX_3DS_FRAME_PHASE(audio_irq);
     stop_music_on_player_death();
     // IRQ.ASM's STARTMUS runs once per 60 Hz video phase. Keep its two-step
     // port acknowledgements and 16-entry effect queue intact even though the
@@ -5318,6 +5320,7 @@ void GameSimulation::service_transfer_request() {
 }
 
 void GameSimulation::calculate_view() {
+    STARFOX_3DS_FRAME_PHASE(view);
     const auto read_word = [this](std::uint32_t address) {
         return signed_word(map_.read_native_word(address));
     };
@@ -5450,6 +5453,7 @@ void GameSimulation::calculate_view() {
 }
 
 std::size_t GameSimulation::update_view_flags_and_cull() {
+    STARFOX_3DS_FRAME_PHASE(cull);
     constexpr std::uint8_t view_flag_mask = 0x02U | 0x04U | 0x08U | 0x10U;
     constexpr std::uint8_t front_and_in_view = 0x08U | 0x10U;
     constexpr std::uint8_t left_of_view = 0x04U;

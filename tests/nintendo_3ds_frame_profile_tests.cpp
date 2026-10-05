@@ -31,6 +31,13 @@ int main() try {
         require(profile.totals()[unsigned(FramePhase::models)] == FramePhaseTotals{1,30,30}, "Unwinding lost timing");
     }
     require(!active_frame_profile, "Profiler outlived owner");
+    static_assert(unsigned(FramePhase::present) == 13);
+    static_assert(frame_phase_names.size() == unsigned(FramePhase::count));
+    for(unsigned i = 0; i < frame_phase_names.size(); ++i) {
+        require(!frame_phase_names[i].empty(), "Empty phase name");
+        for(unsigned j = 0; j < i; ++j)
+            require(frame_phase_names[i] != frame_phase_names[j], "Duplicate phase name");
+    }
     profile.record(FramePhase::audio, 200, 210);
     std::ostringstream stream;
     require(!profile.write_window(stream, 999, 9, 4, 30, 10, 10) && stream.str().empty(), "Sub-second diagnostic wrote data");
@@ -79,5 +86,47 @@ int main() try {
     try { failed_stream.exceptions(std::ios::badbit); } catch(const std::ios_base::failure&) {}
     require(!throwing.write_window(failed_stream, tick+1, 0, 0, 0, 0, 0) && throwing.stopped(),
         "Throwing stream escaped noexcept diagnostic");
+    tick = 0;
+    FrameProfile details(clock_tick, 1000);
+    {
+        ScopedFrameProfileActivation activation(details);
+        const auto before = clock_calls;
+        { STARFOX_3DS_FRAME_PHASE(cpu); tick += 1; }
+        { STARFOX_3DS_FRAME_PHASE(strategies); tick += 2; }
+        { STARFOX_3DS_FRAME_PHASE(view); tick += 3; }
+        { STARFOX_3DS_FRAME_PHASE(cull); tick += 4; }
+        { STARFOX_3DS_FRAME_PHASE(audio_irq); tick += 5; }
+        { STARFOX_3DS_FRAME_PHASE(music); tick += 6; }
+        { STARFOX_3DS_FRAME_PHASE(effects); tick += 7; }
+        { STARFOX_3DS_FRAME_PHASE(spc_emulate); tick += 8; }
+        { STARFOX_3DS_FRAME_PHASE(spc_filter); tick += 9; }
+        { STARFOX_3DS_FRAME_PHASE(bg_decode); tick += 10; }
+        { STARFOX_3DS_FRAME_PHASE(bg_colour); tick += 11; }
+#if defined(STARFOX_3DS_PROFILE_FRAMES)
+        require(clock_calls == before + 22, "Detailed macros lost clock boundaries");
+        for(unsigned i = unsigned(FramePhase::cpu); i < unsigned(FramePhase::count); ++i) {
+            const std::uint64_t duration = i - unsigned(FramePhase::cpu) + 1U;
+            require(details.totals()[i] == FramePhaseTotals{1, duration, duration},
+                "Detailed phase timing/count mismatch");
+        }
+#else
+        require(clock_calls == before && details.totals()
+            == std::array<FramePhaseTotals,unsigned(FramePhase::count)>{},
+            "Disabled detailed markers changed runtime work");
+#endif
+    }
+    // Exercise every row, not only the original fourteen. New details must
+    // obey the same stream failure/reset/window limits as their parents.
+    for(unsigned i = 0; i < unsigned(FramePhase::count); ++i)
+        details.record(FramePhase(i), 100, 101);
+    std::ostringstream detailed_csv;
+    require(details.write_window(detailed_csv, 1000, 9, 3, 3, 1, 1),
+        "Detailed CSV failed");
+    const auto detailed_text = detailed_csv.str();
+    for(auto name : frame_phase_names)
+        require(detailed_text.find("," + std::string(name) + ",") != std::string::npos,
+            "Detailed CSV omitted a phase");
+    require(details.totals() == std::array<FramePhaseTotals,unsigned(FramePhase::count)>{},
+        "Detailed window retained counters");
     std::cout << "3DS native phase totals, nested owners, rollover, unwinding, CSV cadence and failed/bounded logging pass\n";
 } catch(const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }

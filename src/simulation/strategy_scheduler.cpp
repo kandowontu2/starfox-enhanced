@@ -1,4 +1,5 @@
 #include "starfox/simulation/strategy_scheduler.hpp"
+#include "starfox/platform/nintendo_3ds/frame_profile.hpp"
 
 #include <stdexcept>
 #include <sstream>
@@ -146,6 +147,7 @@ std::size_t NativeStrategyScheduler::tick_object(ObjectHandle object) {
 }
 
 StrategyTickStats NativeStrategyScheduler::tick_all() {
+    STARFOX_3DS_FRAME_PHASE(strategies);
     StrategyTickStats result;
     std::array<std::uint64_t, kMaximumObjects + 1> visited{};
     const auto next_unvisited = [&]() {
@@ -188,6 +190,7 @@ StrategyTickStats NativeStrategyScheduler::tick_all() {
 
 StrategyTickStats NativeStrategyScheduler::tick_all_no_objects(
     std::span<const ObjectHandle> protected_objects) {
+    STARFOX_3DS_FRAME_PHASE(strategies);
     StrategyTickStats result;
     auto object = objects_->first_active();
     for (std::size_t guard = 0; object != 0 && guard < 4096; ++guard) {
