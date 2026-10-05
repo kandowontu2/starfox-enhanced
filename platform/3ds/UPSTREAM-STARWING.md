@@ -22,12 +22,22 @@ The first enabled path covers isolated, ordinary Mode-2 BG2 at screen depth or
 our existing infinity projection. Extra LCD rows clamp the same source scanline;
 both eye frusta retain their full source-derived coverage.
 Complete constant vertical-offset tables are supported with their actual source
-offset, not BG2VOFS. Sloped/gapped tables, lower tilemap wraps, priority holes and
-transparent lower characters that need reference ground continuation fall back intact.
-Source mosaic, rolled/finite terrain, tunnel geometry, unique moons/planets and
-mixed-priority painter groups retain the existing exact raster path. Capacity
-or atlas-budget rejection also falls back before publishing partial geometry.
-Further adaptation must preserve our finite-ground/sky stereo semantics rather
-than copy the upstream flat BG2 depth policy.
+offset, not BG2VOFS. The second enabled path covers isolated Mode-2 outdoor
+landscapes, including all-sample fitted roll, gapped tables/register fallback,
+scanline offsets and the original lower wrap/transparent/priority-hole colour
+continuation. Uniform source characters and carried colours are merged into
+rectangles; no invented ground colour or completed model image enters the atlas.
+Its finite quads retain our source camera plane, near/far clipping, homogeneous
+UV/Q pixel registration and both eye frusta. The entire infinity artwork is
+drawn before every finite receiver, with the same source BG2 stencil/depth.
+
+Source mosaic, water/corridors/tunnels, unique moons/planets/sky halves and
+mixed-priority painter groups retain the existing exact raster path. The flat
+screen/infinity path still declines nonconstant roll and lower ground carry;
+the complete terrain planner is explicitly selected only for outdoor receivers.
+Capacity or atlas-budget rejection also falls back to the complete reference
+scene before publishing partial geometry, including the finite vertices in the
+caller's remaining whole-scene budget. We retain our finite-ground/sky stereo
+semantics rather than copying the upstream flat BG2 depth policy.
 
 Host equivalence and ARM compilation do not establish physical-console speed.

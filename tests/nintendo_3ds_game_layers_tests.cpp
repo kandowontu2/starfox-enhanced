@@ -285,6 +285,79 @@ void landscape_depth() {
     auto raster=std::make_shared<GameRasterSnapshot>(*frame.raster);raster->ppu=ppu;frame.raster=raster;
     require(!native_landscape_scene(frame),"Tunnel artwork was misclassified as outdoor ground");
 }
+void atlas_landscape_depth() {
+    for(int roll:{-3,0,3}) for(unsigned offset:{232U,1008U,8190U}) {
+        auto frame=source(simulation::GameFlowState::gameplay,2);
+        auto scene=std::make_shared<vr::GameSceneSnapshot>(*frame.current);
+        scene->background_landscape=true;scene->landscape_grid_height=-145;scene->landscape_atlas_origin=232;
+        frame.current=frame.previous=scene;frame.plan=plan_frame(1,true,ScreenUse::world);
+        auto ppu=std::make_shared<simulation::SnesPpuState>(*frame.raster->ppu);
+        ppu->main_screen=2;ppu->bg2_scroll_y=232;ppu->bg2_vertical_offsets_enabled=true;
+        for(unsigned y=0;y<8;++y) ppu->vram[0x2040+y*2]=std::uint8_t(y%2?0xaa:0x55);
+        for(unsigned y=0;y<32;++y) for(unsigned x=0;x<32;++x) {
+            const unsigned character=x%16==7 && y%8==3?2:x%16==3 && y>16?0:1;
+            const unsigned tile=character|((y/4)<<10)|((x%2)<<14),at=0x6400+(y*32+x)*2;
+            ppu->vram[at]=std::uint8_t(tile);ppu->vram[at+1]=std::uint8_t(tile>>8);
+        }
+        for(unsigned i=0;i<32;++i) {
+            const unsigned word=0x4000|((int(offset)+roll*int(i+1))&8191),at=0x5f40+i*2;
+            ppu->vram[at]=std::uint8_t(word);ppu->vram[at+1]=std::uint8_t(word>>8);
+        }
+        ppu->cgram[17]=0; // Nonzero source index with opaque black RGB.
+        auto raster=std::make_shared<GameRasterSnapshot>(*frame.raster);raster->ppu=ppu;frame.raster=raster;
+        GameLayers native,baseline;const auto gpu=native.prepare(frame,pica_vertex_limit),cpu=baseline.prepare(frame);
+        require(gpu.before_models.textures.size()==1 && gpu.before_models.textures[0].width==256,
+            "Supported rolled landscape did not use its compact source atlas");
+        const auto& group=gpu.before_models;
+        require(group.draws.size()==2 && group.draws[0].space==PicaSpace::scenery
+            && group.draws[1].space==PicaSpace::world && group.draws[1].projected_uv
+            && group.draws[1].depth_test && group.draws[1].depth_write,
+            "Atlas terrain lost source depth, infinity ordering or projected UV");
+        require(group.textures[0].source_layers.empty() && group.vertices.size()<pica_vertex_limit,
+            "Atlas terrain duplicated provenance or exceeded native geometry capacity");
+        const auto plane=source_landscape_plane(frame);const auto& finite=group.draws[1];
+        for(unsigned i=finite.first;i<finite.first+finite.count;++i) {
+            const auto& p=group.vertices[i].position;const double z=p[2];
+            const double x=200+frame.plan.focal_x*p[0]/z,y=120-frame.plan.focal_y*p[1]/z;
+            const double plane_error=std::abs(z*(y-plane.centre-plane.slope*(x-200))-145*frame.plan.focal_y);
+            // World vertices are float on PICA. Near the far clip, subtracting
+            // two rolled horizon terms magnifies their representational ULP.
+            const double rounding=4*std::numeric_limits<float>::epsilon()*(std::abs(z*(y-plane.centre))
+                +std::abs(z*plane.slope*(x-200))+145*frame.plan.focal_y);
+            require(plane_error<std::max(.2,rounding),
+                "Atlas ground vertices departed from the original camera plane");
+            require(z>=frame.plan.near_plane-.02 && z<=frame.plan.far_plane+.02,
+                "Atlas ground omitted the near/far source clip");
+        }
+        for(unsigned y=1;y<224;y+=9) for(unsigned x=1;x<256;x+=11)
+            require(mono_receiver_pixel(group,x,y)==mono_receiver_pixel(cpu.before_models,x,y),
+                "Finite atlas changed mono indexed colours, UV registration, transparency or BG2 ownership");
+        const auto saved_vertices=std::vector<PicaVertex>(group.vertices.begin(),group.vertices.end());
+        const auto before=native.work();
+        frame.plan=plan_frame(.5F,true,ScreenUse::world);
+        const auto slider=native.prepare(frame,pica_vertex_limit);
+        require(slider.before_models.vertices.size()==saved_vertices.size()
+            && std::equal(saved_vertices.begin(),saved_vertices.end(),slider.before_models.vertices.begin())
+            && native.work()[0].decodes==before[0].decodes,
+            "Slider rebuilt source atlas geometry instead of changing eye matrices");
+        const auto rejected=native.prepare(frame,5),reference=baseline.prepare(frame);
+        require(rejected.before_models.textures[0].width==reference.before_models.textures[0].width,
+            "Whole scene atlas overflow published truncated terrain instead of the complete raster");
+        for(unsigned y:{3U,113U,219U}) for(unsigned x:{3U,127U,251U})
+            require(mono_receiver_pixel(rejected.before_models,x,y)==mono_receiver_pixel(reference.before_models,x,y),
+                "Terrain budget fallback changed original coverage");
+        PicaBg2Tiles owner;GameScenery receiver;const auto policy=game_layer_plan(frame);
+        const auto tiles=owner.prepare(ppu,policy.before_models,frame.plan,15,0,pica_vertex_limit,32,true);
+        require(bool(tiles),"Receiver transaction fixture did not create an atlas");
+        const auto accepted=receiver.prepare_tiles(frame,*tiles,owner.coverage_guard(),pica_vertex_limit);
+        require(bool(accepted),"Receiver transaction fixture failed");
+        const auto old=std::vector<PicaVertex>(accepted->vertices.begin(),accepted->vertices.end());
+        require(!receiver.prepare_tiles(frame,*tiles,owner.coverage_guard(),unsigned(tiles->vertices.size())),
+            "Finite geometry overflow was not rejected atomically");
+        require(old.size()==accepted->vertices.size() && std::equal(old.begin(),old.end(),accepted->vertices.begin()),
+            "Failed receiver preparation invalidated a previous borrowed complete frame");
+    }
+}
 void unique_landscape_policy() {
     using enum simulation::GameFlowState;
     for(auto flow:{gameplay,training,intro,title,ex_pregame_menu,controls_type}) for(bool right:{false,true}) {
@@ -946,6 +1019,34 @@ void receiver_eye_coverage() {
         frame.plan=plan_frame(1,true,ScreenUse::world,settings);GameLayers layers;
         const auto group=layers.prepare(frame).before_models;validate_pica_frame(group,lower.view());
         const auto plane=source_landscape_plane(frame);bool finite_started=false;
+        GameLayers native;const auto atlas=native.prepare(frame,pica_vertex_limit).before_models;
+        require(atlas.textures.size()==1 && atlas.textures[0].width==256,
+            "Large source eye coverage incorrectly forced a flat/partial terrain atlas");
+        validate_pica_frame(atlas,lower.view());
+        for(unsigned eye=0;eye<2;++eye) for(unsigned y=0;y<240;y+=17) for(unsigned x=0;x<400;x+=23) {
+            const double px=x+.5,py=y+.5,motion=256.*frame.plan.eyes[eye].x,offset=frame.plan.eyes[eye].projection_offset;
+            const double sx=(px-offset+motion*(py-plane.centre+200*plane.slope)/(145*256))
+                /(1+motion*plane.slope/(145*256));
+            const double reciprocal=(py-plane.centre-plane.slope*(sx-200))/(145*256);
+            if(reciprocal<1./65536 || reciprocal>1) continue;
+            bool covered=false;
+            for(const auto& draw:atlas.draws) if(draw.space==PicaSpace::world)
+                for(unsigned i=draw.first;i<draw.first+draw.count;i+=3) {
+                    std::array<std::array<double,2>,3> triangle;
+                    for(unsigned k=0;k<3;++k) {
+                        const auto p=atlas.vertices[i+k].position;
+                        triangle[k]={200+256.*(p[0]-frame.plan.eyes[eye].x)/p[2]+offset,120-256.*p[1]/p[2]};
+                    }
+                    bool positive=true,negative=true;
+                    for(unsigned k=0;k<3;++k) {
+                        const auto a=triangle[k],b=triangle[(k+1)%3];
+                        const double cross=(b[0]-a[0])*(py-a[1])-(b[1]-a[1])*(px-a[0]);
+                        positive&=cross>=-.02;negative&=cross<=.02;
+                    }
+                    covered|=positive || negative;
+                }
+            require(covered,"Visible terrain pixel fell outside the guarded atlas in an eye");
+        }
         for(const auto& draw:group.draws) {
             if(draw.space==PicaSpace::world) finite_started=true;
             else require(!finite_started,"Infinity strip was painted after finite ground");
@@ -982,6 +1083,6 @@ void receiver_eye_coverage() {
 }
 }
 int main() try {
-    priority_pixels();map_single_occurrence();policy_contracts();margins_and_cache();landscape_depth();unique_landscape_policy();water_depth();water_priority_pixels();water_eye_coverage();corridor_source_symbols();corridor_depth();corridor_eye_coverage();corridor_eye_coverage(true);corridor_eye_coverage(false,true);corridor_eye_coverage(true,true);corridor_eye_coverage(false,true,true);corridor_eye_coverage(true,true,true);colony_depth();panorama_depth();offscreen_landscape_receiver();ex_menu_panorama_depth();receiver_eye_coverage();
+    priority_pixels();map_single_occurrence();policy_contracts();margins_and_cache();landscape_depth();atlas_landscape_depth();unique_landscape_policy();water_depth();water_priority_pixels();water_eye_coverage();corridor_source_symbols();corridor_depth();corridor_eye_coverage();corridor_eye_coverage(true);corridor_eye_coverage(false,true);corridor_eye_coverage(true,true);corridor_eye_coverage(false,true,true);corridor_eye_coverage(true,true,true);colony_depth();panorama_depth();offscreen_landscape_receiver();ex_menu_panorama_depth();receiver_eye_coverage();
     std::cout<<checks<<" 3DS actual source painter-policy checks passed; not full terrain/menu/hardware acceptance\n";
 } catch(const std::exception& error) {std::cerr<<scenario<<error.what()<<'\n';return 1;}

@@ -244,7 +244,7 @@ GameLayerFrames GameLayers::prepare(const GamePresentation& frame,unsigned tile_
     const auto retire=[&](PpuRasterWork part) {
         retired_before_work_.decodes+=part.decodes;retired_before_work_.colour_updates+=part.colour_updates;
     };
-    PicaFrame before;
+    PicaFrame before;bool tile_terrain=false;
     if(policy.before_model_groups.empty()) {
         for(const auto& group:panorama_groups_) {retire(group->raster.work());retire(group->tiles.work());}
         panorama_groups_.clear();
@@ -255,11 +255,16 @@ GameLayerFrames GameLayers::prepare(const GamePresentation& frame,unsigned tile_
             guard=pica_receiver_guard(frame.plan,{-plane.slope/distance,1/distance,
                 (200*plane.slope-plane.centre)/distance});
         }
-        const unsigned budget=!native_landscape_scene(frame) && after.vertices.size()<tile_vertex_budget
+        const unsigned budget=after.vertices.size()<tile_vertex_budget
             ?tile_vertex_budget-unsigned(after.vertices.size()):0;
         const auto tiles=budget?before_tiles_.prepare(frame.raster->ppu,policy.before_models,frame.plan,brightness,
-            frame.current->background_colour_subtract,budget):std::optional<PicaFrame>{};
-        if(tiles) {retire(before_.work());before_=PicaRaster{};before=*tiles;}
+            frame.current->background_colour_subtract,budget,guard,native_landscape_scene(frame)):std::optional<PicaFrame>{};
+        auto ready=tiles;
+        if(tiles && native_landscape_scene(frame)) {
+            ready=scenery_.prepare_tiles(frame,*tiles,before_tiles_.coverage_guard(),budget);
+            tile_terrain=bool(ready);
+        }
+        if(ready) {retire(before_.work());before_=PicaRaster{};before=*ready;}
         else before=before_.prepare(frame.raster->ppu,policy.before_models,frame.plan,brightness,
             frame.current->background_colour_subtract,guard);
     } else {
@@ -268,7 +273,7 @@ GameLayerFrames GameLayers::prepare(const GamePresentation& frame,unsigned tile_
         before=prepare_groups(frame,policy.before_model_groups,panorama_groups_,working_groups_,panorama_,retired_before_work_,budget);
     }
     GameLayerFrames result{before,after,backdrop(frame.raster->ppu->cgram[0],brightness)};
-    if(native_landscape_scene(frame)) result.before_models=scenery_.prepare(frame,result.before_models);
+    if(native_landscape_scene(frame) && !tile_terrain) result.before_models=scenery_.prepare(frame,result.before_models);
     if(policy.solid_frontend_margins) result.clear=right_margin(result);
     return result;
 }

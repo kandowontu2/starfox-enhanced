@@ -27,8 +27,10 @@ bool same_geometry(const simulation::SnesPpuState& a,const simulation::SnesPpuSt
 }
 }
 std::optional<PicaFrame> PicaBg2Tiles::prepare(std::shared_ptr<const simulation::SnesPpuState> source,
-    const PpuBatch& batch,const FramePlan& plan,unsigned brightness,unsigned subtract,unsigned vertex_budget) {
+    const PpuBatch& batch,const FramePlan& plan,unsigned brightness,unsigned subtract,unsigned vertex_budget,
+    unsigned source_guard,bool complete_roll) {
     if(!source || brightness>15 || subtract>31) throw std::invalid_argument("Invalid 3DS GPU tile source");
+    vertex_budget=std::min(vertex_budget,pica_vertex_limit);
     if(batch.passes.size()!=1 || (batch.space!=PicaSpace::screen && batch.space!=PicaSpace::scenery) || batch.water_receiver
         || batch.corridor_receiver || batch.compact_strips
         || batch.first_row!=0 || batch.last_row!=224) return {};
@@ -39,12 +41,16 @@ std::optional<PicaFrame> PicaBg2Tiles::prepare(std::shared_ptr<const simulation:
         || source->tunnel_scene || pass.priority< -1 || pass.priority>1) return {};
     if(plan.eye_count!=(plan.stereo?2U:1U)) throw std::invalid_argument("Invalid 3DS GPU tile eye plan");
     for(unsigned eye=0;eye<plan.eye_count;++eye) static_cast<void>(PicaProjection(plan,eye));
-    const unsigned guard=batch.space==PicaSpace::scenery?pica_scenery_guard(plan):pica_raster_base_guard;
+    if(source_guard>(pica_raster_max_width-top_width)/2) throw std::invalid_argument("3DS tile guard exceeds source storage");
+    const unsigned guard=std::max(source_guard,batch.space==PicaSpace::scenery?pica_scenery_guard(plan):pica_raster_base_guard);
     const unsigned width=batch.expand_horizontal && pass.extend_horizontal?top_width+2*guard:256;
     const auto scroll=pass.scroll.value_or(std::array{source->bg2_scroll_x,source->bg2_scroll_y});
-    const bool decode=!source_ || batch!=batch_ || width_!=width || !same_geometry(*source_,*source);
+    const bool decode=!source_ || batch!=batch_ || width_!=width || complete_roll_!=complete_roll
+        || !same_geometry(*source_,*source) || (complete_roll && (source_->bg2_character_base!=source->bg2_character_base
+            || !same_range(*source_,*source,source->bg2_character_base*2,32768)));
     std::vector<Bg2TileRect> rectangles;
-    if(decode && !plan_bg2_tiles(*source,scroll[0],scroll[1],width,int((width-256)/2),pass.priority,
+    const auto planner=complete_roll?plan_rolled_bg2_tiles:plan_bg2_tiles;
+    if(decode && !planner(*source,scroll[0],scroll[1],width,int((width-256)/2),pass.priority,
         rectangles,std::min(4096U,vertex_budget/6))) return {};
     const auto& rects=decode?rectangles:rectangles_;
     const unsigned edge_quads=batch.space==PicaSpace::scenery?unsigned(std::count_if(rects.begin(),rects.end(),
@@ -53,7 +59,7 @@ std::optional<PicaFrame> PicaBg2Tiles::prepare(std::shared_ptr<const simulation:
     std::vector<std::uint16_t> keys;
     if(decode) {
         keys.reserve(rects.size());
-        for(const auto& rect:rects) keys.push_back(std::uint16_t(rect.character*8+rect.bank));
+        for(const auto& rect:rects) keys.push_back(std::uint16_t(rect.solid_index?8192+rect.solid_index:rect.character*8+rect.bank));
         std::sort(keys.begin(),keys.end());keys.erase(std::unique(keys.begin(),keys.end()),keys.end());
     }
     const auto& active_keys=decode?keys:keys_;
@@ -69,6 +75,18 @@ std::optional<PicaFrame> PicaBg2Tiles::prepare(std::shared_ptr<const simulation:
     if(recolour) {
         pixels.assign(std::size_t(atlas_width)*atlas_height*4,0);
         for(unsigned slot=0;slot<active_keys.size();++slot) {
+            if(active_keys[slot]>=8192) {
+                const unsigned word=source->cgram[active_keys[slot]-8192];
+                for(unsigned y=0;y<8;++y) for(unsigned x=0;x<8;++x) {
+                    const auto at=(std::size_t(slot/32*8+y)*atlas_width+slot%32*8+x)*4;
+                    for(unsigned channel=0;channel<3;++channel) {
+                        const unsigned five=unsigned(std::max(0,int((word>>(channel*5))&31)-int(subtract)));
+                        pixels[at+channel]=std::uint8_t(((five<<3)|(five>>2))*brightness/15);
+                    }
+                    pixels[at+3]=255;
+                }
+                continue;
+            }
             const unsigned character=active_keys[slot]/8,bank=active_keys[slot]%8;
             const unsigned base=source->bg2_character_base*2+character*32;
             for(unsigned y=0;y<8;++y) {
@@ -95,12 +113,12 @@ std::optional<PicaFrame> PicaBg2Tiles::prepare(std::shared_ptr<const simulation:
         vertices.reserve((rects.size()+edge_quads)*6);
         const float left=(float(top_width)-width)*.5F;
         for(const auto& rect:rects) {
-            const auto key=std::uint16_t(rect.character*8+rect.bank);
+            const auto key=std::uint16_t(rect.solid_index?8192+rect.solid_index:rect.character*8+rect.bank);
             const unsigned slot=unsigned(std::lower_bound(active_keys.begin(),active_keys.end(),key)-active_keys.begin());
-            const float tx=float(slot%32*8+rect.source_x+(rect.reverse_x?1:0));
-            const float ty=float(slot/32*8+rect.source_y+(rect.reverse_y?1:0));
-            const float dx=rect.reverse_x?-float(rect.width):float(rect.width);
-            const float dy=rect.reverse_y?-float(rect.height):float(rect.height);
+            const float tx=rect.solid_index?float(slot%32*8)+.5F:float(slot%32*8+rect.source_x+(rect.reverse_x?1:0));
+            const float ty=rect.solid_index?float(slot/32*8)+.5F:float(slot/32*8+rect.source_y+(rect.reverse_y?1:0));
+            const float dx=rect.solid_index?0:rect.reverse_x?-float(rect.width):float(rect.width);
+            const float dy=rect.solid_index?0:rect.reverse_y?-float(rect.height):float(rect.height);
             const auto emit=[&](float y,float height,float first_y,float last_y) {
                 for(unsigned corner:{0U,1U,2U,0U,2U,3U}) {
                     const bool right=corner==1 || corner==2,bottom=corner>=2;
@@ -112,7 +130,7 @@ std::optional<PicaFrame> PicaBg2Tiles::prepare(std::shared_ptr<const simulation:
             if(batch.space==PicaSpace::scenery) {
                 // Same source scanline clamping as PicaRaster, not a stretched
                 // tile at the LCD's extra eight top/bottom rows.
-                const float step=rect.reverse_y?-1.F:1.F;
+                const float step=rect.solid_index?0:rect.reverse_y?-1.F:1.F;
                 if(rect.y==0) emit(0,8,ty,ty+step);
                 if(rect.y+rect.height==224) emit(232,8,ty+dy-step,ty+dy);
             }
@@ -124,6 +142,7 @@ std::optional<PicaFrame> PicaBg2Tiles::prepare(std::shared_ptr<const simulation:
     if(decode) {vertices_.swap(vertices);keys_.swap(keys);batch_=std::move(*next_batch);}
     if(recolour) {pixels_.swap(pixels);++work_.colour_updates;}
     source_=std::move(source);width_=width;
+    complete_roll_=complete_roll;
     brightness_=brightness;subtract_=subtract;
     image_={pixels_,atlas_width,atlas_height,atlas_width*4,4};
     draw_={0,unsigned(vertices_.size()),0,pica_identity,batch.space,false,false,false};draw_.source_layer=2;

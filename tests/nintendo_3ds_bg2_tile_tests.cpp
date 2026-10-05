@@ -42,10 +42,10 @@ std::vector<Pixel> sample(const PicaFrame& frame,unsigned width,int left) {
     return result;
 }
 void parity(std::shared_ptr<const simulation::SnesPpuState> ppu,const PpuBatch& batch,
-    const FramePlan& plan,unsigned brightness,unsigned subtract,PicaBg2Tiles& owner) {
-    const auto prepared=owner.prepare(ppu,batch,plan,brightness,subtract,pica_vertex_limit);
+    const FramePlan& plan,unsigned brightness,unsigned subtract,PicaBg2Tiles& owner,bool complete_roll=false,unsigned guard=32) {
+    const auto prepared=owner.prepare(ppu,batch,plan,brightness,subtract,pica_vertex_limit,guard,complete_roll);
     require(bool(prepared),"Supported ordinary tile fixture fell back");
-    const unsigned width=batch.expand_horizontal?400+2*(batch.space==PicaSpace::scenery?pica_scenery_guard(plan):32):256;
+    const unsigned width=batch.expand_horizontal?400+2*std::max(guard,batch.space==PicaSpace::scenery?pica_scenery_guard(plan):32):256;
     const int left=(400-int(width))/2,origin=(int(width)-256)/2;
     const auto actual=sample(*prepared,width,left);
     render::Framebuffer reference(width,224);reference.enable_layer_tags(true);reference.begin_write_coverage();
@@ -155,13 +155,16 @@ void painter_integration() {
     const auto fallback=native.prepare(source,5);
     require(fallback.before_models.vertices.size()==cpu.before_models.vertices.size()
         && fallback.before_models.textures[0].width==cpu.before_models.textures[0].width,"Whole-scene vertex overflow did not restore the complete raster");
-    // A level can have finite ground even before its roll-offset enable bit is
-    // set. Never feed an atlas mesh to the terrain adapter's strip contract.
+    // A level can have finite ground before its roll-offset enable bit is set.
+    // The atlas uses its own finite-quad contract, never the raster-strip one.
     scene=std::make_shared<vr::GameSceneSnapshot>(*scene);scene->background_landscape=true;scene->landscape_grid_height=-256;
     source.current=source.previous=scene;
     const auto terrain=native.prepare(source,pica_vertex_limit);
     require(native_landscape_scene(source) && !terrain.before_models.textures.empty()
-        && terrain.before_models.textures[0].width!=256,"Unrolled finite terrain incorrectly used the flat tile atlas");
+        && terrain.before_models.textures[0].width==256
+        && std::any_of(terrain.before_models.draws.begin(),terrain.before_models.draws.end(),[](const auto& draw) {
+            return draw.space==PicaSpace::world && draw.depth_test && draw.depth_write && draw.projected_uv;
+        }),"Unrolled tile terrain lost its finite source plane");
 }
 void constant_vertical_offsets() {
     for(unsigned number=0;number<8;++number) {
@@ -202,6 +205,43 @@ void constant_vertical_offsets() {
         require(owner.work().decodes==before.decodes+1,"Updated offset table did not invalidate native geometry");
     }
 }
+void rolled_offsets_and_carry() {
+    for(unsigned number=0;number<24;++number) {
+        auto ppu=fixture(number);ppu->bg2_character_base=0x1000;
+        // Include uniform palette bands, zero texels, opaque RGB black and
+        // ordinary multicolour source tiles, rather than an invented floor.
+        for(unsigned character=0;character<64;++character) if(character%4!=3 || number>=16) {
+            const unsigned ink=character%16;
+            for(unsigned y=0;y<8;++y) for(unsigned plane=0;plane<4;++plane)
+                ppu->vram[0x2000+character*32+y*2+(plane&1)+(plane>=2?16:0)]=(ink&(1U<<plane))?255:0;
+        }
+        ppu->bg2_vertical_offsets_enabled=true;
+        const double slope=number%2?.25:-.25;
+        const int start=number%3==0?8190:number%3==1?1008:8;
+        for(unsigned i=0;i<32;++i) {
+            unsigned offset=unsigned(start+int(std::lround(slope*(i+1))))&8191;
+            if(number%4!=0 || i%5!=0) offset|=0x4000;
+            ppu->vram[0x5f40+i*2]=std::uint8_t(offset);ppu->vram[0x5f41+i*2]=std::uint8_t(offset>>8);
+        }
+        // Exercise register/HDMA fallback when the entire offset table is
+        // disabled, and sticky lower wrapping when a valid fit is present.
+        if(number>=20) for(unsigned i=0;i<32;++i) ppu->vram[0x5f41+i*2]&=0x3f;
+        ppu->bg2_scanline_scroll_enabled=true;ppu->bg2_horizontal_offsets_enabled=true;
+        for(unsigned y=0;y<224;++y) {
+            ppu->bg2_horizontal_offsets[y]=std::int16_t((y/32)*7-29);
+            ppu->bg2_scanline_scroll_y[y]=std::int16_t(y>=176?257:60);
+        }
+        PpuBatch batch;batch.expand_horizontal=number%4!=0;batch.space=PicaSpace::scenery;
+        batch.passes.push_back({PpuLayer::bg2,int(number%3)-1});
+        PicaBg2Tiles owner;const auto plan=plan_frame(1,true,ScreenUse::world);
+        const auto unchanged=*ppu;
+        parity(ppu,batch,plan,number%16,number%5,owner,true,40);
+        const auto before=owner.work();auto fade=std::make_shared<simulation::SnesPpuState>(*ppu);fade->cgram[17]^=31;
+        parity(fade,batch,plan,7,3,owner,true,40);
+        require(owner.work().decodes==before.decodes,"Rolled source palette fade rebuilt tile geometry");
+        require(ppu->vram==unchanged.vram && ppu->cgram==unchanged.cgram,"Rolled tile planning changed source memory");
+    }
+}
 }
 // Only count native owner preparation, not fixture creation or pixel oracles.
 void* operator new(std::size_t count) {
@@ -227,7 +267,7 @@ int main() try {
         }
         require(ppu->vram==unchanged.vram && ppu->cgram==unchanged.cgram && ppu->oam==unchanged.oam,"Native tile planning mutated cartridge memory");
     }
-    rejection_and_reuse();painter_integration();constant_vertical_offsets();
+    rejection_and_reuse();painter_integration();constant_vertical_offsets();rolled_offsets_and_carry();
     std::cout<<"Native BG2 tile planner/atlas: "<<checks<<" exact pixel, palette, ownership, HDMA, flips, budget and fallback checks PASS\n";
     return 0;
 } catch(const std::exception& error) {count_allocations=false;std::cerr<<error.what()<<'\n';return 1;}

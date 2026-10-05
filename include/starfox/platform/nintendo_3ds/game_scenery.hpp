@@ -28,6 +28,10 @@ unsigned source_corridor_guard(const GamePresentation&);
 class GameScenery {
 public:
     PicaFrame prepare(const GamePresentation&,const PicaFrame& bg2);
+    // Explicit atlas contract: arbitrary source LCD quads, not raster strips.
+    // Reject whole-geometry overflow without publishing a partial receiver.
+    std::optional<PicaFrame> prepare_tiles(const GamePresentation&,const PicaFrame& bg2,
+        unsigned available_guard,unsigned vertex_budget);
     PicaFrame prepare_water(const GamePresentation&,const PicaFrame& bg2,unsigned available_guard);
     PicaFrame prepare_corridor(const GamePresentation&,const PicaFrame& bg2,unsigned available_guard);
 private:

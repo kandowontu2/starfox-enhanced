@@ -224,6 +224,87 @@ PicaFrame GameScenery::prepare(const GamePresentation& source,const PicaFrame& b
     vertices_=std::move(next);images_=std::move(images);draws_=std::move(draws);
     return {source.plan,vertices_,draws_,images_,bg2.clear};
 }
+std::optional<PicaFrame> GameScenery::prepare_tiles(const GamePresentation& source,const PicaFrame& bg2,
+    unsigned available_guard,unsigned vertex_budget) {
+    vertex_budget=std::min(vertex_budget,pica_vertex_limit);
+    const auto plane=source_landscape_plane(source);
+    if(!same_pica_plan(source.plan,bg2.plan)) throw std::invalid_argument("3DS terrain atlas belongs to another eye plan");
+    const double scale=plane.height*source.plan.focal_y;
+    const auto guard=pica_receiver_guard(source.plan,{-plane.slope/scale,1/scale,
+        (200*plane.slope-plane.centre)/scale});
+    if(available_guard<guard) throw std::invalid_argument("3DS terrain atlas does not cover both eye receivers");
+    if(bg2.draws.empty()) {
+        if(!bg2.vertices.empty() || !bg2.textures.empty()) throw std::invalid_argument("Incomplete empty 3DS terrain atlas");
+        vertices_.clear();draws_.clear();images_.clear();return PicaFrame{source.plan,{},{},{},bg2.clear};
+    }
+    if(bg2.draws.size()!=1 || bg2.textures.size()!=1 || bg2.vertices.size()%6)
+        throw std::invalid_argument("3DS terrain atlas requires isolated source quads");
+    const auto& draw=bg2.draws.front();const auto& image=bg2.textures.front();
+    if(draw.first || draw.count!=bg2.vertices.size() || draw.texture || draw.source_layer!=2
+        || draw.space!=PicaSpace::scenery || draw.depth_test || draw.depth_write || draw.alpha_blend
+        || draw.projected_uv || draw.screen_dither || draw.clip || draw.colour_op
+        || draw.model!=pica_identity || image.channels!=4 || image.repeat
+        || !image.source_layers.empty()) throw std::invalid_argument("Invalid 3DS terrain tile ownership");
+    static_cast<void>(pica_texture_layout(image));
+    if(bg2.vertices.size()>vertex_budget) return {};
+    using Point=std::array<double,2>;
+    const auto distance=[&](Point p){return p[1]-plane.centre-plane.slope*(p[0]-200);};
+    // Two half-plane clips can grow a rectangle to six corners. Stack storage
+    // avoids an allocating polygon for each of thousands of source tiles.
+    const auto clip=[&](std::array<Point,8>& polygon,unsigned count,double limit,bool above) {
+        const auto old=polygon;unsigned next=0;
+        if(!count) return next;
+        auto a=old[count-1];double da=distance(a)-limit;
+        const auto add=[&](Point p) {
+            if(next==polygon.size()) throw std::logic_error("3DS terrain tile clipping exceeded bounded geometry");
+            polygon[next++]=p;
+        };
+        for(unsigned i=0;i<count;++i) {
+            const auto b=old[i];const double db=distance(b)-limit;
+            const bool ia=above?da>=0:da<=0,ib=above?db>=0:db<=0;
+            if(ia!=ib) {const double t=da/(da-db);add({std::lerp(a[0],b[0],t),std::lerp(a[1],b[1],t)});}
+            if(ib) add(b);
+            a=b;da=db;
+        }
+        return next;
+    };
+    std::vector<PicaVertex> vertices(bg2.vertices.begin(),bg2.vertices.end());
+    vertices.reserve(std::min<std::size_t>(vertex_budget,bg2.vertices.size()*2));
+    for(unsigned at=0;at<bg2.vertices.size();at+=6) {
+        const auto& a=bg2.vertices[at];const auto& b=bg2.vertices[at+1];const auto& c=bg2.vertices[at+2];
+        const auto& d=bg2.vertices[at+5];
+        const double x0=a.position[0],y0=a.position[1],x1=c.position[0],y1=c.position[1];
+        if(!(x0<x1 && y0<y1) || x0< -double(available_guard) || x1>400+double(available_guard)
+            || y0<0 || y1>240 || a.position[2] || b.position!=Point3{float(x1),float(y0),0}
+            || c.position[2] || d.position!=Point3{float(x0),float(y1),0}
+            || a!=bg2.vertices[at+3] || c!=bg2.vertices[at+4]
+            || a.colour!=std::array<float,4>{1,1,1,1} || b.colour!=a.colour || c.colour!=a.colour || d.colour!=a.colour
+            || b.uv!=std::array<float,2>{c.uv[0],a.uv[1]} || d.uv!=std::array<float,2>{a.uv[0],c.uv[1]})
+            throw std::invalid_argument("3DS terrain atlas changed an axis-aligned source tile");
+        std::array<Point,8> polygon{{{x0,y0},{x1,y0},{x1,y1},{x0,y1}}};
+        unsigned count=clip(polygon,4,scale/source.plan.far_plane,true);
+        count=clip(polygon,count,scale/source.plan.near_plane,false);
+        const unsigned extra=count>=3?(count-2)*3:0;
+        if(extra>vertex_budget-vertices.size()) return {};
+        for(unsigned corner=1;corner+1<count;++corner) for(unsigned i:{0U,corner,corner+1}) {
+            const auto p=polygon[i];const double z=scale/distance(p);
+            vertices.push_back({{float((p[0]-200)*z/source.plan.focal_x),float((120-p[1])*z/source.plan.focal_y),float(z)},
+                {1,1,1,1},{float(a.uv[0]+(c.uv[0]-double(a.uv[0]))*(p[0]-x0)/(x1-x0)),
+                    float(a.uv[1]+(c.uv[1]-double(a.uv[1]))*(p[1]-y0)/(y1-y0))}});
+        }
+    }
+    std::vector<PicaDraw> draws(bg2.draws.begin(),bg2.draws.end());
+    // The complete infinity atlas must precede every finite tile, exactly as
+    // in the raster receiver. Never interleave far artwork over another tile.
+    if(vertices.size()>bg2.vertices.size()) {
+        PicaDraw ground;ground.first=unsigned(bg2.vertices.size());ground.count=unsigned(vertices.size())-ground.first;
+        ground.texture=0;ground.source_layer=2;ground.projected_uv=true;draws.push_back(ground);
+    }
+    std::vector<PicaImage> images(bg2.textures.begin(),bg2.textures.end());
+    validate_pica_group({source.plan,vertices,draws,images,bg2.clear},512U*256U*4U);
+    vertices_=std::move(vertices);draws_=std::move(draws);images_=std::move(images);
+    return PicaFrame{source.plan,vertices_,draws_,images_,bg2.clear};
+}
 PicaFrame GameScenery::prepare_water(const GamePresentation& source,const PicaFrame& bg2,unsigned available_guard) {
     const double height=source_water_height(source),distance=height*source.plan.focal_y;
     if(!same_pica_plan(source.plan,bg2.plan) || available_guard<source_water_guard(source))

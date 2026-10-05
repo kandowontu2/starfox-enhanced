@@ -11,6 +11,7 @@ struct Bg2TileRect {
     std::uint16_t character{};
     std::uint8_t bank{},source_x{},source_y{};
     bool reverse_x{},reverse_y{};
+    std::uint8_t solid_index{}; // Nonzero source CGRAM index; merged uniform/carry colour.
 };
 // The first integration accepts ordinary Mode-2 artwork, including complete
 // constant offset tables whose lower source characters need no ground carry.
@@ -19,4 +20,8 @@ struct Bg2TileRect {
 bool plan_bg2_tiles(const simulation::SnesPpuState&,int scroll_x,int scroll_y,
     unsigned width,int origin,int priority,std::vector<Bg2TileRect>&,
     unsigned capacity);
+// Full fitted Mode-2 roll/HDMA and source ground continuation. Uniform source
+// characters become merged colour rectangles, not an invented smooth floor.
+bool plan_rolled_bg2_tiles(const simulation::SnesPpuState&,int scroll_x,int scroll_y,
+    unsigned width,int origin,int priority,std::vector<Bg2TileRect>&,unsigned capacity);
 } // namespace starfox::platform::nintendo_3ds

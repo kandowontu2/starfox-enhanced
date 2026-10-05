@@ -8,12 +8,15 @@ namespace starfox::platform::nintendo_3ds {
 class PicaBg2Tiles {
 public:
     std::optional<PicaFrame> prepare(std::shared_ptr<const simulation::SnesPpuState>,
-        const PpuBatch&,const FramePlan&,unsigned brightness,unsigned subtract,unsigned vertex_budget);
+        const PpuBatch&,const FramePlan&,unsigned brightness,unsigned subtract,unsigned vertex_budget,
+        unsigned source_guard=pica_raster_base_guard,bool complete_roll=false);
     [[nodiscard]] PpuRasterWork work() const noexcept {return work_;}
+    [[nodiscard]] unsigned coverage_guard() const noexcept {return width_>top_width?(width_-top_width)/2:0;}
 private:
     std::shared_ptr<const simulation::SnesPpuState> source_;
     PpuBatch batch_;
     unsigned width_{},brightness_{},subtract_{};
+    bool complete_roll_{};
     std::vector<Bg2TileRect> rectangles_;
     std::vector<std::uint16_t> keys_;
     std::vector<std::uint8_t> pixels_;
