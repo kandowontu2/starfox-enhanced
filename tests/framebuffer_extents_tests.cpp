@@ -67,10 +67,54 @@ void indexed_rows() {
             if (actual.pixels() != expected.pixels()) throw std::runtime_error("empty indexed row wrote pixels");
         }
 }
+void solid_rows() {
+    using namespace starfox::render;
+    constexpr std::array coordinates{std::numeric_limits<std::int32_t>::min(), -32, -1,
+        0, 1, 7, 40, std::numeric_limits<std::int32_t>::max()};
+    for (unsigned scale = 1; scale <= 4; ++scale) for (unsigned width : {0U, 1U, 7U, 33U})
+        for (unsigned flags = 0; flags < 16; ++flags) for (int x : coordinates)
+        for (int y : {-1, 0, 2, 3}) for (unsigned count : {0U, 1U, 17U, 100U, std::numeric_limits<unsigned>::max()}) {
+            Framebuffer actual(width, 3, scale), expected(width, 3, scale);
+            RasterCommands ac, ec;
+            for (auto* frame : {&actual, &expected}) {
+                frame->enable_layer_tags((flags & 1U) != 0);
+                frame->enable_dither_pairs((flags & 2U) != 0);
+                frame->clear(37);
+                if (flags & 4U) frame->begin_write_coverage();
+                frame->set_layer_override(PixelLayer::background);
+                for (unsigned i = 0; i < frame->pixels().size(); ++i) frame->set_dither_alternate(i, i % 251U);
+            }
+            if (flags & 8U) {
+                ac.reset(actual.stored_width(), actual.stored_height());
+                ec.reset(expected.stored_width(), expected.stored_height());
+                actual.record_to(&ac); expected.record_to(&ec);
+            }
+            const auto ink = std::uint8_t(flags % 3 ? 0 : 255);
+            actual.set_solid_indexed_row(x, y, count, ink);
+            // Enumerate only visible logical coordinates, including huge
+            // caller extents; this is independent of the optimized clipping.
+            for (unsigned column = 0; column < width; ++column)
+                if (std::int64_t(column) >= x && std::int64_t(column) < std::int64_t(x) + count)
+                    expected.set(column, y, ink);
+            ++checks;
+            if (actual.pixels() != expected.pixels() || actual.layer_tags() != expected.layer_tags()
+                || !std::equal(actual.write_coverage().begin(), actual.write_coverage().end(), expected.write_coverage().begin())
+                || !std::equal(actual.dither_pairs().begin(), actual.dither_pairs().end(), expected.dither_pairs().begin())
+                || ac.commands.size() != ec.commands.size())
+                throw std::runtime_error{"opaque row pixels/coverage/tags/dither/command count changed"};
+            for (unsigned i = 0; i < ac.commands.size(); ++i) {
+                const auto& a = ac.commands[i]; const auto& b = ec.commands[i];
+                if (a.left != b.left || a.right != b.right || a.top != b.top || a.bottom != b.bottom
+                    || a.even != b.even || a.odd != b.odd || a.tag != b.tag)
+                    throw std::runtime_error{"opaque row command order changed"};
+            }
+        }
+}
 } // namespace
 
 int main() try {
     indexed_rows();
+    solid_rows();
     constexpr std::array<std::uint32_t, 8> sizes{0, 1, 2, 7, 8, 17, 63, 129};
     constexpr std::array<std::uint32_t, 10> partitions{
         0, 1, 2, 3, 4, 5, 6, 16, 65536,

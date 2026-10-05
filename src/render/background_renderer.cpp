@@ -513,6 +513,50 @@ void BackgroundRenderer::draw_bg2(
         : std::min(target.width(), static_cast<std::uint32_t>(
             std::max<std::int32_t>(horizontal_origin + 256, 0)));
     if (first_x >= final_x) return;
+    if (ppu.tunnel_scene && extend_horizontal && wrap_horizontal
+        && !target.command_buffer() && (ppu.mosaic & 2U) == 0U
+        && !(ppu.background_mode == 2U && ppu.bg2_vertical_offsets_enabled)
+        && unique_regions.empty() && !single_occurrence_top_rows
+        && !ending_star_extension && !game_over_star_extension) {
+        // The source-aware fallback clamps the low/all pass's margins to
+        // logical x=0/255, over an opaque wall. Decode each native tile row
+        // once and write each repeated edge once. High-priority margins stay
+        // untouched; low priority deliberately includes the full tunnel.
+        const auto native_first = unsigned(std::clamp<std::int64_t>(
+            horizontal_origin, first_x, final_x));
+        const auto native_last = unsigned(std::clamp<std::int64_t>(
+            std::int64_t(horizontal_origin) + 256, native_first, final_x));
+        for (unsigned y = 0; y < target.height(); ++y) {
+            const int row_x = ppu.bg2_horizontal_offsets_enabled && y < ppu.bg2_horizontal_offsets.size()
+                ? ppu.bg2_horizontal_offsets[y] : scroll_x;
+            const int row_y = ppu.bg2_scanline_scroll_enabled
+                ? ppu.bg2_scanline_scroll_y[std::min(y, 223U)] : scroll_y;
+            const auto source_y = wrap_tilemap_coordinate(int(y) + row_y, height_pixels);
+            const auto edge_colour = [&](int logical_x) {
+                const auto source_x = wrap_tilemap_coordinate(logical_x + row_x, width_pixels);
+                const unsigned tile_x = unsigned(source_x) >> tile_shift;
+                const unsigned tile_y = unsigned(source_y) >> tile_shift;
+                const unsigned entry = ((tile_x >> 5U) + (tile_y >> 5U) * pages_wide) * 1024U
+                    + (tile_y & 31U) * 32U + (tile_x & 31U);
+                const auto tile = vram_word(ppu, unsigned(ppu.bg2_screen_base) + entry);
+                const auto row = decoded_tile_row<4>(ppu, ppu.bg2_character_base,
+                    tile, source_y, ppu.bg2_tile_size_16);
+                const auto ink = row[unsigned(source_x) & (tile_edge - 1U)];
+                return ink && !(transparent_cgram_black && (ppu.cgram[ink] & 32767U) == 0U)
+                    ? ink : wall_colour;
+            };
+            if (priority != TilePriorityPass::high && native_first > first_x)
+                target.set_solid_indexed_row(int(first_x), int(y), native_first - first_x, edge_colour(0));
+            draw_tile_scanline<4>(ppu, target,
+                priority == TilePriorityPass::low ? TilePriorityPass::all : priority,
+                ppu.bg2_screen_base, ppu.bg2_character_base, pages_wide, ppu.bg2_tile_size_16,
+                width_pixels, source_y, row_x, horizontal_origin,
+                native_first, native_last, y, transparent_cgram_black);
+            if (priority != TilePriorityPass::high && native_last < final_x)
+                target.set_solid_indexed_row(int(native_last), int(y), final_x - native_last, edge_colour(255));
+        }
+        return;
+    }
     if ((ppu.mosaic & 2U) == 0U && !expanded_mode2
         && !(ppu.background_mode == 2U && ppu.bg2_vertical_offsets_enabled)
         && !(ppu.tunnel_scene && extend_horizontal)

@@ -282,6 +282,28 @@ public:
             + x * draw_scale_];
     }
 
+    // A repeated opaque indexed write, including index zero. Unlike tile ink,
+    // zero here closes the tunnel wall and must mark coverage and clear dither.
+    // Recording/scaled callers keep the exact sequence of ordinary point writes.
+    void set_solid_indexed_row(std::int32_t x, std::int32_t y,
+        std::uint32_t count, std::uint8_t colour) noexcept {
+        if (y < 0 || std::uint32_t(y) >= height() || !count) return;
+        const auto first = std::max<std::int64_t>(0, -std::int64_t(x));
+        const auto last = std::min<std::int64_t>(count, std::int64_t(width()) - x);
+        if (first >= last) return;
+        const auto begin_x = std::int32_t(std::int64_t(x) + first);
+        const auto length = std::size_t(last - first);
+        if (!commands_ && draw_scale_ == 1U) {
+            const auto offset = std::size_t(y) * stored_width_ + unsigned(begin_x);
+            std::fill_n(pixels_.begin() + offset, length, colour);
+            mark_written(offset, length);
+            if (layer_tags_enabled_)
+                std::fill_n(tags_.begin() + offset, length, write_tag(PixelLayer::two_d));
+            return;
+        }
+        for (std::size_t i = 0; i < length; ++i) set(begin_x + std::int32_t(i), y, colour);
+    }
+
     // Stored writes come from layer compositing, where the tag belongs to the
     // source layer rather than to this call: the Super FX world, the cartridge
     // HUD and the EX overlay all arrive through here. Callers that know the
