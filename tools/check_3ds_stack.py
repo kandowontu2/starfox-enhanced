@@ -83,6 +83,9 @@ def main():
     counters = args.build / "starfox_3ds_spc_counters_check.elf"
     if counters.exists():
         reservations[counters.name] = stack_reservation(counters.read_bytes())
+    output = args.build / "starfox_3ds_spc_output_check.elf"
+    if output.exists():
+        reservations[output.name] = stack_reservation(output.read_bytes())
     frames = compiler_frames(args.build)
     print(json.dumps({"status": "passed", "main_stack_bytes": reservations,
                       "compiler_frame_count": len(frames), "largest_frames": frames[:20],

@@ -48,6 +48,7 @@ on:
       - 'tools/check_3ds_spc_saturation.py'
       - 'tools/check_3ds_spc_counters.py'
       - 'tools/check_3ds_spc_ram.py'
+      - 'tools/check_3ds_spc_output.py'
       - 'tests/3ds_spc_ram_hook.hpp'
       - 'tests/nintendo_3ds_game_assets_tests.cpp'
       - 'src/simulation/**'
@@ -111,6 +112,7 @@ jobs:
           cmake --build "$RUNNER_TEMP/starfox-3ds-core-host" --parallel 2
           ctest --test-dir "$RUNNER_TEMP/starfox-3ds-core-host" --output-on-failure
           python3 tools/check_3ds_spc_ram.py "$RUNNER_TEMP/starfox-3ds-core-host"
+          python3 tools/check_3ds_spc_output.py "$RUNNER_TEMP/starfox-3ds-core-host"
           python3 tests/test_3ds_stack.py
       - name: Cross-build native diagnostics and experimental player
         shell: bash
@@ -122,7 +124,7 @@ jobs:
             -e STARFOX_3DS_ENABLE_IPO=OFF \
             -v "$GITHUB_WORKSPACE:/src" -w /src "$CTR_IMAGE" \
             bash tools/build_3ds_frontend.sh . build/3ds-native
-          for target in starfox_3ds_frontend_check starfox_3ds_spc_saturation_check starfox_3ds_spc_counters_check starfox_3ds_gpu_check starfox_3ds_game_core_check starfox_3ds_test_player; do
+          for target in starfox_3ds_frontend_check starfox_3ds_spc_saturation_check starfox_3ds_spc_counters_check starfox_3ds_spc_output_check starfox_3ds_gpu_check starfox_3ds_game_core_check starfox_3ds_test_player; do
             test -s "build/3ds-native/$target.elf"
             test -s "build/3ds-native/$target.3dsx"
           done
@@ -131,7 +133,7 @@ jobs:
         run: |
           docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
             -v "$GITHUB_WORKSPACE:/src" -w /src "$CTR_IMAGE" bash -euc '
-              for target in starfox_3ds_frontend_check starfox_3ds_spc_saturation_check starfox_3ds_spc_counters_check starfox_3ds_gpu_check starfox_3ds_game_core_check starfox_3ds_test_player; do
+              for target in starfox_3ds_frontend_check starfox_3ds_spc_saturation_check starfox_3ds_spc_counters_check starfox_3ds_spc_output_check starfox_3ds_gpu_check starfox_3ds_game_core_check starfox_3ds_test_player; do
                 "$DEVKITARM/bin/arm-none-eabi-readelf" -h "build/3ds-native/$target.elf"
                 "$DEVKITARM/bin/arm-none-eabi-size" "build/3ds-native/$target.elf"
               done
@@ -139,6 +141,7 @@ jobs:
               python3 tools/check_3ds_spc_saturation.py build/3ds-native
               python3 tools/check_3ds_spc_counters.py build/3ds-native
               python3 tools/check_3ds_spc_ram.py build/3ds-native --native
+              python3 tools/check_3ds_spc_output.py build/3ds-native --native
             '
           python3 tools/check_3ds_stack.py build/3ds-native
       - name: Validate and package the Original 3DS test candidate
@@ -207,6 +210,16 @@ jobs:
           path: |
             build/3ds-native/starfox_3ds_spc_counters_check.3dsx
             build/3ds-native/spc-counters-check.smdh
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload small asset-free native voice output arithmetic check
+        # Separate small math probe; never require downloading debug ELFs.
+        uses: actions/upload-artifact@v4
+        with:
+          name: StarFoxEnhanced-3ds-spc-output-check
+          path: |
+            build/3ds-native/starfox_3ds_spc_output_check.3dsx
+            build/3ds-native/spc-output-check.smdh
           if-no-files-found: error
           retention-days: 14
       - name: Upload native compiler settings for the performance experiment

@@ -61,28 +61,29 @@ def inspect(build: Path, native: bool) -> None:
 
 
 def host_check(root: Path, compiler: str, source: Path, baseline: Path,
-               generated: Path, temporary: Path) -> None:
+               generated: Path, temporary: Path, dsp: bool = False) -> None:
     base = [compiler, '-std=c++20', '-O2', '-DNDEBUG', '-I' + str(root / 'include'),
             '-isystem', str(generated)]
     subprocess.run(base + ['-Wall', '-Wextra', '-Wpedantic', '-Werror', '-c',
                    str(root / 'tests/nintendo_3ds_spc_ram_machine.cpp'),
                    '-o', str(temporary / 'strict-machine.o')], check=True)
-    sources = ['SNES_SPC_misc.cpp', 'SNES_SPC_state.cpp', 'SPC_DSP_3ds_counters.cpp']
-    common = []
-    for name in sources:
-        obj = temporary / (name + '.o')
-        subprocess.run(base + ['-c', str(generated / name), '-o', str(obj)], check=True)
-        common.append(str(obj))
+    sources = ['SNES_SPC_misc.cpp', 'SNES_SPC_state.cpp',
+               'SNES_SPC_3ds_timers.cpp' if dsp else 'SPC_DSP_3ds_output.cpp']
     results = []
     for accuracy, hooks in ((0, False), (0, True), (1, True)):
         flags = ['-DSPC_MORE_ACCURACY=' + str(accuracy)]
         if hooks:
             flags += ['-include', str(root / 'tests/3ds_spc_ram_hook.hpp')]
+        common = []
+        for name in sources:
+            obj = temporary / (name + '.o')
+            subprocess.run(base + flags + ['-c', str(generated / name), '-o', str(obj)], check=True)
+            common.append(str(obj))
         executables = []
-        for label, cpu in (('baseline', baseline), ('candidate', source)):
+        for label, implementation in (('baseline', baseline), ('candidate', source)):
             exe = temporary / (label + '.exe')
             subprocess.run(base + flags + [str(root / 'tests/nintendo_3ds_spc_ram_machine.cpp'),
-                           str(cpu)] + common + ['-o', str(exe)], check=True)
+                           str(implementation)] + common + ['-o', str(exe)], check=True)
             executables.append(exe)
         with subprocess.Popen([str(executables[0])], stdout=subprocess.PIPE, stderr=subprocess.PIPE) as old, \
              subprocess.Popen([str(executables[1])], stdout=subprocess.PIPE, stderr=subprocess.PIPE) as new:
@@ -111,6 +112,7 @@ def host_check(root: Path, compiler: str, source: Path, baseline: Path,
                         process.kill()
                         process.wait()
     print(json.dumps(dict(status='PASS exact actual SPC CPU/DSP state, PCM, time cuts, restore and callback order',
+                         subject='voice sample selection' if dsp else 'RAM dispatch',
                          results=results, scope='Host correctness, not native performance; no trace stored'), indent=2))
 
 

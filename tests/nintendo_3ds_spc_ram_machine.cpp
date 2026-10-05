@@ -48,6 +48,10 @@ std::vector<unsigned char> fixture(unsigned address, bool page, bool rom, unsign
     file[0x28] = 1; file[0x29] = 3; file[0x2a] = page ? 0x20 : 0; file[0x2b] = 0xef;
     for (unsigned i = 0; i < 65536; ++i) file[0x100+i] = (i*17+seed*13)&255;
     auto* ram = file.data()+0x100;
+    constexpr std::array<unsigned char,4> directory{0,3,0,3};
+    constexpr std::array<unsigned char,9> sample{3,0x71,0x32,0x54,0x16,0x27,0x43,0x65,0x10};
+    std::copy(directory.begin(),directory.end(),ram+0x200);
+    std::copy(sample.begin(),sample.end(),ram+0x300);
     ram[0xf0] = 0x0a; ram[0xf1] = (rom ? 0x80 : 0) | 7;
     ram[0xf2] = 0x6c; ram[0xfa] = 7; ram[0xfb] = 11; ram[0xfc] = 13;
     file[0x10100+0x6c] = 0x3f; // No echo/reset/mute; audible noise.
@@ -59,7 +63,8 @@ std::vector<unsigned char> fixture(unsigned address, bool page, bool rom, unsign
     // Page-one MOV dp does not access DSP; explicitly CLR P for this prefix.
     emit({0x20});
     dsp(0x6c,0x3f); dsp(0x0c,0x7f); dsp(0x1c,0x7f); dsp(0x00,0x60); dsp(0x01,0x60);
-    dsp(0x04,0); dsp(0x05,0); dsp(0x07,0x7f); dsp(0x3d,1); dsp(0x4c,1);
+    dsp(0x04,0); dsp(0x05,0); dsp(0x07,0x7f); dsp(0x5d,2);
+    dsp(0x02,0); dsp(0x03,8); dsp(0x3d,seed==7 ? 0 : 1); dsp(0x4c,1);
     emit({static_cast<unsigned char>(page ? 0x40 : 0x20)});
     const unsigned char lo = address&255, hi = address>>8;
     unsigned char value = (seed*29+13)&255;

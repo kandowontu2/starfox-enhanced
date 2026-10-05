@@ -3,6 +3,7 @@
 #include "native_display.hpp"
 #include "starfox/platform/nintendo_3ds/spc_saturation_checks.hpp"
 #include "starfox/platform/nintendo_3ds/spc_counter_checks.hpp"
+#include "starfox/platform/nintendo_3ds/spc_output_checks.hpp"
 #include <3ds.h>
 #include <fstream>
 
@@ -16,7 +17,9 @@ int main() {
     const auto began=svcGetSystemTick();
     std::string result;
     try {
-#ifdef STARFOX_3DS_COUNTER_CHECK
+#if defined(STARFOX_3DS_OUTPUT_CHECK)
+        const auto count=check_spc_output();
+#elif defined(STARFOX_3DS_COUNTER_CHECK)
         const auto count=check_spc_counters();
 #else
         const auto count=check_spc_saturation();
@@ -25,7 +28,10 @@ int main() {
     } catch(const std::exception& error) {result=std::string("FAIL / ")+error.what();}
     const auto elapsed=svcGetSystemTick()-began;
     // A uniquely named, small bounded report, never a settings/save overwrite.
-#ifdef STARFOX_3DS_COUNTER_CHECK
+#if defined(STARFOX_3DS_OUTPUT_CHECK)
+    constexpr auto reportPrefix="sdmc:/starfox-spc-output-";
+    constexpr auto reportTitle="Original 3DS native voice sample selection check";
+#elif defined(STARFOX_3DS_COUNTER_CHECK)
     constexpr auto reportPrefix="sdmc:/starfox-spc-counters-";
     constexpr auto reportTitle="Original 3DS native DSP counter remainder check";
 #else

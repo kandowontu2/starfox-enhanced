@@ -11,11 +11,12 @@ import shlex
 import subprocess
 import tempfile
 from pathlib import Path
+from check_3ds_spc_output import validate_output_source
 
 
 def inspect(build: Path) -> None:
     entries=json.loads((build/'compile_commands.json').read_text())
-    entries=[entry for entry in entries if Path(entry['file']).name=='SPC_DSP_3ds_counters.cpp']
+    entries=[entry for entry in entries if Path(entry['file']).name=='SPC_DSP_3ds_output.cpp']
     if len(entries)!=1:
         raise RuntimeError('Expected one actual native optimized DSP compilation')
     entry=entries[0]
@@ -33,7 +34,7 @@ def inspect(build: Path) -> None:
     counter_anchor='return ((unsigned) m.counter + counter_offsets [rate]) % counter_rates [rate];'
     counter_replacement='return starfox::platform::nintendo_3ds::spc_dsp_counter_remainder((unsigned) m.counter + counter_offsets [rate], counter_rates [rate], starfox::platform::nintendo_3ds::spc_dsp_counter_reciprocals[rate]);'
     expected='#include "starfox/platform/nintendo_3ds/spc_counters.hpp"\n'+prefix+before_source.replace(anchor,replacement).replace(counter_anchor,counter_replacement)
-    if before_source.count(anchor)!=1 or before_source.count(counter_anchor)!=1 or source.read_text()!=expected:
+    if before_source.count(anchor)!=1 or before_source.count(counter_anchor)!=1 or validate_output_source(source)!=expected:
         raise RuntimeError('Private DSP changes exceed the clamp/counter remainder transformations')
     objdump=Path(args[0]).with_name('arm-none-eabi-objdump')
     size_tool=Path(args[0]).with_name('arm-none-eabi-size')
@@ -60,7 +61,7 @@ def inspect(build: Path) -> None:
     if not after['ssat_count'] or any('#16' not in operands for operands in after['ssat_operands']):
         raise RuntimeError('Actual native DSP lacks the requested signed 16-bit saturation')
     print(json.dumps({'status':'PASS source and actual ARM code-generation gates',
-        'baseline':before,'candidate':after,'production_dsp_diff':'Exact CLAMP16 and counter remainder + two helper includes only',
+        'baseline':before,'candidate':after,'production_dsp_diff':'Exact CLAMP16, counter remainder, pure output selection and their helper includes only',
         'scope':'Compiler/object component evidence, not runtime correctness, whole-game cost or physical-console FPS'},indent=2))
 
 

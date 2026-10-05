@@ -10,11 +10,12 @@ import shlex
 import subprocess
 import tempfile
 from pathlib import Path
+from check_3ds_spc_output import validate_output_source
 
 
 def inspect(build: Path) -> None:
     entries = json.loads((build / 'compile_commands.json').read_text())
-    entries = [entry for entry in entries if Path(entry['file']).name == 'SPC_DSP_3ds_counters.cpp']
+    entries = [entry for entry in entries if Path(entry['file']).name == 'SPC_DSP_3ds_output.cpp']
     if len(entries) != 1:
         raise RuntimeError('Expected one actual native DSP counter compilation')
     entry = entries[0]
@@ -27,7 +28,7 @@ def inspect(build: Path) -> None:
     anchor = 'return ((unsigned) m.counter + counter_offsets [rate]) % counter_rates [rate];'
     replacement = 'return starfox::platform::nintendo_3ds::spc_dsp_counter_remainder((unsigned) m.counter + counter_offsets [rate], counter_rates [rate], starfox::platform::nintendo_3ds::spc_dsp_counter_reciprocals[rate]);'
     before = baseline_source.read_text()
-    if before.count(anchor) != 1 or source.read_text() != '#include "starfox/platform/nintendo_3ds/spc_counters.hpp"\n' + before.replace(anchor, replacement):
+    if before.count(anchor) != 1 or validate_output_source(source) != '#include "starfox/platform/nintendo_3ds/spc_counters.hpp"\n' + before.replace(anchor, replacement):
         raise RuntimeError('Native DSP counter changes exceed the single remainder/include transformation')
     # Confirm that reciprocal generation still matches the actual pinned table,
     # including its special never-firing first rate, before trusting codegen.
