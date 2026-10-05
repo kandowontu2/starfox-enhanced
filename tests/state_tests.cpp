@@ -450,7 +450,10 @@ int main(int argc,char** argv) {
         game.set_dlss_mode(1);
         game.set_fsr1_mode(4);
         game.set_fsr1_menu(true);
+        game.set_gpu_renderer(simulation::GpuRenderer::fast);
         auto full_restore = game.restored_state(full_saved);
+        require(full_restore->gpu_renderer()==simulation::GpuRenderer::fast,
+            "state restore reset the current GPU FAST host preference");
         require(full_restore->stereo_output()==2,"state restore reset current stereo output");
         require(full_restore->reflective_surfaces_setting()==3,"state restore reset reflection preference");
         require(full_restore->dlss_mode()==1 && full_restore->fsr1_mode()==4 && full_restore->fsr1_menu(),

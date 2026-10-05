@@ -73,6 +73,18 @@ void touchBox(inout uint3 rgb,int2 at,int4 bounds,uint3 edgeColour) {
     rgb=(rgb*(255-alpha)+colour*alpha+127)/255;
 }
 uint indexOf(uint2 p) { return p.y*width+p.x; }
+// GPU FAST above 4x traces shadows/reflections at a capped scale: ray
+// buffers hold frame pixels x numerator / denominator (bits 8-15 / 16-23 of
+// shadowEnabled; zero means 1:1). The low byte is the shadow mask format.
+uint2 rayRatio() {
+    uint n=(shadowEnabled>>8)&255u,d=(shadowEnabled>>16)&255u;
+    return d!=0?uint2(n,d):uint2(1,1);
+}
+uint shadeAt(uint2 m) {
+    uint mode=shadowEnabled&255u;
+    uint i=m.y*(mode==3?((shadowWidth+3u)&~3u):shadowWidth)+m.x;
+    return mode==2?shadowMask.Load(i*4):(shadowMask.Load(i&~3u)>>((i&3u)*8))&255u;
+}
 uint paletteIndex(uint2 p) {
     uint i=indexOf(p);
     return reserved==1?(indexedPixels.Load(i*4)&255u)
@@ -542,8 +554,10 @@ void main(uint3 id : SV_DispatchThreadID) {
             receiver=kind>=1 && kind<=5 && ((environmentModes.x>=6 && environmentModes.x<=8)
                 || environmentModes.x==10 || (environmentModes.x==1 && kind==5));
         } else if(pad1==0) receiver=model(p) && surfaceAt(int2(p),surface);
-        if(receiver && p.x<shadowWidth && sy>=0 && sy<int(shadowHeight)) {
-            uint packed=shadowMask.Load((uint(sy)*shadowWidth+p.x)*4);
+        // Capped ray resolution maps frame pixels to the nearest ray pixel.
+        uint2 ray=sy>=0?uint2(p.x,uint(sy))*rayRatio().x/rayRatio().y:uint2(0,0);
+        if(receiver && ray.x<shadowWidth && sy>=0 && ray.y<shadowHeight) {
+            uint packed=shadowMask.Load((ray.y*shadowWidth+ray.x)*4);
             uint marker=packed>>24;
             if(pad1!=0 && environmentModes.x==10 && marker==253) {
                 float2 slope=float2(packed&255u,(packed>>8)&255u)/255.f*2.f-1.f;
@@ -574,11 +588,27 @@ void main(uint3 id : SV_DispatchThreadID) {
     } else if(stage==15) {
         int sy=int(p.y)-shadowY;
         uint layer=tag(p);
-        if(p.x<shadowWidth && sy>=0 && sy<int(shadowHeight) && (layer==0 || layer==2 || layer==4 || layer==5)) {
-            uint i=uint(sy)*(shadowEnabled==3?((shadowWidth+3u)&~3u):shadowWidth)+p.x;
-            uint shade=shadowEnabled==2 ? shadowMask.Load(i*4)
-                : (shadowMask.Load(i&~3u)>>((i&3u)*8))&255u;
-            result.rgb=c.rgb*(255-shade)/255;
+        // Emissive beams (packed bit 29, composite_portable) are lights, not
+        // receivers: the source draws its shadow polygon beneath them.
+        bool beam=reserved==1 && (layerTags.Load(indexOf(p)*4)&0x20000000u)!=0;
+        uint2 ratio=rayRatio();
+        if(!beam && sy>=0 && (layer==0 || layer==2 || layer==4 || layer==5)) {
+            if(ratio.x==ratio.y) {
+                if(p.x<shadowWidth && sy<int(shadowHeight)) {
+                    uint shade=shadeAt(uint2(p.x,uint(sy)));
+                    result.rgb=c.rgb*(255-shade)/255;
+                }
+            } else if(p.x*ratio.x/ratio.y<shadowWidth && uint(sy)*ratio.x/ratio.y<shadowHeight) {
+                // Capped ray resolution: soft shadows sample bilinearly.
+                float2 at=(float2(p.x,sy)+.5)*float(ratio.x)/float(ratio.y)-.5;
+                int2 limit=int2(shadowWidth,shadowHeight)-1;
+                int2 lo=clamp(int2(floor(at)),0,limit),hi=clamp(int2(floor(at))+1,0,limit);
+                float2 f=saturate(at-floor(at));
+                float top=lerp(float(shadeAt(uint2(lo.x,lo.y))),float(shadeAt(uint2(hi.x,lo.y))),f.x);
+                float bottom=lerp(float(shadeAt(uint2(lo.x,hi.y))),float(shadeAt(uint2(hi.x,hi.y))),f.x);
+                uint shade=uint(clamp(lerp(top,bottom,f.y)+.5,0.,255.));
+                result.rgb=c.rgb*(255-shade)/255;
+            }
         }
     } else if(stage==14 && (overlayFilter || art(p))) {
         uint factor=filter==5?3:filter==2?clamp(scale,2u,6u):max(scale,2u);uint4 v;

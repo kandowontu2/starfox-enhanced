@@ -40,8 +40,17 @@ constexpr std::array<RenderScale, render_scale_count> kRenderScales{
     RenderScale::scale_2x,
     RenderScale::scale_3x,
     RenderScale::scale_4x,
+    RenderScale::scale_5x,
+    RenderScale::scale_6x,
+    RenderScale::scale_7x,
+    RenderScale::scale_8x,
+    RenderScale::scale_9x,
+    RenderScale::scale_10x,
 };
 #endif
+// 5x-10x are offered only to GPU FAST on desktop builds; mobile, console and
+// UWP targets keep the 4x ceiling for memory.
+constexpr bool kHighRenderScales = platform_render_scale_limit>standard_render_scale_count;
 constexpr std::array<CrosshairColour, 8> kCrosshairColours{
     CrosshairColour::green,
     CrosshairColour::white,
@@ -1465,8 +1474,15 @@ GameTickResult GameSimulation::tick_pregame_menu(
             | starfox::input::right | starfox::input::select
             | starfox::input::a | starfox::input::b)) != 0U;
     if (change_renderer) {
-        set_renderer_mode(renderer_mode_ == RendererMode::gpu
-            ? RendererMode::software : RendererMode::gpu);
+        // SOFTWARE <-> GPU ACCURATE <-> GPU FAST, wrapping. Left/B step back.
+        const bool backward = (menu_input.pressed
+            & (starfox::input::left | starfox::input::b)) != 0U;
+        const auto next=next_renderer_selection(renderer_mode_,gpu_renderer_,backward,hardware_renderer_only);
+        set_renderer_mode(next.first);set_gpu_renderer(next.second);
+        if (!gpu_fast() && static_cast<std::size_t>(render_scale_)
+                >= standard_render_scale_count) {
+            render_scale_ = RenderScale::scale_4x;
+        }
         queue_sound_effect(0x11U);
     }
 
@@ -1492,17 +1508,19 @@ GameTickResult GameSimulation::tick_pregame_menu(
             break;
         }
         case 9U: {
+            const auto available = kHighRenderScales && gpu_fast()
+                ? kRenderScales.size()
+                : std::min(kRenderScales.size(), standard_render_scale_count);
             const auto found = std::find(
                 kRenderScales.begin(), kRenderScales.end(), render_scale_);
             auto index = found == kRenderScales.end()
                 ? std::size_t{}
-                : static_cast<std::size_t>(
-                    std::distance(kRenderScales.begin(), found));
+                : std::min(static_cast<std::size_t>(
+                    std::distance(kRenderScales.begin(), found)), available - 1U);
             if ((menu_input.pressed & starfox::input::left) != 0U) {
-                index = (index + kRenderScales.size() - 1U)
-                    % kRenderScales.size();
+                index = (index + available - 1U) % available;
             } else {
-                index = (index + 1U) % kRenderScales.size();
+                index = (index + 1U) % available;
             }
             render_scale_ = kRenderScales[index];
             break;

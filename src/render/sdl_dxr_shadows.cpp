@@ -12,6 +12,10 @@
 #define VK_NO_PROTOTYPES
 #include <vulkan/vulkan.h>
 #include "starfox/render/sdl_vulkan_bridge.h"
+#if defined(__MINGW32__) && !defined(__REQUIRED_RPCNDR_H_VERSION__)
+// Match SDL/DirectX-Headers: MinGW's RPC headers expose version 475.
+#define __REQUIRED_RPCNDR_H_VERSION__ 475
+#endif
 #include <d3d12.h>
 #include <wrl/client.h>
 #include <cstring>

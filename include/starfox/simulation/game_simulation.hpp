@@ -21,6 +21,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <utility>
 
 namespace starfox::simulation {
 
@@ -72,6 +73,15 @@ enum class RendererMode : std::uint8_t {
     software,
 };
 
+// Which GPU path draws the scene while renderer_mode is gpu. This is a host
+// preference: it is saved as the optional pregame.cfg key GPU_RENDERER and
+// is deliberately absent from save states.
+enum class GpuRenderer : std::uint8_t {
+    accurate, // the original per-model GPU path, the parity reference
+    fast,     // the GPU FAST paths; output must match accurate exactly
+};
+inline constexpr std::size_t gpu_renderer_count = 2U;
+
 // Internal supersampling of the host-rendered 3D layer. Cartridge 2D art is
 // unaffected and keeps its source raster.
 enum class RenderScale : std::uint8_t {
@@ -79,9 +89,27 @@ enum class RenderScale : std::uint8_t {
     scale_2x,
     scale_3x,
     scale_4x,
+    // GPU FAST only, desktop only: native-resolution 3D at 4K (16:9, 10x =
+    // 4000x2240) and 7680x2160 (32:9, 10x = 8000x2240).
+    scale_5x,
+    scale_6x,
+    scale_7x,
+    scale_8x,
+    scale_9x,
+    scale_10x,
 };
 
-inline constexpr std::size_t render_scale_count = 4U;
+inline constexpr std::size_t render_scale_count = 10U;
+// SOFTWARE and GPU ACCURATE keep the upstream 4x ceiling.
+inline constexpr std::size_t standard_render_scale_count = 4U;
+#if defined(STARFOX_IOS_RUNTIME)
+inline constexpr unsigned platform_render_scale_limit = 2U;
+#elif defined(__ANDROID__) || defined(__SWITCH__) || defined(STARFOX_UWP) \
+    || defined(SDL_PLATFORM_VITA) || defined(STARFOX_PS5)
+inline constexpr unsigned platform_render_scale_limit = 4U;
+#else
+inline constexpr unsigned platform_render_scale_limit = 10U;
+#endif
 
 enum class PregamePage {
     main,
@@ -517,6 +545,25 @@ public:
     void set_renderer_mode(RendererMode mode) noexcept {
         renderer_mode_ = constrain_renderer_mode(mode, hardware_renderer_only);
     }
+    [[nodiscard]] static constexpr std::pair<RendererMode,GpuRenderer> next_renderer_selection(
+        RendererMode mode,GpuRenderer gpu,bool backward,bool hardware_only) noexcept {
+        if(hardware_only) return {RendererMode::gpu,
+            gpu==GpuRenderer::fast?GpuRenderer::accurate:GpuRenderer::fast};
+        const unsigned position=mode==RendererMode::software?0U:gpu==GpuRenderer::fast?2U:1U;
+        const unsigned next=(position+(backward?2U:1U))%3U;
+        return {next==0U?RendererMode::software:RendererMode::gpu,
+            next==0U?gpu:next==2U?GpuRenderer::fast:GpuRenderer::accurate};
+    }
+    [[nodiscard]] GpuRenderer gpu_renderer() const noexcept {
+        return gpu_renderer_;
+    }
+    void set_gpu_renderer(GpuRenderer renderer) noexcept {
+        gpu_renderer_ = renderer;
+    }
+    [[nodiscard]] bool gpu_fast() const noexcept {
+        return renderer_mode_ == RendererMode::gpu
+            && gpu_renderer_ == GpuRenderer::fast;
+    }
     [[nodiscard]] bool msu1_music() const noexcept { return msu1_music_; }
     void set_msu1_music(bool enabled) noexcept {
         msu1_music_ = enabled && msu1_available_;
@@ -563,11 +610,12 @@ public:
     [[nodiscard]] RenderScale render_scale() const noexcept {
         return render_scale_;
     }
+    [[nodiscard]] static constexpr RenderScale constrain_render_scale(RenderScale scale) noexcept {
+        return static_cast<RenderScale>(std::min(static_cast<unsigned>(scale),platform_render_scale_limit-1U));
+    }
     void set_render_scale(RenderScale scale) noexcept {
-#if defined(STARFOX_IOS_RUNTIME)
-        if (scale > RenderScale::scale_2x) scale = RenderScale::scale_2x;
-#endif
-        render_scale_ = scale;
+        // Also constrain config/test/archive entry, not only menu cycling.
+        render_scale_ = constrain_render_scale(scale);
     }
     void set_secondary_inputs(
         std::span<const input::TickInput> controllers) noexcept;
@@ -1224,6 +1272,7 @@ private:
     bool preview_start_requested_{};
     bool vsync_{};
     RendererMode renderer_mode_{RendererMode::gpu};
+    GpuRenderer gpu_renderer_{GpuRenderer::accurate};
     bool msu1_music_{};
     bool msu1_available_{true};
     bool rumble_{true};

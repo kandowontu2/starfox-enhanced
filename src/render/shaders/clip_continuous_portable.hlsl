@@ -5,6 +5,7 @@
 #define STARFOX_CLIP_CAPACITY 128
 #endif
 #include "geometry_fp64.hlsli"
+#include "scaled_round.hlsli"
 Sf64 exact_pair(float hi,float lo) {
     return sf_add(sf_from_float_bits(asuint(hi)),sf_from_float_bits(asuint(lo)));
 }
@@ -60,7 +61,22 @@ bool inside(Accurate v,uint axis,float boundary,bool less) {
 [[vk::binding(0,2)]] cbuffer Settings : register(b0,space2) {
     uint polygonCount;uint pointCount;uint cornerCount;uint visibilityCount;
     int width;int height;uint projectionCount;uint residualCount;
+    float2 storedScale;uint2 storedPadding;
 };
+// Above 4x a nearest-float vertex can sit across a (k+0.5)/scale rounding
+// boundary from its exact value. Keep the neighbour that spans round like
+// the exact value; at 1x-4x (storedScale 0) the output is unchanged.
+float narrow_for_scale(float narrowed,Sf64 exact,float scale) {
+    if(!(scale>4) || narrowed==0 || !sf_valid(exact)) return narrowed;
+    float2 target=exact_parts(sf_mul(exact,exact_pair(scale,0)));
+    int stored=sr_round_away_pair(target.x,target.y);
+    if(sr_scaled_round(narrowed,scale)==stored) return narrowed;
+    Sf64 difference=sf_sub(exact,exact_pair(narrowed,0));
+    if(sf_zero(difference)) return narrowed;
+    bool increase=((difference.hi&0x80000000U)==0)==(narrowed>0);
+    uint bits=asuint(narrowed);float other=asfloat(increase?bits+1:bits-1);
+    return sr_scaled_round(other,scale)==stored?other:narrowed;
+}
 // Header is bitwise int4(count,status,0,0), payload is float4(X,Y,U,V).
 [numthreads(32,1,1)]
 void main(uint3 id:SV_DispatchThreadID) {
@@ -319,6 +335,7 @@ void main(uint3 id:SV_DispatchThreadID) {
                         uint raw=asuint(parts.x);bool increase=(parts.y>0)==(parts.x>0);
                         value[c]=asfloat(increase?raw+1:raw-1);
                     }
+                    if(c<2) value[c]=narrow_for_scale(value[c],vertices64[i].v[c],storedScale[c]);
                 }
                 clipped[base+i+1]=value;
             }
@@ -372,7 +389,7 @@ void main(uint3 id:SV_DispatchThreadID) {
                     uint bits=asuint(value.x);bool increase=(value.y>0)==(value.x>0);
                     narrowed=asfloat(increase?bits+1:bits-1);
                 }
-                endpoints64[i][c]=narrowed;
+                endpoints64[i][c]=narrow_for_scale(narrowed,exact,storedScale[c]);
             }
             clipped[base+1]=endpoints64[0];clipped[base+2]=endpoints64[1];clipped[base]=asfloat(int4(2,0,1,0));return;
         }
@@ -412,6 +429,7 @@ void main(uint3 id:SV_DispatchThreadID) {
                 uint bits=asuint(value.x);bool increase=(value.y>0)==(value.x>0);
                 endpoints[i][c]=asfloat(increase?bits+1:bits-1);
             }
+            endpoints[i][c]=narrow_for_scale(endpoints[i][c],exact_pair(value.x,value.y),storedScale[c]);
         }
         clipped[base+1]=endpoints[0];clipped[base+2]=endpoints[1];clipped[base]=asfloat(int4(2,0,1,0));return;
     }
@@ -466,6 +484,8 @@ void main(uint3 id:SV_DispatchThreadID) {
                 value[c]=asfloat(increase?bits+1:bits-1);
             }
         }
+        for(uint c=0;c<2;++c)
+            value[c]=narrow_for_scale(value[c],exact_pair(work[i].hi[c],work[i].lo[c]),storedScale[c]);
         clipped[base+1+i]=value;
     }
     clipped[base]=asfloat(int4(size,0,0,0));

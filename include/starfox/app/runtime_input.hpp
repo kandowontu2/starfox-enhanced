@@ -193,6 +193,8 @@ struct PregameSettings {
     std::array<std::uint8_t,6> environment{};
     bool planet_select_cheat{};
     std::uint8_t asteroid_models{}; // render::AsteroidModels: 0=SPRITE, 1-3=SUPER FX LOW/MEDIUM/HIGH.
+    // 0=GPU ACCURATE (default), 1=GPU FAST. Optional key GPU_RENDERER.
+    std::uint8_t gpu_renderer{};
 
     [[nodiscard]] bool operator==(const PregameSettings&) const = default;
 };

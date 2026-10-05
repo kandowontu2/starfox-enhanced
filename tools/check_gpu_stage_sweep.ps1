@@ -2,12 +2,16 @@ param([string]$OutputDirectory='tmp/gpu-stage-sweep',
     [ValidateSet('direct3d12','vulkan')][string]$GpuDriver='direct3d12',
     [ValidateSet('ORIGINAL','EX')][string[]]$Experiences=@('ORIGINAL','EX'),
     [ValidateSet('4_3','16_9','32_9')][string]$DisplayMode='16_9',
+    [ValidateSet('ACCURATE','FAST')][string]$GpuRenderer='ACCURATE',
+    [ValidateRange(1,10)][int[]]$RenderScale=@(1),
     [switch]$IncludeSpecialRoutes,
     [switch]$RasterOnly,
     [switch]$AllowUniformFinal,
     [switch]$RequireNoCpuUpload,
     [switch]$LowPowerGpu,
     [switch]$TraceGpuModelDispatch,
+    # GPU FAST: force compact row-span tile lists at every scale (A/B).
+    [switch]$CompactSpanTiles,
     [string[]]$Levels=@(), [ValidateRange(0,8000)][int]$Ticks=1000,
     [ValidateRange(1,240)][int]$Frames=12)
 $ErrorActionPreference='Stop'
@@ -32,6 +36,7 @@ try {
     }
     if($LowPowerGpu){$settings.STARFOX_TEST_LOW_POWER_GPU='1'}
     if($TraceGpuModelDispatch){$settings.STARFOX_TRACE_GPU_MODEL_DISPATCH='1'}
+    if($CompactSpanTiles){$settings.STARFOX_TEST_COMPACT_SPAN_TILES='1'}
     # Environment upgrades are persisted in the user's configuration. Clearing
     # process variables alone does not reset them; baseline comparisons must
     # explicitly select OFF without modifying the saved configuration.
@@ -53,22 +58,22 @@ try {
             # underlying harness reports the PID; never restart that process.
             & "$PSScriptRoot/check_gpu_native.ps1" -OutputDirectory "$OutputDirectory/$experience-$level" `
                 -Experience $experience -Rom $rom -Symbols $symbols -Level $level -GpuDriver $GpuDriver `
-                -Ticks $Ticks -Frames $Frames -Warmup 0 -Scales 1 -PresentationFps 60 `
+                -GpuRenderer $GpuRenderer -Ticks $Ticks -Frames $Frames -Warmup 0 -Scales $RenderScale -PresentationFps 60 `
                 -DefaultPipeline -Geometry:(!$RasterOnly) -RasterOnly:$RasterOnly `
                 -PresentationCapture -AllowUniformFinal:$AllowUniformFinal `
                 -RequireNoCpuUpload:$RequireNoCpuUpload -Bloom 0
             # Verify the requested aspect reached final presentation, rather
             # than comparing two equally wrong inherited display settings.
             $expectedWidth=switch($DisplayMode){'4_3'{299};'16_9'{400};'32_9'{800}}
-            foreach($mode in @('cpu','gpu')) {
-                $capture=Join-Path "$OutputDirectory/$experience-$level" "$experience-$level-$Ticks-60fps-1x-$mode-presentation.bmp"
+            foreach($scale in $RenderScale) {foreach($mode in @('cpu','gpu')) {
+                $capture=Join-Path "$OutputDirectory/$experience-$level" "$experience-$level-$Ticks-60fps-${scale}x-$mode-presentation.bmp"
                 $header=[IO.File]::ReadAllBytes([IO.Path]::GetFullPath($capture))
                 if($header.Length -lt 26 -or $header[0] -ne 66 -or $header[1] -ne 77 -or
-                    [BitConverter]::ToInt32($header,18) -ne $expectedWidth -or
-                    [Math]::Abs([BitConverter]::ToInt32($header,22)) -ne 224) {
+                    [BitConverter]::ToInt32($header,18) -ne $expectedWidth*$scale -or
+                    [Math]::Abs([BitConverter]::ToInt32($header,22)) -ne 224*$scale) {
                     throw "Unexpected final presentation dimensions: $capture ($DisplayMode)"
                 }
-            }
+            }}
             ++$passed
             Write-Output "Stage sweep: $passed passed; $experience $level"
         }

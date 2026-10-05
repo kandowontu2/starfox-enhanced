@@ -111,6 +111,7 @@ inline constexpr MenuText menu_text[] = {
     {"STARFOX EX", {U"STARFOX EX", U"STARFOX EX", U"STARFOX EX", U"STARFOX EX"}},
     {"GPU", {U"GPU", U"GPU", U"GPU", U"GPU"}},
     {"SOFTWARE", {U"\u30bd\u30d5\u30c8\u30a6\u30a7\u30a2", U"SOFTWARE", U"LOGICIEL", U"SOFTWARE"}},
+    {"GPU FAST", {U"GPU \u9ad8\u901f", U"GPU SCHNELL", U"GPU RAPIDE", U"GPU R\u00c1PIDO"}},
     {"UNLOCKED 20 HZ", {U"\u56fa\u5b9a20HZ", U"FESTE 20 HZ", U"20 HZ FIXES", U"20 HZ FIJOS"}},
     {"4 BY 3 STANDARD", {U"4:3 \u6a19\u6e96", U"4:3 STANDARD", U"4:3 STANDARD", U"4:3 EST\u00c1NDAR"}},
     {"16 BY 9 WIDE", {U"16:9 \u30ef\u30a4\u30c9", U"16:9 BREIT", U"16:9 LARGE", U"16:9 PANOR\u00c1MICO"}},

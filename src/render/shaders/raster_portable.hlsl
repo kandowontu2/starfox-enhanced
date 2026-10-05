@@ -21,10 +21,10 @@ RWStructuredBuffer<float> geometry_depth:register(u2,space1);
 cbuffer Settings:register(b0,space2) {
     uint width,height,want_surface,reserved;
     uint has_back,has_back_surface,take_surface,padding;
-    uint texel_bytes,reserved1,reserved2,reserved3;
+    uint texel_bytes,reserved1,reserved2,bounded; // bounded: 1=box origin in rows[12..13], 2=background is the output
     uint want_depth,plane_count,has_back_depth,depth_padding;
     float4 depth_projection; // focal x/y, center x/y in output pixels.
-    float2 rasterJitter;uint2 jitterPadding;
+    float2 rasterJitter;uint2 jitterPadding; // jitterPadding.x: compact list length in uints
 };
 // Source wave arithmetic uses signed 16-bit wrapping before both phase steps.
 int waveShift(int x,int offset,uint frame) {
@@ -35,6 +35,10 @@ int waveShift(int x,int offset,uint frame) {
 }
 [numthreads(64,1,1)]
 void main(uint3 id:SV_DispatchThreadID) {
+    // GPU FAST dispatches only the model's screen box (row spans leave rows[]
+    // unused). Uncovered pixels in the box rewrite their own value.
+    if((bounded&1U)!=0) id.xy+=uint2(rows[12],rows[13]);
+    bool in_place=(bounded&2U)!=0;
     uint outputWidth=reserved1!=0?reserved1:width,outputHeight=reserved2!=0?reserved2:height;
     if(id.x>=outputWidth || id.y>=outputHeight) return;
     uint outputIndex=id.y*outputWidth+id.x;
@@ -63,13 +67,28 @@ void main(uint3 id:SV_DispatchThreadID) {
     uint row=id.y*((width+63)/64)+id.x/64;
     uint begin=row_spans?0:rows[row];
     if(tiled_spans) begin=row*((reserved&0x3fffffffU)+1)+1;
-    for(uint cursor=tiled_spans?begin+indices[begin-1]:row_spans?(reserved&0x3fffffffU)*(wave_rows?2U:1U):rows[row+1];cursor>begin;) {
+    // GPU FAST compact lists (raster_bins stages 10-14): CSR offsets per box
+    // tile, box in rows[11..14]. An overflowed fill walks every polygon.
+    bool compact_spans=row_spans && !tiled_spans && (padding&0x40000000U)!=0;
+    uint compact_end=0;
+    if(compact_spans) {
+        uint tiles=((width+63)/64)*height,entries=tiles+1+(tiles+63)/64+1;
+        uint box_tiles=rows[14];
+        if(entries+indices[box_tiles]>jitterPadding.x) compact_spans=false;
+        else {
+            uint column=(id.x-rows[12])/64,box_row=id.y-rows[13];
+            bool inside=id.x>=rows[12] && id.y>=rows[13] && column<rows[11] && box_row*rows[11]+column<box_tiles;
+            uint tile=box_row*rows[11]+column;
+            begin=inside?entries+indices[tile]:0;compact_end=inside?entries+indices[tile+1]:0;
+        }
+    }
+    for(uint cursor=compact_spans?compact_end:tiled_spans?begin+indices[begin-1]:row_spans?(reserved&0x3fffffffU)*(wave_rows?2U:1U):rows[row+1];cursor>begin;) {
         --cursor;
         bool wave_candidate=wave_rows && (cursor&1U)!=0;
         int source_y=int(id.y)-(wave_candidate?wave_delta:0);
         if(source_y<0 || source_y>=int(height)) continue;
         uint polygon=wave_rows?cursor/2U:cursor;
-        uint command_index=tiled_spans?indices[cursor]:row_spans?polygon*height+uint(source_y):indices[cursor+(sparse?height*((width+63)/64):0)];
+        uint command_index=(tiled_spans || compact_spans)?indices[cursor]:row_spans?polygon*height+uint(source_y):indices[cursor+(sparse?height*((width+63)/64):0)];
         uint owner=command_index+1;
         // Sparse atomic scatter is unordered. Once both independent owners
         // outrank this command, neither coverage nor texture transparency
@@ -195,13 +214,20 @@ void main(uint3 id:SV_DispatchThreadID) {
         if(!sparse && have_pixel && have_surface) break;
     }
     if((reserved&0x40000000U)!=0 && have_pixel) packed|=0x04000000U;
+    // In place, a pixel no command touched already holds its final value.
+    // Skip the read-modify-write of colour, surface and depth.
+    if(in_place && !have_pixel && surface_owner==0) return;
     if(has_back!=0) {
-        uint back=back_pixels[id.y*width+id.x];
-        if(!have_pixel) packed=(packed&0x01ff0000U)|(back&0x1c00ffffU);
-        if(want_depth!=0 && !have_pixel && has_back_depth!=0) depth=back_depth[id.y*width+id.x];
+        uint backIndex=id.y*width+id.x;
+        uint back=in_place?pixels[backIndex]:back_pixels[backIndex];
+        // Uncovered pixels keep the background's flags, including the
+        // emissive-beam bit 29 (scene_portable).
+        if(!have_pixel) packed=(packed&0x01ff0000U)|(back&0x3c00ffffU);
+        if(want_depth!=0 && !have_pixel && has_back_depth!=0)
+            depth=in_place?geometry_depth[backIndex]:back_depth[backIndex];
         if((packed&0x01000000U)==0 && has_back_surface!=0 && (back&0x01000000U)!=0) {
-            packed=(packed&0x1c00ffffU)|(back&0x01ff0000U);
-            surface=back_surfaces[id.y*width+id.x];
+            packed=(packed&0x3c00ffffU)|(back&0x01ff0000U);
+            surface=in_place?surfaces[backIndex]:back_surfaces[backIndex];
         }
     }
     pixels[outputIndex]=packed;

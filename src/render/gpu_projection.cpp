@@ -1,5 +1,7 @@
 #include "starfox/render/gpu_projection.hpp"
 #include "starfox/compat/bit_cast.hpp"
+#include "starfox/render/gpu_raster.hpp"
+#include "starfox/render/gpu_scene_counters.hpp"
 #include "starfox/render/temporal_jitter.hpp"
 #include "starfox/render/grid_projection.hpp"
 #include <cmath>
@@ -225,7 +227,7 @@ void* GpuProjection::enqueue_motion_impl(void* device,void* command,void* curren
         SDL_PushGPUComputeUniformData(cmd,0,&settings,sizeof(settings));
         SDL_GPUStorageBufferReadWriteBinding out{};
         out.buffer=impl_->motion_output;out.cycle=true;
-        auto* pass=SDL_BeginGPUComputePass(cmd,nullptr,0,&out,1);Impl::require(pass);
+        auto* pass=scene_counters::begin_compute_pass(cmd,nullptr,0,&out,1);Impl::require(pass);
         SDL_BindGPUComputePipeline(pass,impl_->motion_pipeline);
         SDL_GPUBuffer* inputs[]{static_cast<SDL_GPUBuffer*>(current_points),static_cast<SDL_GPUBuffer*>(previous_points)};
         SDL_BindGPUComputeStorageBuffers(pass,0,inputs,2);
@@ -245,7 +247,7 @@ void* GpuProjection::enqueue_text(void* device,void* command,const ScaledTextRen
     try {
         const bool custom=logical_viewport[0] || logical_viewport[1];
         if(!device || !command || !width || !height || width>8192 || height>8192
-            || !scale || scale>4 || (!custom && (width%scale || height%scale))
+            || !scale || scale>max_gpu_render_scale || (!custom && (width%scale || height%scale))
             || (custom && (!logical_viewport[0] || !logical_viewport[1]
                 || logical_viewport[0]>2048 || logical_viewport[1]>2048)) || frame.glyphs.size()>256
             || frame.character_size< -1 || frame.character_size>254
@@ -292,7 +294,7 @@ void* GpuProjection::enqueue_text(void* device,void* command,const ScaledTextRen
             auto* copy=SDL_BeginGPUCopyPass(cmd);Impl::require(copy);
             SDL_GPUTransferBufferLocation from{impl_->text_upload,0};
             SDL_GPUBufferRegion to{impl_->text_glyphs,0,Uint32(frame.glyphs.size()*64)};
-            SDL_UploadToGPUBuffer(copy,&from,&to,true);SDL_EndGPUCopyPass(copy);
+            scene_counters::upload_buffer(copy,&from,&to,true);SDL_EndGPUCopyPass(copy);
         }
         struct Settings {
             double x,y,z;Uint32 width,height,scale,count;std::int32_t size;Uint32 colour;
@@ -305,7 +307,7 @@ void* GpuProjection::enqueue_text(void* device,void* command,const ScaledTextRen
         for(unsigned stage=0;stage<2;++stage) {
             settings.stage=stage;SDL_PushGPUComputeUniformData(cmd,0,&settings,sizeof(settings));
             SDL_GPUStorageBufferReadWriteBinding binding{};binding.buffer=impl_->text_work;binding.cycle=stage==0;
-            auto* pass=SDL_BeginGPUComputePass(cmd,nullptr,0,&binding,1);Impl::require(pass);
+            auto* pass=scene_counters::begin_compute_pass(cmd,nullptr,0,&binding,1);Impl::require(pass);
             SDL_BindGPUComputePipeline(pass,impl_->text_pipeline);
             SDL_BindGPUComputeStorageBuffers(pass,0,&impl_->text_glyphs,1);
             SDL_DispatchGPUCompute(pass,stage?(width*height+63)/64:1,1,1);SDL_EndGPUComputePass(pass);
@@ -355,7 +357,7 @@ void* GpuProjection::enqueue_particle_frame(void* device,void* command,const Par
         auto* copy=SDL_BeginGPUCopyPass(static_cast<SDL_GPUCommandBuffer*>(command));Impl::require(copy);
         SDL_GPUTransferBufferLocation source{impl_->particle_upload,0};
         SDL_GPUBufferRegion destination{impl_->particle_input,0,bytes};
-        SDL_UploadToGPUBuffer(copy,&source,&destination,true);SDL_EndGPUCopyPass(copy);
+        scene_counters::upload_buffer(copy,&source,&destination,true);SDL_EndGPUCopyPass(copy);
         ParticleSettings settings;
         settings.owner_x=frame.pose.x;settings.owner_y=frame.pose.y;settings.owner_z=frame.pose.z;
         settings.alpha=std::clamp(frame.alpha,0.,1.);settings.width=width;settings.height=height;
@@ -401,7 +403,7 @@ void* GpuProjection::enqueue_particles(void* device,void* command,void* points,c
         }
         auto* cmd=static_cast<SDL_GPUCommandBuffer*>(command);SDL_PushGPUComputeUniformData(cmd,0,&settings,sizeof(settings));
         SDL_GPUStorageBufferReadWriteBinding binding{};binding.buffer=impl_->particle_output;binding.cycle=true;
-        auto* pass=SDL_BeginGPUComputePass(cmd,nullptr,0,&binding,1);Impl::require(pass);
+        auto* pass=scene_counters::begin_compute_pass(cmd,nullptr,0,&binding,1);Impl::require(pass);
         SDL_BindGPUComputePipeline(pass,impl_->particle_pipeline);
         auto* input=static_cast<SDL_GPUBuffer*>(points);SDL_BindGPUComputeStorageBuffers(pass,0,&input,1);
         SDL_DispatchGPUCompute(pass,(settings.count+63)/64,1,1);SDL_EndGPUComputePass(pass);
@@ -441,9 +443,9 @@ void* GpuProjection::enqueue_dust_frame(void* device,void* command,const DustRen
         auto* cmd=static_cast<SDL_GPUCommandBuffer*>(command);
         auto* copy=SDL_BeginGPUCopyPass(cmd);Impl::require(copy);
         SDL_GPUTransferBufferLocation source{impl_->dust_upload,0};SDL_GPUBufferRegion destination{impl_->dust_input,0,bytes};
-        SDL_UploadToGPUBuffer(copy,&source,&destination,true);
+        scene_counters::upload_buffer(copy,&source,&destination,true);
         source.offset=511*32;destination={impl_->dust_colours,0,256};
-        SDL_UploadToGPUBuffer(copy,&source,&destination,true);SDL_EndGPUCopyPass(copy);
+        scene_counters::upload_buffer(copy,&source,&destination,true);SDL_EndGPUCopyPass(copy);
         DustSettings settings;
         for(unsigned i=0;i<3;++i) {
             settings.row_x[i]=frame.matrix[i*3];settings.row_y[i]=frame.matrix[i*3+1];settings.row_z[i]=frame.matrix[i*3+2];
@@ -492,7 +494,7 @@ void* GpuProjection::enqueue_dust(void* device,void* command,void* points,void* 
         auto* cmd=static_cast<SDL_GPUCommandBuffer*>(command);
         SDL_PushGPUComputeUniformData(cmd,0,&settings,sizeof(settings));
         SDL_GPUStorageBufferReadWriteBinding binding{};binding.buffer=impl_->dust_output;binding.cycle=true;
-        auto* pass=SDL_BeginGPUComputePass(cmd,nullptr,0,&binding,1);Impl::require(pass);
+        auto* pass=scene_counters::begin_compute_pass(cmd,nullptr,0,&binding,1);Impl::require(pass);
         SDL_BindGPUComputePipeline(pass,impl_->dust_pipeline);
         SDL_GPUBuffer* inputs[]{static_cast<SDL_GPUBuffer*>(points),static_cast<SDL_GPUBuffer*>(colours)};
         SDL_BindGPUComputeStorageBuffers(pass,0,inputs,2);
@@ -561,7 +563,7 @@ void* GpuProjection::enqueue_point_spans(void* command,std::uint32_t height,
             starfox::bit_cast<Uint32>(jitter[0]),starfox::bit_cast<Uint32>(jitter[1]),0,0};
         SDL_PushGPUComputeUniformData(cmd,0,settings,sizeof(settings));
         SDL_GPUStorageBufferReadWriteBinding binding{};binding.buffer=impl_->grid_spans;binding.cycle=true;
-        auto* pass=SDL_BeginGPUComputePass(cmd,nullptr,0,&binding,1);Impl::require(pass);
+        auto* pass=scene_counters::begin_compute_pass(cmd,nullptr,0,&binding,1);Impl::require(pass);
         SDL_BindGPUComputePipeline(pass,impl_->grid_spans_pipeline);
         SDL_BindGPUComputeStorageBuffers(pass,0,&point_buffer,1);
         SDL_DispatchGPUCompute(pass,(count*height+63)/64,1,1);SDL_EndGPUComputePass(pass);
@@ -609,7 +611,7 @@ void* GpuProjection::enqueue_grid(void* device,void* command,const GridLattice& 
         auto* cmd=static_cast<SDL_GPUCommandBuffer*>(command);
         SDL_PushGPUComputeUniformData(cmd,0,&settings,sizeof(settings));
         SDL_GPUStorageBufferReadWriteBinding binding{};binding.buffer=impl_->grid_output;binding.cycle=true;
-        auto* pass=SDL_BeginGPUComputePass(cmd,nullptr,0,&binding,1);Impl::require(pass);
+        auto* pass=scene_counters::begin_compute_pass(cmd,nullptr,0,&binding,1);Impl::require(pass);
         SDL_BindGPUComputePipeline(pass,impl_->grid_pipeline);
         SDL_DispatchGPUCompute(pass,4,1,1);SDL_EndGPUComputePass(pass);
         impl_->grid_command=command;impl_->grid_height=height;
@@ -661,7 +663,7 @@ void* GpuProjection::enqueue_axis_points(void* device,void* command,void* points
         auto* cmd=static_cast<SDL_GPUCommandBuffer*>(command);SDL_PushGPUComputeUniformData(cmd,0,&settings,sizeof(settings));
         SDL_GPUStorageBufferReadWriteBinding bindings[2]{};bindings[0].buffer=impl_->axis_output;bindings[0].cycle=true;
         bindings[1].buffer=impl_->axis_residuals;bindings[1].cycle=true;
-        auto* pass=SDL_BeginGPUComputePass(cmd,nullptr,0,bindings,2);Impl::require(pass);
+        auto* pass=scene_counters::begin_compute_pass(cmd,nullptr,0,bindings,2);Impl::require(pass);
         SDL_BindGPUComputePipeline(pass,impl_->axis_pipeline);
         SDL_GPUBuffer* inputs[]{static_cast<SDL_GPUBuffer*>(points),static_cast<SDL_GPUBuffer*>(indices),static_cast<SDL_GPUBuffer*>(input_residuals?input_residuals:points)};
         SDL_BindGPUComputeStorageBuffers(pass,0,inputs,3);SDL_DispatchGPUCompute(pass,1,1,1);SDL_EndGPUComputePass(pass);
@@ -705,7 +707,7 @@ void* GpuProjection::enqueue_continuous(void* device,void* command,void* vertice
         SDL_GPUStorageBufferReadWriteBinding bindings[2]{};
         bindings[0].buffer=impl_->transformed;bindings[0].cycle=true;
         bindings[1].buffer=impl_->continuous_residuals;bindings[1].cycle=true;
-        auto* pass=SDL_BeginGPUComputePass(cmd,nullptr,0,bindings,2);Impl::require(pass);
+        auto* pass=scene_counters::begin_compute_pass(cmd,nullptr,0,bindings,2);Impl::require(pass);
         SDL_BindGPUComputePipeline(pass,impl_->continuous_pipeline);
         SDL_GPUBuffer* inputs[]{static_cast<SDL_GPUBuffer*>(vertices),static_cast<SDL_GPUBuffer*>(poses)};
         SDL_BindGPUComputeStorageBuffers(pass,0,inputs,2);
@@ -741,7 +743,7 @@ void* GpuProjection::enqueue_transformed(void* device,void* command,void* vertic
         const Uint32 settings[]{count,pose_count,0,0};
         SDL_PushGPUComputeUniformData(cmd,0,settings,sizeof(settings));
         SDL_GPUStorageBufferReadWriteBinding binding{};binding.buffer=impl_->transformed;binding.cycle=true;
-        auto* pass=SDL_BeginGPUComputePass(cmd,nullptr,0,&binding,1);Impl::require(pass);
+        auto* pass=scene_counters::begin_compute_pass(cmd,nullptr,0,&binding,1);Impl::require(pass);
         SDL_BindGPUComputePipeline(pass,impl_->transform_pipeline);
         SDL_GPUBuffer* inputs[]{static_cast<SDL_GPUBuffer*>(vertices),static_cast<SDL_GPUBuffer*>(poses)};
         SDL_BindGPUComputeStorageBuffers(pass,0,inputs,2);
@@ -780,7 +782,7 @@ void* GpuProjection::enqueue(void* device,void* command,void* input,std::uint32_
         SDL_PushGPUComputeUniformData(cmd,0,settings,sizeof(settings));
         SDL_GPUStorageBufferReadWriteBinding binding{};
         binding.buffer=impl_->output;binding.cycle=true;
-        auto* pass=SDL_BeginGPUComputePass(cmd,nullptr,0,&binding,1);Impl::require(pass);
+        auto* pass=scene_counters::begin_compute_pass(cmd,nullptr,0,&binding,1);Impl::require(pass);
         SDL_BindGPUComputePipeline(pass,impl_->pipeline);
         auto* source=static_cast<SDL_GPUBuffer*>(input);
         SDL_BindGPUComputeStorageBuffers(pass,0,&source,1);
@@ -824,7 +826,7 @@ void* GpuProjection::enqueue_visibility_impl(void* command,void* faces,std::uint
         const Uint32 settings[]{count,point_count,0,0};
         SDL_PushGPUComputeUniformData(cmd,0,settings,sizeof(settings));
         SDL_GPUStorageBufferReadWriteBinding binding{};binding.buffer=impl_->visibility_output;binding.cycle=true;
-        auto* pass=SDL_BeginGPUComputePass(cmd,nullptr,0,&binding,1);Impl::require(pass);
+        auto* pass=scene_counters::begin_compute_pass(cmd,nullptr,0,&binding,1);Impl::require(pass);
         SDL_BindGPUComputePipeline(pass,pipeline);
         SDL_GPUBuffer* inputs[]{points,static_cast<SDL_GPUBuffer*>(faces)};
         SDL_BindGPUComputeStorageBuffers(pass,0,inputs,2);

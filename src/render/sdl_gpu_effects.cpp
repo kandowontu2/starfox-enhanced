@@ -361,6 +361,11 @@ struct SdlGpuEffects::Impl {
                 throw std::runtime_error("Invalid packed resident shadow stride");
             p.shadow_enabled=s.resident_shadow.packed_row_bytes?3:2;data[3]={};
         }
+        // Capped ray resolution (GPU FAST above 4x): bits 8-15/16-23 of
+        // shadowEnabled carry the frame-to-ray ratio for stages 15 and 30.
+        const Uint32 ray_ratio=s.ray_scale_den && s.ray_scale_num<256 && s.ray_scale_den<256
+            ?(s.ray_scale_num<<8)|(s.ray_scale_den<<16):0U;
+        if(p.shadow_enabled) p.shadow_enabled|=ray_ratio;
         if(s.resident_reflection.buffer) {
             const auto& r=s.resident_reflection;
             if(r.device!=device || !r.width || !r.height || r.width>width
@@ -446,6 +451,7 @@ struct SdlGpuEffects::Impl {
             const auto& r=s.resident_reflection;auto reflection=p;
             reflection.shadow_width=r.width;reflection.shadow_height=r.height;
             reflection.shadow_y=s.reflection_offset_y;
+            reflection.shadow_enabled=(reflection.shadow_enabled&255U)|ray_ratio;
             reflection.pad0=int(std::min(s.reflection_intensity,100U));
             reflection.pad1=0;
             reflection.overlay_filter=s.reflection_material?1:0;
@@ -564,6 +570,7 @@ struct SdlGpuEffects::Impl {
             if(s.environment.ray_water && s.resident_reflection.buffer) {
                 const auto& r=s.resident_reflection;
                 env.shadow_width=r.width;env.shadow_height=r.height;env.shadow_y=s.reflection_offset_y;
+                env.shadow_enabled=(env.shadow_enabled&255U)|ray_ratio;
                 env.pad0=100;env.pad1=1;
                 auto* saved=input_buffers[3];input_buffers[3]=static_cast<SDL_GPUBuffer*>(r.buffer);
                 dispatch(env,30,images[current],images[1-current]);current=1-current;
