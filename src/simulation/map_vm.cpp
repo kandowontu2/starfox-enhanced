@@ -693,9 +693,13 @@ void MapVm::sync_objects_to_cpu() {
             ? original_object_pointer(active[index + 1U]) : 0U);
         cpu_.write16(base + 2U, index != 0
             ? original_object_pointer(active[index - 1U]) : 0U);
-        for (std::uint16_t offset = 4; offset < object_size_; ++offset) {
-            cpu_.write8(base + offset, read_native_object_byte(handle, offset));
-        }
+        std::array<std::uint8_t, 57> record;
+        const auto bytes = std::span{record}.first(object_size_);
+        objects_->read_base_record(handle, bytes);
+        // Keep every bus write and its order, including the later reference
+        // fixups: open-bus state and CPU-visible records must remain identical.
+        for (std::uint16_t offset = 4; offset < object_size_; ++offset)
+            cpu_.write8(base + offset, bytes[offset]);
         const auto& object = objects_->at(handle);
         cpu_.write16(base + 6U, original_object_pointer(object.attached));
         cpu_.write16(base + 25U, original_object_pointer(object.immune_object));
@@ -735,21 +739,23 @@ void MapVm::sync_objects_from_cpu() {
         throw std::runtime_error{"native active/free lists do not cover the object pool"};
     }
     objects_->restore_lists(active, free);
-    for (const auto handle : objects_->active_handles()) {
+    for (const auto handle : active) {
         const auto base = static_cast<std::uint32_t>(original_object_pointer(handle));
         const auto extended_base = extended_object_base_
             + static_cast<std::uint32_t>(handle - 1U) * object_size_;
-        for (std::uint16_t offset = 4; offset < object_size_; ++offset) {
-            write_native_object_byte(handle, offset, cpu_.read8(base + offset));
-        }
+        std::array<std::uint8_t, 57> record;
+        const auto bytes = std::span{record}.first(object_size_);
+        for (std::uint16_t offset = 4; offset < object_size_; ++offset)
+            bytes[offset] = cpu_.read8(base + offset);
+        objects_->write_base_record(handle, bytes);
         auto& object = objects_->at(handle);
         object.attached = object_handle(cpu_.read16(base + 6U));
         object.immune_object = object_handle(cpu_.read16(base + 25U));
         object.collision_object = object_handle(cpu_.read16(base + 27U));
-        for (std::size_t offset = 0; offset < extended_object_bytes_; ++offset) {
-            objects_->write_path_byte(handle, static_cast<std::uint8_t>(0x80U + offset),
-                                      cpu_.read8(extended_base + offset));
-        }
+        const auto extended_bytes = std::span{record}.first(extended_object_bytes_);
+        for (std::size_t offset = 0; offset < extended_object_bytes_; ++offset)
+            extended_bytes[offset] = cpu_.read8(extended_base + offset);
+        objects_->write_extended_record(handle, extended_bytes);
         object.fire_object = object_handle(cpu_.read16(extended_base + 19U));
     }
 }

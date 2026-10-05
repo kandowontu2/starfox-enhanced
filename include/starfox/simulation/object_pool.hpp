@@ -91,6 +91,11 @@ public:
     [[nodiscard]] ObjectHandle next_active(ObjectHandle handle) const noexcept;
     [[nodiscard]] std::size_t active_count() const noexcept { return active_count_; }
     [[nodiscard]] std::size_t capacity() const noexcept { return capacity_; }
+    // Literal AL_/ALX_ records for the CPU bridge, without per-byte semantic
+    // dispatch. Base bytes 0..3 are linked-list pointers owned by the bridge.
+    void read_base_record(ObjectHandle handle, std::span<std::uint8_t> bytes) const;
+    void write_base_record(ObjectHandle handle, std::span<const std::uint8_t> bytes);
+    void write_extended_record(ObjectHandle handle, std::span<const std::uint8_t> bytes);
     [[nodiscard]] std::uint8_t read_base_byte(ObjectHandle handle, std::uint16_t offset) const;
     [[nodiscard]] std::uint16_t read_base_word(ObjectHandle handle, std::uint16_t offset) const;
     void write_base_byte(ObjectHandle handle, std::uint16_t offset, std::uint8_t value);
