@@ -15,6 +15,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/SpcState.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/spc_timers.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/spc_saturation.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/spc_counters.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/spc_ram.cmake")
 add_library(starfox_3ds_spc STATIC
     "${STARFOX_SPC_SOURCE}/spc.cpp" "${STARFOX_3DS_SPC_TIMERS_SOURCE}"
     "${STARFOX_SPC_SOURCE}/SNES_SPC_misc.cpp" "${STARFOX_SPC_SOURCE}/SNES_SPC_state.cpp"
