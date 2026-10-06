@@ -98,7 +98,7 @@ jobs:
       - name: Verify source PPU layers, caches and ordered composition
         shell: bash
         run: |
-          g++ -std=c++20 -O2 -Wall -Wextra -Wpedantic -Werror -I include \
+          g++ -std=c++20 -O2 -Wall -Wextra -Wpedantic -Werror -DSTARFOX_SCENE_SOURCE_ONLY=1 -I include \
             tests/nintendo_3ds_raster_tests.cpp platform/3ds/pica_raster.cpp \
             src/render/background_renderer.cpp src/render/sprite_renderer.cpp \
             -o "$RUNNER_TEMP/starfox-3ds-raster-contracts"

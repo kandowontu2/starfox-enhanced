@@ -39,6 +39,9 @@ add_library(starfox_3ds_raster STATIC pica_raster.cpp bg2_tile_plan.cpp bg2_roll
     ../../src/render/background_renderer.cpp ../../src/render/sprite_renderer.cpp)
 target_include_directories(starfox_3ds_raster PUBLIC ../../include)
 target_compile_features(starfox_3ds_raster PUBLIC cxx_std_20)
+# Host raster/effect contracts consume the same cartridge scene snapshots as
+# the console. They must not acquire desktop OpenXR helpers through that ABI.
+target_compile_definitions(starfox_3ds_raster PUBLIC STARFOX_SCENE_SOURCE_ONLY=1)
 if(STARFOX_3DS_BUILD_GAME_CORE)
     include(cartridge_core.cmake)
     if(STARFOX_3DS_PROFILE_FRAMES)
