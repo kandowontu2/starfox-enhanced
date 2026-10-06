@@ -12,7 +12,7 @@ struct GameRasterSnapshot {
     simulation::WindowWipeState wipe;
     simulation::ColourMathEffectState colour_math;
     std::uint8_t brightness{};
-    bool boss_roll{},stage_hud{}; // Source flow policy, captured with the 60 Hz raster.
+    bool boss_roll{},stage_hud{},final_score{}; // Source flow policy, captured with the 60 Hz raster.
 };
 struct GamePresentation {
     FramePlan plan;

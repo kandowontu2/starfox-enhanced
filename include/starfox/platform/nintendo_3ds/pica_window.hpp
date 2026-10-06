@@ -3,14 +3,15 @@
 #include "starfox/simulation/game_simulation.hpp"
 
 namespace starfox::platform::nintendo_3ds {
-enum class WindowCoverage {authored,full_scene};
+enum class WindowCoverage {authored,full_scene,vertical_scene};
 // The source colour window masks the composed world, not a mono framebuffer.
 // Submit this screen-space black geometry AFTER the ordered upper-LCD scene.
 // Actual additive/subtractive circle/colour math is separate, not faked black.
 class PicaWindow {
 public:
     PicaFrame prepare(const simulation::WindowWipeState& wipe,const FramePlan& plan,WindowCoverage coverage) {
-        if(coverage!=WindowCoverage::authored && coverage!=WindowCoverage::full_scene)
+        if(coverage!=WindowCoverage::authored && coverage!=WindowCoverage::full_scene
+            && coverage!=WindowCoverage::vertical_scene)
             throw std::invalid_argument("Unknown 3DS source window coverage");
         if(plan.eye_count!=(plan.stereo?2U:1U)) throw std::invalid_argument("Invalid 3DS window eye plan");
         for(unsigned eye=0;eye<plan.eye_count;++eye) static_cast<void>(PicaProjection(plan,eye));
@@ -27,7 +28,8 @@ public:
                 unsigned count=0;
                 if(y<screen_height) {
                     const bool expanded=coverage==WindowCoverage::full_scene;
-                    const int sy=expanded?int(y*191/(screen_height-1)):int(y)-24;
+                    const bool vertical=coverage!=WindowCoverage::authored;
+                    const int sy=vertical?int(y*191/(screen_height-1)):int(y)-24;
                     std::array<unsigned,6> edges{0,top_width,0,0,0,0};
                     if(wipe.horizontal_opening) {
                         if(expanded) edges[2]=(top_width+221)/223;
@@ -66,7 +68,7 @@ public:
     [[nodiscard]] std::uint64_t builds() const noexcept {return builds_;}
 private:
     static unsigned boundary(int source,WindowCoverage coverage) noexcept {
-        if(coverage==WindowCoverage::authored) return unsigned(std::clamp(source+int((top_width-256)/2),0,int(top_width)));
+        if(coverage!=WindowCoverage::full_scene) return unsigned(std::clamp(source+int((top_width-256)/2),0,int(top_width)));
         const int value=source-16;
         if(value<=0) return 0;
         return unsigned(std::min(int(top_width),(value*int(top_width-1)+222)/223));
@@ -80,15 +82,16 @@ private:
     static bool masked(const simulation::WindowWipeState& wipe,WindowCoverage coverage,unsigned x,unsigned y) {
         if(!wipe.active) return false;
         const bool expanded=coverage==WindowCoverage::full_scene;
+        const bool vertical=coverage!=WindowCoverage::authored;
         const int sx=expanded?16+int(x*223/(top_width-1)):int(x)-int((top_width-256)/2);
         if(wipe.horizontal_opening) {
-            const double sy=expanded?(y+.5)*192/screen_height:double(y)+.5-24;
+            const double sy=vertical?(y+.5)*192/screen_height:double(y)+.5-24;
             if(sy<0 || sy>=192) return false;
             if(sy<wipe.opening_top || sy>=wipe.opening_bottom) return true;
             if(expanded) return x<(top_width+221)/223;
             return (!(sx>=15 && sx<=16))!=(sx>=16 && sx<=240);
         }
-        const int sy=expanded?int(y*191/(screen_height-1)):int(y)-24;
+        const int sy=vertical?int(y*191/(screen_height-1)):int(y)-24;
         if(sy<0 || sy>=192) return false;
         const int left=wipe.left[sy]&255,right=wipe.right[sy]&255;
         const bool inside=left<=right?(sx>=left && sx<=right):(sx>=left || sx<=right);

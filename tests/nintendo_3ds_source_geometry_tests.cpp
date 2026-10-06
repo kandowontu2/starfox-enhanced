@@ -158,6 +158,78 @@ void effect_windows() {
     rejects([&]{validate_pica_frame(malformed,{lower,bottom_width,screen_height,bottom_width*3});},
         "Reversed source window accepted by presenter validation");
 }
+void painter_projection() {
+    const auto colours=palette();render::SoftwareRenderer renderer;PicaShapes output;
+    auto near_pose=pose();near_pose.z=256;
+    auto far_pose=pose();far_pose.z=512;
+    auto shape=quad();shape.faces[0].colour_id=3;
+    const auto front=renderer.prepare_primitives(shape,near_pose);
+    shape.faces[0].colour_id=7;
+    const auto player=renderer.prepare_primitives(shape,far_pose);
+    output.append(front,colours);
+    output.append(player,colours,{128,112},nullptr,PicaShapeOrder::painter);
+    output.append(player,colours,{128,112},nullptr,PicaShapeOrder::painter);
+    output.append(front,colours);
+    const auto plan=plan_frame(1,true,ScreenUse::world);
+    const auto frame=output.frame(plan);
+    require(frame.draws.size()==3 && frame.draws[1].count==12
+        && frame.draws[0].depth_test && !frame.draws[1].depth_test && !frame.draws[1].depth_write
+        && frame.draws[2].depth_test && frame.draws[2].depth_write,
+        "Painter/depth passes merged across their boundary or leaked into the next source object");
+    for(const auto& draw:frame.draws)
+        require(draw.space==PicaSpace::world && draw.source_layer==1 && draw.model==pica_identity,
+            "Late player lost finite eye projection/source colour ownership");
+    // Independently sample the overlapping camera triangles at LCD pixel
+    // centres. Reciprocal-Z plus per-draw depth policy, not the production
+    // projection helper, determines whether the farther painter is visible.
+    const auto sample=[&](unsigned eye,bool force_depth) {
+        std::array<float,4> colour{};double nearest=std::numeric_limits<double>::infinity();
+        for(unsigned d=0;d<2;++d) {
+            const auto& draw=frame.draws[d];
+            for(unsigned i=draw.first;i<draw.first+draw.count;i+=3) {
+                std::array<std::array<double,2>,3> p{};
+                for(unsigned k=0;k<3;++k) {
+                    const auto v=frame.vertices[i+k].position;
+                    p[k]={200+plan.focal_x*(double(v[0])-plan.eyes[eye].x)/v[2]+plan.eyes[eye].projection_offset,
+                        120-plan.focal_y*double(v[1])/v[2]};
+                }
+                const auto cross=[](auto a,auto b,auto q){return (b[0]-a[0])*(q[1]-a[1])-(b[1]-a[1])*(q[0]-a[0]);};
+                const double area=cross(p[0],p[1],p[2]);
+                const std::array point{200.5,120.5};
+                const std::array w{cross(p[1],p[2],point)/area,cross(p[2],p[0],point)/area,cross(p[0],p[1],point)/area};
+                if(std::any_of(w.begin(),w.end(),[](double value){return value<0;})) continue;
+                double reciprocal=0;for(unsigned k=0;k<3;++k) reciprocal+=w[k]/frame.vertices[i+k].position[2];
+                const double z=1/reciprocal;
+                if((force_depth || draw.depth_test) && z>nearest) continue;
+                colour=frame.vertices[i].colour;if(force_depth || draw.depth_write) nearest=z;
+            }
+        }
+        return colour;
+    };
+    for(unsigned eye=0;eye<2;++eye) {
+        require(sample(eye,false)==frame.vertices[frame.draws[1].first].colour,
+            "Farther Controls painter is still hidden by a nearer weapons-demo triangle");
+        require(sample(eye,true)==frame.vertices[frame.draws[0].first].colour,
+            "Occlusion fixture does not distinguish ordinary world depth from painter order");
+        require(pica_draw_matrix(plan,eye,frame.draws[1])==PicaProjection(plan,eye).rows(),
+            "Painter pass became a flat menu image");
+    }
+    require(pica_draw_matrix(plan,0,frame.draws[1])!=pica_draw_matrix(plan,1,frame.draws[1]),
+        "Late player stereo disparity was removed with its depth test");
+    std::vector<std::uint8_t> lower(bottom_width*screen_height*3);
+    validate_pica_frame(frame,{lower,bottom_width,screen_height,bottom_width*3});
+    auto invalid=player;invalid.primitives.push_back(invalid.primitives.front());
+    invalid.primitives.back().vertices[0].camera[0]=std::numeric_limits<double>::quiet_NaN();
+    const auto before=std::vector<PicaVertex>(frame.vertices.begin(),frame.vertices.end());
+    rejects([&]{output.append(invalid,colours,{128,112},nullptr,PicaShapeOrder::painter);},
+        "Malformed painter shape must roll back its new draw and vertices");
+    const auto retained=output.frame(plan);
+    require(std::equal(before.begin(),before.end(),retained.vertices.begin()) && retained.draws.size()==3
+        && retained.draws.back().depth_test && retained.draws.back().count==6,
+        "Failed painter append changed the previous complete depth stream");
+    rejects([&]{output.append(player,colours,{128,112},nullptr,static_cast<PicaShapeOrder>(99));},
+        "Unknown source painter policy accepted");
+}
 void rollback_and_budget() {
     auto shape=quad();auto p=pose();render::SoftwareRenderer renderer;
     const auto colours=palette();PicaShapes output;auto prepared=renderer.prepare_primitives(shape,p);
@@ -228,6 +300,6 @@ void projected_dither() {
 }
 } // namespace
 int main() try {
-    native_vertices();source_geometry();materials_and_sprites();effect_windows();rollback_and_budget();texture_resources();projected_dither();
+    native_vertices();source_geometry();materials_and_sprites();effect_windows();painter_projection();rollback_and_budget();texture_resources();projected_dither();
     std::cout<<"3DS shared source geometry/material conversion: "<<checks<<" checks passed\n";
 } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}

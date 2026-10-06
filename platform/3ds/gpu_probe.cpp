@@ -92,8 +92,8 @@ int diagnostic(NativeDisplay& display) {
             caption.text(12,12,"PICA200 GPU CHECK / NOT THE GAME",{183,224,240});
             if(setup) caption.text(24,56,"A: SOURCE MODELS / DEPTH / SLIDER\n\nB: RETURN TO THIS PAGE\nCIRCLE PAD: MOVE FRONT CUBE\nL/R: EX SPAN MODE\n\nSELECT + START: EXIT\n\nREAL PRE-GAME MENU IS RETAINED\nIN THE SEPARATE GAME PORT",{227,235,242});
             else {
-                caption.text(8,203,std::string("EX SPANS: ")+span_names[span_mode],{213,237,244});
-                caption.text(8,221,"L/R: SPANS / X: WIPE / Y: COLOUR",{213,237,244});
+                caption.text(8,211,std::string("EX SPANS: ")+span_names[span_mode],{213,237,244});
+                caption.text(8,228,"L/R: SPANS / X: WIPE / Y: COLOUR",{213,237,244});
             }
             caption_dirty=false;
         }

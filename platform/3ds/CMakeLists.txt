@@ -335,11 +335,18 @@ elseif(STARFOX_3DS_BUILD_HOST_TESTS)
         add_executable(starfox_3ds_game_state_tests ../../tests/nintendo_3ds_game_state_tests.cpp)
         target_link_libraries(starfox_3ds_game_state_tests PRIVATE starfox_3ds_cartridge_core)
         add_test(NAME starfox_3ds_game_state_tests COMMAND starfox_3ds_game_state_tests)
-        add_executable(starfox_3ds_game_models_check ../../tools/check_3ds_game_models.cpp)
+        add_executable(starfox_3ds_game_models_check ../../tools/check_3ds_game_models.cpp "${companion_header}")
+        target_include_directories(starfox_3ds_game_models_check PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
         target_link_libraries(starfox_3ds_game_models_check PRIVATE starfox_3ds_cartridge_core)
         add_test(NAME starfox_3ds_game_models_cli
             COMMAND "${CMAKE_COMMAND}" "-DCHECKER=$<TARGET_FILE:starfox_3ds_game_models_check>"
                 -P "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/nintendo_3ds_game_models_cli.cmake")
+        add_executable(starfox_3ds_fortuna_inputs_check ../../tools/check_3ds_fortuna_inputs.cpp "${companion_header}")
+        target_include_directories(starfox_3ds_fortuna_inputs_check PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+        target_link_libraries(starfox_3ds_fortuna_inputs_check PRIVATE starfox_3ds_cartridge_core)
+        add_test(NAME starfox_3ds_fortuna_inputs_cli
+            COMMAND "${CMAKE_COMMAND}" "-DCHECKER=$<TARGET_FILE:starfox_3ds_fortuna_inputs_check>"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/nintendo_3ds_fortuna_inputs_cli.cmake")
     endif()
 endif()
 

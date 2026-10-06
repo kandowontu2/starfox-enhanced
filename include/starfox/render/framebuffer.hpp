@@ -247,6 +247,28 @@ public:
         }
     }
 
+    // A borrowed, bounded native PPU row. Callers iterate inside its width and
+    // must not resize/reconfigure the framebuffer while the view is alive.
+    // Unlike decoded tile ink, set() writes opaque index zero too. The fast
+    // contract includes coverage and ownership; other callers retain set().
+    struct NativeIndexedRow {
+        std::span<std::uint8_t> pixels, coverage, tags;
+        std::uint8_t tag{};
+        explicit operator bool() const noexcept { return !pixels.empty(); }
+        void set(std::size_t x, std::uint8_t colour) const noexcept {
+            pixels[x] = colour; coverage[x] = 1; tags[x] = tag;
+        }
+    };
+    [[nodiscard]] NativeIndexedRow native_indexed_row(std::uint32_t y) noexcept {
+        if (commands_ || draw_scale_ != 1U || !track_coverage_
+            || !layer_tags_enabled_ || !dither_pairs_.empty() || y >= stored_height_)
+            return {};
+        const auto offset = std::size_t(y) * stored_width_;
+        return {std::span(pixels_).subspan(offset, stored_width_),
+            std::span(coverage_).subspan(offset, stored_width_),
+            std::span(tags_).subspan(offset, stored_width_), write_tag(PixelLayer::two_d)};
+    }
+
     // An already decoded cartridge tile row: ink zero is transparent, but a
     // nonzero index whose CGRAM colour is black remains an ordinary write.
     // Clip once and retain the same ordered point commands/scaled writes as

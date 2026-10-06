@@ -4,6 +4,9 @@
 #include "starfox/render/palette.hpp"
 
 namespace starfox::platform::nintendo_3ds {
+// Painter order changes occlusion, not camera projection. Controls uses this
+// for its isolated player/shadow after the ordinary weapons demonstration.
+enum class PicaShapeOrder {depth,painter};
 // Owned conversion of the shared source primitives, not a crop of a rendered
 // mono framebuffer. Append in cartridge draw order. Both native eyes consume
 // the same camera geometry; only their projection uniforms differ.
@@ -11,7 +14,8 @@ class PicaShapes {
 public:
     void clear();
     void append(const render::PreparedShapePrimitives&,std::span<const render::Rgba8>,
-        std::array<double,2> source_origin={128,112},const FramePlan* span_plan=nullptr);
+        std::array<double,2> source_origin={128,112},const FramePlan* span_plan=nullptr,
+        PicaShapeOrder order=PicaShapeOrder::depth);
     // Borrowed spans remain valid only until the next append/clear/frame call.
     // The native presenter consumes/copies them synchronously.
     [[nodiscard]] PicaFrame frame(const FramePlan&,Rgb clear={8,15,28});
@@ -23,7 +27,7 @@ private:
     };
     unsigned texture(Texture);
     void submit(std::span<const PicaVertex>,unsigned texture,const PicaMatrix&,bool dither,
-        std::array<std::uint8_t,4> odd,std::optional<PicaClip>);
+        std::array<std::uint8_t,4> odd,std::optional<PicaClip>,PicaShapeOrder);
     std::vector<PicaVertex> vertices_;
     std::vector<PicaDraw> draws_;
     std::vector<Texture> textures_;

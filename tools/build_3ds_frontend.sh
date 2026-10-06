@@ -43,5 +43,5 @@ printf 'Frontend diagnostic (NOT the game): %s\n' "${build_root}/starfox_3ds_fro
 printf 'PICA GPU diagnostic (NOT the game): %s\n' "${build_root}/starfox_3ds_gpu_check.3dsx"
 printf 'Actual VM/SPC/HUD bring-up (renderer incomplete): %s\n' "${build_root}/starfox_3ds_game_core_check.3dsx"
 if [[ "$test_player" == ON ]]; then
-    printf 'Experimental Original 3DS test player (NOT hardware-accepted): %s\n' "${build_root}/starfox_3ds_test_player.3dsx"
+    printf 'Experimental New 3DS stereo / original-model mono test player (NOT hardware-accepted): %s\n' "${build_root}/starfox_3ds_test_player.3dsx"
 fi

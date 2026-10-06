@@ -2,6 +2,7 @@
 #include "starfox/platform/nintendo_3ds/pica_composite.hpp"
 #include "starfox/platform/nintendo_3ds/pica_window.hpp"
 #include "starfox/platform/nintendo_3ds/pica_colour.hpp"
+#include "starfox/platform/nintendo_3ds/game_effects.hpp"
 #include <iostream>
 
 namespace {
@@ -599,6 +600,55 @@ void screen_sprite_crop() {
     raster.prepare(ppu,batch,plan,0,0,32,true);
     require(raster.work().decodes==1 && *ppu==unchanged,"Screen crop fade redecoded or changed source data");
 }
+void game_effect_flow() {
+    auto scene=std::make_shared<vr::GameSceneSnapshot>();
+    auto raster=std::make_shared<GameRasterSnapshot>();raster->brightness=15;
+    raster->circle={true,128,112,65535,31,0,0,63};
+    GamePresentation source;source.current=scene;source.raster=raster;
+    source.plan=plan_frame(1,true,ScreenUse::front_end);
+    GameEffects effects;
+    for(const auto flow:{simulation::GameFlowState::controls_type,simulation::GameFlowState::controls_choice}) {
+        scene->flow=flow;
+        const auto frame=effects.prepare(source).colour;
+        require(frame.draws.size()==1 && frame.draws.front().clip==PicaClip{96,32,208,120},
+            "Native Controls demonstration circle spills outside its source flight panel");
+        require(frame.vertices.front().position==Point3{96,32,0}
+            && frame.vertices[2].position==Point3{208,120,0},"Controls circle geometry exceeds the demonstration panel");
+    }
+    constexpr std::array authored{simulation::GameFlowState::pregame_menu,simulation::GameFlowState::title,
+        simulation::GameFlowState::controls_type,simulation::GameFlowState::controls_choice,
+        simulation::GameFlowState::planet_select,simulation::GameFlowState::planet_travel,
+        simulation::GameFlowState::game_over,simulation::GameFlowState::continue_choice,simulation::GameFlowState::finished};
+    raster->wipe.active=true;raster->wipe.logic=1;raster->wipe.left.fill(0);raster->wipe.right.fill(0);
+    for(unsigned flow=0;flow<=unsigned(simulation::GameFlowState::finished);++flow)
+        for(bool boss:{false,true}) for(bool score:{false,true}) {
+            scene->flow=simulation::GameFlowState(flow);raster->boss_roll=boss;raster->final_score=score;
+            const bool expanded=score || (std::find(authored.begin(),authored.end(),scene->flow)==authored.end()
+                && !(boss && scene->flow==simulation::GameFlowState::credits));
+            const auto policy=game_effect_plan(source);
+            require(policy.window==(expanded?WindowCoverage::full_scene:boss?WindowCoverage::vertical_scene:WindowCoverage::authored),
+                "Native flow window policy changed source X/Y extension rules");
+            const bool controls=scene->flow==simulation::GameFlowState::controls_type || scene->flow==simulation::GameFlowState::controls_choice;
+            require(policy.circle_clip.has_value()==controls,"Non-Controls bomb/death circle inherited the demonstration clip");
+            for(float slider:{0.F,.5F,1.F}) {
+                source.plan=plan_frame(slider,true,ScreenUse::world);
+                const auto prepared=effects.prepare(source);
+                Canvas dashboard;validate_pica_frame(prepared.colour,dashboard.view());validate_pica_frame(prepared.window,dashboard.view());
+                require(prepared.window.draws.size()==1 && prepared.window.draws.front().source_layer==0,
+                    "Closed scene wipe lost its opaque, colour-protected post-world ownership");
+                if(expanded) require(prepared.window.vertices.size()==6
+                    && prepared.window.vertices[0].position==Point3{0,0,0}
+                    && prepared.window.vertices[2].position==Point3{400,240,0},"Expanded intro/results/EX/final-score wipe leaves LCD edges visible");
+                else if(boss) require(prepared.window.vertices[0].position==Point3{88,0,0}
+                    && prepared.window.vertices[2].position==Point3{313,240,0},"Boss dossier wipe leaves the upper/lower source guard rows visible");
+            }
+        }
+    scene->flow=simulation::GameFlowState::gameplay;raster->boss_roll=raster->final_score=false;
+    raster->wipe.active=false;
+    const auto world=effects.prepare(source);
+    require(world.window.vertices.empty() && world.colour.draws[0].clip==std::nullopt,
+        "Returning to gameplay retained a closed wipe or Controls-only circle clip");
+}
 void colour_effects() {
     const auto plan=plan_frame(1,true,ScreenUse::world);Canvas dashboard;PicaColourEffects effects;
     simulation::CircleEffectState circle;simulation::ColourMathEffectState math;
@@ -687,14 +737,15 @@ void colour_effects() {
 bool expected_mask(const simulation::WindowWipeState& wipe,WindowCoverage coverage,unsigned x,unsigned y) {
     if(!wipe.active) return false;
     const bool wide=coverage==WindowCoverage::full_scene;
+    const bool vertical=coverage!=WindowCoverage::authored;
     const int sx=wide?16+int(x*223/399):int(x)-72;
     if(wipe.horizontal_opening) {
-        const double sy=wide?(double(y)+.5)*.8:double(y)+.5-24;
+        const double sy=vertical?(double(y)+.5)*.8:double(y)+.5-24;
         if(sy<0 || sy>=192) return false;
         if(sy<wipe.opening_top || sy>=wipe.opening_bottom) return true;
         return wide?x<2:(!(sx>=15 && sx<=16))!=(sx>=16 && sx<=240);
     }
-    const int sy=wide?int(y*191/239):int(y)-24;
+    const int sy=vertical?int(y*191/239):int(y)-24;
     if(sy<0 || sy>=192) return false;
     const int left=std::uint8_t(wipe.left[sy]),right=std::uint8_t(wipe.right[sy]);
     const bool dynamic=left<=right?(sx>=left && sx<=right):(sx>=left || sx<=right);
@@ -739,7 +790,7 @@ void window_masks() {
             wipe.left[y]=std::uint16_t((y*13+phase*59)&511);
             wipe.right[y]=std::uint16_t((y*7+255-phase*39)&511);
         }
-        check(WindowCoverage::authored);check(WindowCoverage::full_scene);
+        check(WindowCoverage::authored);check(WindowCoverage::full_scene);check(WindowCoverage::vertical_scene);
     }
     wipe.logic=1;wipe.left.fill(0);wipe.right.fill(0);check(WindowCoverage::full_scene);
     const auto closed=window.prepare(wipe,plan,WindowCoverage::full_scene);
@@ -748,7 +799,7 @@ void window_masks() {
     wipe.horizontal_opening=true;
     for(double edge:{0.,32.125,63.5,96.}) {
         wipe.opening_top=edge;wipe.opening_bottom=192-edge;
-        check(WindowCoverage::authored);check(WindowCoverage::full_scene);
+        check(WindowCoverage::authored);check(WindowCoverage::full_scene);check(WindowCoverage::vertical_scene);
     }
     const auto retained=window.prepare(wipe,plan,WindowCoverage::full_scene);
     const std::vector<PicaVertex> saved(retained.vertices.begin(),retained.vertices.end());const auto builds=window.builds();
@@ -767,5 +818,5 @@ void window_masks() {
     rejected([&]{pica_screen_scissor({0,0,0,240});},"Empty effect scissor accepted");
 }
 }
-int main() try {raster();pass_memory_dependencies();optical_coverage();disjoint_scenery_coverage();transparent_priority_crop();unique_sky_halves();composition();corridor_batch_contract();compact_strip_contract();screen_sprite_crop();window_masks();colour_effects();std::cout<<checks<<" 3DS native PPU/cache/composition checks passed; NOT full game/hardware acceptance\n";}
+int main() try {game_effect_flow();raster();pass_memory_dependencies();optical_coverage();disjoint_scenery_coverage();transparent_priority_crop();unique_sky_halves();composition();corridor_batch_contract();compact_strip_contract();screen_sprite_crop();window_masks();colour_effects();std::cout<<checks<<" 3DS native PPU/cache/composition checks passed; NOT full game/hardware acceptance\n";}
 catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}

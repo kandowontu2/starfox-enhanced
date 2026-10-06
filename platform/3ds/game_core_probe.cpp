@@ -20,6 +20,7 @@
 #include "starfox/platform/nintendo_3ds/game_dots.hpp"
 #include "starfox/platform/nintendo_3ds/pica_composite.hpp"
 #include "starfox/platform/nintendo_3ds/pica_colour.hpp"
+#include "starfox/platform/nintendo_3ds/game_effects.hpp"
 #include "starfox/platform/nintendo_3ds/pica_window.hpp"
 #endif
 #include <3ds.h>
@@ -96,7 +97,7 @@ int main() {
     std::unique_ptr<ctr::NativeGpu> gpu;
     std::unique_ptr<ctr::GameLayers> layers;
     std::unique_ptr<ctr::GameDots> dots;
-    ctr::PicaComposite composite;ctr::PicaColourEffects colour;ctr::PicaWindow window;
+    ctr::PicaComposite composite;ctr::GameEffects effects;
 #if !defined(STARFOX_3DS_TEST_PLAYER)
     // Explicitly label this experimental source-scene test. This small host
     // strip is not a replacement pre-game menu or part of source colour math.
@@ -458,12 +459,8 @@ int main() {
                 }
                 const auto model_frame=[&] { STARFOX_3DS_FRAME_PHASE(models);return models->prepare(source); }();
                 const auto dot_frame=[&] { STARFOX_3DS_FRAME_PHASE(dots);return dots->prepare(source); }();
-                const auto math=colour.prepare(source.raster->circle,source.raster->colour_math,
-                    source.raster->brightness,source.plan);
-                const bool world=source.current->flow==simulation::GameFlowState::gameplay
-                    || source.current->flow==simulation::GameFlowState::training;
-                const auto mask=window.prepare(source.raster->wipe,source.plan,
-                    world?ctr::WindowCoverage::full_scene:ctr::WindowCoverage::authored);
+                const auto effect_frames=effects.prepare(source);
+                const auto math=effect_frames.colour,mask=effect_frames.window;
                 // Scene/raster/model clocks are shared by the eyes. Only PICA
                 // eye matrices differ. The lower cockpit never joins a wipe.
 #if defined(STARFOX_3DS_TEST_PLAYER)

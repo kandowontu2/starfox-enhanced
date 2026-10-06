@@ -165,10 +165,41 @@ void benchmark() {
         std::cout << layer << ',' << draws << ',' << elapsed << ',' << std::hex << hash << std::dec << '\n';
     }
 }
+void native_row_contract() {
+    const auto require = [](bool value) {
+        if (!value) throw std::runtime_error("native indexed row ownership/eligibility changed");
+    };
+    Framebuffer frame(19, 3);
+    require(!frame.native_indexed_row(0));
+    frame.enable_layer_tags(true);
+    require(!frame.native_indexed_row(0));
+    frame.clear(37); frame.begin_write_coverage();
+    const ScopedLayer tag(frame, PixelLayer::background);
+    const auto row = frame.native_indexed_row(1);
+    require(bool(row) && row.pixels.size() == 19 && row.coverage.size() == 19 && row.tags.size() == 19);
+    row.set(0, 0); row.set(18, 129); // Opaque zero and the final bounded pixel.
+    for (unsigned y = 0; y < 3; ++y) for (unsigned x = 0; x < 19; ++x) {
+        const bool written = y == 1 && (x == 0 || x == 18);
+        require(frame.get(x, y) == (written ? (x == 0 ? 0 : 129) : 37));
+        require(frame.write_coverage()[y * 19 + x] == unsigned(written));
+        require(frame.layer_tags()[y * 19 + x] == unsigned(written ? PixelLayer::background : PixelLayer::three_d));
+    }
+    require(!frame.native_indexed_row(3));
+    frame.enable_dither_pairs(true); require(!frame.native_indexed_row(1));
+    frame.enable_dither_pairs(false);
+    RasterCommands commands; commands.reset(19, 3);
+    frame.record_to(&commands); require(!frame.native_indexed_row(1));
+    frame.record_to(nullptr); frame.set_draw_scale(2); require(!frame.native_indexed_row(0));
+    frame.set_draw_scale(1); frame.end_write_coverage(); require(!frame.native_indexed_row(0));
+    frame.begin_write_coverage(); frame.enable_layer_tags(false); require(!frame.native_indexed_row(0));
+    Framebuffer empty(0, 3); empty.enable_layer_tags(true); empty.begin_write_coverage();
+    require(!empty.native_indexed_row(1));
+}
 } // namespace
 
 int main(int argc, char** argv) try {
     if (argc == 2 && std::string_view(argv[1]) == "--benchmark") { benchmark(); return 0; }
+    native_row_contract();
     const auto digest = oracle_trace();
     // Filled from a separate executable built BEFORE changing the renderer:
     // background_renderer.cpp SHA256 450af058b47c38fd096b7416782f1b3ab

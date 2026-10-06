@@ -53,12 +53,14 @@ unsigned PicaShapes::texture(Texture image) {
     textures_.push_back(std::move(image));return unsigned(textures_.size()-1);
 }
 void PicaShapes::submit(std::span<const PicaVertex> vertices,unsigned texture_index,
-    const PicaMatrix& model,bool dither,std::array<std::uint8_t,4> odd,std::optional<PicaClip> clip) {
+    const PicaMatrix& model,bool dither,std::array<std::uint8_t,4> odd,std::optional<PicaClip> clip,PicaShapeOrder order) {
     if(vertices.empty()) return;
     if(vertices.size()%3 || vertices.size()>pica_vertex_limit-vertices_.size())
         throw std::length_error("3DS source geometry limit exceeded");
+    const bool depth=order==PicaShapeOrder::depth;
     const bool merge=!draws_.empty() && draws_.back().texture==texture_index
         && draws_.back().model==model && draws_.back().screen_dither==dither && draws_.back().clip==clip
+        && draws_.back().depth_test==depth && draws_.back().depth_write==depth
         && (!dither || draws_.back().dither_odd==odd);
     if(!merge && draws_.size()>=pica_draw_limit) throw std::length_error("3DS source draw limit exceeded");
     const auto first=unsigned(vertices_.size()),count=unsigned(vertices.size());
@@ -66,14 +68,16 @@ void PicaShapes::submit(std::span<const PicaVertex> vertices,unsigned texture_in
     if(merge) draws_.back().count+=count;
     else {
         PicaDraw draw;draw.first=first;draw.count=count;draw.texture=texture_index;
-        draw.model=model;draw.screen_dither=dither;draw.dither_odd=odd;draw.clip=clip;draws_.push_back(draw);
+        draw.model=model;draw.screen_dither=dither;draw.dither_odd=odd;draw.clip=clip;
+        draw.depth_test=draw.depth_write=depth;draws_.push_back(draw);
     }
 }
 void PicaShapes::append(const render::PreparedShapePrimitives& source,
-    std::span<const render::Rgba8> palette,std::array<double,2> origin,const FramePlan* span_plan) {
+    std::span<const render::Rgba8> palette,std::array<double,2> origin,const FramePlan* span_plan,PicaShapeOrder order) {
     if(palette.empty() || palette.size()>256 || !std::isfinite(source.focal_length)
         || source.focal_length<=0 || !std::isfinite(origin[0]) || !std::isfinite(origin[1])
-        || !std::isfinite(source.pose.vanish_x) || !std::isfinite(source.pose.vanish_y))
+        || !std::isfinite(source.pose.vanish_x) || !std::isfinite(source.pose.vanish_y)
+        || (order!=PicaShapeOrder::depth && order!=PicaShapeOrder::painter))
         throw std::invalid_argument("Invalid 3DS source projection/palette");
     std::optional<PicaClip> clip;
     if(source.pose.effect_clip_right>source.pose.effect_clip_left) {
@@ -149,7 +153,7 @@ void PicaShapes::append(const render::PreparedShapePrimitives& source,
             if(sparse) {
                 const auto triangles=pica_source_span_geometry(primitive.vertices,source.pose,
                     source.focal_length,origin,*span_plan,colour,unsigned(pica_vertex_limit-vertices_.size()));
-                submit(triangles,texture_index,model,dither,odd_colour,clip);
+                submit(triangles,texture_index,model,dither,odd_colour,clip,order);
                 continue;
             }
             std::vector<PicaVertex> boundary;
@@ -189,7 +193,7 @@ void PicaShapes::append(const render::PreparedShapePrimitives& source,
                 for(unsigned corner=1;corner+1<boundary.size();++corner)
                     for(unsigned index:{0U,corner,corner+1}) triangles.push_back(boundary[index]);
             }
-            submit(triangles,texture_index,model,dither,odd_colour,clip);
+            submit(triangles,texture_index,model,dither,odd_colour,clip,order);
         }
         views_.clear();
     } catch(...) {

@@ -25,6 +25,119 @@ documented below. Historical packages do not gain this change retroactively.
 CPU speedup alone does not establish stable 60 FPS; measure New-model stereo
 and old-model mono separately before claiming playable performance.
 
+## Native effect-flow correction (October 6)
+
+The Controls demo also now follows the desktop's isolated player order:
+ordinary weapons-demo shadows/models, then the player's shadow/model, followed
+by the existing high-priority controller frame and source color/window effects.
+The player retains finite 3D eye projection and source BSP face order, but does
+not share the demo weapons' depth buffer. Other scenes keep normal depth tests.
+Draw coalescing cannot merge across that policy boundary. An independent
+overlap fixture checks occlusion and stereo projection; the normal Original/EX
+routes each exercise 465 live player phases, including 201 / 291 with ordinary
+blaster-demo geometry. This fixes host-observed order,
+not a claim of newly verified PICA pixels or a rebuilt native package.
+
+The native player now uses `GameEffects` for its upper-LCD color/window policy.
+Controls demonstration circles are clipped to the source flight panel, instead
+of coloring the surrounding controller/instructions. Intro, EX setup, Training,
+gameplay, results, ordinary credits and final-score wipes cover the expanded
+LCD. Boss dossiers keep their authored horizontal bounds but cover all vertical
+guard rows. The lower HUD and host menu remain outside these effect passes.
+The current 60 Hz raster captures the final-score flag; neither eye advances it.
+
+The former policy fails the new Controls regression. Independent per-pixel
+window checks cover all three X/Y policies, wrapped edges, all window logic
+modes, fractional horizontal shutters and mono/stereo cache reuse. Normal
+TITLEMAP/Start/A inputs then reach Controls and Training in both cartridges:
+851 / 959 complete host compositions, including 135 / 270 live clipped circle
+phases. Peak padded scene/lower-LCD texture residency is 1,851,648 / 1,855,744
+bytes in those routes. The lean cartridge-core build and desktop checker build
+pass; targeted raster/layer/state tests pass too. These are not ARM/PICA pixel,
+complete process RAM, whole-ending/death-flow or physical performance acceptance.
+The root host checker also now builds its actual companion checksum and tile,
+pose and cockpit dependencies, rather than requiring files from another build.
+R39 and existing installed players predate this change; no new package or CI
+run is claimed. The remaining whole-pass order and physical tests still apply.
+
+## Host source-scene validation
+
+With the cartridge core and host tests enabled, `starfox_3ds_game_models_check`
+can read the same local companion BIN as the console player; extracting private
+ROM/symbol files is not required. `--bundle-original BIN` and `--bundle-ex BIN`
+use the bounded console decoder and the build-time public-resource manifest,
+not a checksum selected by the input file. Run `--help` for argument bounds.
+Without a stage argument the checks retain BOOT's 240 phases and Corneria's
+1,440 phases. A shorter Corneria run can deliberately fail because it never
+leaves the launch tunnel; do not remove its positive outdoor-coverage check.
+
+The separate bounded `--native-menu-composition` check includes the real
+preview-OFF setup and the stable cartridge preview with its actual host menu.
+It uses the test player's full painter order and reserves the lower HUD,
+checking 24 phases at supported maximum separation/convergence through mono,
+half/full slider, mono again and old-model mono with persistent owners:
+
+```text
+starfox_3ds_game_models_check --bundle-original PATH_TO_BIN --native-menu-composition
+starfox_3ds_game_models_check --bundle-ex PATH_TO_BIN --native-menu-composition
+```
+
+Both October 6 host runs pass 120 preview compositions and 989 checks each.
+Peak padded textures, including the host menu and lower HUD, are 1,085,696
+bytes; peak vertices/draws/textures are 26,319/41/4 (Original) and 26,460/33/4
+(EX). Preparing either eye or changing the slider preserves source/SPC state
+and screen-depth menu pixels. These are bounded host owner/resource checks,
+not PICA pixel, ARM gameplay, full process-RAM, physical audio/FPS or complete
+port acceptance. The R39 native package is unchanged. The separate full
+Fortuna model-stream route below is not retroactively claimed to include
+this new menu/compositor integration check.
+
+The opt-in command below follows actual Original Fortuna source input until
+the sea transition and 120 finite water frames, within a 21,600-phase bound:
+
+```text
+starfox_3ds_game_models_check --bundle-original PATH_TO_BIN LEVEL3_3 21600 --fortuna-water
+```
+
+It uses the existing GOD cheat and centre/fire input, without a source-state
+teleport or altered simulation/SPC pacing. It requires earlier land coverage,
+the real `PLAYERONWATER_STRAT` and changed source palette, finite Mode-2
+terrain-plane geometry, full 400x240 BG/OBJ pixel/alpha/ownership
+comparisons on five water frames, and maximum menu optics on every water frame
+with persistent owners and the whole padded texture budget. Merely observing
+a WATER flag cannot pass: Fortuna changes its existing landscape palette and
+player strategy, unlike Titania's Mode-1 `BG_2_3B` water scene. Progress is
+flushed every 600 display phases with actual logic/video counts, map cursor
+and countdown. The earlier test incorrectly waited for Titania's backdrop
+and failed at its bound; that failure is not a passed Fortuna transition.
+The corrected October 5 run passed at 4,267 source phases: sea entry at 4,148,
+120 finite sea frames, five full-LCD comparisons and 206,488 model-stream
+checks. This is host acceptance of that source transition, not a completed
+stage, native PICA pixel check or physical-console performance result. The
+existing R39 native package was not rebuilt by this host check.
+
+For longer source-flow coverage, the separate `--fortuna-complete` mode has a
+36,000-phase bound and does not stop at the sea transition:
+
+```text
+starfox_3ds_game_models_check --bundle-original PATH_TO_BIN LEVEL3_3 36000 --fortuna-complete
+```
+
+It retains the same game, SPC and renderer owners through the live boss,
+visible completed results tally and return to the planet map. Passing requires
+120 fully visible map phases after that sequence, as well as the short mode's
+positive land/sea and full-LCD water comparisons. Maximum menu optics and
+whole padded texture residency are checked on every phase, including results
+and the map. The diagnostic GOD cheat is retained, but the full-route input
+pilot releases fire between bursts and steers toward live boss weak points
+using ordinary joypad input. Passing requires observed boss damage before
+results, then the actual post-level map (`planet_travel` or `planet_select`).
+No boss health, exit flags, source positions or timing are written by the test.
+A bound reached without all those milestones is a failure, not a clear.
+This mode is a host source/renderer-policy test, not native PICA pixels,
+ARM full-stage performance or physical-device acceptance. It does not change
+or rebuild a packaged test player.
+
 ## Opt-in native frame profiling
 
 `STARFOX_3DS_PROFILE_FRAMES=ON` enables separate raw ARM11-clock timing for
@@ -942,8 +1055,9 @@ selection and explosion transforms. `PicaShapes` converts polygons, lines and
 simple/embedded sprites to owned triangle/texture streams. Two-ink faces use
 one shared 8x8 binary mask and native screen parity; they do not allocate a
 texture for every ink pair. Texture/draw/vertex budgets remain enforced.
-EX wire/wobble/wave/cel span conversions are explicitly unsupported, not
-silently replaced with ordinary triangles.
+EX wire/wobble/wave/cel spans now use the native sparse-ink/depth converter
+described in "Native EX span follow-up" above, not ordinary filled triangles.
+Their host coverage does not establish full-scene PICA or physical acceptance.
 
 `GameModels` connects actual immutable `GamePresentation` object lists to this
 converter. It shares source-pose interpolation with desktop VR without loading
@@ -1234,13 +1348,19 @@ cross-compiled or tested on hardware: this machine had no devkitPro 3DS SDK,
 and the official package endpoint still returned HTTP 403 on recheck. No WSL installation,
 remote CI run, release publication or console installation was performed.
 
-## Remaining port work, in order
+## Remaining port work, in order (October 6)
 
-1. Run the now-cross-built CPU/audio and PICA diagnostics on
-   original 3DS/XL. Check eyes are not reversed, the slider is smooth, stereo
-   switches off cleanly, resume works and Circle Pad/face buttons match.
-2. Promote the linked `GameSession`/SD/NDSP diagnostic into the actual console
-   game entry. Real pre-game menu, experience/preview/Start handoffs, settings,
+1. Cross-build and package the current source, including the latest controls
+   and BG2 row follow-ups. R39 is an older New-model test candidate, not proof
+   that these newer changes compile for ARM. Use a devkitARM/libctru/Citro3D
+   toolchain or the existing 3DS CI workflow; host tests are not an ARM build.
+   After an actual ARM/package pass, run CPU/audio and PICA diagnostics on
+   **New 3DS/XL in stereo** and **original 3DS/XL in mono**. Check New-model eyes
+   are not reversed, its slider is smooth and zero skips the second eye;
+   original models must stay mono at either slider extreme. Check resume and
+   Circle Pad/face buttons on both targets.
+2. Verify the connected `GameSession`/SD/NDSP console game entry through whole
+   flows. Real pre-game menu, experience/preview/Start handoffs, settings,
    EX SRAM, mapped reset and controller remapping are now connected; finish
    native HUD partition and physical acceptance of the connected touch/button
    layout editor. The 30/60 output controls and measured FPS counter
