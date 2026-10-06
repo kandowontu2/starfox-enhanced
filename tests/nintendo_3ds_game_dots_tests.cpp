@@ -119,6 +119,22 @@ void dust() {
     frame=owner.prepare(f.source);const auto depth=frame.vertices[0].position[2];
     close(frame.vertices[0].position[0],100*32767./32768-22*depth/256,"Controls dust viewport X");
     close(frame.vertices[0].position[1],32*depth/256,"Controls dust viewport Y");
+    const auto controls_vertices=std::vector<PicaVertex>(frame.vertices.begin(),frame.vertices.end());
+    for(auto flow:{simulation::GameFlowState::controls_type,simulation::GameFlowState::controls_choice}) {
+        f.scene->flow=flow;
+        for(float slider:{0.F,.5F,1.F}) {
+            f.source.plan=plan_frame(slider,true,ScreenUse::world);frame=owner.prepare(f.source);
+            require(frame.draws[0].clip==PicaClip{96,32,208,120},"Controls dust escaped its 112x88 source flight panel");
+            require(std::equal(controls_vertices.begin(),controls_vertices.end(),frame.vertices.begin()),
+                "Controls dust clip/eye change rebuilt or pre-cropped camera geometry");
+            validate_pica_frame(frame,f.source.dashboard);
+            PicaComposite composite;const auto combined=composite.prepare(f.source.plan,std::array{frame,frame},f.source.dashboard);
+            require(combined.draws.size()==2 && combined.draws[0].clip==frame.draws[0].clip
+                && combined.draws[1].clip==frame.draws[0].clip,"Composition stripped the Controls dust window");
+        }
+    }
+    f.scene->flow=simulation::GameFlowState::gameplay;frame=owner.prepare(f.source);
+    require(!frame.draws[0].clip,"Controls dust clip leaked into gameplay");
     f.raster->brightness=0;frame=owner.prepare(f.source);
     for(auto v:frame.vertices) require(v.colour==std::array<float,4>{0,0,0,1},"Live raster fade lost opaque star ink");
     for(auto flow:{simulation::GameFlowState::planet_select,simulation::GameFlowState::planet_travel,simulation::GameFlowState::continue_choice}) {

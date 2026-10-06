@@ -70,7 +70,7 @@ std::shared_ptr<const assets::Shape> GameModels::shape(std::uint32_t address,std
     shapes_.emplace(key,CachedShape{decoded,bytes,epoch_});cached_bytes_+=bytes;return decoded;
 }
 void GameModels::text(PicaShapes& output,const simulation::GameObject& object,const render::RenderPose& pose,
-    const render::Palette256& palette,GameModelCoverage& count,PicaShapeOrder order) {
+    const render::Palette256& palette,GameModelCoverage& count,PicaShapeOrder order,std::optional<PicaClip> clip) {
     const auto glyphs=text_.prepare_projected(object.colour_table,object.extended[21],
         starfox::bit_cast<std::int8_t>(object.texture_scroll_x),pose,112);
     if(glyphs.glyphs.empty() || glyphs.character_size<=0) return;
@@ -85,12 +85,13 @@ void GameModels::text(PicaShapes& output,const simulation::GameObject& object,co
         render::ShapePrimitive primitive;primitive.kind=render::ShapePrimitiveKind::sprite;
         primitive.material.texture=&art;primitive.simple_sprite=true;primitive.sprite_half_extent=width*.5;
         primitive.vertices.push_back({{pose.x+(i+.5-glyphs.glyphs.size()*.5)*width,pose.y,pose.z},{}});
-        prepared.primitives.push_back(std::move(primitive));output.append(prepared,palette,source_origin,nullptr,order);
+        prepared.primitives.push_back(std::move(primitive));output.append(prepared,palette,source_origin,nullptr,order,clip);
         ++count.text_glyphs;++count.primitives;
     }
 }
 void GameModels::particles(PicaShapes& output,const vr::GameSceneSnapshot& scene,simulation::ObjectHandle owner,
-    const render::RenderPose& pose,double alpha,const render::Palette256& palette,GameModelCoverage& count,PicaShapeOrder order) {
+    const render::RenderPose& pose,double alpha,const render::Palette256& palette,GameModelCoverage& count,
+    PicaShapeOrder order,std::optional<PicaClip> clip) {
     auto prepared=auxiliary(pose);
     for(const auto& particle:scene.particles) {
         if(!particle.life || particle.owner!=owner) continue;
@@ -109,7 +110,7 @@ void GameModels::particles(PicaShapes& output,const vr::GameSceneSnapshot& scene
         }
         prepared.primitives.push_back(std::move(primitive));++count.particles;++count.primitives;
     }
-    output.append(prepared,palette,source_origin,nullptr,order);
+    output.append(prepared,palette,source_origin,nullptr,order,clip);
 }
 PicaFrame GameModels::prepare(const GamePresentation& frame) {
     if(!frame.current || !frame.previous || !frame.raster || !frame.raster->ppu
@@ -123,8 +124,8 @@ PicaFrame GameModels::prepare(const GamePresentation& frame) {
     std::copy(scene.model_palette.begin(),scene.model_palette.end(),words.begin()+112);
     const auto palette=render::apply_snes_brightness(render::decode_bgr555_palette(words),frame.raster->brightness);
     PicaShapes next;GameModelCoverage count;++epoch_;
-    const bool controls=scene.flow==simulation::GameFlowState::controls_type
-        || scene.flow==simulation::GameFlowState::controls_choice;
+    const auto clip=game_controls_clip(scene.flow);
+    const bool controls=clip.has_value();
     // Match the desktop Controls compositor: ordinary demo shadows/models,
     // then the isolated player's shadow/model. Retain BSP face painter order
     // within the late pass, and finite camera vertices for native stereo.
@@ -140,8 +141,8 @@ PicaFrame GameModels::prepare(const GamePresentation& frame) {
         if(shadow && (!scene.shadows_enabled || !(flags&0x0c))) continue;
         if(!shadow && (flags&4)) continue;
         auto pose=shadow?shadows[i]:poses[i];
-        if(flags&0x40) {if(!shadow) text(next,object,pose,palette,count,order);continue;}
-        if(!shadow && (flags&0x10)) {particles(next,scene,item.handle,pose,alpha,palette,count,order);continue;}
+        if(flags&0x40) {if(!shadow) text(next,object,pose,palette,count,order,clip);continue;}
+        if(!shadow && (flags&0x10)) {particles(next,scene,item.handle,pose,alpha,palette,count,order,clip);continue;}
         if(!object.shape) continue;
         auto colour=object.colour_table;
         if(scene.colour_table_override && !reticle) colour=*scene.colour_table_override;
@@ -163,7 +164,7 @@ PicaFrame GameModels::prepare(const GamePresentation& frame) {
                 auto diameter=simulation::add16(header.size,adjustment);diameter=simulation::add16(diameter,diameter);
                 pose.simple_sprite_world_size=diameter?diameter:1;pose.simple_sprite_colour=object.extended[21];
             }
-            const auto prepared=renderer_.prepare_primitives(*model,pose);next.append(prepared,palette,source_origin,&frame.plan,order);
+            const auto prepared=renderer_.prepare_primitives(*model,pose);next.append(prepared,palette,source_origin,&frame.plan,order,clip);
             count.primitives+=prepared.primitives.size();if(shadow) ++count.shadows;else ++count.models;
         } catch(const std::exception& error) {
             throw std::runtime_error("3DS object "+std::to_string(item.handle)+" shape "+std::to_string(object.shape)+": "+error.what());

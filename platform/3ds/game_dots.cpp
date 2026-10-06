@@ -183,6 +183,8 @@ PicaFrame GameDots::prepare(const GamePresentation& source) {
         texture_count=(ink_width+pica_raster_strip_width-1)/pica_raster_strip_width;
     }
     if(next.size()>pica_vertex_limit) throw std::length_error("Native dust/grid exceeds geometry budget");
+    const auto scene_clip=game_controls_clip(scene.flow);
+    for(unsigned i=0;i<draw_count;++i) draws[i].clip=scene_clip;
     std::array<PicaImage,pica_raster_max_strips> images{};
     if(texture_count) {
         const auto pixels=std::span<const std::uint8_t>(next_colour?next_rgba:rgba_);

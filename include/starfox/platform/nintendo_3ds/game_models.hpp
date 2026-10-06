@@ -28,9 +28,9 @@ private:
     std::shared_ptr<const assets::Shape> shape(std::uint32_t,std::uint16_t,
         const assets::ShapeHeader* parent=nullptr);
     void text(PicaShapes&,const simulation::GameObject&,const render::RenderPose&,
-        const render::Palette256&,GameModelCoverage&,PicaShapeOrder);
+        const render::Palette256&,GameModelCoverage&,PicaShapeOrder,std::optional<PicaClip>);
     void particles(PicaShapes&,const vr::GameSceneSnapshot&,simulation::ObjectHandle,
-        const render::RenderPose&,double,const render::Palette256&,GameModelCoverage&,PicaShapeOrder);
+        const render::RenderPose&,double,const render::Palette256&,GameModelCoverage&,PicaShapeOrder,std::optional<PicaClip>);
     assets::ShapeDecoder decoder_;
     render::SoftwareRenderer renderer_;
     render::ScaledTextRenderer text_;

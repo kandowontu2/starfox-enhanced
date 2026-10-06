@@ -13,10 +13,7 @@ inline GameEffectPlan game_effect_plan(const GamePresentation& source) {
     using enum simulation::GameFlowState;
     const auto flow=source.current->flow;
     GameEffectPlan result;
-    // The canonical 256x224 source raster is centered at LCD (72,8).
-    // Controls' demonstration is only [24,136)x[24,112) in that raster,
-    // not a world-wide bomb/death disk over the surrounding instructions.
-    if(flow==controls_type || flow==controls_choice) result.circle_clip=PicaClip{96,32,208,120};
+    result.circle_clip=game_controls_clip(flow);
     // Follow the source scene-extension contract, rather than treating only
     // gameplay as an expanded scene. The 400px upper LCD is always wider than
     // the cartridge canvas. Boss dossiers keep authored X but expose the full

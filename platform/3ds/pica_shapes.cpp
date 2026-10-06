@@ -73,7 +73,8 @@ void PicaShapes::submit(std::span<const PicaVertex> vertices,unsigned texture_in
     }
 }
 void PicaShapes::append(const render::PreparedShapePrimitives& source,
-    std::span<const render::Rgba8> palette,std::array<double,2> origin,const FramePlan* span_plan,PicaShapeOrder order) {
+    std::span<const render::Rgba8> palette,std::array<double,2> origin,const FramePlan* span_plan,
+    PicaShapeOrder order,std::optional<PicaClip> scene_clip) {
     if(palette.empty() || palette.size()>256 || !std::isfinite(source.focal_length)
         || source.focal_length<=0 || !std::isfinite(origin[0]) || !std::isfinite(origin[1])
         || !std::isfinite(source.pose.vanish_x) || !std::isfinite(source.pose.vanish_y)
@@ -89,6 +90,14 @@ void PicaShapes::append(const render::PreparedShapePrimitives& source,
         if(left>=right) return; // A completely clipped primitive is legitimately invisible.
         clip=PicaClip{int(std::ceil(left)),0,int(std::ceil(right)),int(screen_height)};
         if(clip->left>=clip->right) return;
+    }
+    if(scene_clip) {
+        static_cast<void>(pica_screen_scissor(*scene_clip));
+        if(clip) {
+            clip=PicaClip{std::max(clip->left,scene_clip->left),std::max(clip->top,scene_clip->top),
+                std::min(clip->right,scene_clip->right),std::min(clip->bottom,scene_clip->bottom)};
+            if(clip->left>=clip->right || clip->top>=clip->bottom) return;
+        } else clip=scene_clip;
     }
     const auto old_vertices=vertices_.size(),old_draws=draws_.size(),old_textures=textures_.size();
     const unsigned old_count=draws_.empty()?0:draws_.back().count;

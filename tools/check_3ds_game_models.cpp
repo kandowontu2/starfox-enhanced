@@ -231,6 +231,12 @@ void native_effect_flow(const assets::RomImage& rom,const assets::SymbolMap& sym
             && source.raster->boss_roll==session.game().boss_roll_active(),"Effect extension flags are stale compared with current source raster");
         if(source.current->flow==controls_type || source.current->flow==controls_choice) {
             require(policy.circle_clip==PicaClip{96,32,208,120},"Actual Controls source did not use its flight-panel effect clip");
+            for(const auto& draw:geometry.draws)
+                require(draw.clip && draw.clip->left>=96 && draw.clip->right<=208
+                    && draw.clip->top==32 && draw.clip->bottom==120,
+                    "Actual Controls model/particle/text escaped its source flight panel");
+            for(const auto& draw:ink.draws)
+                require(draw.clip==PicaClip{96,32,208,120},"Actual Controls dust escaped its source flight panel");
             // Compare the full stream with a separately owned player-only
             // observation of this exact completed/interpolated source. The
             // player (including its shadow) is the late demo painter pass,
@@ -267,6 +273,8 @@ void native_effect_flow(const assets::RomImage& rom,const assets::SymbolMap& sym
                     require(p[0]>=96 && p[0]<=208 && p[1]>=32 && p[1]<=120,"Actual Controls disk emits ink over instructions/controller artwork");
                 }
             }
+        } else {
+            for(const auto& draw:ink.draws) require(!draw.clip,"Controls dust clip leaked into another actual source flow");
         }
         if(phase%90==0) std::cout<<"  phase "<<phase<<" flow "<<unsigned(source.current->flow)<<" circles "<<circles<<'\n'<<std::flush;
         if(phases[unsigned(training)]>=180) break;

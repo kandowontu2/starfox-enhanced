@@ -230,6 +230,67 @@ void painter_projection() {
     rejects([&]{output.append(player,colours,{128,112},nullptr,static_cast<PicaShapeOrder>(99));},
         "Unknown source painter policy accepted");
 }
+void scene_windows() {
+    render::SoftwareRenderer renderer;auto prepared=renderer.prepare_primitives(quad(),pose());
+    // Oversized finite camera geometry intersects every LCD edge. A CPU mono
+    // reject would hide valid panel ink; no scissor would overwrite its labels.
+    const std::array<std::array<double,3>,4> points{{{-600,-400,512},{600,-400,512},
+        {600,400,512},{-600,400,512}}};
+    for(unsigned i=0;i<4;++i) prepared.primitives[0].vertices[i].camera=points[i];
+    const PicaClip panel{96,32,208,120};PicaShapes owner;
+    owner.append(prepared,palette());
+    owner.append(prepared,palette(),{128,112},nullptr,PicaShapeOrder::painter,panel);
+    for(float slider:{0.F,.5F,1.F}) {
+        const auto plan=plan_frame(slider,true,ScreenUse::world);const auto frame=owner.frame(plan);
+        require(frame.draws.size()==2 && frame.draws[1].clip==panel && !frame.draws[1].depth_test,
+            "Scene window lost its isolated painter/depth policy");
+        require(std::equal(frame.vertices.begin(),frame.vertices.begin()+6,frame.vertices.begin()+6),
+            "Scene window altered finite camera vertices instead of scissoring each eye");
+        const auto& draw=frame.draws[1];
+        for(unsigned eye=0;eye<plan.eye_count;++eye) {
+            std::array<std::array<double,2>,6> projected{};
+            for(unsigned i=0;i<6;++i) {
+                const auto v=frame.vertices[draw.first+i].position;
+                projected[i]={200+plan.focal_x*(double(v[0])-plan.eyes[eye].x)/v[2]+plan.eyes[eye].projection_offset,
+                    120-plan.focal_y*double(v[1])/v[2]};
+            }
+            const auto cross=[](auto a,auto b,auto s){return (b[0]-a[0])*(s[1]-a[1])-(b[1]-a[1])*(s[0]-a[0]);};
+            unsigned occupied=0,unclipped=0;
+            for(int y=0;y<240;++y) for(int x=0;x<400;++x) {
+                const std::array sample{double(x)+.5,double(y)+.5};bool ink=false;
+                for(unsigned i:{0U,3U}) {
+                    const auto a=projected[i],b=projected[i+1],c=projected[i+2];
+                    const double area=cross(a,b,c);
+                    ink|=cross(b,c,sample)/area>=0 && cross(c,a,sample)/area>=0 && cross(a,b,sample)/area>=0;
+                }
+                unclipped+=ink;
+                const auto scissor=pica_screen_scissor(*draw.clip);
+                // Independent clockwise framebuffer address, sampled at pixel
+                // centres; Citro3D's target is 240x400 with exclusive bounds.
+                const unsigned rx=239-unsigned(y),ry=399-unsigned(x);
+                ink&=rx>=scissor[0] && rx<scissor[2] && ry>=scissor[1] && ry<scissor[3];
+                require(ink==(x>=96 && x<208 && y>=32 && y<120),
+                    "Native scene scissor misses/overwrites Controls panel pixels in an eye");
+                occupied+=ink;
+            }
+            require(unclipped==400*240 && occupied==112*88,"Scene-window fixture did not exercise all four guard edges");
+        }
+    }
+    auto authored=prepared;authored.pose.effect_clip_left=40;authored.pose.effect_clip_right=80;
+    owner.append(authored,palette(),{128,112},nullptr,PicaShapeOrder::depth,panel);
+    const auto plan=plan_frame(1,true,ScreenUse::world);
+    require(owner.frame(plan).draws.back().clip==PicaClip{112,32,152,120},
+        "Scene window replaced/widened the authored horizontal effect clip");
+    const auto before=owner.frame(plan).vertices.size();
+    authored.pose.effect_clip_left=160;authored.pose.effect_clip_right=180;
+    owner.append(authored,palette(),{128,112},nullptr,PicaShapeOrder::depth,panel);
+    require(owner.frame(plan).vertices.size()==before,"Disjoint authored/scene windows emitted ink");
+    rejects([&]{owner.append(prepared,palette(),{128,112},nullptr,PicaShapeOrder::depth,PicaClip{-1,0,100,120});},
+        "Invalid native scene clip was accepted");
+    require(owner.frame(plan).vertices.size()==before,"Invalid scene clip damaged previously completed geometry");
+    owner.append(prepared,palette());
+    require(!owner.frame(plan).draws.back().clip,"Controls window leaked into a subsequent world append");
+}
 void rollback_and_budget() {
     auto shape=quad();auto p=pose();render::SoftwareRenderer renderer;
     const auto colours=palette();PicaShapes output;auto prepared=renderer.prepare_primitives(shape,p);
@@ -300,6 +361,6 @@ void projected_dither() {
 }
 } // namespace
 int main() try {
-    native_vertices();source_geometry();materials_and_sprites();effect_windows();painter_projection();rollback_and_budget();texture_resources();projected_dither();
+    native_vertices();source_geometry();materials_and_sprites();effect_windows();painter_projection();scene_windows();rollback_and_budget();texture_resources();projected_dither();
     std::cout<<"3DS shared source geometry/material conversion: "<<checks<<" checks passed\n";
 } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
