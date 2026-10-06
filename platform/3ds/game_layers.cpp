@@ -147,8 +147,9 @@ GameLayerPlan game_layer_plan(const GamePresentation& frame) {
     }
     if(!world_hud) front.push_back(pass(PpuLayer::objects,3,extend));
     if(ppu.background_mode==1 && ppu.bg3_high_priority) front.push_back(pass(PpuLayer::bg3,1,extend));
-    if(native_landscape_scene(frame)) result.before_models.space=PicaSpace::scenery;
-    else if(native_panorama_scene(frame) || native_water_scene(frame) || native_corridor_scene(frame)) {
+    const bool landscape=native_landscape_scene(frame);
+    if(landscape && world_hud) result.before_models.space=PicaSpace::scenery;
+    else if(landscape || native_panorama_scene(frame) || native_water_scene(frame) || native_corridor_scene(frame)) {
         const bool water=native_water_scene(frame),corridor=native_corridor_scene(frame);
         const auto split=[&](const auto& passes,auto& groups) {
             for(const auto& source_pass:passes) {
@@ -156,12 +157,14 @@ GameLayerPlan game_layer_plan(const GamePresentation& frame) {
                 const auto space=(source_pass.layer==PpuLayer::bg2 || (water && source_pass.layer==PpuLayer::bg3))
                     ?PicaSpace::scenery:PicaSpace::screen;
                 const bool tunnel=corridor && source_pass.layer==PpuLayer::bg2;
+                const bool terrain=landscape && source_pass.layer==PpuLayer::bg2;
                 if(groups.empty() || groups.back().space!=space || groups.back().water_receiver!=receiver
-                    || groups.back().corridor_receiver!=tunnel) {
+                    || groups.back().corridor_receiver!=tunnel || groups.back().landscape_receiver!=terrain) {
                     PpuBatch group;group.space=space;group.expand_horizontal=true;group.water_receiver=receiver;
-                    group.corridor_receiver=tunnel;group.compact_strips=(water || corridor) && space==PicaSpace::scenery;
+                    group.corridor_receiver=tunnel;group.compact_strips=(water || corridor || landscape) && space==PicaSpace::scenery;
+                    group.landscape_receiver=terrain;
                     group.corridor_open_left=tunnel && scene.background_corridor->walls==14;
-                    group.visible_scenery_only=!water && !corridor && space==PicaSpace::scenery;
+                    group.visible_scenery_only=!water && !corridor && !landscape && space==PicaSpace::scenery;
                     groups.push_back(std::move(group));
                 }
                 groups.back().passes.push_back(source_pass);
@@ -170,7 +173,7 @@ GameLayerPlan game_layer_plan(const GamePresentation& frame) {
         split(back,result.before_model_groups);
         // A Mode-1 high-priority BG3 sky can be after models. Its infinity
         // projection must not move the adjacent OBJ/bitmap passes or their order.
-        if(water || corridor) split(front,result.after_model_groups);
+        if(water || corridor || landscape) split(front,result.after_model_groups);
     }
     return result;
 }
@@ -195,17 +198,19 @@ PicaFrame GameLayers::prepare_groups(const GamePresentation& frame,std::span<con
     working.clear();working.reserve(owners.size());
     for(unsigned i=0;i<owners.size();++i) {
         auto& owner=*owners[i];const auto& batch=batches[i];
-        const auto guard=batch.water_receiver?source_water_guard(frame):batch.corridor_receiver?source_corridor_guard(frame):pica_raster_base_guard;
+        const auto guard=batch.landscape_receiver?source_landscape_guard(frame):batch.water_receiver?source_water_guard(frame)
+            :batch.corridor_receiver?source_corridor_guard(frame):pica_raster_base_guard;
         // Reserve complete raster fallbacks for later groups, including all
         // three water regions. Never spend another group's finite-quad budget.
         const bool corridors=std::any_of(batches.begin(),batches.end(),[](const auto& group) {return group.corridor_receiver;});
         unsigned reserve=0;
         for(unsigned later=i+1;later<batches.size();++later)
-            reserve+=pica_raster_max_strips*(batches[later].water_receiver?3*12:6);
+            reserve+=pica_raster_max_strips*(batches[later].water_receiver?3*12:batches[later].landscape_receiver?18:6);
         const unsigned budget=!corridors && tile_vertex_budget>reserve?tile_vertex_budget-reserve:0;
         const auto tiles=budget?owner.tiles.prepare(frame.raster->ppu,batch,frame.plan,frame.raster->brightness,
-            frame.current->background_colour_subtract,budget,guard,batch.water_receiver):std::optional<PicaFrame>{};
-        const auto ready=tiles && batch.water_receiver?owner.receiver.prepare_water_tiles(frame,*tiles,owner.tiles.coverage_guard(),budget):tiles;
+            frame.current->background_colour_subtract,budget,guard,batch.water_receiver || batch.landscape_receiver):std::optional<PicaFrame>{};
+        const auto ready=tiles && batch.water_receiver?owner.receiver.prepare_water_tiles(frame,*tiles,owner.tiles.coverage_guard(),budget)
+            :tiles && batch.landscape_receiver?owner.receiver.prepare_tiles(frame,*tiles,owner.tiles.coverage_guard(),budget):tiles;
         PicaFrame prepared;
         if(ready) {
             const auto work=owner.raster.work();retired.decodes+=work.decodes;retired.colour_updates+=work.colour_updates;
@@ -213,7 +218,8 @@ PicaFrame GameLayers::prepare_groups(const GamePresentation& frame,std::span<con
         } else prepared=owner.raster.prepare(frame.raster->ppu,batch,frame.plan,frame.raster->brightness,
             frame.current->background_colour_subtract,guard,true);
         tile_vertex_budget=prepared.vertices.size()<tile_vertex_budget?tile_vertex_budget-unsigned(prepared.vertices.size()):0;
-        if(batch.water_receiver && !ready) prepared=owner.receiver.prepare_water(frame,prepared,owner.raster.coverage_guard());
+        if(batch.landscape_receiver && !ready) prepared=owner.receiver.prepare(frame,prepared,owner.raster.coverage_guard());
+        else if(batch.water_receiver && !ready) prepared=owner.receiver.prepare_water(frame,prepared,owner.raster.coverage_guard());
         else if(batch.corridor_receiver) prepared=owner.receiver.prepare_corridor(frame,prepared,owner.raster.coverage_guard());
         else if(batch.space==PicaSpace::scenery) {
             auto& images=owner.isolated_images;images.assign(prepared.textures.begin(),prepared.textures.end());
@@ -249,12 +255,7 @@ GameLayerFrames GameLayers::prepare(const GamePresentation& frame,unsigned tile_
         for(const auto& group:panorama_groups_) {retire(group->raster.work());retire(group->tiles.work());}
         panorama_groups_.clear();
         unsigned guard=pica_raster_base_guard;
-        if(native_landscape_scene(frame)) {
-            const auto plane=source_landscape_plane(frame);
-            const double distance=plane.height*frame.plan.focal_y;
-            guard=pica_receiver_guard(frame.plan,{-plane.slope/distance,1/distance,
-                (200*plane.slope-plane.centre)/distance});
-        }
+        if(native_landscape_scene(frame)) guard=source_landscape_guard(frame);
         const unsigned budget=after.vertices.size()<tile_vertex_budget
             ?tile_vertex_budget-unsigned(after.vertices.size()):0;
         const auto tiles=budget?before_tiles_.prepare(frame.raster->ppu,policy.before_models,frame.plan,brightness,
@@ -273,7 +274,8 @@ GameLayerFrames GameLayers::prepare(const GamePresentation& frame,unsigned tile_
         before=prepare_groups(frame,policy.before_model_groups,panorama_groups_,working_groups_,panorama_,retired_before_work_,budget);
     }
     GameLayerFrames result{before,after,backdrop(frame.raster->ppu->cgram[0],brightness)};
-    if(native_landscape_scene(frame) && !tile_terrain) result.before_models=scenery_.prepare(frame,result.before_models);
+    if(native_landscape_scene(frame) && policy.before_model_groups.empty() && !tile_terrain)
+        result.before_models=scenery_.prepare(frame,result.before_models);
     if(policy.solid_frontend_margins) result.clear=right_margin(result);
     return result;
 }

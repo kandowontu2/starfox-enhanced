@@ -1,5 +1,17 @@
 # Star Fox Enhanced — New 3DS stereo / original-model mono test candidate
 
+October 6 R42 source follow-up: retained Mode-2 landscapes now keep their
+finite terrain and distant sky during stage results. Source BG2 low/high and
+OBJ priorities remain separate: score/sprite artwork does not acquire ground
+depth. Occupied receiver rectangles avoid duplicating guarded texture pages,
+while budget failure retains the complete source raster fallback. The actual
+Original Fortuna ordinary-input/GOD diagnostic observes 411 retained results
+phases, 42 sampled supported-optics compositions, 14 full-LCD source-priority
+comparisons and source/SPC-state parity. These are host checks, not physical
+PICA pixels, total process RAM or console FPS. R41 native screenshots below
+predate this results fix. Check real stage clears/results on both New-model
+stereo and old-model mono, including slider changes during the score tally.
+
 This is an experimental native player, not a verified release. It contains
 the real pre-game menu, cartridge simulation, SPC audio, native 3D geometry,
 slider-controlled stereoscopic top screen and configurable lower-screen HUD.
@@ -61,8 +73,20 @@ An earlier capture attempt selected emulator popup windows and was rejected;
 the fresh actual-game-window captures pass margin and eye/HUD checks. These
 are not complete-stage, physical-device performance or total-memory results.
 
-For current hardware testing, use **StarFoxEnhanced-3ds-test** from the latest
-successful **3DS native bring-up checks** on `codex/3ds-native-bringup`.
+For the retained-results follow-up, use **R42 / StarFoxEnhanced-3ds-test**
+from the source-only **3DS native bring-up checks** on
+`codex/3ds-followup-r42-20261006`, after its ARM/package gates pass.
+Its `BUILD-INFO.json` source must match that exact workflow commit.
+R41's independently checked earlier candidate is available from
+[native check run 37514141658](https://github.com/kandowontu2/starfox-enhanced/actions/runs/37514141658)
+on `codex/3ds-followup-r41-20261006`. Its ARM/package checks passed. The local
+tester copy is `build/StarFoxEnhanced-3ds-test-r41.zip`; its `BUILD-INFO.json` source must be
+`ed7733fb11963420b62d3573a034f2465d72c473`; do not substitute an older branch's
+"latest" artifact. R41 keeps native Controls dust, models, shadows, particles
+and text inside the black flight panel without flattening their stereo depth.
+The earlier R40 candidate is `build/StarFoxEnhanced-3ds-test-r40.zip`
+from run 37508739190, source `a69e729707b35bf57c336661ecaa1cca58d82253`.
+Physical console and full-flow acceptance remain open for both candidates.
 Check `BUILD-INFO.json`: its target must say New Nintendo 3DS stereo with
 original-model mono, and its hardware policy must match the description above.
 R38 and older packages predate this change. No ROM, asset BIN or DSP firmware
@@ -173,6 +197,8 @@ New and old emulator timings as though they were the same hardware baseline.
   exterior follow-up (R5 does include the inside Gekkou/open-colony receivers).
 - Check pause/resume, portrait/dialogue and meters on the lower LCD, fades,
   explosions/death, stage results, map, Controls, game over and end/credits.
+  In Controls, stars and demo models must stay inside the black flight panel;
+  outside instructions and the controller artwork must remain unobstructed.
 - Check audio, remapping, HUD editing, save/load, clean exit, SD persistence,
   Home and sleep. Note sustained FPS, slowdowns, crashes or memory errors.
 - In builds after R6, repeatedly switch preview, game scenes and the quick menu.

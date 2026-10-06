@@ -10,6 +10,7 @@ struct LandscapePlane {
     bool operator==(const LandscapePlane&) const=default;
 };
 LandscapePlane source_landscape_plane(const GamePresentation&);
+unsigned source_landscape_guard(const GamePresentation&);
 bool native_landscape_scene(const GamePresentation&) noexcept;
 bool native_water_scene(const GamePresentation&) noexcept;
 double source_water_height(const GamePresentation&);
@@ -27,7 +28,9 @@ unsigned source_corridor_guard(const GamePresentation&);
 // One immutable mesh and borrowed horizontal texture strips serve both eyes.
 class GameScenery {
 public:
-    PicaFrame prepare(const GamePresentation&,const PicaFrame& bg2);
+    // A nonzero decoded guard permits occupied source rectangles from the
+    // isolated raster owner; full contiguous strips retain the default contract.
+    PicaFrame prepare(const GamePresentation&,const PicaFrame& bg2,unsigned decoded_guard=0);
     // Explicit atlas contract: arbitrary source LCD quads, not raster strips.
     // Reject whole-geometry overflow without publishing a partial receiver.
     std::optional<PicaFrame> prepare_tiles(const GamePresentation&,const PicaFrame& bg2,

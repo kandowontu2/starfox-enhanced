@@ -98,7 +98,11 @@ void validate(const simulation::SnesPpuState& ppu,const PpuBatch& batch,const Fr
             || batch.space!=PicaSpace::scenery || batch.passes.empty()
             || std::any_of(batch.passes.begin(),batch.passes.end(),[](const auto& pass){return pass.layer!=PpuLayer::bg2;})))
         || (batch.visible_scenery_only && (batch.space!=PicaSpace::scenery || !batch.expand_horizontal
-            || batch.water_receiver || batch.corridor_receiver))
+            || batch.water_receiver || batch.corridor_receiver || batch.landscape_receiver))
+        || (batch.landscape_receiver && (ppu.background_mode!=2 || ppu.tunnel_scene
+            || batch.water_receiver || batch.corridor_receiver
+            || batch.space!=PicaSpace::scenery || !batch.expand_horizontal || batch.passes.empty()
+            || std::any_of(batch.passes.begin(),batch.passes.end(),[](const auto& pass){return pass.layer!=PpuLayer::bg2;})))
         || (batch.space!=PicaSpace::screen && batch.space!=PicaSpace::scenery)
         || (batch.space==PicaSpace::scenery && !batch.expand_horizontal))
         throw std::invalid_argument("Unsupported/incomplete 3DS PPU painter group");

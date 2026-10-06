@@ -25,6 +25,51 @@ documented below. Historical packages do not gain this change retroactively.
 CPU speedup alone does not establish stable 60 FPS; measure New-model stereo
 and old-model mono separately before claiming playable performance.
 
+## Retained-results landscape follow-up R42 (October 6)
+
+An actual Original Fortuna route uncovered 411 results phases whose retained
+Mode-2 landscape was incorrectly left at screen depth. This follow-up keeps
+its finite ground and distant sky, splitting BG2 priority passes from
+screen-space score/OBJ artwork without changing the source painter sequence.
+The tile path and complete raster fallback retain source colours, opaque black
+and signed HDMA camera alignment. Occupied receiver rectangles avoid duplicating
+large padded pages at maximum supported optics. The gameplay/Training fast path,
+EX pre-game ground exclusion and boss-roll panel exclusion remain separate.
+
+Actual-source host checks pass 42 sampled complete mono/stereo compositions,
+14 full-LCD priority comparisons, source/SPC-state parity and all 411 retained
+results phases. Peak padded textures including the lower LCD are 1,003,776
+bytes. Original/EX campaign-entry observations also reach Corneria normally.
+This is not native PICA pixels, physical slider/NDSP, total process RAM,
+stable console FPS or final port acceptance.
+
+## R41 native test candidate (October 6)
+
+R41 keeps Controls dust, model/shadow geometry, particles and text inside the
+original black flight panel, while retaining finite stereo geometry and any
+narrower authored effect window. The
+[source-only ARM workflow](https://github.com/kandowontu2/starfox-enhanced/actions/runs/37514141658)
+passes on `codex/3ds-followup-r41-20261006`, source
+`ed7733fb11963420b62d3573a034f2465d72c473`. The tester ZIP is
+`build/StarFoxEnhanced-3ds-test-r41.zip`. Original and EX host checks cover real
+Controls/Training effects and the complete menu/preview owner graph. Physical
+performance, New-model slider and full-game acceptance remain open.
+
+## Earlier R40 native test candidate (October 6)
+
+The earlier Controls/effect-flow and native BG2 row follow-ups pass the
+[actual ARM/package workflow](https://github.com/kandowontu2/starfox-enhanced/actions/runs/37508739190)
+on temporary branch `codex/3ds-followup-r40-20261006`, source
+`a69e729707b35bf57c336661ecaa1cca58d82253`. This audited source snapshot retains
+R39's merged shared features and ARM compatibility, rather than replacing them
+with older local shared files. All 40 host tests, seven ARM executables,
+native SPC/code-generation checks and stack/package gates pass. The downloaded
+ZIP's CRC, exact members, checksums, source identity and 3DSX/SMDH payloads were
+checked. It is available locally as `build/StarFoxEnhanced-3ds-test-r40.zip`.
+No private assets or firmware are included, and no release was published.
+This is an updated test candidate, not physical-console, FPS or full-port
+acceptance; R39 does not contain these newer rendering fixes.
+
 ## Native effect-flow correction (October 6)
 
 The Controls demo also now follows the desktop's isolated player order:
@@ -1350,11 +1395,10 @@ remote CI run, release publication or console installation was performed.
 
 ## Remaining port work, in order (October 6)
 
-1. Cross-build and package the current source, including the latest controls
-   and BG2 row follow-ups. R39 is an older New-model test candidate, not proof
-   that these newer changes compile for ARM. Use a devkitARM/libctru/Citro3D
-   toolchain or the existing 3DS CI workflow; host tests are not an ARM build.
-   After an actual ARM/package pass, run CPU/audio and PICA diagnostics on
+1. Use the R42 source-only workflow on `codex/3ds-followup-r42-20261006`
+   for the retained-results follow-up, after its ARM/package gates pass.
+   R41 predates that terrain fix; do not substitute it or treat a whole
+   dirty desktop working tree as the audited ARM source. Run CPU/audio and PICA diagnostics on
    **New 3DS/XL in stereo** and **original 3DS/XL in mono**. Check New-model eyes
    are not reversed, its slider is smooth and zero skips the second eye;
    original models must stay mono at either slider extreme. Check resume and

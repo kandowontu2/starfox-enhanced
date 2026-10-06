@@ -38,6 +38,7 @@ struct PpuBatch {
     // mono LCD, rather than uploading the unseen gap. Never use for finite
     // receivers: their source intervals depend on depth, not infinity offsets.
     bool visible_scenery_only{};
+    bool landscape_receiver{}; // Isolated Mode-2 BG2, including retained results scenery.
     bool operator==(const PpuBatch&) const=default;
 };
 struct PpuRasterWork {std::uint64_t decodes{},colour_updates{};};

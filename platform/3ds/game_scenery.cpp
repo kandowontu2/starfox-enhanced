@@ -93,9 +93,12 @@ unsigned source_corridor_guard(const GamePresentation& source) {
     return pica_scenery_guard(source.plan);
 }
 bool native_landscape_scene(const GamePresentation& source) noexcept {
-    if(!source.current || !source.raster || !source.raster->ppu) return false;
+    if(!source.current || !source.raster || !source.raster->ppu || source.raster->boss_roll) return false;
     const auto& s=*source.current;
-    return (s.flow==simulation::GameFlowState::gameplay || s.flow==simulation::GameFlowState::training)
+    // Actual Original Fortuna retains this same landscape during its score
+    // tally. Keep that world receiver, not the neighbouring screen-space OBJ.
+    return (s.flow==simulation::GameFlowState::gameplay || s.flow==simulation::GameFlowState::training
+        || s.flow==simulation::GameFlowState::stage_results)
         && source.raster->ppu->background_mode==2 && !source.raster->ppu->tunnel_scene
         && s.background_landscape && s.landscape_grid_height<0;
 }
@@ -152,7 +155,13 @@ LandscapePlane source_landscape_plane(const GamePresentation& source) {
     horizon-=std::round((horizon-120)/period)*period;
     return {horizon,-slope/8.,-double(scene.landscape_grid_height)};
 }
-PicaFrame GameScenery::prepare(const GamePresentation& source,const PicaFrame& bg2) {
+unsigned source_landscape_guard(const GamePresentation& source) {
+    const auto plane=source_landscape_plane(source);
+    const double distance=plane.height*source.plan.focal_y;
+    return pica_receiver_guard(source.plan,{-plane.slope/distance,1/distance,
+        (200*plane.slope-plane.centre)/distance});
+}
+PicaFrame GameScenery::prepare(const GamePresentation& source,const PicaFrame& bg2,unsigned decoded_guard) {
     const auto plane=source_landscape_plane(source);
     if(!same_pica_plan(source.plan,bg2.plan)) throw std::invalid_argument("3DS terrain belongs to another source eye plan");
     if(bg2.draws.empty()) {vertices_.clear();return {source.plan,{},{},{},bg2.clear};}
@@ -169,7 +178,7 @@ PicaFrame GameScenery::prepare(const GamePresentation& source,const PicaFrame& b
     const double coverage_left=bg2.vertices.front().position[0];
     // Last vertex of each source quad is its left-bottom corner, not right.
     const double right=bg2.vertices[bg2.vertices.size()-4].position[0];
-    if(coverage_left> -double(guard) || right<top_width+double(guard))
+    if(decoded_guard?decoded_guard<guard:coverage_left> -double(guard) || right<top_width+double(guard))
         throw std::invalid_argument("3DS terrain raster does not cover both eye receivers");
     using Point=std::array<double,2>;
     const auto distance=[&](Point point) {return point[1]-plane.centre-plane.slope*(point[0]-200);};
@@ -194,10 +203,13 @@ PicaFrame GameScenery::prepare(const GamePresentation& source,const PicaFrame& b
     double previous=coverage_left;
     for(unsigned strip=0;strip<images.size();++strip) {
         auto& image=images[strip];auto& sky=draws[strip];
-        const double left=bg2.vertices[strip*6].position[0],end=left+image.width;
+        const auto origin=bg2.vertices[strip*6].position;
+        const double left=origin[0],end=left+image.width,top=origin[1],bottom=top+image.height;
         if(sky.first!=strip*6 || sky.count!=6 || sky.texture!=strip || sky.space!=PicaSpace::scenery
-            || sky.source_layer!=2 || image.height!=screen_height || image.channels!=4
-            || image.repeat || image.source_layers.empty() || left!=previous)
+            || sky.source_layer!=2 || image.channels!=4 || image.repeat || image.source_layers.empty()
+            || (!decoded_guard && (image.height!=screen_height || left!=previous))
+            || (decoded_guard && (left< -double(decoded_guard) || end>top_width+decoded_guard || top<0 || bottom>screen_height))
+            || origin[2] || bg2.vertices[strip*6+2].position!=Point3{float(end),float(bottom),0})
             throw std::invalid_argument("Invalid 3DS source receiver strip");
         static_cast<void>(pica_texture_layout(image));previous=end;
         image.source_layers={};image.layer_pitch=0;sky.alpha_blend=false;
@@ -205,15 +217,16 @@ PicaFrame GameScenery::prepare(const GamePresentation& source,const PicaFrame& b
     // All infinity strips precede every finite strip: interleaving would let
     // a later no-depth sky overwrite an earlier receiver after eye parallax.
     for(unsigned strip=0;strip<images.size();++strip) {
-        const auto& image=images[strip];const double left=bg2.vertices[strip*6].position[0],end=left+image.width;
-        std::vector<Point> polygon{{left,0},{end,0},{end,240},{left,240}};
+        const auto& image=images[strip];const auto origin=bg2.vertices[strip*6].position;
+        const double left=origin[0],end=left+image.width,top=origin[1],bottom=top+image.height;
+        std::vector<Point> polygon{{left,top},{end,top},{end,bottom},{left,bottom}};
         clip(polygon,distance_scale/source.plan.far_plane,true);
         clip(polygon,distance_scale/source.plan.near_plane,false);
         const unsigned first=unsigned(next.size());
         for(unsigned corner=1;corner+1<polygon.size();++corner) for(unsigned i:{0U,corner,corner+1}) {
             const auto point=polygon[i];const double z=distance_scale/distance(point);
             next.push_back({{float((point[0]-200)*z/focal_x),float((120-point[1])*z/focal_y),float(z)},
-                {1,1,1,1},{float(std::clamp((point[0]-left)/image.width,0.,1.)),float(std::clamp(point[1]/screen_height,0.,1.))}});
+                {1,1,1,1},{float(std::clamp((point[0]-left)/image.width,0.,1.)),float(std::clamp((point[1]-top)/image.height,0.,1.))}});
         }
         if(next.size()>first) {
             PicaDraw ground;ground.first=first;ground.count=unsigned(next.size())-first;ground.texture=strip;

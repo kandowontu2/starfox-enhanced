@@ -360,13 +360,13 @@ void atlas_landscape_depth() {
 }
 void unique_landscape_policy() {
     using enum simulation::GameFlowState;
-    for(auto flow:{gameplay,training,intro,title,ex_pregame_menu,controls_type}) for(bool right:{false,true}) {
+    for(auto flow:{gameplay,training,stage_results,intro,title,ex_pregame_menu,controls_type}) for(bool right:{false,true}) {
         auto frame=source(flow,2);auto scene=std::make_shared<vr::GameSceneSnapshot>(*frame.current);
         scene->background_landscape=true;scene->landscape_grid_height=-145;scene->landscape_atlas_origin=248;
         scene->background_landscape_unique_half=!right;scene->background_landscape_unique_right_half=right;
         frame.current=frame.previous=scene;
         const auto policy=game_layer_plan(frame);
-        const bool world=flow==gameplay || flow==training;unsigned observed=0;
+        const bool world=flow==gameplay || flow==training || flow==stage_results;unsigned observed=0;
         for(const auto* batch:{&policy.before_models,&policy.after_models}) for(const auto& pass:batch->passes) {
             const bool expected=world && pass.layer==PpuLayer::bg2;
             require(pass.single_occurrence_sky_half.has_value()==expected,
@@ -385,6 +385,78 @@ void unique_landscape_policy() {
     frame.current=frame.previous=scene;bool failed=false;
     try {static_cast<void>(game_layer_plan(frame));} catch(const std::invalid_argument&) {failed=true;}
     require(failed,"Ambiguous source sky half silently substituted another atlas policy");
+}
+void results_landscape_priorities() {
+    using enum simulation::GameFlowState;
+    auto frame=source(stage_results,2);
+    auto scene=std::make_shared<vr::GameSceneSnapshot>(*frame.current);
+    scene->background_landscape=true;scene->landscape_grid_height=-145;scene->landscape_atlas_origin=232;
+    frame.current=frame.previous=scene;
+    auto ppu=std::make_shared<simulation::SnesPpuState>(*frame.raster->ppu);
+    ppu->cgram[33]=0; // Nonzero index: black ground must remain opaque.
+    const auto tile=[&](unsigned row,unsigned col,unsigned word) {
+        const unsigned at=0x6400+(row*32+col)*2;
+        ppu->vram[at]=std::uint8_t(word);ppu->vram[at+1]=std::uint8_t(word>>8);
+    };
+    for(unsigned row=0;row<28;++row) for(unsigned col=0;col<32;++col)
+        tile(row,col,0x0801|(row>=12 && row<=18 && col>=7 && col<=19?0x2000:0));
+    for(unsigned priority=0;priority<4;++priority) {
+        ppu->oam[priority*4]=std::uint8_t(56+priority*24);ppu->oam[priority*4+1]=128;
+        ppu->oam[priority*4+2]=1;ppu->oam[priority*4+3]=std::uint8_t(priority<<4);
+    }
+    auto raster=std::make_shared<GameRasterSnapshot>(*frame.raster);raster->ppu=ppu;frame.raster=raster;
+    StereoSettings settings;settings.separation=64;settings.convergence=16;settings.strength=2;
+    frame.plan=plan_frame(1,true,ScreenUse::world,settings);
+    const auto policy=game_layer_plan(frame);
+    require(native_landscape_scene(frame) && policy.before_model_groups.size()==4,
+        "Results landscape was flattened or source BG2/OBJ boundaries were collected out of order");
+    std::vector<PpuPass> flattened;
+    for(const auto& batch:policy.before_model_groups) {
+        for(const auto& pass:batch.passes) {
+            require(batch.landscape_receiver==(pass.layer==PpuLayer::bg2)
+                && (batch.space==PicaSpace::scenery)==batch.landscape_receiver,
+                "Results text/sprites entered a terrain receiver or BG2 stayed at HUD depth");
+            flattened.push_back(pass);
+        }
+    }
+    require(flattened==policy.before_models.passes,"Results grouping changed authored priority sequence");
+    PpuBatch raw=policy.before_models;raw.passes.insert(raw.passes.end(),policy.after_models.passes.begin(),policy.after_models.passes.end());
+    PicaRaster oracle;const auto authored=oracle.prepare(ppu,raw,frame.plan,15);
+    for(unsigned priority=0;priority<4;++priority)
+        require(pixel(authored,56+priority*24,128).second==(priority<2?2U:16U),
+            "Results fixture did not exercise both occluded and visible source OBJ priorities");
+    GameLayers layers;PicaComposite composite;Canvas lower;
+    for(unsigned budget:{0U,pica_vertex_limit,1U}) {
+        auto prepared=layers.prepare(frame,budget);
+        auto native=composite.prepare(frame.plan,std::array{prepared.before_models,prepared.after_models},lower.view());
+        unsigned finite=0,screen=0;
+        for(const auto& draw:native.draws) {
+            if(draw.space==PicaSpace::world) {
+                ++finite;require(draw.source_layer==2 && draw.projected_uv && draw.depth_test && draw.depth_write,
+                    "Results finite ground lost homogeneous source UV or depth ownership");
+            } else if(draw.space==PicaSpace::screen) {
+                ++screen;require(!draw.depth_test && !draw.depth_write && (draw.source_layer==16
+                    || (draw.texture!=pica_no_texture && validate_pica_layers(native.textures[draw.texture])==16)),
+                    "Results screen text/sprite group acquired terrain depth");
+            }
+        }
+        require(finite>0 && screen>0,"Results fixture lost its finite ground or screen-space sprites");
+        for(unsigned y=0;y<224;++y) for(unsigned x=0;x<256;++x)
+            require(mono_receiver_pixel(native,x,y)==pixel(authored,x,y),
+                "Results receiver/atlas/fallback changed source pixels, black opacity or BG2/OBJ priority");
+        const auto work=layers.work();
+        for(float slider:{0.F,.5F,1.F}) {
+            frame.plan=plan_frame(slider,true,ScreenUse::world,settings);prepared=layers.prepare(frame,budget);
+            native=composite.prepare(frame.plan,std::array{prepared.before_models,prepared.after_models},lower.view());
+            validate_pica_frame(native,lower.view());
+            require(layers.work()[0].decodes==work[0].decodes && layers.work()[0].colour_updates==work[0].colour_updates,
+                "Results slider reran source landscape/OBJ decoding or recolouring");
+        }
+    }
+    raster->boss_roll=true;require(!native_landscape_scene(frame),"Boss-roll panels entered retained results terrain");
+    raster->boss_roll=false;scene->flow=ex_pregame_menu;
+    require(!native_landscape_scene(frame) && game_layer_plan(frame).before_model_groups.empty(),
+        "Results terrain policy leaked into the EX pre-game menu");
 }
 void atlas_water_depth() {
     for(unsigned height:{64U,128U}) for(unsigned size:{0U,3U}) {
@@ -1185,6 +1257,6 @@ void receiver_eye_coverage() {
 }
 }
 int main() try {
-    priority_pixels();map_single_occurrence();policy_contracts();margins_and_cache();landscape_depth();atlas_landscape_depth();unique_landscape_policy();atlas_water_depth();water_depth();water_priority_pixels();water_eye_coverage();corridor_source_symbols();corridor_depth();corridor_eye_coverage();corridor_eye_coverage(true);corridor_eye_coverage(false,true);corridor_eye_coverage(true,true);corridor_eye_coverage(false,true,true);corridor_eye_coverage(true,true,true);colony_depth();panorama_depth();panorama_atlas_priority_pixels();offscreen_landscape_receiver();ex_menu_panorama_depth();receiver_eye_coverage();
+    priority_pixels();map_single_occurrence();policy_contracts();margins_and_cache();landscape_depth();atlas_landscape_depth();unique_landscape_policy();results_landscape_priorities();atlas_water_depth();water_depth();water_priority_pixels();water_eye_coverage();corridor_source_symbols();corridor_depth();corridor_eye_coverage();corridor_eye_coverage(true);corridor_eye_coverage(false,true);corridor_eye_coverage(true,true);corridor_eye_coverage(false,true,true);corridor_eye_coverage(true,true,true);colony_depth();panorama_depth();panorama_atlas_priority_pixels();offscreen_landscape_receiver();ex_menu_panorama_depth();receiver_eye_coverage();
     std::cout<<checks<<" 3DS actual source painter-policy checks passed; not full terrain/menu/hardware acceptance\n";
 } catch(const std::exception& error) {std::cerr<<scenario<<error.what()<<'\n';return 1;}

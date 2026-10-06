@@ -36,7 +36,9 @@ std::optional<PicaFrame> PicaBg2Tiles::prepare(std::shared_ptr<const simulation:
     const bool mode1_scenery=source->background_mode==1 && batch.space==PicaSpace::scenery;
     const bool complete_plan=complete_roll || mode1_scenery;
     if(batch.passes.size()!=1 || (batch.space!=PicaSpace::screen && batch.space!=PicaSpace::scenery)
-        || (batch.water_receiver && !water) || batch.corridor_receiver || (batch.compact_strips && !water)
+        || (batch.landscape_receiver && (source->background_mode!=2 || batch.space!=PicaSpace::scenery
+            || !batch.expand_horizontal || !complete_roll || batch.water_receiver || batch.visible_scenery_only))
+        || (batch.water_receiver && !water) || batch.corridor_receiver || (batch.compact_strips && !water && !batch.landscape_receiver)
         || batch.first_row!=0 || batch.last_row!=224) return {};
     const auto& pass=batch.passes.front();
     if(pass.layer!=PpuLayer::bg2 || !pass.wrap_horizontal || pass.transparent_black

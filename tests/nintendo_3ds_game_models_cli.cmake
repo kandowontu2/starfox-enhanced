@@ -11,11 +11,12 @@ if(NOT result EQUAL 0 OR NOT output MATCHES "BOOT \\(240 frames\\) and LEVEL1_1 
     OR NOT output MATCHES "MAX_PHASES 1..36000" OR NOT output MATCHES "--fortuna-complete"
     OR NOT output MATCHES "--native-menu-composition"
     OR NOT output MATCHES "--native-effects-flow"
+    OR NOT output MATCHES "--native-landscape-flow"
     OR NOT output MATCHES "--all-optics: check every requested frame at strength 2")
     message(FATAL_ERROR "Scene checker help/default scope changed: ${output}${error}")
 endif()
 
-foreach(mode IN ITEMS --native-menu-composition --native-effects-flow)
+foreach(mode IN ITEMS --native-menu-composition --native-effects-flow --native-landscape-flow)
 foreach(kind IN ITEMS --bundle-original --bundle-ex)
     execute_process(COMMAND "${CHECKER}" "${kind}" missing-private-BIN "${mode}"
         RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)

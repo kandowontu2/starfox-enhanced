@@ -15,6 +15,8 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <map>
+#include <set>
 
 namespace {
 using namespace starfox;
@@ -291,6 +293,128 @@ void native_effect_flow(const assets::RomImage& rom,const assets::SymbolMap& sym
         <<" with ordinary demo geometry), peak padded scene/lower textures "<<peak_bytes
         <<"; HOST source/resource acceptance, NOT ARM/PICA pixels, process RAM or physical FPS\n";
 }
+void native_landscape_flow(const assets::RomImage& rom,const assets::SymbolMap& symbols) {
+    // Observe ordinary campaign entry and stage progression. Original Fortuna
+    // also uses the existing ordinary-input/GOD diagnostic route to reach its
+    // results/map; no teleport or emulated guest-state mutation is involved.
+    for(const std::string map:{"TITLEMAP","LEVEL1_1","LEVEL3_3"}) {
+        const bool fortuna=map=="LEVEL3_3" && symbols.find("SPECWEPCNTONE").empty();
+        if(map=="LEVEL3_3" && !fortuna) continue;
+        GameSessionOptions options;
+        if(fortuna) {options.preferences=GamePreferences{};options.preferences->god=true;}
+        GameSession session(rom,symbols,[](auto){},map,{},options);
+        GameModels models(session.rom(),session.symbols());GameDots dots(session.rom(),session.symbols());
+        GameLayers layers;GameEffects effects;PicaComposite composite,artwork_composite;PicaRaster priority_oracle,edge_oracle;
+        unsigned compositions=0,finite_compositions=0,peak_bytes=0,priority_comparisons=0;
+        std::optional<fortuna_route_diagnostic::Inputs> guided;
+        if(fortuna) guided.emplace(symbols);
+        bool boss=false,results=false;unsigned returned_map=0;
+        session.advance(0,0);
+        auto previous=session.game().flow_state();unsigned age=0;
+        std::map<unsigned,std::array<unsigned,2>> observed;
+        for(unsigned phase=1;phase<=(fortuna?36000U:7200U);++phase) {
+            const auto flow=session.game().flow_state();
+            if(flow!=previous) {age=0;previous=flow;}++age;
+            input::ButtonMask held=0;
+            using enum simulation::GameFlowState;
+            if((flow==title || flow==ex_pregame_menu) && age%90==0) held=input::start;
+            else if(flow==controls_type && age>=180 && age%90==0) held=input::start;
+            else if(flow==controls_choice) {
+                if(age==30) held=input::down; // Select GAME, not Training.
+                else if(age>=90 && age%90==0) held=input::start;
+            } else if(flow==planet_select && age>=90 && age%90==0) held=input::a;
+            else if(flow==gameplay && age>30) held=input::ButtonMask(input::y|input::right);
+            if(guided) held=guided->held(session,phase,boss,results);
+            session.advance(std::int64_t(phase)*1'000'000'000/60,held);
+            const auto source=session.presentation(0,false);
+            boss|=session.game().peek_meter_state().boss_max_health!=0;
+            results|=source.current->flow==stage_results;
+            if(results && (source.current->flow==planet_select || source.current->flow==planet_travel)
+                && source.raster->brightness==15) ++returned_map;
+            if(source.current->background_landscape && source.current->landscape_grid_height<0
+                && source.raster->ppu->background_mode==2 && !source.raster->ppu->tunnel_scene
+                && !source.raster->boss_roll) {
+                auto& count=observed[unsigned(source.current->flow)];
+                if(!count[0]) std::cout<<map<<": first eligible landscape flow "<<unsigned(source.current->flow)
+                    <<" phase "<<phase<<" native receiver="<<native_landscape_scene(source)<<std::endl;
+                ++count[0];count[1]+=native_landscape_scene(source);
+                if(source.current->flow==stage_results && (count[0]==1 || count[0]%30==0)) {
+                    context="Actual retained results landscape phase "+std::to_string(phase);
+                    const auto state=session.game().save_state(),apu=session.audio().save_state();
+                    StereoSettings settings;settings.separation=64;settings.convergence=16;settings.strength=2;
+                    for(float slider:{0.F,.5F,1.F}) {
+                        const auto optical=session.presentation(slider,true,settings);
+                        require(native_landscape_scene(optical),"Actual results landscape lost its finite receiver policy");
+                        const auto geometry=models.prepare(optical),ink=dots.prepare(optical);
+                        const auto fx=effects.prepare(optical);
+                        const auto artwork=layers.prepare(optical,remaining_layer_vertices({geometry,ink,fx.colour,fx.window}));
+                        const auto complete=composite.prepare(optical.plan,
+                            std::array{artwork.before_models,ink,geometry,artwork.after_models,fx.colour,fx.window},
+                            optical.dashboard,artwork.clear);
+                        validate_pica_frame(complete,optical.dashboard);++compositions;
+                        unsigned bytes=512U*256U*4U;
+                        for(const auto image:complete.textures) bytes+=pica_resident_texture_bytes(image);
+                        require(bytes<=pica_texture_budget,"Actual results split exceeded whole-scene/lower LCD residency");
+                        peak_bytes=std::max(peak_bytes,bytes);
+                        finite_compositions+=std::any_of(artwork.before_models.draws.begin(),artwork.before_models.draws.end(),
+                            [](const auto& draw){return draw.source_layer==2 && draw.space==PicaSpace::world;});
+                        if(slider==0) {
+                            const auto policy=game_layer_plan(optical);auto raw=policy.before_models;
+                            raw.passes.insert(raw.passes.end(),policy.after_models.passes.begin(),policy.after_models.passes.end());
+                            const auto authored=priority_oracle.prepare(optical.raster->ppu,raw,optical.plan,
+                                optical.raster->brightness,optical.current->background_colour_subtract);
+                            const auto decoded=artwork_composite.prepare_layers(optical.plan,
+                                std::array{artwork.before_models,artwork.after_models});
+                            const auto actual_pixels=flat_painter_pixels(decoded,true);
+                            // BG2 extends its edge scanlines into the native
+                            // top/bottom LCD margin. Screen-space OBJ does not.
+                            // Compare canonical/source priority with the mixed
+                            // raw decoder, and those extra rows independently
+                            // with an all-priority BG2-only source decoder.
+                            PpuBatch edges{{{PpuLayer::bg2}},PicaSpace::scenery,true};
+                            edges.passes[0].scroll=optical.current->background_scroll_override;
+                            const auto sky=flat_painter_pixels(edge_oracle.prepare(optical.raster->ppu,edges,optical.plan,
+                                optical.raster->brightness,optical.current->background_colour_subtract));
+                            auto expected_pixels=flat_painter_pixels(authored);
+                            for(unsigned row=0;row<screen_height;++row) if(row<8 || row>=232)
+                                std::copy_n(sky.begin()+row*top_width,top_width,expected_pixels.begin()+row*top_width);
+                            const auto mismatch=std::mismatch(actual_pixels.begin(),actual_pixels.end(),expected_pixels.begin());
+                            if(mismatch.first!=actual_pixels.end()) {
+                                const auto at=unsigned(mismatch.first-actual_pixels.begin());
+                                std::cout<<"Results pixel mismatch LCD "<<at%top_width<<','<<at/top_width<<" actual/expected ";
+                                for(auto value:*mismatch.first) std::cout<<value<<',';
+                                std::cout<<" / ";for(auto value:*mismatch.second) std::cout<<value<<',';std::cout<<std::endl;
+                            }
+                            require(mismatch.first==actual_pixels.end(),
+                                "Actual retained results terrain changed mono full-LCD colours, opacity or score/sprite priorities");
+                            ++priority_comparisons;
+                        }
+                    }
+                    require(session.game().save_state()==state && session.audio().save_state()==apu,
+                        "Results optics/composition changed source or SPC state");
+                }
+            }
+            if(phase%600==0) std::cout<<map<<": observation phase "<<phase<<" flow "
+                <<unsigned(source.current->flow)<<std::endl;
+            if((source.current->flow==continue_choice && age>=60) || returned_map>=60) break;
+        }
+        for(const auto& [flow,count]:observed)
+            std::cout<<map<<": actual landscape flow "<<flow<<" eligible/native receiver frames "
+                <<count[0]<<'/'<<count[1]<<'\n';
+        require(observed.contains(unsigned(simulation::GameFlowState::gameplay)),
+            "Normal landscape observation failed to reach Corneria gameplay");
+        if(fortuna) {
+            require(boss && results && returned_map>=60,"Fortuna observation did not complete its ordinary-input boss/results/map route");
+            const auto retained=observed.find(unsigned(simulation::GameFlowState::stage_results));
+            require(retained!=observed.end() && retained->second[0]>=120 && retained->second[0]==retained->second[1]
+                && finite_compositions>0 && compositions>=12 && priority_comparisons>=4,
+                "Fortuna check missed real retained results terrain, finite compositions or full-LCD source comparisons");
+            std::cout<<map<<": retained results "<<compositions<<" complete supported-optics compositions / "
+                <<finite_compositions<<" finite receivers / "<<priority_comparisons<<" full-LCD source priority comparisons; peak "
+                <<peak_bytes<<" padded texture bytes including lower LCD; source/SPC parity passed; HOST only, not PICA/device acceptance\n";
+        }
+    }
+}
 void auxiliary_checks(const assets::RomImage& rom,const assets::SymbolMap& symbols) {
     context="Synthetic particle/transaction fixture using actual cartridge assets";
     GameSession session(rom,symbols,[](auto){},"LEVEL1_1");GameModels models(session.rom(),session.symbols());
@@ -350,6 +474,10 @@ void fixture(const assets::RomImage& rom,const assets::SymbolMap& symbols,const 
     unsigned dust_points{},grid_points{},connected_points{},combined_vertices{},combined_draws{},combined_textures{};
     unsigned panorama_frames{},combined_resident_bytes{},optical_frames{},optical_resident_bytes{};
     unsigned water_frames{},tunnel_frames{},unique_frames{},orbital_frames{},disabled_dot_frames{},intro_frames{};
+    // Observe actual cartridge flows before accepting a receiver policy. A
+    // retained landscape is not necessarily gameplay: transition artwork and
+    // its OBJ priorities must not silently become a flat screen-space image.
+    std::map<unsigned,std::array<unsigned,2>> landscape_flows;
     unsigned finite_water_frames{},water_oracles{},first_water_phase{};
     unsigned first_boss_phase{},first_results_phase{},first_map_phase{},results_frames{},map_frames{},visible_map_frames{};
     unsigned first_boss_damage_phase{};
@@ -381,6 +509,12 @@ void fixture(const assets::RomImage& rom,const assets::SymbolMap& symbols,const 
         const auto advance=session.advance(time,held);
         source_video_phases+=advance.video_phases;source_logic_ticks+=advance.logic_ticks;
         auto source=session.presentation(1,true);const auto state=session.game().save_state(),apu=session.audio().save_state();
+        if(source.current->background_landscape && source.current->landscape_grid_height<0
+            && source.raster->ppu->background_mode==2 && !source.raster->ppu->tunnel_scene
+            && !source.raster->boss_roll) {
+            auto& observed=landscape_flows[unsigned(source.current->flow)];
+            ++observed[0];observed[1]+=native_landscape_scene(source);
+        }
         // Fortuna's mapfadetosea changes its Mode-2 terrain palette and
         // PLAYERONWATER_STRAT, not Titania's Mode-1 BG_2_3B WATER backdrop.
         // Observe actual source execution; never write its strategy/position.
@@ -516,13 +650,18 @@ void fixture(const assets::RomImage& rom,const assets::SymbolMap& symbols,const 
         }
         if(native_landscape_scene(source)) {
             ++outdoor_frames;
-            require(!ordered.before_models.draws.empty() && ordered.before_models.draws[0].space==PicaSpace::scenery,
+            require(std::any_of(ordered.before_models.draws.begin(),ordered.before_models.draws.end(),[](const auto& draw) {
+                return draw.space==PicaSpace::scenery && draw.source_layer==2;}),
                 "Actual outdoor cartridge background stayed at HUD depth");
             const auto plane=source_landscape_plane(source);
             const double distance=plane.height*source.plan.focal_y;
-            unsigned sky_count=0,receiver_count=0;bool receiver_visible=false;
+            unsigned sky_count=0,receiver_count=0;bool receiver_visible=false;std::set<unsigned> terrain_textures;
             for(const auto& draw:ordered.before_models.draws) {
-                require(draw.source_layer==2,"Actual cartridge terrain lost source ownership");
+                if(draw.source_layer!=2) {
+                    require(draw.space==PicaSpace::screen && !draw.depth_test && !draw.depth_write,
+                        "Actual results sprite/text was projected as terrain");continue;
+                }
+                terrain_textures.insert(draw.texture);
                 if(draw.space==PicaSpace::scenery) {
                     ++sky_count;double low=std::numeric_limits<double>::max(),high=-low;
                     for(unsigned i=draw.first;i<draw.first+draw.count;++i) {
@@ -541,7 +680,7 @@ void fixture(const assets::RomImage& rom,const assets::SymbolMap& symbols,const 
             // guarded receivers can also use more than one borrowed strip.
             // Require finite geometry exactly when the source domain intersects
             // the near/far receiver, not an unconditional two-draw screenshot.
-            require(sky_count==ordered.before_models.textures.size() && (receiver_count!=0)==receiver_visible,
+            require(sky_count==terrain_textures.size() && (receiver_count!=0)==receiver_visible,
                 "Actual cartridge finite terrain coverage disagrees with its source plane");
             if(source.current->background_landscape_unique_half || source.current->background_landscape_unique_right_half) {
                 const bool right=source.current->background_landscape_unique_right_half;
@@ -667,6 +806,9 @@ void fixture(const assets::RomImage& rom,const assets::SymbolMap& symbols,const 
     std::cout<<map<<": dust/grid/connected points "<<dust_points<<" / "<<grid_points<<" / "<<connected_points
         <<"; combined peak "<<combined_vertices<<" vertices / "<<combined_draws<<" draws / "<<combined_textures<<" textures\n";
     std::cout<<map<<": "<<panorama_frames<<" panorama frames; padded texture residency peak "<<combined_resident_bytes<<" bytes including lower LCD\n";
+    for(const auto& [flow,observed]:landscape_flows)
+        std::cout<<map<<": actual landscape flow "<<flow<<" eligible/native receiver frames "
+            <<observed[0]<<'/'<<observed[1]<<'\n';
     std::cout<<map<<": source policy observations water/tunnel/unique/orbital "<<water_frames<<" / "<<tunnel_frames
         <<" / "<<unique_frames<<" / "<<orbital_frames<<"; cartridge-disabled dot frames "<<disabled_dot_frames
         <<"; counts do not prove visual policy acceptance\n";
@@ -710,6 +852,7 @@ int main(int argc,char** argv) try {
         "   or: check_3ds_game_models --bundle-original BIN LEVEL3_3 MAX_PHASES --fortuna-complete\n"
         "   or: check_3ds_game_models --bundle-original|--bundle-ex BIN --native-menu-composition\n"
         "   or: check_3ds_game_models ROM SYMBOLS --native-effects-flow\n"
+        "   or: check_3ds_game_models --bundle-original|--bundle-ex BIN --native-landscape-flow\n"
         "Default: BOOT (240 frames) and LEVEL1_1 (1440 frames).\n"
         "Optional MAP: an exact cartridge map symbol; SOURCE_FRAMES: 1..3600.\n"
         "--all-optics: check every requested frame at strength 2, separation 64, convergence 16, retaining native owners.\n"
@@ -719,16 +862,19 @@ int main(int argc,char** argv) try {
         "require water, live boss, visible completed tally and 120 fully visible return-map frames; maximum optics every phase.\n"
         "--native-menu-composition: real plain setup and 24 preview phases through the complete test-player graph, supported optics.\n"
         "--native-effects-flow: normal TITLEMAP/Start/buttons through live Controls circles and Training; complete host compositor.\n"
+        "--native-landscape-flow: campaign entry, stage progression and Original Fortuna GOD/input results/map; report real landscape flow/receiver observations.\n"
         "Uses private local assets; host policy/resource checks, not native gameplay or hardware acceptance.\n";
     if(argc==2 && std::string_view(argv[1])=="--help") {std::cout<<usage;return 0;}
     const bool fortuna_water=argc==6 && std::string_view(argv[5])=="--fortuna-water";
     const bool fortuna_complete=argc==6 && std::string_view(argv[5])=="--fortuna-complete";
     const bool native_menu=argc==4 && std::string_view(argv[3])=="--native-menu-composition";
     const bool native_effects=argc==4 && std::string_view(argv[3])=="--native-effects-flow";
+    const bool native_landscape=argc==4 && std::string_view(argv[3])=="--native-landscape-flow";
     if(argc<3 || argc>6 || (argc==6 && std::string_view(argv[5])!="--all-optics" && !fortuna_water && !fortuna_complete))
         throw std::invalid_argument(usage);
     if(argc>=4 && ((std::string_view(argv[3])=="--native-menu-composition" && !native_menu)
-        || (std::string_view(argv[3])=="--native-effects-flow" && !native_effects)))
+        || (std::string_view(argv[3])=="--native-effects-flow" && !native_effects)
+        || (std::string_view(argv[3])=="--native-landscape-flow" && !native_landscape)))
         throw std::invalid_argument(usage);
     if((fortuna_water || fortuna_complete) && (std::string_view(argv[3])!="LEVEL3_3" || std::string_view(argv[1])=="--bundle-ex"))
         throw std::invalid_argument(std::string(argv[5])+" requires Original LEVEL3_3");
@@ -756,11 +902,12 @@ int main(int argc,char** argv) try {
     }();
     const auto& rom=cartridge.rom;const auto& symbols=cartridge.symbols;
     auxiliary_checks(rom,symbols);
-    if(native_effects) native_effect_flow(rom,symbols);
+    if(native_landscape) native_landscape_flow(rom,symbols);
+    else if(native_effects) native_effect_flow(rom,symbols);
     else if(native_menu) native_menu_composition(rom,symbols);
     else if(argc>=4) fixture(rom,symbols,argv[3],phases,argc==6 && std::string_view(argv[5])=="--all-optics",fortuna_water,fortuna_complete);
     else {fixture(rom,symbols,"BOOT");fixture(rom,symbols,"LEVEL1_1");}
-    if(native_menu || native_effects) std::cout<<checks<<" native menu/effect composition host checks passed; NOT ARM gameplay, PICA pixels or hardware acceptance\n";
+    if(native_menu || native_effects || native_landscape) std::cout<<checks<<" native menu/effect/landscape composition host checks passed; NOT ARM gameplay, PICA pixels or hardware acceptance\n";
     else std::cout<<checks<<" native model-stream checks passed; NOT full compositor, ARM gameplay or hardware acceptance\n";
     return 0;
 } catch(const std::exception& error) {std::cerr<<context<<": "<<error.what()<<'\n';return 1;}
