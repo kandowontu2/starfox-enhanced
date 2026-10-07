@@ -20,7 +20,9 @@ photograph the on-screen error; it should remain visible. Report console model,
 Original or EX, stage/scene, and the source commit in `BUILD-INFO.json`.
 This is a test candidate, not a promise of stable console FPS.
 
-## R43 source follow-up (October 7)
+## Current build and validation
+
+### R43 source follow-up (October 7)
 
 Native saved-state loading now clears unsupported desktop renderer/upscale,
 AA, lighting, material, environment and post-processing preferences. It also
@@ -31,7 +33,7 @@ Original/EX BOOT and stage import regressions pass on the host; this is not
 physical-console validation. Use `BUILD-INFO.json` for the exact binary's
 source commit; the older R42 ZIP does not contain this fix.
 
-## Previous R42 build and validation
+### Previous R42 build and validation
 
 The R42 source-only CI build has passed: use the local
 `build/StarFoxEnhanced-3ds-test-r42.zip` or the experimental player artifact from
