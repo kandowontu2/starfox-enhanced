@@ -22,6 +22,22 @@ This is a test candidate, not a promise of stable console FPS.
 
 ## Current build and validation
 
+### R46 source follow-up (October 7)
+
+Native source textures reuse bounded CPU RGBA buffers instead of allocating a
+temporary image for every textured/dithered face. Only the active scene's
+textures are published; source texels, palettes and partial alpha are decoded
+afresh, and the immutable screen-parity mask is created once per scene. CPU
+texture storage has a separate 4.25 MiB bound including inactive slots/workspace;
+the existing 4 MiB padded GPU budget including the lower LCD is unchanged.
+Changing near-budget sizes/counts, late failure/retry and empty scenes have
+regressions. The warmed 180-scene material fixture reduces 40,320 allocations
+to zero while independently checking current RGBA, wrapping, sprite and dither
+ink. This does not make the complete model-preparation path allocation-free,
+nor establish console FPS, peak process RAM or complete native pixel fidelity.
+R45 and earlier packages do not include this follow-up. Check the exact source
+in `BUILD-INFO.json`; do not relabel an older ARM ZIP as the updated candidate.
+
 ### R45 source follow-up (October 7)
 
 Native model conversion reuses polygon workspace, submits triangle fans

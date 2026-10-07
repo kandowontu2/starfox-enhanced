@@ -387,6 +387,134 @@ void texture_resources() {
         "Hundreds of animated source ink pairs use one parity mask, not hundreds of textures");
     validate_pica_frame(frame,{lower,bottom_width,screen_height,bottom_width*3});
 }
+void warmed_texture_storage() {
+    render::SoftwareRenderer renderer;
+    auto prepared=renderer.prepare_primitives(quad(),pose());
+    const auto primitive=prepared.primitives.front();prepared.primitives.clear();
+    std::array<assets::TextureImage,32> artwork;
+    for(unsigned i=0;i<artwork.size();++i) {
+        auto& art=artwork[i];art.u_mask=art.v_mask=7;art.texels.resize(64);
+        for(unsigned at=0;at<64;++at) art.texels[at]=(at%7)?std::uint8_t(i+1):0;
+        auto face=primitive;face.material.texture=&art;
+        for(unsigned duplicate=0;duplicate<4;++duplicate) prepared.primitives.push_back(face);
+        face.kind=render::ShapePrimitiveKind::sprite;face.vertices.resize(1);
+        face.sprite_half_extent=16;prepared.primitives.push_back(face);
+    }
+    for(unsigned i=1;i<=64;++i) {
+        auto face=primitive;face.material.colour={std::uint8_t(i),std::uint8_t(i+1),true};
+        prepared.primitives.push_back(face);
+    }
+    auto colours=palette();const auto plan=plan_frame(1,true,ScreenUse::world);
+    std::array<PicaShapes,2> owners;
+    for(auto& owner:owners) {owner.append(prepared,colours);static_cast<void>(owner.frame(plan));}
+    // Count only conversion. Independent expected RGBA is computed directly
+    // from the current indexed texels/palette, never from a previous frame.
+    allocations=0;count_allocations=true;
+    for(unsigned phase=0;phase<180;++phase) {
+        for(unsigned i=1;i<colours.size();++i)
+            colours[i]={std::uint8_t(i+phase),std::uint8_t(255-i+phase*3),std::uint8_t((i^85)+phase*5),std::uint8_t(128+(i+phase)%128)};
+        for(unsigned i=0;i<artwork.size();++i) for(unsigned at=0;at<64;++at)
+            artwork[i].texels[at]=((at+phase)%7)?std::uint8_t(i+1):0;
+        prepared.primitives[0].vertices[0].camera[0]=phase*.125;
+        auto& owner=owners[phase&1];owner.clear();owner.append(prepared,colours);
+        const auto frame=owner.frame(plan);
+        require(frame.textures.size()==65 && frame.draws.size()==128 && frame.vertices.size()==1344,
+            "Warmed materials lost a sprite/repeat distinction, parity mask or ordered draw");
+        require(owner.texture_storage_bytes()<=PicaShapes::texture_storage_limit,
+            "Warmed texture reuse exceeded its separate CPU storage bound");
+        require(frame.vertices[0].position[0]==float(phase)*.125F,
+            "Warmed material conversion retained old model coordinates");
+        for(unsigned i=0;i<artwork.size();++i) for(unsigned repeat=0;repeat<2;++repeat) {
+            const auto& image=frame.textures[i*2+repeat];
+            require(image.repeat==(repeat==0) && image.width==8 && image.height==8,
+                "Texture reuse changed polygon wrapping or sprite dimensions");
+            for(unsigned at=0;at<64;++at) {
+                const auto index=artwork[i].texels[at];const auto expected=index?colours[index]:render::Rgba8{0,0,0,0};
+                require(image.pixels[at*4]==expected.r && image.pixels[at*4+1]==expected.g
+                    && image.pixels[at*4+2]==expected.b && image.pixels[at*4+3]==expected.a,
+                    "Reused source texture lost live texels, palette or transparent/partial-alpha ink");
+            }
+        }
+        const auto mask=frame.textures.back();
+        for(unsigned y=0;y<8;++y) for(unsigned x=0;x<8;++x) for(unsigned channel=0;channel<4;++channel)
+            require(mask.pixels[(y*8+x)*4+channel]==(((x^y)&1)?255:0),
+                "Reused parity mask inherited source artwork/palette");
+        for(unsigned i=0;i<64;++i) {
+            const auto& draw=frame.draws[64+i];const auto even=colours[i+1],odd=colours[i+2];
+            require(draw.screen_dither && draw.texture==64 && draw.dither_odd==std::array<std::uint8_t,4>{odd.r,odd.g,odd.b,odd.a}
+                && frame.vertices[draw.first].colour==std::array<float,4>{even.r/255.F,even.g/255.F,even.b/255.F,even.a/255.F},
+                "Parity reuse flattened live even/odd source colours or alpha");
+        }
+    }
+    count_allocations=false;
+    std::cout<<"Warmed native texture/parity conversion: "<<allocations<<" allocations over 180 changed scenes\n";
+    require(allocations==0,"Warmed source textures or repeated parity faces still allocate every frame");
+}
+void texture_storage_bound_and_failure() {
+    render::SoftwareRenderer renderer;auto prepared=renderer.prepare_primitives(quad(),pose());
+    const auto primitive=prepared.primitives.front();const auto colours=palette();
+    const auto plan=plan_frame(1,true,ScreenUse::world);PicaShapes owner;
+    std::array<assets::TextureImage,200> art;
+    std::vector<std::uint8_t> lower(bottom_width*screen_height*3);
+    for(unsigned phase=0;phase<9;++phase) {
+        owner.clear();prepared.primitives.clear();
+        const bool large=phase%3==1;const unsigned side=large?256:64,count=large?14:200;
+        for(unsigned i=0;i<count;++i) {
+            art[i].u_mask=art[i].v_mask=std::uint8_t(side-1);
+            art[i].texels.assign(side*side,std::uint8_t(i+1));
+            auto face=primitive;face.material.texture=&art[i];prepared.primitives.push_back(std::move(face));
+        }
+        owner.append(prepared,colours);const auto frame=owner.frame(plan);
+        require(frame.textures.size()==count && frame.draws.size()==count && frame.vertices.size()==count*6,
+            "Changing texture sizes/counts retained inactive image views or lost active source draws");
+        require(owner.texture_storage_bytes()<=PicaShapes::texture_storage_limit,
+            "Alternating near-budget texture scenes accumulated unbounded inactive CPU buffers");
+        validate_pica_frame(frame,{lower,bottom_width,screen_height,bottom_width*3});
+        for(unsigned i=0;i<count;++i) {
+            const auto& image=frame.textures[i];const auto expected=colours[i+1];
+            require(image.width==side && image.height==side && image.repeat && image.pixels.size()==side*side*4,
+                "Recycled texture retained its former dimensions or buffer length");
+            for(unsigned at=0;at<side*side;++at)
+                require(image.pixels[at*4]==expected.r && image.pixels[at*4+1]==expected.g
+                    && image.pixels[at*4+2]==expected.b && image.pixels[at*4+3]==expected.a,
+                    "Recycled texture storage changed completed source RGBA");
+        }
+        if(large) {
+            auto dither=primitive;dither.material.colour={1,2,true};
+            render::PreparedShapePrimitives extra=prepared;extra.primitives.assign(1,dither);
+            rejects([&]{owner.append(extra,colours);},"Reused CPU buffers bypassed padded GPU texture budget");
+            const auto retained=owner.frame(plan);
+            require(retained.textures.size()==14 && retained.draws.size()==14 && retained.vertices.size()==84,
+                "GPU residency failure published a parity texture or partial geometry");
+        }
+    }
+    owner.clear();require(owner.frame(plan).textures.empty(),"Empty scene still exposes retained inactive textures");
+    require(owner.texture_storage_bytes()<=PicaShapes::texture_storage_limit,"Cleared texture pool exceeded its CPU bound");
+
+    // A new image AND parity mask are created before the later bad vertex.
+    // Rollback must keep active pixels unchanged and not retain a stale mask
+    // index when those inactive slots are used by the successful retry.
+    prepared.primitives.assign(1,primitive);art[0].u_mask=art[0].v_mask=7;art[0].texels.assign(64,3);
+    prepared.primitives[0].material.texture=&art[0];owner.append(prepared,colours);
+    const auto before=owner.frame(plan);const std::vector<PicaVertex> saved_vertices(before.vertices.begin(),before.vertices.end());
+    const std::vector<std::uint8_t> saved_pixels(before.textures[0].pixels.begin(),before.textures[0].pixels.end());
+    art[1].u_mask=art[1].v_mask=7;art[1].texels.assign(64,4);
+    auto fresh=primitive;fresh.material.texture=&art[1];auto dither=primitive;dither.material.colour={5,6,true};
+    auto invalid=primitive;invalid.vertices[0].camera[0]=std::numeric_limits<double>::quiet_NaN();
+    auto extra=prepared;extra.primitives={fresh,dither,invalid};
+    rejects([&]{owner.append(extra,colours);},"Late textured-scene failure did not reject the append");
+    const auto retained=owner.frame(plan);
+    require(retained.textures.size()==1 && retained.draws.size()==1
+        && std::equal(saved_vertices.begin(),saved_vertices.end(),retained.vertices.begin(),retained.vertices.end())
+        && std::equal(saved_pixels.begin(),saved_pixels.end(),retained.textures[0].pixels.begin(),retained.textures[0].pixels.end()),
+        "Late failure changed the previously complete texture/geometry stream");
+    extra.primitives={dither,fresh};owner.append(extra,colours);const auto retry=owner.frame(plan);
+    require(retry.textures.size()==3 && retry.draws.size()==3 && retry.draws[1].screen_dither && retry.draws[1].texture==1,
+        "Retry reused a failed transaction's parity index or inactive source texture");
+    for(unsigned y=0;y<8;++y) for(unsigned x=0;x<8;++x) for(unsigned channel=0;channel<4;++channel)
+        require(retry.textures[1].pixels[(y*8+x)*4+channel]==(((x^y)&1)?255:0),"Retry mask has stale failed-append artwork");
+    validate_pica_frame(retry,{lower,bottom_width,screen_height,bottom_width*3});
+}
 void projected_dither() {
     const auto plan=plan_frame(1,true,ScreenUse::world);
     const std::array<Point3,3> points{{{-96,42,220},{128,-54,750},{-8,72,1900}}};
@@ -429,6 +557,6 @@ STARFOX_ALLOCATION_NOINLINE void operator delete(void* memory,std::size_t) noexc
 STARFOX_ALLOCATION_NOINLINE void operator delete[](void* memory,std::size_t) noexcept {std::free(memory);}
 #undef STARFOX_ALLOCATION_NOINLINE
 int main() try {
-    native_vertices();source_geometry();materials_and_sprites();effect_windows();painter_projection();scene_windows();rollback_and_budget();warmed_geometry_storage();texture_resources();projected_dither();
+    native_vertices();source_geometry();materials_and_sprites();effect_windows();painter_projection();scene_windows();rollback_and_budget();warmed_geometry_storage();texture_resources();warmed_texture_storage();texture_storage_bound_and_failure();projected_dither();
     std::cout<<"3DS shared source geometry/material conversion: "<<checks<<" checks passed\n";
 } catch(const std::exception& error) {count_allocations=false;std::cerr<<error.what()<<'\n';return 1;}
