@@ -22,7 +22,33 @@ This is a test candidate, not a promise of stable console FPS.
 
 ## Current build and validation
 
+### R47 source follow-up (October 7)
+
+Landscape, water and tunnel receivers now reuse separate unpublished/published
+CPU geometry buffers. Finite-eye coverage and clipped receiver polygons use
+bounded stack storage, retaining the original closed edges, source UVs, depth
+and painter order. Failed clips, validation and complete-geometry budgets leave
+the last published receiver intact. Retained vertex capacity is capped at the
+native complete-scene limit; borrowed image pixels are not duplicated.
+The warmed six-path fixture changes terrain height, water height, camera and
+slider over 1,080 preparations. Its 77,352 previous allocations become zero,
+with identical vertex/draw totals and exact geometry digest. Near-limit growth,
+late failure/retry and empty-scene tests also cover the reused banks. This is
+a host resource/geometry result, not physical console FPS or peak process RAM.
+R46 and earlier packages do not include this source follow-up. Identify the
+actual candidate using `BUILD-INFO.json`; do not relabel an older ARM package.
+
 ### R46 source follow-up (October 7)
+
+The R46 source-only ARM CI build has passed. Use the numbered tester package
+`build/StarFoxEnhanced-3ds-test-r46.zip`, or download the
+**StarFoxEnhanced-3ds-test** artifact from
+[native check run 37603407882](https://github.com/kandowontu2/starfox-enhanced/actions/runs/37603407882).
+Its source is `75e7478c37ab19f62a2471318fb9e57a24e42a31`, recorded in
+`BUILD-INFO.json`. The CI artifact contains the tester ZIP; extract that ZIP to
+the SD card's root and follow the Quick start above. This build supersedes
+R45 and earlier candidates. It contains no ROMs/private assets and is not a
+published or hardware-accepted release.
 
 Native source textures reuse bounded CPU RGBA buffers instead of allocating a
 temporary image for every textured/dithered face. Only the active scene's

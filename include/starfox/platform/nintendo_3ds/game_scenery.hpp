@@ -39,9 +39,18 @@ public:
         unsigned available_guard,unsigned vertex_budget);
     PicaFrame prepare_water(const GamePresentation&,const PicaFrame& bg2,unsigned available_guard);
     PicaFrame prepare_corridor(const GamePresentation&,const PicaFrame& bg2,unsigned available_guard);
+    std::size_t working_geometry_bytes() const noexcept;
 private:
+    void ensure_vertex_space(std::size_t needed);
+    PicaFrame publish(const GamePresentation&,const PicaFrame& source);
     std::vector<PicaVertex> vertices_;
     std::vector<PicaDraw> draws_;
     std::vector<PicaImage> images_;
+    // Build away from the currently borrowed frame. A rejected budget/clip/
+    // validation must leave that frame intact; successful publication swaps
+    // the banks and reuses the retired storage on the next preparation.
+    std::vector<PicaVertex> pending_vertices_;
+    std::vector<PicaDraw> pending_draws_;
+    std::vector<PicaImage> pending_images_;
 };
 } // namespace starfox::platform::nintendo_3ds

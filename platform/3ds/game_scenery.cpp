@@ -1,9 +1,39 @@
 #include "starfox/platform/nintendo_3ds/game_scenery.hpp"
 #include "starfox/platform/nintendo_3ds/raster_coverage.hpp"
 #include "starfox/platform/nintendo_3ds/pica_composite.hpp"
+#include <initializer_list>
 
 namespace starfox::platform::nintendo_3ds {
 namespace {
+// A nondegenerate rectangle clipped by at most five half-planes has at most
+// nine corners; sixteen also covers two added closed/duplicate points per
+// clip. A frustum face has at most twelve edge hits followed by seven clips,
+// which fits thirty-two even with those duplicates. No corner is simplified.
+template<unsigned Dimensions,unsigned Capacity>
+class SceneryPolygon {
+public:
+    using Point=std::array<double,Dimensions>;
+    SceneryPolygon()=default;
+    SceneryPolygon(std::initializer_list<Point> points) {for(const auto p:points) push_back(p);}
+    void clear() noexcept {count_=0;}
+    bool empty() const noexcept {return count_==0;}
+    unsigned size() const noexcept {return count_;}
+    Point& operator[](unsigned i) noexcept {return points_[i];}
+    const Point& operator[](unsigned i) const noexcept {return points_[i];}
+    const Point& front() const noexcept {return points_[0];}
+    const Point& back() const noexcept {return points_[count_-1];}
+    const Point* begin() const noexcept {return points_.data();}
+    const Point* end() const noexcept {return points_.data()+count_;}
+    void push_back(Point point) {
+        if(count_==Capacity) throw std::logic_error("3DS receiver clipping exceeded bounded geometry");
+        points_[count_++]=point;
+    }
+private:
+    std::array<Point,Capacity> points_{};
+    unsigned count_{};
+};
+using SceneryPolygon2=SceneryPolygon<2,16>;
+using SceneryPolygon3=SceneryPolygon<3,32>;
 bool valid_corridor(const vr::SourceCorridorBounds& box) noexcept {
     return box.walls && !(box.walls&~15U) && box.left<box.right && box.top<box.bottom;
 }
@@ -161,10 +191,26 @@ unsigned source_landscape_guard(const GamePresentation& source) {
     return pica_receiver_guard(source.plan,{-plane.slope/distance,1/distance,
         (200*plane.slope-plane.centre)/distance});
 }
+std::size_t GameScenery::working_geometry_bytes() const noexcept {
+    return (vertices_.capacity()+pending_vertices_.capacity())*sizeof(PicaVertex)
+        +(draws_.capacity()+pending_draws_.capacity())*sizeof(PicaDraw)
+        +(images_.capacity()+pending_images_.capacity())*sizeof(PicaImage);
+}
+void GameScenery::ensure_vertex_space(std::size_t needed) {
+    if(needed>pica_vertex_limit) throw std::invalid_argument("3DS scenery exceeds complete geometry capacity");
+    if(needed>pending_vertices_.capacity())
+        pending_vertices_.reserve(std::min<std::size_t>(pica_vertex_limit,
+            std::max(needed,std::max<std::size_t>(8,pending_vertices_.capacity()*2))));
+}
+PicaFrame GameScenery::publish(const GamePresentation& source,const PicaFrame& bg2) {
+    validate_pica_group({source.plan,pending_vertices_,pending_draws_,pending_images_,bg2.clear},512U*256U*4U);
+    vertices_.swap(pending_vertices_);draws_.swap(pending_draws_);images_.swap(pending_images_);
+    return {source.plan,vertices_,draws_,images_,bg2.clear};
+}
 PicaFrame GameScenery::prepare(const GamePresentation& source,const PicaFrame& bg2,unsigned decoded_guard) {
     const auto plane=source_landscape_plane(source);
     if(!same_pica_plan(source.plan,bg2.plan)) throw std::invalid_argument("3DS terrain belongs to another source eye plan");
-    if(bg2.draws.empty()) {vertices_.clear();return {source.plan,{},{},{},bg2.clear};}
+    if(bg2.draws.empty()) {vertices_.clear();draws_.clear();images_.clear();return {source.plan,{},{},{},bg2.clear};}
     if(bg2.draws.size()!=bg2.textures.size() || bg2.draws.size()>pica_raster_max_strips
         || bg2.vertices.size()!=bg2.draws.size()*6)
         throw std::invalid_argument("3DS terrain requires an isolated guarded BG2 source raster");
@@ -182,8 +228,8 @@ PicaFrame GameScenery::prepare(const GamePresentation& source,const PicaFrame& b
         throw std::invalid_argument("3DS terrain raster does not cover both eye receivers");
     using Point=std::array<double,2>;
     const auto distance=[&](Point point) {return point[1]-plane.centre-plane.slope*(point[0]-200);};
-    const auto clip=[&](std::vector<Point>& polygon,double limit,bool above) {
-        auto old=std::move(polygon);polygon.clear();
+    const auto clip=[&](SceneryPolygon2& polygon,double limit,bool above) {
+        const auto old=polygon;polygon.clear();
         if(old.empty()) return;
         auto a=old.back();double da=distance(a)-limit;
         for(const auto b:old) {
@@ -197,9 +243,10 @@ PicaFrame GameScenery::prepare(const GamePresentation& source,const PicaFrame& b
             a=b;da=db;
         }
     };
-    std::vector<PicaVertex> next(bg2.vertices.begin(),bg2.vertices.end());
-    std::vector<PicaImage> images(bg2.textures.begin(),bg2.textures.end());
-    std::vector<PicaDraw> draws(bg2.draws.begin(),bg2.draws.end());
+    ensure_vertex_space(bg2.vertices.size());
+    auto& next=pending_vertices_;next.assign(bg2.vertices.begin(),bg2.vertices.end());
+    auto& images=pending_images_;images.assign(bg2.textures.begin(),bg2.textures.end());
+    auto& draws=pending_draws_;draws.assign(bg2.draws.begin(),bg2.draws.end());
     double previous=coverage_left;
     for(unsigned strip=0;strip<images.size();++strip) {
         auto& image=images[strip];auto& sky=draws[strip];
@@ -219,10 +266,11 @@ PicaFrame GameScenery::prepare(const GamePresentation& source,const PicaFrame& b
     for(unsigned strip=0;strip<images.size();++strip) {
         const auto& image=images[strip];const auto origin=bg2.vertices[strip*6].position;
         const double left=origin[0],end=left+image.width,top=origin[1],bottom=top+image.height;
-        std::vector<Point> polygon{{left,top},{end,top},{end,bottom},{left,bottom}};
+        SceneryPolygon2 polygon{{left,top},{end,top},{end,bottom},{left,bottom}};
         clip(polygon,distance_scale/source.plan.far_plane,true);
         clip(polygon,distance_scale/source.plan.near_plane,false);
         const unsigned first=unsigned(next.size());
+        ensure_vertex_space(first+(polygon.size()>=3?(polygon.size()-2)*3:0));
         for(unsigned corner=1;corner+1<polygon.size();++corner) for(unsigned i:{0U,corner,corner+1}) {
             const auto point=polygon[i];const double z=distance_scale/distance(point);
             next.push_back({{float((point[0]-200)*z/focal_x),float((120-point[1])*z/focal_y),float(z)},
@@ -233,9 +281,7 @@ PicaFrame GameScenery::prepare(const GamePresentation& source,const PicaFrame& b
             ground.source_layer=2;ground.projected_uv=true;draws.push_back(ground);
         }
     }
-    PicaFrame result{source.plan,next,draws,images,bg2.clear};validate_pica_group(result,512*256*4);
-    vertices_=std::move(next);images_=std::move(images);draws_=std::move(draws);
-    return {source.plan,vertices_,draws_,images_,bg2.clear};
+    return publish(source,bg2);
 }
 std::optional<PicaFrame> GameScenery::prepare_tiles(const GamePresentation& source,const PicaFrame& bg2,
     unsigned available_guard,unsigned vertex_budget) {
@@ -281,8 +327,8 @@ std::optional<PicaFrame> GameScenery::prepare_tiles(const GamePresentation& sour
         }
         return next;
     };
-    std::vector<PicaVertex> vertices(bg2.vertices.begin(),bg2.vertices.end());
-    vertices.reserve(std::min<std::size_t>(vertex_budget,bg2.vertices.size()*2));
+    ensure_vertex_space(bg2.vertices.size());
+    auto& vertices=pending_vertices_;vertices.assign(bg2.vertices.begin(),bg2.vertices.end());
     for(unsigned at=0;at<bg2.vertices.size();at+=6) {
         const auto& a=bg2.vertices[at];const auto& b=bg2.vertices[at+1];const auto& c=bg2.vertices[at+2];
         const auto& d=bg2.vertices[at+5];
@@ -299,6 +345,7 @@ std::optional<PicaFrame> GameScenery::prepare_tiles(const GamePresentation& sour
         count=clip(polygon,count,scale/source.plan.near_plane,false);
         const unsigned extra=count>=3?(count-2)*3:0;
         if(extra>vertex_budget-vertices.size()) return {};
+        ensure_vertex_space(vertices.size()+extra);
         for(unsigned corner=1;corner+1<count;++corner) for(unsigned i:{0U,corner,corner+1}) {
             const auto p=polygon[i];const double z=scale/distance(p);
             vertices.push_back({{float((p[0]-200)*z/source.plan.focal_x),float((120-p[1])*z/source.plan.focal_y),float(z)},
@@ -306,17 +353,15 @@ std::optional<PicaFrame> GameScenery::prepare_tiles(const GamePresentation& sour
                     float(a.uv[1]+(c.uv[1]-double(a.uv[1]))*(p[1]-y0)/(y1-y0))}});
         }
     }
-    std::vector<PicaDraw> draws(bg2.draws.begin(),bg2.draws.end());
+    auto& draws=pending_draws_;draws.assign(bg2.draws.begin(),bg2.draws.end());
     // The complete infinity atlas must precede every finite tile, exactly as
     // in the raster receiver. Never interleave far artwork over another tile.
     if(vertices.size()>bg2.vertices.size()) {
         PicaDraw ground;ground.first=unsigned(bg2.vertices.size());ground.count=unsigned(vertices.size())-ground.first;
         ground.texture=0;ground.source_layer=2;ground.projected_uv=true;draws.push_back(ground);
     }
-    std::vector<PicaImage> images(bg2.textures.begin(),bg2.textures.end());
-    validate_pica_group({source.plan,vertices,draws,images,bg2.clear},512U*256U*4U);
-    vertices_=std::move(vertices);draws_=std::move(draws);images_=std::move(images);
-    return PicaFrame{source.plan,vertices_,draws_,images_,bg2.clear};
+    auto& images=pending_images_;images.assign(bg2.textures.begin(),bg2.textures.end());
+    return publish(source,bg2);
 }
 std::optional<PicaFrame> GameScenery::prepare_water_tiles(const GamePresentation& source,const PicaFrame& bg2,
     unsigned available_guard,unsigned vertex_budget) {
@@ -366,8 +411,8 @@ std::optional<PicaFrame> GameScenery::prepare_water_tiles(const GamePresentation
         }
         return next;
     };
-    std::vector<PicaVertex> vertices;vertices.reserve(std::min<std::size_t>(vertex_budget,bg2.vertices.size()*2));
-    std::vector<PicaDraw> draws;
+    auto& vertices=pending_vertices_;vertices.clear();
+    auto& draws=pending_draws_;draws.clear();
     // Same two finite planes and narrow far-horizon band as prepare_water.
     // Do not retain the entire old water image underneath the finite surfaces.
     for(int side:{0,-1,1}) {
@@ -385,6 +430,7 @@ std::optional<PicaFrame> GameScenery::prepare_water_tiles(const GamePresentation
             }
             const unsigned extra=count>=3?(count-2)*3:0;
             if(extra>vertex_budget-vertices.size()) return {};
+            ensure_vertex_space(vertices.size()+extra);
             for(unsigned corner=1;corner+1<count;++corner) for(unsigned i:{0U,corner,corner+1}) {
                 const auto p=polygon[i];const double z=side?distance/(side*(p[1]-120)):0;
                 const Point3 position=side?Point3{float((p[0]-200)*z/source.plan.focal_x),
@@ -399,10 +445,8 @@ std::optional<PicaFrame> GameScenery::prepare_water_tiles(const GamePresentation
             next.depth_test=next.depth_write=side!=0;draws.push_back(next);
         }
     }
-    std::vector<PicaImage> images(bg2.textures.begin(),bg2.textures.end());
-    validate_pica_group({source.plan,vertices,draws,images,bg2.clear},512U*256U*4U);
-    vertices_=std::move(vertices);draws_=std::move(draws);images_=std::move(images);
-    return PicaFrame{source.plan,vertices_,draws_,images_,bg2.clear};
+    auto& images=pending_images_;images.assign(bg2.textures.begin(),bg2.textures.end());
+    return publish(source,bg2);
 }
 PicaFrame GameScenery::prepare_water(const GamePresentation& source,const PicaFrame& bg2,unsigned available_guard) {
     const double height=source_water_height(source),distance=height*source.plan.focal_y;
@@ -411,9 +455,8 @@ PicaFrame GameScenery::prepare_water(const GamePresentation& source,const PicaFr
     if(bg2.draws.size()!=bg2.textures.size() || bg2.draws.size()>pica_raster_max_strips
         || bg2.vertices.size()!=bg2.draws.size()*6)
         throw std::invalid_argument("3DS water requires isolated BG2 source strips");
-    using Point=std::array<double,2>;
-    const auto clip=[](std::vector<Point>& polygon,double y,bool below) {
-        auto old=std::move(polygon);polygon.clear();if(old.empty()) return;
+    const auto clip=[](SceneryPolygon2& polygon,double y,bool below) {
+        const auto old=polygon;polygon.clear();if(old.empty()) return;
         auto a=old.back();double da=a[1]-y;
         for(const auto b:old) {
             const double db=b[1]-y;const bool ia=below?da>=0:da<=0,ib=below?db>=0:db<=0;
@@ -425,8 +468,8 @@ PicaFrame GameScenery::prepare_water(const GamePresentation& source,const PicaFr
             a=b;da=db;
         }
     };
-    std::vector<PicaVertex> vertices;std::vector<PicaDraw> draws;
-    std::vector<PicaImage> images(bg2.textures.begin(),bg2.textures.end());
+    auto& vertices=pending_vertices_;vertices.clear();auto& draws=pending_draws_;draws.clear();
+    auto& images=pending_images_;images.assign(bg2.textures.begin(),bg2.textures.end());
     for(unsigned i=0;i<images.size();++i) {
         auto& image=images[i];const auto& draw=bg2.draws[i];
         if(draw.first!=i*6 || draw.count!=6 || draw.texture!=i || draw.source_layer!=2
@@ -439,7 +482,7 @@ PicaFrame GameScenery::prepare_water(const GamePresentation& source,const PicaFr
     for(int side:{0,-1,1}) for(unsigned strip=0;strip<images.size();++strip) {
         const auto& image=images[strip];const auto& origin=bg2.vertices[strip*6].position;
         const double left=origin[0],top=origin[1],right=left+image.width,bottom=top+image.height;
-        std::vector<Point> polygon{{left,top},{right,top},{right,bottom},{left,bottom}};
+        SceneryPolygon2 polygon{{left,top},{right,top},{right,bottom},{left,bottom}};
         if(side==0) {
             clip(polygon,120-distance/source.plan.far_plane,true);
             clip(polygon,120+distance/source.plan.far_plane,false);
@@ -448,6 +491,7 @@ PicaFrame GameScenery::prepare_water(const GamePresentation& source,const PicaFr
             clip(polygon,120+side*distance/source.plan.near_plane,side<0);
         }
         const unsigned first=unsigned(vertices.size());
+        ensure_vertex_space(first+(polygon.size()>=3?(polygon.size()-2)*3:0));
         for(unsigned corner=1;corner+1<polygon.size();++corner) for(unsigned k:{0U,corner,corner+1}) {
             const auto point=polygon[k];const double z=side?distance/(side*(point[1]-120)):0;
             const Point3 position=side?Point3{float((point[0]-200)*z/source.plan.focal_x),
@@ -461,9 +505,7 @@ PicaFrame GameScenery::prepare_water(const GamePresentation& source,const PicaFr
             draw.projected_uv=side!=0;draw.depth_test=draw.depth_write=side!=0;draws.push_back(draw);
         }
     }
-    validate_pica_group({source.plan,vertices,draws,images,bg2.clear},512U*256U*4U);
-    vertices_=std::move(vertices);draws_=std::move(draws);images_=std::move(images);
-    return {source.plan,vertices_,draws_,images_,bg2.clear};
+    return publish(source,bg2);
 }
 PicaFrame GameScenery::prepare_corridor(const GamePresentation& source,const PicaFrame& bg2,unsigned available_guard) {
     const auto geometry=corridor_geometry(source);
@@ -475,8 +517,8 @@ PicaFrame GameScenery::prepare_corridor(const GamePresentation& source,const Pic
         throw std::invalid_argument("3DS corridor requires isolated BG2 strips");
     using Point=std::array<double,2>;using Plane=std::array<double,3>;
     const auto depth=[](Point p,Plane q){return q[0]*p[0]+q[1]*p[1]+q[2];};
-    const auto clip=[&](std::vector<Point>& polygon,Plane q) {
-        auto old=std::move(polygon);polygon.clear();if(old.empty()) return;
+    const auto clip=[&](SceneryPolygon2& polygon,Plane q) {
+        const auto old=polygon;polygon.clear();if(old.empty()) return;
         auto a=old.back();double da=depth(a,q);
         for(const auto b:old) {
             const double db=depth(b,q);
@@ -487,8 +529,8 @@ PicaFrame GameScenery::prepare_corridor(const GamePresentation& source,const Pic
             a=b;da=db;
         }
     };
-    std::vector<PicaVertex> vertices;std::vector<PicaDraw> draws;
-    std::vector<PicaImage> images(bg2.textures.begin(),bg2.textures.end());
+    auto& vertices=pending_vertices_;vertices.clear();auto& draws=pending_draws_;draws.clear();
+    auto& images=pending_images_;images.assign(bg2.textures.begin(),bg2.textures.end());
     for(unsigned i=0;i<images.size();++i) {
         auto& image=images[i];const auto& draw=bg2.draws[i];
         if(draw.first!=i*6 || draw.count!=6 || draw.texture!=i || draw.source_layer!=2
@@ -511,8 +553,8 @@ PicaFrame GameScenery::prepare_corridor(const GamePresentation& source,const Pic
         // no invented wall across the colony opening, and no source-camera cut.
         using SpatialPoint=std::array<double,3>;
         const auto dot=[](SpatialPoint a,SpatialPoint b){return a[0]*b[0]+a[1]*b[1]+a[2]*b[2];};
-        const auto spatial_clip=[&](std::vector<SpatialPoint>& polygon,SpatialPoint normal,double offset) {
-            auto old=std::move(polygon);polygon.clear();if(old.empty()) return;
+        const auto spatial_clip=[&](SceneryPolygon3& polygon,SpatialPoint normal,double offset) {
+            const auto old=polygon;polygon.clear();if(old.empty()) return;
             auto a=old.back();double da=dot(normal,a)+offset;
             for(const auto b:old) {
                 const double db=dot(normal,b)+offset;
@@ -536,10 +578,11 @@ PicaFrame GameScenery::prepare_corridor(const GamePresentation& source,const Pic
         // The source has no separate authored outside-tube plate. Keep its
         // isolated BG2 far field behind the bounded faces, never a final model
         // image. Missing disoccluded exterior artwork remains a separate gate.
+        ensure_vertex_space(bg2.vertices.size());
         vertices.assign(bg2.vertices.begin(),bg2.vertices.end());draws.assign(bg2.draws.begin(),bg2.draws.end());
         for(unsigned wall=0;wall<4;++wall) {
             if(!(source.current->background_corridor->walls&(1U<<wall))) continue;
-            std::vector<SpatialPoint> face;
+            SceneryPolygon3 face;
             const auto add=[&](SpatialPoint p) {
                 if(std::none_of(face.begin(),face.end(),[&](const auto q) {
                     return std::abs(p[0]-q[0])+std::abs(p[1]-q[1])+std::abs(p[2]-q[2])<1.e-7;
@@ -587,6 +630,7 @@ PicaFrame GameScenery::prepare_corridor(const GamePresentation& source,const Pic
                 spatial_clip(polygon,{0,-source.plan.focal_y,120-top},0);
                 spatial_clip(polygon,{0,source.plan.focal_y,top+image.height-120},0);
                 const unsigned first=unsigned(vertices.size());
+                ensure_vertex_space(first+(polygon.size()>=3?(polygon.size()-2)*3:0));
                 for(unsigned corner=1;corner+1<polygon.size();++corner) for(unsigned k:{0U,corner,corner+1}) {
                     const auto p=polygon[k];const double x=200+source.plan.focal_x*p[0]/p[2],y=120-source.plan.focal_y*p[1]/p[2];
                     vertices.push_back({{float(p[0]),float(p[1]),float(p[2])},{1,1,1,1},
@@ -598,9 +642,7 @@ PicaFrame GameScenery::prepare_corridor(const GamePresentation& source,const Pic
                 }
             }
         }
-        validate_pica_group({source.plan,vertices,draws,images,bg2.clear},512U*256U*4U);
-        vertices_=std::move(vertices);draws_=std::move(draws);images_=std::move(images);
-        return {source.plan,vertices_,draws_,images_,bg2.clear};
+        return publish(source,bg2);
     }
     for(unsigned surface=0;surface<5;++surface) for(unsigned strip=0;strip<images.size();++strip) for(int edge:{-1,0,1}) {
         if(surface && !(source.current->background_corridor->walls&(1U<<(surface-1)))) continue;
@@ -610,7 +652,7 @@ PicaFrame GameScenery::prepare_corridor(const GamePresentation& source,const Pic
         if(edge>0 && (strip+1!=images.size() || right<top_width+double(available_guard))) continue;
         const double begin=edge<0?-mesh_guard:edge>0?right:left,end=edge<0?left:edge>0?top_width+mesh_guard:right;
         if(begin>=end) continue;
-        std::vector<Point> polygon{{begin,top},{end,top},{end,top+image.height},{begin,top+image.height}};
+        SceneryPolygon2 polygon{{begin,top},{end,top},{end,top+image.height},{begin,top+image.height}};
         if(surface==0) for(const auto q:planes) clip(polygon,{-q[0],-q[1],1./source.plan.far_plane-q[2]});
         else {
             const auto q=planes[surface-1];
@@ -620,6 +662,7 @@ PicaFrame GameScenery::prepare_corridor(const GamePresentation& source,const Pic
             clip(polygon,{-q[0],-q[1],1./source.plan.near_plane-q[2]});
         }
         const unsigned first=unsigned(vertices.size());
+        ensure_vertex_space(first+(polygon.size()>=3?(polygon.size()-2)*3:0));
         for(unsigned corner=1;corner+1<polygon.size();++corner) for(unsigned k:{0U,corner,corner+1}) {
             const auto point=polygon[k];const double z=surface?1./depth(point,planes[surface-1]):0;
             const Point3 position=surface?Point3{float((point[0]-200)*z/source.plan.focal_x),
@@ -633,8 +676,6 @@ PicaFrame GameScenery::prepare_corridor(const GamePresentation& source,const Pic
             draw.depth_test=draw.depth_write=surface!=0;draws.push_back(draw);
         }
     }
-    validate_pica_group({source.plan,vertices,draws,images,bg2.clear},512U*256U*4U);
-    vertices_=std::move(vertices);draws_=std::move(draws);images_=std::move(images);
-    return {source.plan,vertices_,draws_,images_,bg2.clear};
+    return publish(source,bg2);
 }
 } // namespace starfox::platform::nintendo_3ds

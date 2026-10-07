@@ -1,11 +1,15 @@
 #include "starfox/platform/nintendo_3ds/game_layers.hpp"
+#include <cstdlib>
 #include <iostream>
+#include <new>
 
 namespace {
 using namespace starfox;
 using namespace platform::nintendo_3ds;
 unsigned checks{};
 std::string scenario;
+std::size_t scenery_allocations{};
+bool count_scenery_allocations{};
 void require(bool value,const char* message) {++checks;if(!value) throw std::runtime_error(message);}
 GamePresentation source(simulation::GameFlowState flow,unsigned mode) {
     auto scene=std::make_shared<vr::GameSceneSnapshot>();scene->flow=flow;
@@ -1255,8 +1259,150 @@ void receiver_eye_coverage() {
         }
     }
 }
+void warmed_scenery_storage() {
+    constexpr unsigned guard=32,width=400+2*guard;
+    std::vector<std::uint8_t> pixels(width*240*4),layers(width*240,2);
+    for(unsigned y=0;y<240;++y) for(unsigned x=0;x<width;++x) {
+        const auto at=(y*width+x)*4;
+        pixels[at]=std::uint8_t(x);pixels[at+1]=std::uint8_t(y);
+        pixels[at+2]=std::uint8_t(x^y);pixels[at+3]=255;
+    }
+    const std::array<PicaVertex,6> quad{{
+        {{-float(guard),0,0},{1,1,1,1},{0,0}},{{float(400+guard),0,0},{1,1,1,1},{1,0}},
+        {{float(400+guard),240,0},{1,1,1,1},{1,1}},{{-float(guard),0,0},{1,1,1,1},{0,0}},
+        {{float(400+guard),240,0},{1,1,1,1},{1,1}},{{-float(guard),240,0},{1,1,1,1},{0,1}}}};
+    PicaDraw draw;draw.count=6;draw.texture=0;draw.source_layer=2;
+    draw.space=PicaSpace::scenery;draw.depth_test=draw.depth_write=false;
+    const std::array draws{draw};
+    const std::array strip_images{PicaImage{pixels,width,240,width*4,4,false,layers,width}};
+    const std::array atlas_images{PicaImage{pixels,width,240,width*4,4}};
+    std::array<GamePresentation,6> frames;
+    std::array<std::shared_ptr<vr::GameSceneSnapshot>,6> scenes;
+    for(unsigned kind=0;kind<frames.size();++kind) {
+        frames[kind]=source(simulation::GameFlowState::gameplay,kind<2?2:1);
+        scenes[kind]=std::make_shared<vr::GameSceneSnapshot>(*frames[kind].current);
+        auto& scene=*scenes[kind];
+        if(kind<2) {scene.background_landscape=true;scene.landscape_grid_height=-145;}
+        else if(kind<4) {scene.background_water_surround=true;scene.camera.y=-96;scene.shadow_height=0;}
+        else {
+            scene.background_corridor=vr::SourceCorridorBounds{-60,60,-120,0,15};
+            scene.view_matrix={32767,0,0,0,32767,0,0,0,32767};
+            scene.camera.x=kind==4?0:-100;scene.camera.y=-60;
+            auto ppu=std::make_shared<simulation::SnesPpuState>(*frames[kind].raster->ppu);ppu->tunnel_scene=true;
+            auto raster=std::make_shared<GameRasterSnapshot>(*frames[kind].raster);raster->ppu=ppu;frames[kind].raster=raster;
+        }
+        frames[kind].current=frames[kind].previous=scenes[kind];
+    }
+    GameScenery receiver;
+    std::uint64_t digest=1469598103934665603ULL;std::size_t total_vertices{},total_draws{};
+    const auto word=[&](std::uint32_t value) {digest=(digest^value)*1099511628211ULL;};
+    const auto prepare=[&](unsigned kind,unsigned phase) {
+        auto& frame=frames[kind];auto& scene=*scenes[kind];
+        frame.plan=plan_frame(float(phase%3)*.5F,true,ScreenUse::world);
+        if(kind<2) scene.landscape_grid_height=std::int16_t(-145-int(phase%5));
+        else if(kind<4) scene.camera.y=std::int16_t(-96-int(phase%5));
+        else scene.camera.x=std::int16_t((kind==4?0:-100)+int(phase%5));
+        const bool atlas=kind==1 || kind==3;
+        const PicaFrame input{frame.plan,quad,draws,atlas?std::span<const PicaImage>(atlas_images):strip_images,{}};
+        PicaFrame output;
+        if(kind==0) output=receiver.prepare(frame,input);
+        else if(kind==1) {
+            const auto ready=receiver.prepare_tiles(frame,input,guard,pica_vertex_limit);
+            require(bool(ready),"Warmed terrain atlas unexpectedly exceeded its complete geometry budget");output=*ready;
+        } else if(kind==2) output=receiver.prepare_water(frame,input,guard);
+        else if(kind==3) {
+            const auto ready=receiver.prepare_water_tiles(frame,input,guard,pica_vertex_limit);
+            require(bool(ready),"Warmed water atlas unexpectedly exceeded its complete geometry budget");output=*ready;
+        } else output=receiver.prepare_corridor(frame,input,guard);
+        require(!output.vertices.empty() && !output.draws.empty(),"Warmed scenery dropped its complete receiver");
+        total_vertices+=output.vertices.size();total_draws+=output.draws.size();
+        word(kind);word(unsigned(output.vertices.size()));word(unsigned(output.draws.size()));
+        for(const auto& vertex:output.vertices) {
+            for(float v:vertex.position) word(std::bit_cast<std::uint32_t>(v));
+            for(float v:vertex.colour) word(std::bit_cast<std::uint32_t>(v));
+            for(float v:vertex.uv) word(std::bit_cast<std::uint32_t>(v));
+        }
+        for(const auto& op:output.draws) {
+            word(op.first);word(op.count);word(op.texture);word(unsigned(op.space));word(op.source_layer);
+            word(op.depth_test);word(op.depth_write);word(op.alpha_blend);word(op.projected_uv);
+        }
+        require(output.textures.size()==1 && output.textures[0].pixels.data()==pixels.data()
+            && output.textures[0].source_layers.empty(),"Scenery retained stale image/provenance or copied the borrowed source");
+        return output;
+    };
+    // Both unpublished/published banks see every geometry-size/slider variant.
+    for(unsigned phase=0;phase<15;++phase) for(unsigned kind=0;kind<frames.size();++kind) prepare(kind,phase);
+    digest=1469598103934665603ULL;total_vertices=total_draws=0;
+    scenery_allocations=0;count_scenery_allocations=true;
+    for(unsigned phase=0;phase<180;++phase) for(unsigned kind=0;kind<frames.size();++kind) prepare(kind,phase);
+    count_scenery_allocations=false;
+    std::cout<<"Warmed landscape/water/interior/exterior scenery: "<<scenery_allocations
+        <<" allocations over 1080 changed preparations; vertices="<<total_vertices<<" draws="<<total_draws
+        <<" geometry_digest="<<digest<<'\n';
+    require(scenery_allocations==0,"Warmed native scenery still allocates per receiver/tile/clip");
+    const auto accepted=prepare(1,1);
+    const auto saved=std::vector<PicaVertex>(accepted.vertices.begin(),accepted.vertices.end());
+    const auto saved_draws=std::vector<PicaDraw>(accepted.draws.begin(),accepted.draws.end());
+    const PicaFrame atlas{frames[1].plan,quad,draws,atlas_images,{}};
+    require(!receiver.prepare_tiles(frames[1],atlas,guard,6),"Scenery overflow published an incomplete receiver");
+    require(accepted.vertices.size()==saved.size() && std::equal(saved.begin(),saved.end(),accepted.vertices.begin())
+        && accepted.draws.size()==saved_draws.size() && accepted.draws[0].count==saved_draws[0].count,
+        "A refused scenery preparation invalidated its published complete frame");
+    auto invalid=quad;invalid[2].uv[0]=std::numeric_limits<float>::quiet_NaN();
+    const PicaFrame broken{frames[0].plan,invalid,draws,strip_images,{}};bool rejected=false;
+    try {static_cast<void>(receiver.prepare(frames[0],broken));} catch(const std::invalid_argument&) {rejected=true;}
+    require(rejected && accepted.vertices.size()==saved.size()
+        && std::equal(saved.begin(),saved.end(),accepted.vertices.begin()),
+        "Late scenery validation failure replaced the previously published frame");
+    const auto retry=receiver.prepare_tiles(frames[1],atlas,guard,pica_vertex_limit);
+    require(retry && retry->vertices.size()==saved.size() && std::equal(saved.begin(),saved.end(),retry->vertices.begin()),
+        "Scenery retry retained partial geometry from a rejected preparation");
+    const PicaFrame empty{frames[1].plan,{},{},{},{}};
+    const auto cleared=receiver.prepare_tiles(frames[1],empty,guard,pica_vertex_limit);
+    require(cleared && cleared->vertices.empty() && cleared->draws.empty() && cleared->textures.empty(),
+        "Empty scenery scene retained the previous world receiver");
+    require(bool(receiver.prepare_tiles(frames[1],atlas,guard,pica_vertex_limit)),"Empty scenery scene prevented a complete retry");
+    // Stress growth right up to the complete-scene limit without retaining
+    // vector's usual doubling beyond that limit. Overflow must keep the old
+    // borrowed output even when the pending bank already contains a partial mesh.
+    std::vector<PicaVertex> repeated;
+    repeated.reserve(pica_vertex_limit);
+    for(unsigned i=0;i<pica_vertex_limit/6;++i) repeated.insert(repeated.end(),quad.begin(),quad.end());
+    auto large_draw=draw;large_draw.count=unsigned(repeated.size());const std::array large_draws{large_draw};
+    const PicaFrame large{frames[1].plan,repeated,large_draws,atlas_images,{}};
+    require(!receiver.prepare_tiles(frames[1],large,guard,pica_vertex_limit),"Oversized finite receiver published partial geometry");
+    constexpr std::size_t bound=2*(std::size_t(pica_vertex_limit)*sizeof(PicaVertex)
+        +std::size_t(pica_draw_limit)*sizeof(PicaDraw)+std::size_t(pica_texture_limit)*sizeof(PicaImage));
+    require(receiver.working_geometry_bytes()<=bound,"Scenery retained oversized pending geometry after a refused scene");
+    const auto restored=receiver.prepare_tiles(frames[1],atlas,guard,pica_vertex_limit);
+    require(restored && restored->vertices.size()==saved.size() && std::equal(saved.begin(),saved.end(),restored->vertices.begin()),
+        "Near-limit scenery storage prevented an exact small-scene retry");
+    std::cout<<"Scenery retained CPU geometry: "<<receiver.working_geometry_bytes()<<" bytes (bound "<<bound<<")\n";
 }
-int main() try {
+}
+// Count only warmed preparation; fixture/independent pixel-oracle allocations
+// are deliberately outside this boundary. Keep hooks out of line for GCC.
+#if defined(_MSC_VER)
+#define STARFOX_SCENERY_NOINLINE __declspec(noinline)
+#elif defined(__GNUC__)
+#define STARFOX_SCENERY_NOINLINE __attribute__((noinline))
+#else
+#define STARFOX_SCENERY_NOINLINE
+#endif
+STARFOX_SCENERY_NOINLINE void* operator new(std::size_t count) {
+    if(count_scenery_allocations) ++scenery_allocations;
+    if(auto* memory=std::malloc(std::max(count,std::size_t{1}))) return memory;
+    throw std::bad_alloc{};
+}
+STARFOX_SCENERY_NOINLINE void* operator new[](std::size_t count) {return ::operator new(count);}
+STARFOX_SCENERY_NOINLINE void operator delete(void* memory) noexcept {std::free(memory);}
+STARFOX_SCENERY_NOINLINE void operator delete[](void* memory) noexcept {std::free(memory);}
+STARFOX_SCENERY_NOINLINE void operator delete(void* memory,std::size_t) noexcept {std::free(memory);}
+STARFOX_SCENERY_NOINLINE void operator delete[](void* memory,std::size_t) noexcept {std::free(memory);}
+#undef STARFOX_SCENERY_NOINLINE
+int main(int argc,char** argv) try {
+    if(argc==2 && std::string_view(argv[1])=="--scenery-only") {warmed_scenery_storage();return 0;}
     priority_pixels();map_single_occurrence();policy_contracts();margins_and_cache();landscape_depth();atlas_landscape_depth();unique_landscape_policy();results_landscape_priorities();atlas_water_depth();water_depth();water_priority_pixels();water_eye_coverage();corridor_source_symbols();corridor_depth();corridor_eye_coverage();corridor_eye_coverage(true);corridor_eye_coverage(false,true);corridor_eye_coverage(true,true);corridor_eye_coverage(false,true,true);corridor_eye_coverage(true,true,true);colony_depth();panorama_depth();panorama_atlas_priority_pixels();offscreen_landscape_receiver();ex_menu_panorama_depth();receiver_eye_coverage();
+    warmed_scenery_storage();
     std::cout<<checks<<" 3DS actual source painter-policy checks passed; not full terrain/menu/hardware acceptance\n";
-} catch(const std::exception& error) {std::cerr<<scenario<<error.what()<<'\n';return 1;}
+} catch(const std::exception& error) {count_scenery_allocations=false;std::cerr<<scenario<<error.what()<<'\n';return 1;}
