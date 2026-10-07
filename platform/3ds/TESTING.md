@@ -1,5 +1,64 @@
 # Star Fox Enhanced — New 3DS stereo / original-model mono test candidate
 
+## Quick start for testers
+
+1. Download the current `StarFoxEnhanced-3ds-test.zip` experimental player
+   (or its numbered tester ZIP) and extract it to the SD card's root.
+2. Put your own `Starfox-Assets.BIN` in `/3ds/starfox-enhanced/`.
+   The final path must be `/3ds/starfox-enhanced/Starfox-Assets.BIN`.
+   Do not put a ROM in that folder instead of the generated BIN.
+3. Ensure your normal homebrew DSP setup is installed. Audio needs your own
+   console's `/3ds/dspfirm.cdc`; it is not included in the download.
+4. In Homebrew Launcher, launch **Star Fox Enhanced - TEST**. Keep the
+   pre-game menu and choose **START GAME** normally.
+5. Try Training and Corneria. On New 3DS/XL, start with the slider low, then
+   compare slider off and halfway. Original 3DS/XL and 2DS intentionally stay
+   mono. Check sound, pause/resume, and Select + Start to exit.
+
+Back up existing `/3ds/starfox-enhanced/` saves/settings first. If boot fails,
+photograph the on-screen error; it should remain visible. Report console model,
+Original or EX, stage/scene, and the source commit in `BUILD-INFO.json`.
+This is a test candidate, not a promise of stable console FPS.
+
+## R43 source follow-up (October 7)
+
+Native saved-state loading now clears unsupported desktop renderer/upscale,
+AA, lighting, material, environment and post-processing preferences. It also
+keeps MSU-1 unavailable until a native streaming adapter exists. This does not
+remove the cartridge's own EX effects or alter its VM/SPC/grid timeline.
+Supported timing, audio volumes, cheats and controls remain intact. Real
+Original/EX BOOT and stage import regressions pass on the host; this is not
+physical-console validation. Use `BUILD-INFO.json` for the exact binary's
+source commit; the older R42 ZIP does not contain this fix.
+
+## Previous R42 build and validation
+
+The R42 source-only CI build has passed: use the local
+`build/StarFoxEnhanced-3ds-test-r42.zip` or the experimental player artifact from
+[native check run 37518401745](https://github.com/kandowontu2/starfox-enhanced/actions/runs/37518401745).
+Its source is `10d57b0a2afdd13142aa4da48430e54940269fa0`.
+Fresh native emulator checks reach the Original title, Controls, launch and
+Corneria in both old-model mono and New-model stereo. New-model upper-eye
+images differ while the lower HUD stays identical, and its bounded run closes
+normally. The earlier old-model movie needs a planned forced stop after reaching
+gameplay; that historical run does not verify clean exit. A fresh R42
+Original-model mono run without movie replay also reaches gameplay through
+pre-game, title/intro, Controls and map/travel, then closes gracefully at the
+planned 261-second limit. Its isolated save/config are restored byte-exactly;
+no new pixel or audible-audio acceptance is claimed from this route.
+These are smoke checks, not sustained console FPS, physical
+slider/audio/Home/sleep or complete stage/results acceptance. No release or
+private assets were published.
+
+The current Windows-host regression run also passes all 27 configured 3DS
+tests, including Original/EX menu composition, source/effect integration,
+remapping, quick menu, HUD, audio ownership and settings/state storage. Native
+landscape-flow checks are now registered in CTest instead of relying on manual
+invocation. Original Fortuna's ordinary-input/GOD route covers its retained
+results and return map with source/SPC and full-LCD priority parity. These are
+host checks, not ARM/PICA pixel, audible-audio or console-performance proof;
+the R42 binary/ZIP has not changed.
+
 October 6 R42 source follow-up: retained Mode-2 landscapes now keep their
 finite terrain and distant sky during stage results. Source BG2 low/high and
 OBJ priorities remain separate: score/sprite artwork does not acquire ground
@@ -75,8 +134,9 @@ are not complete-stage, physical-device performance or total-memory results.
 
 For the retained-results follow-up, use **R42 / StarFoxEnhanced-3ds-test**
 from the source-only **3DS native bring-up checks** on
-`codex/3ds-followup-r42-20261006`, after its ARM/package gates pass.
-Its `BUILD-INFO.json` source must match that exact workflow commit.
+`codex/3ds-followup-r42-20261006`; its ARM/package gates passed in
+[run 37518401745](https://github.com/kandowontu2/starfox-enhanced/actions/runs/37518401745).
+Its `BUILD-INFO.json` source must be `10d57b0a2afdd13142aa4da48430e54940269fa0`.
 R41's independently checked earlier candidate is available from
 [native check run 37514141658](https://github.com/kandowontu2/starfox-enhanced/actions/runs/37514141658)
 on `codex/3ds-followup-r41-20261006`. Its ARM/package checks passed. The local

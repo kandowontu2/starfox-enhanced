@@ -277,6 +277,79 @@ void presentation_cadence(const assets::RomImage& rom,const assets::SymbolMap& s
     GameSessionOptions invalid;invalid.preferences=GamePreferences{};invalid.preferences->render_fps=90;
     rejects([&]{GameSession rejected(rom,symbols,[](auto){},"BOOT",{},invalid);},"Invalid native SD FPS accepted by session");
 }
+void native_capability_restore(const assets::RomImage& rom,const assets::SymbolMap& symbols) {
+    // Import a real decoded GAME packet with supported cartridge settings and
+    // desktop-only rendering enabled. Do not edit guessed serialized offsets.
+    for(const auto map:{"BOOT","LEVEL1_1"}) {
+        GameSession session(rom,symbols,[](auto){},map);
+        session.advance(0,0);session.advance(timestamp(1),0);
+        const auto saved=session.save_state();const auto crc=assets::crc32(rom.bytes());
+        const auto packet=decode_game_state(saved,crc);
+        auto desktop=session.game().restored_state(packet.game);
+        desktop->set_display_mode(simulation::DisplayMode::super_ultrawide_32_9);
+        desktop->set_renderer_mode(simulation::RendererMode::software);
+        desktop->set_render_scale(simulation::RenderScale::scale_6x);
+        desktop->set_anti_aliasing_mode(simulation::AntiAliasingMode::heavy);
+        desktop->set_aa_type(3);desktop->set_integer_scaling(true);
+        desktop->set_enhanced_graphics(true);desktop->set_smooth_polys(true);
+        desktop->set_rtx_lighting_intensity(3);desktop->set_two_d_filter(simulation::TwoDFilterMode::scalefx);
+        desktop->set_effect(1);desktop->set_world_effect(2);desktop->set_bloom(3);desktop->set_bloom_2d(3);
+        desktop->set_material(static_cast<std::uint8_t>(render::Effect::mirror));
+        desktop->set_manipulation(static_cast<std::uint8_t>(render::Effect::twist));
+        desktop->set_extra_effects({static_cast<std::uint8_t>(render::Effect::heat_wake),
+            static_cast<std::uint8_t>(render::Effect::energy_shield),static_cast<std::uint8_t>(render::Effect::hologram)});
+        desktop->set_enhanced_shadows(true);desktop->set_ray_tracing_quality(3);
+        desktop->set_chromatic_aberration(3);desktop->set_hdr_effect(3);
+        desktop->set_global_enhancements(0x03ffffff);desktop->set_scene_enhancements(255);
+        desktop->set_depth_enhancements(15);desktop->set_particle_enhancements(15);
+        desktop->set_phosphor_persistence(3);desktop->set_adaptive_exposure(3);
+        desktop->set_water_caustics(3);desktop->set_camera_response(63);
+        desktop->set_volumetric_fog(3);desktop->set_motion_blur(3);
+        desktop->set_environment({1,1,1,1,1,1});desktop->set_vsync(true);
+        require(desktop->effect() && desktop->world_effect() && desktop->material() && desktop->manipulation()
+            && std::ranges::all_of(desktop->extra_effects(),[](auto value){return value!=0;})
+            && desktop->environment()!=std::array<std::uint8_t,6>{},"Desktop capability fixture silently disabled its effects");
+        desktop->set_msu1_available(true);desktop->set_msu1_music(true);
+        desktop->set_music_volume(35);desktop->set_sfx_volume(55);
+        desktop->set_timing_mode(simulation::TimingMode::unlocked_20_fps);
+        desktop->set_show_fps(true);desktop->set_presentation_fps(90);
+        desktop->set_swap_face_buttons(true);desktop->set_infinite_bombs(true);
+        auto candidate=packet;candidate.game=desktop->save_state();
+        const auto native=session.restored_state(encode_game_state(candidate,crc));
+        const auto& game=native->game();
+        require(!game.anti_aliasing() && !game.aa_type() && !game.integer_scaling()
+            && !game.enhanced_graphics() && !game.smooth_polys() && !game.rtx_lighting()
+            && game.two_d_filter()==simulation::TwoDFilterMode::off
+            && !game.effect() && !game.world_effect() && !game.bloom() && !game.bloom_2d()
+            && !game.enhanced_shadows() && !game.ray_tracing() && !game.reflective_surfaces_setting()
+            && !game.chromatic_aberration() && !game.hdr_effect(),
+            "Restoring desktop state silently enabled unsupported native rendering");
+        require(!game.global_enhancements() && !game.scene_enhancements() && !game.depth_enhancements()
+            && !game.particle_enhancements() && !game.phosphor_persistence() && !game.adaptive_exposure()
+            && !game.water_caustics() && !game.camera_response() && !game.volumetric_fog() && !game.motion_blur()
+            && game.environment()==std::array<std::uint8_t,6>{} && !game.material() && !game.manipulation()
+            && game.extra_effects()==std::array<std::uint8_t,3>{},
+            "Restoring desktop state retained ignored native material/environment/post effects");
+        require(game.display_mode()==simulation::DisplayMode::standard_4_3
+            && game.renderer_mode()==simulation::RendererMode::gpu
+            && game.render_scale()==simulation::RenderScale::scale_1x && !game.vsync()
+            && !game.msu1_available() && !game.msu1_music(),
+            "Restoring desktop state advertised unsupported LCD/renderer/audio capabilities");
+        require(game.presentation_fps()==60 && game.show_fps() && game.music_volume()==35 && game.sfx_volume()==55
+            && game.timing_mode()==simulation::TimingMode::unlocked_20_fps
+            && game.swap_face_buttons() && game.infinite_bombs(),
+            "Native capability normalization erased supported preferences");
+        const auto after=decode_game_state(native->save_state(),crc);
+        require(game.map().save_state()==desktop->map().save_state() && after.audio==packet.audio
+            && after.audio_phase==packet.audio_phase && after.pending_audio==packet.pending_audio
+            && after.grid==packet.grid && after.scene_revision==packet.scene_revision,
+            "Native capability normalization changed cartridge/SPC/grid timeline");
+        require(session.save_state()==saved,"Preparing native capability candidate mutated the running session");
+        const auto roundtrip=native->restored_state(native->save_state());
+        require(roundtrip->save_state()==native->save_state(),"Normalized native state did not round-trip exactly");
+    }
+    std::cout<<"  Native capabilities: real BOOT/stage state imports clear desktop-only graphics/audio, preserve supported controls and VM/SPC/grid\n";
+}
 struct MenuDriver {
     GameSession& session;std::int64_t time{};GameAdvance last;
     explicit MenuDriver(GameSession& source):session(source) {session.advance(0,0);}
@@ -912,15 +985,21 @@ void actual_hud_customization(const assets::RomImage& rom,const assets::SymbolMa
 int main(int argc,char** argv) {
     try {
         const bool states_only=argc==4 && std::string_view(argv[3])=="--states-only";
-        if(argc!=3 && !states_only && !(argc==5 && std::string_view(argv[3])=="--capture"))
-            throw std::invalid_argument("Usage: game_session_check ROM SYMBOLS [--capture DIRECTORY | --states-only]");
+        const bool capabilities_only=argc==4 && std::string_view(argv[3])=="--capabilities-only";
+        if(argc!=3 && !states_only && !capabilities_only && !(argc==5 && std::string_view(argv[3])=="--capture"))
+            throw std::invalid_argument("Usage: game_session_check ROM SYMBOLS [--capture DIRECTORY | --states-only | --capabilities-only]");
         const auto rom=assets::RomImage::load(argv[1]);const auto symbols=assets::SymbolMap::load(argv[2]);
+        if(capabilities_only) {
+            native_capability_restore(rom,symbols);
+            std::cout<<"3DS native capabilities: "<<checks<<" checks passed; host state imports, not console acceptance\n";return 0;
+        }
         if(states_only) {
             full_state_parity(rom,symbols);
             std::cout<<"3DS actual full states: "<<checks<<" checks passed; host source parity, not console acceptance\n";return 0;
         }
         parity(rom,symbols,"BOOT");parity(rom,symbols,"LEVEL1_1");handoff(rom,symbols);
         presentation_cadence(rom,symbols);
+        native_capability_restore(rom,symbols);
         actual_menu(rom,symbols,argc==5?std::filesystem::path(argv[4]):std::filesystem::path{});
         actual_disk_handoff(rom,symbols);
         actual_settings_reset(rom,symbols);
@@ -938,3 +1017,4 @@ int main(int argc,char** argv) {
         std::cout<<"3DS actual game session: "<<checks<<" checks passed; host source parity, not PICA/NDSP or hardware acceptance\n";
     } catch(const std::exception& error) {std::cerr<<"3DS actual game session: "<<error.what()<<'\n';return 1;}
 }
+

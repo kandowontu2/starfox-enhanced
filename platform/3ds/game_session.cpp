@@ -60,6 +60,7 @@ GameSession::GameSession(assets::RomImage rom,assets::SymbolMap symbols,PcmSink 
         game_.set_stereo_separation(std::min<std::uint16_t>(64,prefs.separation));
         game_.set_stereo_convergence(prefs.convergence);
     }
+    apply_native_capabilities();
     if(options.preview) {
         if(initial_map=="BOOT" || options.start_after_preview)
             throw std::invalid_argument("3DS preview requires a real stage owner, not BOOT/Start");
@@ -98,6 +99,28 @@ GameSession::GameSession(assets::RomImage rom,assets::SymbolMap symbols,PcmSink 
     }
     start_after_preview_=options.start_after_preview;
     history_.capture();history_.reset_interpolation();publish_raster();
+}
+void GameSession::apply_native_capabilities() noexcept {
+    // A GAME archive carries desktop host preferences as well as the source
+    // timeline. PICA uses native LCD geometry and the cartridge's own effects;
+    // ignored desktop settings must not survive a successful native restore.
+    // These setters touch host preferences only, never cartridge RAM/SPC state.
+    game_.set_display_mode(simulation::DisplayMode::standard_4_3);
+    game_.set_renderer_mode(simulation::RendererMode::gpu);
+    game_.set_render_scale(simulation::RenderScale::scale_1x);
+    game_.set_anti_aliasing_mode(simulation::AntiAliasingMode::off);
+    game_.set_aa_type(0);game_.set_integer_scaling(false);
+    game_.set_enhanced_graphics(false);game_.set_smooth_polys(false);
+    game_.set_rtx_lighting(false);game_.set_two_d_filter(simulation::TwoDFilterMode::off);
+    game_.set_effect(0);game_.set_world_effect(0);game_.set_bloom(0);game_.set_bloom_2d(0);
+    game_.set_model_smoothing(0);game_.set_enhanced_shadows(false);game_.set_ray_tracing(false);
+    game_.set_reflective_surfaces(0);game_.set_chromatic_aberration(0);game_.set_hdr_effect(0);
+    game_.set_material(0);game_.set_manipulation(0);game_.set_extra_effects({});game_.set_environment({});
+    game_.set_global_enhancements(0);game_.set_scene_enhancements(0);game_.set_depth_enhancements(0);
+    game_.set_particle_enhancements(0);game_.set_phosphor_persistence(0);game_.set_adaptive_exposure(0);
+    game_.set_water_caustics(0);game_.set_camera_response(0);game_.set_volumetric_fog(0);game_.set_motion_blur(0);
+    game_.set_dlss_mode(0);game_.set_dlss45_mode(0);game_.set_fsr1_mode(0);game_.set_fsr1_menu(false);
+    game_.set_vsync(false);game_.set_msu1_available(false);
 }
 GamePreferences GameSession::preferences() const noexcept {
     return {game_.timing_mode(),game_.music_volume(),game_.sfx_volume(),game_.language(),

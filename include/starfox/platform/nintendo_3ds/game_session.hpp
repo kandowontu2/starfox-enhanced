@@ -99,6 +99,7 @@ public:
         result.convergence=float(game_.stereo_convergence());return result;
     }
 private:
+    void apply_native_capabilities() noexcept;
     void prepare_pace_shapes();
     void publish_raster();
     assets::RomImage rom_;
