@@ -140,7 +140,7 @@ struct NativeGpu::Impl {
     GpuLease lease;
     bool initialized{},program_ready{};
     PicaVertex* vbo{};
-    std::vector<PicaVertex> cached_vertices;
+    PicaVertexResidency vertices;
     std::vector<u32> shader_words;
     DVLB_s* library{};
     shaderProgram_s program{};
@@ -272,16 +272,11 @@ void NativeGpu::present(const PicaFrame& frame,ImageView lower) {
     FrameEnd end; // Includes failure exits; uploads complete before targets are marked used.
     update_pica_texture_residency(frame.textures,{lower.pixels,lower.width,lower.height,lower.pitch,3},
         std::span(impl_->textures),impl_->dashboard);
-    if(impl_->cached_vertices.size()!=frame.vertices.size()
-        || !std::equal(frame.vertices.begin(),frame.vertices.end(),impl_->cached_vertices.begin())) {
-        std::vector<PicaVertex> next(frame.vertices.begin(),frame.vertices.end());
-        if(!next.empty()) {
-            std::memcpy(impl_->vbo,next.data(),next.size()*sizeof(PicaVertex));
-            if(R_FAILED(GSPGPU_FlushDataCache(impl_->vbo,next.size()*sizeof(PicaVertex))))
-                throw std::runtime_error("3DS GPU geometry flush failed");
-        }
-        impl_->cached_vertices=std::move(next);
-    }
+    impl_->vertices.prepare(frame.vertices,[&](std::span<const PicaVertex> source) {
+        std::memcpy(impl_->vbo,source.data(),source.size_bytes());
+        if(R_FAILED(GSPGPU_FlushDataCache(impl_->vbo,source.size_bytes())))
+            throw std::runtime_error("3DS GPU geometry flush failed");
+    });
     if(frame.plan.stereo && !impl_->top[1]) impl_->top[1]=Impl::make_target(top_width,GFX_TOP,GFX_RIGHT,true);
     impl_->configure();gfxSet3D(frame.plan.stereo);
     for(unsigned eye=0;eye<frame.plan.eye_count;++eye) {

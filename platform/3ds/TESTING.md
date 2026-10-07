@@ -22,6 +22,18 @@ This is a test candidate, not a promise of stable console FPS.
 
 ## Current build and validation
 
+### R44 source follow-up (October 7)
+
+Native changed-scene vertex uploads now use the borrowed scene directly and
+reuse one CPU comparison cache. Held scenes still skip uploads; an unsuccessful
+flush invalidates residency so retrying the previous scene repairs the VBO.
+This removes the former per-change complete-scene temporary vector without
+changing geometry, stereo, source timing or effects. Host regressions cover
+steady updates, held/empty/shrinking/restored scenes and failed-upload recovery.
+Use the package's `BUILD-INFO.json` to identify its exact source. R43 and earlier
+packages do not contain this optimization. Native ARM and real-device tests are
+required before treating it as a playable/performance-accepted improvement.
+
 ### R43 source follow-up (October 7)
 
 Native saved-state loading now clears unsupported desktop renderer/upscale,

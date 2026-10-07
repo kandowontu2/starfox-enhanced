@@ -10,6 +10,59 @@ template<class F> void rejects(F action,const char* message) {
     bool rejected=false;try {action();} catch(const std::invalid_argument&) {rejected=true;}
     require(rejected,message);
 }
+void vertex_residency() {
+    PicaVertexResidency cache;
+    std::vector<PicaVertex> source(96),gpu;
+    unsigned uploads{};bool fail{};
+    const auto upload=[&](std::span<const PicaVertex> submitted) {
+        require(submitted.data()==source.data() && submitted.size()==source.size(),
+            "Vertex upload used a complete-scene temporary instead of borrowed source");
+        ++uploads;
+        // A failed flush may already have changed native VBO bytes. CPU cache
+        // equality alone cannot certify that the previous scene is resident.
+        gpu.assign(submitted.begin(),submitted.end());
+        if(fail)throw std::runtime_error("Injected geometry flush failure");
+    };
+    require(!cache.valid() && cache.vertices().empty(),"New vertex cache fabricated valid residency");
+    require(cache.prepare(source,upload) && cache.valid() && uploads==1,
+        "Initial scene did not upload/commit exactly once");
+    const auto address=cache.vertices().data();const auto capacity=cache.capacity();
+    const auto equal=[&]{return std::equal(source.begin(),source.end(),cache.vertices().begin(),cache.vertices().end());};
+    require(equal() && !cache.prepare(source,upload) && uploads==1,"Held vertex scene was copied/uploaded again");
+    for(unsigned phase=1;phase<=180;++phase) {
+        source[phase%source.size()].position[0]=float(phase)*.25F;
+        require(cache.prepare(source,upload) && cache.valid() && equal(),"Changed vertices were not exactly committed");
+        require(cache.vertices().data()==address && cache.capacity()==capacity,
+            "Steady vertex updates replaced the comparison-cache allocation");
+        require(!cache.prepare(source,upload),"Held changed scene performed a second upload");
+    }
+    require(uploads==181,"Steady vertices did not have one upload per change");
+    const auto old=source;
+    source[0].position[2]=917;fail=true;
+    bool failed=false;try{cache.prepare(source,upload);}catch(const std::runtime_error&){failed=true;}
+    require(failed && !cache.valid()
+        && std::equal(old.begin(),old.end(),cache.vertices().begin(),cache.vertices().end()),
+        "Failed flush committed newer CPU vertices or retained valid GPU residency");
+    require(gpu!=old,"Failure fixture did not actually mutate its GPU bytes");
+    source=old;fail=false;const auto before_retry=uploads;
+    require(cache.prepare(source,upload) && cache.valid() && gpu==old && uploads==before_retry+1,
+        "Retry of the old CPU scene skipped the required VBO repair");
+    source.resize(12);
+    require(cache.prepare(source,upload) && equal() && cache.vertices().data()==address,
+        "Shrinking scene replaced storage or retained obsolete vertices");
+    source.clear();const auto before_empty=uploads;
+    require(cache.prepare(source,upload) && cache.valid() && cache.vertices().empty()
+        && cache.capacity()==capacity && uploads==before_empty,
+        "Empty scene uploaded fake vertices or freed reusable storage");
+    require(!cache.prepare(source,upload),"Held empty scene was not reused");
+    source.resize(96);source[2].position[1]=713;
+    require(cache.prepare(source,upload) && cache.valid() && equal() && cache.vertices().data()==address,
+        "Restored scene did not reuse its bounded vertex storage");
+    source.resize(pica_vertex_limit+1);const auto before_invalid=uploads;
+    rejects([&]{cache.prepare(source,upload);},"Oversized vertex scene accepted before upload");
+    require(cache.valid() && cache.vertices().size()==96 && cache.capacity()==capacity && uploads==before_invalid,
+        "Invalid preflight mutated residency or allocated beyond the scene bound");
+}
 void texture_upload() {
     // Independent Morton lookup, including source row order and ABGR bytes.
     constexpr unsigned spread[]{0,1,4,5,16,17,20,21};
@@ -326,7 +379,7 @@ void sampled_texture_orientation() {
 }
 }
 int main() try {
-    texture_upload();texture_residency();projection_and_draws();layer_upload();sampled_texture_orientation();
+    texture_upload();texture_residency();vertex_residency();projection_and_draws();layer_upload();sampled_texture_orientation();
     require(pica_uv_mode(false,false)==std::array<float,4>{1,0,0,0},"Ordinary texture projection changed");
     require(pica_uv_mode(true,false)==std::array<float,4>{0,1,0,0},"LCD parity texture lost its homogeneous Q");
     require(pica_uv_mode(false,true)==std::array<float,4>{0,0,1,0},"Source terrain mode zeroed ordinary UVs before projection");

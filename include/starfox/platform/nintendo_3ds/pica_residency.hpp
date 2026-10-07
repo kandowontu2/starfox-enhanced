@@ -1,7 +1,37 @@
 #pragma once
 #include "starfox/platform/nintendo_3ds/pica_frame.hpp"
+#include <type_traits>
 
 namespace starfox::platform::nintendo_3ds {
+// The presenter waits for its preceding GPU work before calling prepare.
+// Upload the borrowed scene directly; retain one reusable CPU comparison
+// cache, not a newly allocated complete-scene staging vector every frame.
+class PicaVertexResidency {
+public:
+    static_assert(std::is_nothrow_copy_constructible_v<PicaVertex> && std::is_nothrow_copy_assignable_v<PicaVertex>);
+    template<class Upload>
+    bool prepare(std::span<const PicaVertex> source,Upload upload) {
+        if(source.size()>pica_vertex_limit)
+            throw std::invalid_argument("Invalid 3DS resident vertex count");
+        if(valid_ && source.size()==vertices_.size()
+            && std::equal(source.begin(),source.end(),vertices_.begin())) return false;
+        // Allocate BEFORE touching GPU storage. After reserve, PicaVertex's
+        // nonthrowing copy can commit without an allocation failure leaving
+        // the VBO newer than a still-valid CPU comparison cache.
+        vertices_.reserve(source.size());
+        valid_=false;
+        if(!source.empty()) upload(source);
+        vertices_.assign(source.begin(),source.end());valid_=true;
+        return true;
+    }
+    [[nodiscard]] bool valid() const noexcept {return valid_;}
+    [[nodiscard]] std::span<const PicaVertex> vertices() const noexcept {return vertices_;}
+    [[nodiscard]] std::size_t capacity() const noexcept {return vertices_.capacity();}
+private:
+    std::vector<PicaVertex> vertices_;
+    bool valid_{};
+};
+
 struct PicaTextureRetention {
     bool colour{},layers{};
 };
