@@ -15,8 +15,8 @@ std::array<float,4> rgba(render::Rgba8 colour) {
 }
 // Source two-point ink is a one-pixel-wide camera-facing ribbon, not a missing
 // triangle. Width remains one source pixel as depth varies along the line.
-std::vector<Camera> line_quad(Camera a,Camera b,double focal) {
-    if(a[2]<1 && b[2]<1) return {};
+std::optional<std::array<Camera,4>> line_quad(Camera a,Camera b,double focal) {
+    if(a[2]<1 && b[2]<1) return std::nullopt;
     if(a[2]<1 || b[2]<1) {
         auto& outside=a[2]<1?a:b;const auto inside=a[2]<1?b:a;
         const auto t=(1-outside[2])/(inside[2]-outside[2]);
@@ -26,15 +26,15 @@ std::vector<Camera> line_quad(Camera a,Camera b,double focal) {
     const auto length=std::hypot(dx,dy);
     if(length<=1.e-12) {
         const auto half=a[2]/focal*.5;
-        return {{a[0]-half,a[1]-half,a[2]},{a[0]+half,a[1]-half,a[2]},
-            {a[0]+half,a[1]+half,a[2]},{a[0]-half,a[1]+half,a[2]}};
+        return std::array<Camera,4>{{{a[0]-half,a[1]-half,a[2]},{a[0]+half,a[1]-half,a[2]},
+            {a[0]+half,a[1]+half,a[2]},{a[0]-half,a[1]+half,a[2]}}};
     }
     const auto nx=length>1.e-12?-dy/length:.0,ny=length>1.e-12?dx/length:1.;
     const auto corner=[&](Camera p,double sign) {
         const auto half=std::max(1.,p[2])/focal*.5;
         p[0]+=sign*nx*half;p[1]+=sign*ny*half;return p;
     };
-    return {corner(a,-1),corner(b,-1),corner(b,1),corner(a,1)};
+    return std::array{corner(a,-1),corner(b,-1),corner(b,1),corner(a,1)};
 }
 } // namespace
 void PicaShapes::clear() {vertices_.clear();draws_.clear();textures_.clear();views_.clear();}
@@ -53,9 +53,12 @@ unsigned PicaShapes::texture(Texture image) {
     textures_.push_back(std::move(image));return unsigned(textures_.size()-1);
 }
 void PicaShapes::submit(std::span<const PicaVertex> vertices,unsigned texture_index,
-    const PicaMatrix& model,bool dither,std::array<std::uint8_t,4> odd,std::optional<PicaClip> clip,PicaShapeOrder order) {
-    if(vertices.empty()) return;
-    if(vertices.size()%3 || vertices.size()>pica_vertex_limit-vertices_.size())
+    const PicaMatrix& model,bool dither,std::array<std::uint8_t,4> odd,std::optional<PicaClip> clip,PicaShapeOrder order,bool fan) {
+    if(vertices.empty() || (fan && vertices.size()<3)) return;
+    if(fan && vertices.size()-2>pica_vertex_limit/3)
+        throw std::length_error("3DS source geometry limit exceeded");
+    const auto count=fan?(vertices.size()-2)*3:vertices.size();
+    if(count%3 || count>pica_vertex_limit-vertices_.size())
         throw std::length_error("3DS source geometry limit exceeded");
     const bool depth=order==PicaShapeOrder::depth;
     const bool merge=!draws_.empty() && draws_.back().texture==texture_index
@@ -63,11 +66,19 @@ void PicaShapes::submit(std::span<const PicaVertex> vertices,unsigned texture_in
         && draws_.back().depth_test==depth && draws_.back().depth_write==depth
         && (!dither || draws_.back().dither_odd==odd);
     if(!merge && draws_.size()>=pica_draw_limit) throw std::length_error("3DS source draw limit exceeded");
-    const auto first=unsigned(vertices_.size()),count=unsigned(vertices.size());
-    vertices_.insert(vertices_.end(),vertices.begin(),vertices.end());
-    if(merge) draws_.back().count+=count;
+    const auto first=unsigned(vertices_.size()),submitted=unsigned(count);
+    // Grow geometrically, bounded to one complete scene. Reserving the exact
+    // appended size for each face would simply move the allocation hotspot.
+    const auto required=vertices_.size()+count;
+    if(required>vertices_.capacity())
+        vertices_.reserve(std::min(std::size_t(pica_vertex_limit),std::max(required,vertices_.capacity()*2)));
+    if(fan) {
+        for(unsigned corner=1;corner+1<vertices.size();++corner)
+            for(unsigned index:{0U,corner,corner+1}) vertices_.push_back(vertices[index]);
+    } else vertices_.insert(vertices_.end(),vertices.begin(),vertices.end());
+    if(merge) draws_.back().count+=submitted;
     else {
-        PicaDraw draw;draw.first=first;draw.count=count;draw.texture=texture_index;
+        PicaDraw draw;draw.first=first;draw.count=submitted;draw.texture=texture_index;
         draw.model=model;draw.screen_dither=dither;draw.dither_odd=odd;draw.clip=clip;
         draw.depth_test=draw.depth_write=depth;draws_.push_back(draw);
     }
@@ -124,6 +135,9 @@ void PicaShapes::append(const render::PreparedShapePrimitives& source,
             const bool sparse=kind==render::ShapePrimitiveKind::polygon && !art && (source.pose.wireframe_mode
                 || source.pose.wobble_mode || source.pose.wave_mode || source.pose.cel_mode);
             if(sparse && !span_plan) throw std::invalid_argument("3DS EX spans require the immutable active eye plan");
+            if(kind==render::ShapePrimitiveKind::polygon && !sparse
+                && primitive.vertices.size()-2>(pica_vertex_limit-vertices_.size())/3)
+                throw std::length_error("3DS source geometry limit exceeded");
             if(kind==render::ShapePrimitiveKind::sprite && !art)
                 throw std::invalid_argument("Missing 3DS source sprite texture");
             unsigned texture_index=pica_no_texture;bool dither=false;std::array<std::uint8_t,4> odd_colour{};
@@ -165,7 +179,7 @@ void PicaShapes::append(const render::PreparedShapePrimitives& source,
                 submit(triangles,texture_index,model,dither,odd_colour,clip,order);
                 continue;
             }
-            std::vector<PicaVertex> boundary;
+            auto& boundary=boundary_;boundary.clear();
             if(kind==render::ShapePrimitiveKind::polygon) {
                 for(const auto& vertex:primitive.vertices) {
                     std::array<float,2> uv{};
@@ -176,8 +190,8 @@ void PicaShapes::append(const render::PreparedShapePrimitives& source,
                 }
             } else if(kind==render::ShapePrimitiveKind::line) {
                 for(const auto& vertex:primitive.vertices) static_cast<void>(camera_point(vertex.camera));
-                for(auto point:line_quad(primitive.vertices[0].camera,primitive.vertices[1].camera,source.focal_length))
-                    boundary.push_back({camera_point(point),colour,{}});
+                if(const auto points=line_quad(primitive.vertices[0].camera,primitive.vertices[1].camera,source.focal_length))
+                    for(auto point:*points) boundary.push_back({camera_point(point),colour,{}});
             } else {
                 const auto centre=primitive.vertices[0].camera;
                 static_cast<void>(camera_point(centre));
@@ -196,13 +210,7 @@ void PicaShapes::append(const render::PreparedShapePrimitives& source,
                 const std::array<std::array<float,2>,4> uv{{{float(u0),0},{float(u1),0},{float(u1),float(v1)},{float(u0),float(v1)}}};
                 for(unsigned corner=0;corner<4;++corner) boundary.push_back({camera_point(points[corner]),colour,uv[corner]});
             }
-            std::vector<PicaVertex> triangles;
-            if(boundary.size()>=3) {
-                triangles.reserve((boundary.size()-2)*3);
-                for(unsigned corner=1;corner+1<boundary.size();++corner)
-                    for(unsigned index:{0U,corner,corner+1}) triangles.push_back(boundary[index]);
-            }
-            submit(triangles,texture_index,model,dither,odd_colour,clip,order);
+            submit(boundary,texture_index,model,dither,odd_colour,clip,order,true);
         }
         views_.clear();
     } catch(...) {

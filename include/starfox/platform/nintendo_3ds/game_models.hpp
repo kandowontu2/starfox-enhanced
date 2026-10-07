@@ -40,7 +40,9 @@ private:
     std::map<std::array<std::uint32_t,3>,CachedShape> shapes_;
     std::size_t cached_bytes_{};
     std::uint64_t epoch_{};
-    PicaShapes geometry_;
+    // Build only into the unpublished owner; swap after all conversion/frame
+    // allocations succeed. Both scene buffers retain capacity after warm-up.
+    PicaShapes geometry_,next_geometry_;
     GameModelCoverage coverage_;
 };
 } // namespace starfox::platform::nintendo_3ds

@@ -22,6 +22,18 @@ This is a test candidate, not a promise of stable console FPS.
 
 ## Current build and validation
 
+### R45 source follow-up (October 7)
+
+Native model conversion reuses polygon workspace, submits triangle fans
+directly and uses fixed-size ribbon corners. The unpublished/published model
+owners also retain their scene buffers across frames; texture views are prepared
+before publication, so a failure cannot replace the last complete scene.
+Host checks compare the exact source fan, line, sprite, clipping and EX geometry,
+and count allocations only in warmed polygon/ribbon conversion. This does not
+claim every game-preparation phase is allocation-free, nor establish console FPS.
+R44 and earlier packages do not contain this follow-up. As always, identify the
+exact source in `BUILD-INFO.json` and test real audio/controls/stereo/performance.
+
 ### R44 source follow-up (October 7)
 
 Native changed-scene vertex uploads now use the borrowed scene directly and

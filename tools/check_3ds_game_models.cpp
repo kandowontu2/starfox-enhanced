@@ -453,6 +453,21 @@ void auxiliary_checks(const assets::RomImage& rom,const assets::SymbolMap& symbo
     require(rejected,"Invalid interpolation must reject a new source frame");
     require(masked_frame.vertices.size()==saved.size() && std::equal(saved.begin(),saved.end(),masked_frame.vertices.begin())
         && models.coverage().particles==2,"Failed new scene replaced or invalidated the last complete model stream");
+    // Fail AFTER a complete scene's worth of valid conversion, not only in
+    // interpolation preflight. The unpublished reusable owner must never
+    // invalidate the borrowed last-successful scene or its coverage.
+    auto overflow=std::make_shared<vr::GameSceneSnapshot>(*scene);
+    overflow->objects.assign(pica_vertex_limit/12+1,item);
+    auto oversized=source;oversized.previous=oversized.current=overflow;
+    rejected=false;try {static_cast<void>(models.prepare(oversized));}catch(const std::exception&) {rejected=true;}
+    require(rejected && std::equal(saved.begin(),saved.end(),masked_frame.vertices.begin(),masked_frame.vertices.end())
+        && masked_frame.draws.size()==1 && masked_frame.draws[0].count==12
+        && masked_frame.draws[0].clip==PicaClip{152,0,248,240} && models.coverage().particles==2,
+        "Late over-budget preparation changed the published native model scene");
+    const auto recovered=models.prepare(source);validate_pica_frame(recovered,source.dashboard);
+    require(recovered.vertices.size()==saved.size() && std::equal(saved.begin(),saved.end(),recovered.vertices.begin(),recovered.vertices.end())
+        && recovered.draws.size()==1 && recovered.draws[0].count==12 && !recovered.draws[0].clip
+        && models.coverage().particles==2,"Retry retained partial geometry/draw state from the unpublished failure");
     auto raster=std::make_shared<GameRasterSnapshot>(*source.raster);raster->brightness=0;source.raster=raster;
     const auto faded=models.prepare(source);
     for(const auto& vertex:faded.vertices) require(vertex.colour[0]==0 && vertex.colour[1]==0 && vertex.colour[2]==0,

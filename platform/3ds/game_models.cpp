@@ -123,7 +123,7 @@ PicaFrame GameModels::prepare(const GamePresentation& frame) {
     auto words=frame.raster->ppu->cgram;
     std::copy(scene.model_palette.begin(),scene.model_palette.end(),words.begin()+112);
     const auto palette=render::apply_snes_brightness(render::decode_bgr555_palette(words),frame.raster->brightness);
-    PicaShapes next;GameModelCoverage count;++epoch_;
+    auto& next=next_geometry_;next.clear();GameModelCoverage count;++epoch_;
     const auto clip=game_controls_clip(scene.flow);
     const bool controls=clip.has_value();
     // Match the desktop Controls compositor: ordinary demo shadows/models,
@@ -170,7 +170,10 @@ PicaFrame GameModels::prepare(const GamePresentation& frame) {
             throw std::runtime_error("3DS object "+std::to_string(item.handle)+" shape "+std::to_string(object.shape)+": "+error.what());
         }
     }
-    count.cached_shape_bytes=cached_bytes_;geometry_=std::move(next);coverage_=count;
-    return geometry_.frame(frame.plan);
+    // Texture-view allocation is part of preparation, not a possible failure
+    // after replacing the last complete published scene.
+    const auto completed=next.frame(frame.plan);
+    count.cached_shape_bytes=cached_bytes_;std::swap(geometry_,next);coverage_=count;
+    return completed;
 }
 } // namespace starfox::platform::nintendo_3ds

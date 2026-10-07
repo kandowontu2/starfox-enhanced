@@ -1,11 +1,16 @@
 #include "starfox/platform/nintendo_3ds/pica_shapes.hpp"
+#include <atomic>
+#include <cstdlib>
 #include <iostream>
 #include <limits>
+#include <new>
 
 namespace {
 using namespace starfox;
 using namespace platform::nintendo_3ds;
 unsigned checks{};
+std::atomic<std::size_t> allocations{};
+bool count_allocations{};
 void require(bool value,const char* message) {++checks;if(!value) throw std::runtime_error(message);}
 template<class F> void rejects(F&& f,const char* message) {
     bool rejected=false;try {f();} catch(const std::exception&) {rejected=true;}
@@ -313,6 +318,47 @@ void rollback_and_budget() {
     require(output.frame(plan).vertices.size()==pica_vertex_limit,"Budget failure retained complete previous frame");
     output.clear();require(output.frame(plan).vertices.empty(),"Explicit frame reset clears geometry");
 }
+void warmed_geometry_storage() {
+    render::SoftwareRenderer renderer;
+    auto prepared=renderer.prepare_primitives(quad(),pose());
+    auto polygon=prepared.primitives.front();
+    polygon.vertices.resize(7);
+    for(unsigned i=0;i<7;++i) polygon.vertices[i].camera={double(i*9)-24,double((i*i)%17)-8,512};
+    prepared.primitives.assign(128,polygon);
+    auto line=polygon;line.kind=render::ShapePrimitiveKind::line;line.vertices.resize(2);
+    line.vertices[0].camera={1,2,512};line.vertices[1].camera={1,2,512}; // Collapsed source ribbon.
+    prepared.primitives.push_back(line);
+    line.vertices[0].camera={-1,-2,-4};line.vertices[1].camera={12,9,128}; // Near-clipped ribbon.
+    prepared.primitives.push_back(line);
+    const auto colours=palette();const auto plan=plan_frame(1,true,ScreenUse::world);
+    std::array<PicaShapes,2> owners;
+    for(auto& owner:owners) owner.append(prepared,colours);
+    constexpr unsigned count=128*15+12;
+    for(auto& owner:owners) {
+        const auto frame=owner.frame(plan);
+        require(frame.vertices.size()==count && frame.draws.size()==1,"Fan/ribbon warm-up changed geometry or merging");
+        unsigned at=0;
+        for(unsigned corner=1;corner+1<polygon.vertices.size();++corner)
+            for(unsigned index:{0U,corner,corner+1}) {
+                const auto& source=polygon.vertices[index].camera;
+                require(frame.vertices[at++].position==Point3{float(source[0]),float(-source[1]),float(source[2])},
+                    "Direct fan submission changed source vertex order or camera coordinates");
+            }
+    }
+    const std::array addresses{owners[0].frame(plan).vertices.data(),owners[1].frame(plan).vertices.data()};
+    allocations=0;count_allocations=true;
+    for(unsigned phase=0;phase<180;++phase) {
+        prepared.primitives[0].vertices[0].camera[0]=double(phase)*.125;
+        auto& owner=owners[phase&1];owner.clear();owner.append(prepared,colours);
+        const auto frame=owner.frame(plan);
+        require(frame.vertices.size()==count && frame.vertices.data()==addresses[phase&1]
+            && frame.vertices[0].position[0]==float(phase)*.125F,
+            "Warmed scene storage was replaced, lost geometry or retained old coordinates");
+    }
+    count_allocations=false;
+    std::cout<<"Warmed native fan/ribbon conversion: "<<allocations<<" allocations over 180 changed scenes\n";
+    require(allocations==0,"Warmed polygon/fan/ribbon conversion still allocates per face or scene");
+}
 void texture_resources() {
     const auto colours=palette();render::SoftwareRenderer renderer;PicaShapes output;
     auto prepared=renderer.prepare_primitives(quad(),pose());
@@ -360,7 +406,29 @@ void projected_dither() {
     }
 }
 } // namespace
+// Observe only warmed preparation, not fixture creation or the independent fan oracle.
+#if defined(_MSC_VER)
+#define STARFOX_ALLOCATION_NOINLINE __declspec(noinline)
+#elif defined(__GNUC__)
+#define STARFOX_ALLOCATION_NOINLINE __attribute__((noinline))
+#else
+#define STARFOX_ALLOCATION_NOINLINE
+#endif
+// Keep test allocation boundaries visible. Inlining these replacement hooks
+// also triggers GCC's false malloc/new provenance warning in unrelated fixtures.
+STARFOX_ALLOCATION_NOINLINE
+void* operator new(std::size_t count) {
+    if(count_allocations) ++allocations;
+    if(auto* memory=std::malloc(std::max(count,std::size_t{1}))) return memory;
+    throw std::bad_alloc{};
+}
+STARFOX_ALLOCATION_NOINLINE void* operator new[](std::size_t count) {return ::operator new(count);}
+STARFOX_ALLOCATION_NOINLINE void operator delete(void* memory) noexcept {std::free(memory);}
+STARFOX_ALLOCATION_NOINLINE void operator delete[](void* memory) noexcept {std::free(memory);}
+STARFOX_ALLOCATION_NOINLINE void operator delete(void* memory,std::size_t) noexcept {std::free(memory);}
+STARFOX_ALLOCATION_NOINLINE void operator delete[](void* memory,std::size_t) noexcept {std::free(memory);}
+#undef STARFOX_ALLOCATION_NOINLINE
 int main() try {
-    native_vertices();source_geometry();materials_and_sprites();effect_windows();painter_projection();scene_windows();rollback_and_budget();texture_resources();projected_dither();
+    native_vertices();source_geometry();materials_and_sprites();effect_windows();painter_projection();scene_windows();rollback_and_budget();warmed_geometry_storage();texture_resources();projected_dither();
     std::cout<<"3DS shared source geometry/material conversion: "<<checks<<" checks passed\n";
-} catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
+} catch(const std::exception& error) {count_allocations=false;std::cerr<<error.what()<<'\n';return 1;}

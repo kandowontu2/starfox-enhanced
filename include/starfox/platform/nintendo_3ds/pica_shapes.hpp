@@ -29,8 +29,10 @@ private:
     };
     unsigned texture(Texture);
     void submit(std::span<const PicaVertex>,unsigned texture,const PicaMatrix&,bool dither,
-        std::array<std::uint8_t,4> odd,std::optional<PicaClip>,PicaShapeOrder);
+        std::array<std::uint8_t,4> odd,std::optional<PicaClip>,PicaShapeOrder,bool fan=false);
     std::vector<PicaVertex> vertices_;
+    // Reused between faces/scenes; triangles are written directly to vertices_.
+    std::vector<PicaVertex> boundary_;
     std::vector<PicaDraw> draws_;
     std::vector<Texture> textures_;
     std::vector<PicaImage> views_;
