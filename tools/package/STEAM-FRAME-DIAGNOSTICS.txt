@@ -1,0 +1,16 @@
+Steam Frame ARM64 hardware diagnostic set
+
+starfox_pc is the flat ARM64 baseline. Run it on the Frame to validate the
+runtime ABI and host environment before testing VR.
+
+starfox_vr_runtime_check is the OpenXR loader/session diagnostic. Run it with
+--loader-only while the headset is connected and the Frame OpenXR runtime is
+available.
+
+ELF-DEPENDENCIES.json records the AArch64 ELF identities and the complete
+dynamic dependency closure resolved from the pinned Sniper ARM64 SDK. The
+BUILD-METADATA.json file records source and dependency identity and hashes each
+diagnostic payload.
+
+This set contains no game asset bundle, ROM, save, music, Vulkan loader, or
+Vulkan ICD files.

@@ -40,7 +40,7 @@ struct Visibility {
 };
 
 struct Face {
-    std::int8_t visibility_index{};
+    std::int16_t visibility_index{};
     std::uint8_t colour_id{};
     Vec3i normal{};
     std::vector<std::uint8_t> vertex_indices;

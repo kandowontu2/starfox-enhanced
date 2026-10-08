@@ -14,6 +14,7 @@ Starfox-Assets.BIN
 /dist/StarFoxEnhanced-android-arm64.apk
 /dist/StarFoxEnhanced-switch/
 /dist/StarFoxEnhanced-vita/
+/dist/StarFoxEnhanced-ps5/
 /dist/StarFoxEnhanced-xbox-uwp-x64/
 /dist/StarFoxEnhanced-*.zip
 /dist/StarFoxAssetBuilder-*.zip
@@ -32,3 +33,4 @@ Starfox-Assets.BIN
 /Android/
 __pycache__/
 *.pyc
+.DS_Store

@@ -1,4 +1,5 @@
 #include "starfox/timing/fixed_step.hpp"
+#include "starfox/compat/bit_cast.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -11,7 +12,7 @@ namespace starfox::timing {
 TransformSnapshot relative_birth_snapshot(const TransformSnapshot& sample,
     const TransformSnapshot& previous_owner, const TransformSnapshot& current_owner) noexcept {
     const auto offset = [](std::int32_t value, std::int32_t previous, std::int32_t current) {
-        return std::bit_cast<std::int16_t>(static_cast<std::uint16_t>(value + previous - current));
+        return starfox::bit_cast<std::int16_t>(static_cast<std::uint16_t>(value + previous - current));
     };
     return {offset(sample.x, previous_owner.x, current_owner.x),
         offset(sample.y, previous_owner.y, current_owner.y),

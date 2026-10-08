@@ -7146,14 +7146,26 @@ int main(int argc, char** argv) {
         drive_boot({0, starfox::input::down, 0});
         require(boot_game.pregame_selection() == 4U,
                 "pre-game cursor did not reach RENDERER");
+        require(boot_game.gpu_renderer()
+                    == starfox::simulation::GpuRenderer::accurate,
+                "pre-game renderer did not default to GPU ACCURATE");
+        // SOFTWARE <-> GPU ACCURATE <-> GPU FAST, wrapping in both directions.
+        drive_boot({0, starfox::input::a, 0});
+        require(boot_game.gpu_fast(),
+                "pre-game renderer option did not step forward to GPU FAST");
         drive_boot({0, starfox::input::a, 0});
         require(boot_game.renderer_mode()
                     == starfox::simulation::RendererMode::software,
-                "pre-game renderer option did not select software");
+                "pre-game renderer option did not wrap to software");
+        drive_boot({0, starfox::input::left, 0});
+        require(boot_game.gpu_fast(),
+                "pre-game renderer option did not step back to GPU FAST");
         drive_boot({0, starfox::input::left, 0});
         require(boot_game.renderer_mode()
-                    == starfox::simulation::RendererMode::gpu,
-                "pre-game renderer option did not return to GPU");
+                    == starfox::simulation::RendererMode::gpu
+                    && boot_game.gpu_renderer()
+                        == starfox::simulation::GpuRenderer::accurate,
+                "pre-game renderer option did not return to GPU ACCURATE");
         drive_boot({0, starfox::input::down, 0});
         require(boot_game.pregame_selection() == 5U,
                 "pre-game cursor did not reach MSU-1 MUSIC");
@@ -7250,6 +7262,22 @@ int main(int argc, char** argv) {
                     == starfox::simulation::RenderScale::scale_1x
                     && !boot_game.smooth_polys(),
                 "Render Upscale enabled the replaced legacy effect");
+        // GPU FAST offers 5x-10x on desktop builds; other renderers keep 4x.
+        boot_game.set_gpu_renderer(starfox::simulation::GpuRenderer::fast);
+        drive_boot({0, starfox::input::left, 0});
+        require(boot_game.render_scale()
+                    == starfox::simulation::RenderScale::scale_10x,
+                "GPU FAST Render Upscale did not wrap backward to 10x");
+        boot_game.set_gpu_renderer(starfox::simulation::GpuRenderer::accurate);
+        drive_boot({0, starfox::input::left, 0});
+        require(boot_game.render_scale()
+                    == starfox::simulation::RenderScale::scale_3x,
+                "GPU ACCURATE Render Upscale did not stay within 1x-4x");
+        drive_boot({0, starfox::input::right, 0});
+        drive_boot({0, starfox::input::right, 0});
+        require(boot_game.render_scale()
+                    == starfox::simulation::RenderScale::scale_1x,
+                "GPU ACCURATE Render Upscale did not wrap forward after 4x");
         drive_boot({0, starfox::input::down, 0});
         select_menu_action(boot_game, starfox::simulation::PregamePage::two_d, 18U, &boot_audio);
         require(boot_game.pregame_selection() == 18U,
@@ -7262,6 +7290,20 @@ int main(int argc, char** argv) {
         require(boot_game.pregame_selection()==12U,"retired smoothing must not occupy a menu row");
         boot_game.set_model_smoothing(3);
         require(boot_game.model_smoothing()==0,"legacy settings re-enabled retired smoothing");
+        select_menu_action(boot_game, starfox::simulation::PregamePage::three_d, 79U, &boot_audio);
+        require(boot_game.pregame_selection() == 79U
+                && boot_game.asteroid_models() == starfox::render::AsteroidModels::sprite,
+                "3D ASTEROIDS missing or not default SPRITE");
+        for (const auto mode : {starfox::render::AsteroidModels::super_fx_low,
+                 starfox::render::AsteroidModels::super_fx_medium,
+                 starfox::render::AsteroidModels::super_fx_high}) {
+            drive_boot({0, starfox::input::a, 0});
+            require(boot_game.asteroid_models() == mode, "3D ASTEROIDS did not step through the SUPER FX levels");
+        }
+        drive_boot({0, starfox::input::a, 0});
+        require(boot_game.asteroid_models() == starfox::render::AsteroidModels::sprite,
+                "3D ASTEROIDS did not wrap to SPRITE");
+        drive_boot({0, starfox::input::down, 0});
         select_menu_action(boot_game, starfox::simulation::PregamePage::global, 10U, &boot_audio);
         require(boot_game.pregame_selection() == 10U,
                 "pre-game cursor did not reach RTX LIGHTING");

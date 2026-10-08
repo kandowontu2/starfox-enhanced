@@ -7553,6 +7553,7 @@ inline constexpr unsigned char dxil[]={
 100,6,91,134,241,52,34,51,216,50,252,177,17,153,193,150,193,151,141,200,12,0,0,0,0,0,0,0,0,0,0,0
 };
 
+#if defined(__APPLE__)
 inline constexpr char metal[]=R"SFXMETAL(
 #pragma clang diagnostic ignored "-Wmissing-prototypes"
 
@@ -15708,4 +15709,7 @@ kernel void main0(device type_StructuredBuffer_uint& memory [[buffer(1)]], devic
 }
 
 )SFXMETAL";
+#else
+inline constexpr char metal[]="";
+#endif
 }

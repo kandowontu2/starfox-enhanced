@@ -1,4 +1,7 @@
 #include "starfox/render/gpu_clip.hpp"
+#include "starfox/compat/bit_cast.hpp"
+#include "starfox/render/gpu_raster.hpp"
+#include "starfox/render/gpu_scene_counters.hpp"
 #if defined(STARFOX_SDL_GPU_EFFECTS)
 #include <SDL3/SDL.h>
 #include "starfox/render/gpu_preparation.hpp"
@@ -275,7 +278,7 @@ void GpuClip::release_device()noexcept {
 void* GpuClip::enqueue(void* device,void* command,void* points,void* corners,
     void* polygons,void* visibility,const NativeClipSettings& settings,bool continuous,
     void* projection_params,std::uint32_t projection_count,void* point_residuals,std::uint32_t residual_count,
-    std::uint32_t verified_source_corners) {
+    std::uint32_t verified_source_corners,std::uint32_t render_scale,std::array<std::uint32_t,2> raster_size) {
     if(!device || !command || !points || !corners || !polygons || !visibility
         || !settings.polygon_count || settings.polygon_count>65536
         || settings.width<=0 || settings.width>32767 || settings.height<=0 || settings.height>32767) {
@@ -317,12 +320,17 @@ void* GpuClip::enqueue(void* device,void* command,void* points,void* corners,
         if(trace) std::cerr<<"clip-enqueue: uniforms continuous="<<continuous
             <<" polygons="<<settings.polygon_count<<" points="<<settings.point_count
             <<" corners="<<settings.corner_count<<" residuals="<<residual_count<<'\n';
-        auto uniforms=settings;uniforms.reserved[0]=projection_params?projection_count:0;
-        uniforms.reserved[1]=continuous && point_residuals?residual_count:0;
-        SDL_PushGPUComputeUniformData(cmd,0,&uniforms,sizeof(uniforms));
+        struct {NativeClipSettings clip;float stored_scale[2];Uint32 padding[2];} uniforms{settings,{},{}};
+        uniforms.clip.reserved[0]=projection_params?projection_count:0;
+        uniforms.clip.reserved[1]=continuous && point_residuals?residual_count:0;
+        // Same stored scale as enqueue_spans' pointAt (rasterScale or renderScale).
+        const bool custom=raster_size[0] || raster_size[1];
+        uniforms.stored_scale[0]=custom?float(raster_size[0])/settings.width:float(render_scale);
+        uniforms.stored_scale[1]=custom?float(raster_size[1])/settings.height:float(render_scale);
+        SDL_PushGPUComputeUniformData(cmd,0,&uniforms,continuous?sizeof(uniforms):sizeof(uniforms.clip));
         SDL_GPUStorageBufferReadWriteBinding binding{};binding.buffer=impl_->output;binding.cycle=true;
         if(trace) std::cerr<<"clip-enqueue: begin\n";
-        auto* pass=SDL_BeginGPUComputePass(cmd,nullptr,0,&binding,1);Impl::require(pass);
+        auto* pass=scene_counters::begin_compute_pass(cmd,nullptr,0,&binding,1);Impl::require(pass);
         if(trace) std::cerr<<"clip-enqueue: bind pipeline\n";
         SDL_BindGPUComputePipeline(pass,selected_pipeline);
         SDL_GPUBuffer* inputs[]{static_cast<SDL_GPUBuffer*>(points),static_cast<SDL_GPUBuffer*>(corners),
@@ -361,12 +369,12 @@ void* GpuClip::enqueue(void* device,void* command,void* points,void* corners,
     return nullptr;
 #endif
 }
-void* GpuClip::enqueue_spans(void* command,void* materials,bool winding_independent,std::uint32_t render_scale,const GpuSpanOrder* order,std::uint32_t line_thickness,void* source_texels,std::uint32_t source_texel_bytes,void** masked_texels,std::array<std::uint32_t,2> raster_size,bool reuse_span_scratch,unsigned msaa_samples) {
+void* GpuClip::enqueue_spans(void* command,void* materials,bool winding_independent,std::uint32_t render_scale,const GpuSpanOrder* order,std::uint32_t line_thickness,void* source_texels,std::uint32_t source_texel_bytes,void** masked_texels,std::array<std::uint32_t,2> raster_size,bool reuse_span_scratch,unsigned msaa_samples,bool parallel_clear_requested) {
     const bool msaa_masks=msaa_samples!=0;
     if(masked_texels) *masked_texels=nullptr;
 #if defined(STARFOX_SDL_GPU_EFFECTS)
     try {
-        if(render_scale<1 || render_scale>10) throw std::runtime_error("Invalid span render scale");
+        if(render_scale<1 || render_scale>max_gpu_render_scale) throw std::runtime_error("Invalid span render scale");
         if(msaa_masks && !masked_texels) throw std::runtime_error("MSAA span samples require mask storage");
         if(msaa_samples!=0 && msaa_samples!=2 && msaa_samples!=4 && msaa_samples!=8) throw std::runtime_error("Invalid span sample count");
         if(!command || !materials || !impl_->settings.polygon_count || !impl_->output)
@@ -416,7 +424,7 @@ void* GpuClip::enqueue_spans(void* command,void* materials,bool winding_independ
         const Uint32 rows=slots*height;
         const Uint32 mask_words=msaa_masks?Uint32((mask_bytes-source_texel_bytes)/4):0;
         const bool force_full=SDL_getenv("STARFOX_TEST_FULL_SPAN_CLEAR")!=nullptr;
-        const bool force_parallel=SDL_getenv("STARFOX_TEST_PARALLEL_SPAN_CLEAR")!=nullptr;
+        const bool force_parallel=(parallel_clear_requested && !SDL_getenv("STARFOX_TEST_SERIAL_SPAN_CLEAR")) || SDL_getenv("STARFOX_TEST_PARALLEL_SPAN_CLEAR")!=nullptr;
         const bool force_bounds=SDL_getenv("STARFOX_TEST_SPAN_BOUNDS_CLEAR")!=nullptr;
         const auto clear_mode=span_clear_mode(rows,mask_words,force_full,force_parallel,force_bounds);
         const bool parallel_clear=clear_mode==SpanClearMode::parallel;
@@ -432,7 +440,7 @@ void* GpuClip::enqueue_spans(void* command,void* materials,bool winding_independ
             render_scale,impl_->continuous?1U:0U,order?1U:0U,s.polygon_count,
             order?order->first:0U,order?order->tree_index:0U,line_thickness,bounds_clear?1U:0U,
             masked_texels?1U:0U,source_texel_bytes,mask_stride,custom?1U:0U,
-            std::bit_cast<Uint32>(float(width)/s.width),std::bit_cast<Uint32>(float(height)/s.height),msaa_samples,0};
+            starfox::bit_cast<Uint32>(float(width)/s.width),starfox::bit_cast<Uint32>(float(height)/s.height),msaa_samples,0};
         SDL_PushGPUComputeUniformData(cmd,0,settings,sizeof(settings));
         SDL_GPUStorageBufferReadWriteBinding bindings[2]{};
         // Ordered model batches rasterize these rows before the next model
@@ -450,7 +458,7 @@ void* GpuClip::enqueue_spans(void* command,void* materials,bool winding_independ
             const auto mask_cycle=bindings[1].cycle;
             if(!msaa_masks) bindings[1].cycle=false;
             auto* pipeline=impl_->prepare_span_clear();
-            auto* clear=SDL_BeginGPUComputePass(cmd,nullptr,0,bindings,2);Impl::require(clear);
+            auto* clear=scene_counters::begin_compute_pass(cmd,nullptr,0,bindings,2);Impl::require(clear);
             SDL_BindGPUComputePipeline(clear,pipeline);
             SDL_DispatchGPUCompute(clear,dispatch.x,dispatch.y,1);SDL_EndGPUComputePass(clear);
             bindings[0].cycle=false;bindings[1].cycle=msaa_masks?false:mask_cycle;
@@ -463,7 +471,7 @@ void* GpuClip::enqueue_spans(void* command,void* materials,bool winding_independ
             settings[19]=1;SDL_PushGPUComputeUniformData(cmd,0,settings,sizeof(settings));
             const auto span_cycle=bindings[0].cycle;bindings[0].cycle=false;
             auto* clear_pipeline=impl_->prepare_stage(Impl::Stage::spans);
-            auto* clear=SDL_BeginGPUComputePass(cmd,nullptr,0,bindings,2);Impl::require(clear);
+            auto* clear=scene_counters::begin_compute_pass(cmd,nullptr,0,bindings,2);Impl::require(clear);
             SDL_BindGPUComputePipeline(clear,clear_pipeline);
             SDL_GPUBuffer* clear_inputs[]{impl_->output,static_cast<SDL_GPUBuffer*>(materials),
                 static_cast<SDL_GPUBuffer*>(order?order->indices:materials),static_cast<SDL_GPUBuffer*>(order?order->results:materials)};
@@ -473,7 +481,7 @@ void* GpuClip::enqueue_spans(void* command,void* materials,bool winding_independ
             bindings[0].cycle=span_cycle;bindings[1].cycle=false;
             settings[19]=0;SDL_PushGPUComputeUniformData(cmd,0,settings,sizeof(settings));
         }
-        auto* pass=SDL_BeginGPUComputePass(cmd,nullptr,0,bindings,2);Impl::require(pass);
+        auto* pass=scene_counters::begin_compute_pass(cmd,nullptr,0,bindings,2);Impl::require(pass);
         SDL_BindGPUComputePipeline(pass,spans_pipeline);
         SDL_GPUBuffer* inputs[]{impl_->output,static_cast<SDL_GPUBuffer*>(materials),
             static_cast<SDL_GPUBuffer*>(order?order->indices:materials),

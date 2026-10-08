@@ -1,6 +1,7 @@
 #pragma once
 
 #include "starfox/assets/rom.hpp"
+#include "starfox/render/asteroid_models.hpp"
 #include "starfox/render/effect_types.hpp"
 #include "starfox/input/input_latch.hpp"
 #include "starfox/simulation/map_vm.hpp"
@@ -20,6 +21,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <utility>
 
 namespace starfox::simulation {
 
@@ -72,6 +74,15 @@ enum class RendererMode : std::uint8_t {
     software,
 };
 
+// Which GPU path draws the scene while renderer_mode is gpu. This is a host
+// preference: it is saved as the optional pregame.cfg key GPU_RENDERER and
+// is deliberately absent from save states.
+enum class GpuRenderer : std::uint8_t {
+    accurate, // the original per-model GPU path, the parity reference
+    fast,     // the GPU FAST paths; output must match accurate exactly
+};
+inline constexpr std::size_t gpu_renderer_count = 2U;
+
 // Internal supersampling of the host-rendered 3D layer. Cartridge 2D art is
 // unaffected and keeps its source raster.
 enum class RenderScale : std::uint8_t {
@@ -79,6 +90,8 @@ enum class RenderScale : std::uint8_t {
     scale_2x,
     scale_3x,
     scale_4x,
+    // GPU FAST only, desktop only: native-resolution 3D at 4K (16:9, 10x =
+    // 4000x2240) and 7680x2160 (32:9, 10x = 8000x2240).
     scale_5x,
     scale_6x,
     scale_7x,
@@ -87,8 +100,17 @@ enum class RenderScale : std::uint8_t {
     scale_10x,
 };
 
-// 7x-10x are explicit configuration overrides, not menu choices.
 inline constexpr std::size_t render_scale_count = 10U;
+// SOFTWARE and GPU ACCURATE keep the upstream 4x ceiling.
+inline constexpr std::size_t standard_render_scale_count = 4U;
+#if defined(STARFOX_IOS_RUNTIME)
+inline constexpr unsigned platform_render_scale_limit = 2U;
+#elif defined(__ANDROID__) || defined(__SWITCH__) || defined(STARFOX_UWP) \
+    || defined(SDL_PLATFORM_VITA) || defined(STARFOX_PS5)
+inline constexpr unsigned platform_render_scale_limit = 4U;
+#else
+inline constexpr unsigned platform_render_scale_limit = 10U;
+#endif
 
 enum class PregamePage {
     main,
@@ -103,7 +125,7 @@ enum class PregamePage {
 inline constexpr std::array<std::uint8_t, 14> main_menu_order{
     0,1,2,3,43,4,5,6,20,21,47,14,15,16};
 inline constexpr std::array<std::uint8_t, 13> two_d_menu_order{8,18,36,37,38,39,40,41,13,24,44,46,23};
-inline constexpr std::array<std::uint8_t, 14> three_d_menu_order{42,7,11,9,30,78,17,12,22,35,33,34,45,23};
+inline constexpr std::array<std::uint8_t, 15> three_d_menu_order{42,7,11,9,30,78,17,79,12,22,35,33,34,45,23};
 inline constexpr std::array<std::uint8_t, 36> global_menu_order{
     29,72,32,71,76,77,10,65,66,28,70,27,73,74,75,61,62,67,63,68,64,48,49,50,51,52,53,54,55,56,57,58,69,59,60,23};
 #if defined(__ANDROID__) || defined(STARFOX_IOS_RUNTIME)
@@ -465,6 +487,7 @@ public:
     [[nodiscard]] std::uint8_t bloom_2d() const noexcept { return bloom_2d_; }
     void set_bloom_2d(std::uint8_t value) noexcept { bloom_2d_ = value < 4U ? value : 0U; }
     [[nodiscard]] std::uint8_t model_smoothing() const noexcept { return 0; } // Retired; old states cannot re-enable it.
+    [[nodiscard]] render::AsteroidModels asteroid_models() const noexcept { return asteroid_models_; }
     [[nodiscard]] std::uint8_t language() const noexcept { return language_; }
     [[nodiscard]] bool ray_tracing() const noexcept { return ray_tracing_; }
     [[nodiscard]] std::uint8_t ray_tracing_quality() const noexcept { return ray_tracing_?ray_tracing_quality_:0; }
@@ -504,6 +527,10 @@ public:
     void set_hdr_effect(std::uint8_t value) noexcept { hdr_effect_ = value <= 3 ? value : 0; }
     void set_language(std::uint8_t value);
     void set_model_smoothing(std::uint8_t) noexcept { model_smoothing_ = 0; }
+    void set_asteroid_models(std::uint8_t value) noexcept {
+        asteroid_models_ = value < render::asteroid_model_mode_count
+            ? static_cast<render::AsteroidModels>(value) : render::AsteroidModels::sprite;
+    }
     [[nodiscard]] std::uint8_t effect_intensity() const noexcept { return effect_intensity_; }
     [[nodiscard]] std::uint8_t manipulation() const noexcept { return manipulation_; }
     [[nodiscard]] const std::array<std::uint8_t,3>& extra_effects() const noexcept {return extra_effects_;}
@@ -554,8 +581,38 @@ public:
     [[nodiscard]] RendererMode renderer_mode() const noexcept {
         return renderer_mode_;
     }
+    // Platforms without a CPU presentation path (the PS5's only renderer is
+    // SDL GPU on RADV) keep the hardware renderer whatever is requested.
+    [[nodiscard]] static constexpr RendererMode constrain_renderer_mode(
+        RendererMode requested, bool hardware_only) noexcept {
+        return hardware_only ? RendererMode::gpu : requested;
+    }
+#if defined(STARFOX_PS5)
+    static constexpr bool hardware_renderer_only = true;
+#else
+    static constexpr bool hardware_renderer_only = false;
+#endif
     void set_renderer_mode(RendererMode mode) noexcept {
-        renderer_mode_ = mode;
+        renderer_mode_ = constrain_renderer_mode(mode, hardware_renderer_only);
+    }
+    [[nodiscard]] static constexpr std::pair<RendererMode,GpuRenderer> next_renderer_selection(
+        RendererMode mode,GpuRenderer gpu,bool backward,bool hardware_only) noexcept {
+        if(hardware_only) return {RendererMode::gpu,
+            gpu==GpuRenderer::fast?GpuRenderer::accurate:GpuRenderer::fast};
+        const unsigned position=mode==RendererMode::software?0U:gpu==GpuRenderer::fast?2U:1U;
+        const unsigned next=(position+(backward?2U:1U))%3U;
+        return {next==0U?RendererMode::software:RendererMode::gpu,
+            next==0U?gpu:next==2U?GpuRenderer::fast:GpuRenderer::accurate};
+    }
+    [[nodiscard]] GpuRenderer gpu_renderer() const noexcept {
+        return gpu_renderer_;
+    }
+    void set_gpu_renderer(GpuRenderer renderer) noexcept {
+        gpu_renderer_ = renderer;
+    }
+    [[nodiscard]] bool gpu_fast() const noexcept {
+        return renderer_mode_ == RendererMode::gpu
+            && gpu_renderer_ == GpuRenderer::fast;
     }
     [[nodiscard]] bool msu1_music() const noexcept { return msu1_music_; }
     void set_msu1_music(bool enabled) noexcept {
@@ -603,15 +660,20 @@ public:
     [[nodiscard]] RenderScale render_scale() const noexcept {
         return render_scale_;
     }
+    [[nodiscard]] static constexpr RenderScale constrain_render_scale(RenderScale scale) noexcept {
+        return static_cast<RenderScale>(std::min(static_cast<unsigned>(scale),platform_render_scale_limit-1U));
+    }
     void set_render_scale(RenderScale scale) noexcept {
-        if (scale > RenderScale::scale_10x) scale = RenderScale::scale_10x;
-#if defined(STARFOX_IOS_RUNTIME)
-        if (scale > RenderScale::scale_2x) scale = RenderScale::scale_2x;
-#endif
-        render_scale_ = scale;
+        // Also constrain config/test/archive entry, not only menu cycling.
+        render_scale_ = constrain_render_scale(scale);
     }
     void set_secondary_inputs(
         std::span<const input::TickInput> controllers) noexcept;
+    // Host input policy, not cartridge state: keep raw menu buttons intact
+    // while fixing native Y=fire/B=brake across all control types.
+    void set_fixed_native_fire_brake(bool enabled) noexcept {
+        fixed_native_fire_brake_ = enabled;
+    }
     void set_mouse_input(MouseInputState mouse) noexcept {
         mouse_input_ = mouse;
     }
@@ -1253,6 +1315,7 @@ private:
     bool ray_tracing_{};
     std::uint8_t ray_tracing_quality_{2};
     std::uint8_t reflective_surfaces_{};
+    render::AsteroidModels asteroid_models_{};
     std::uint8_t dlss_mode_{}; // Host quality preference, not emulated game state.
     std::uint8_t dlss45_mode_{};
     std::uint8_t fsr1_mode_{}; // Host quality preference; preserve across state loads.
@@ -1276,6 +1339,7 @@ private:
     bool preview_start_requested_{};
     bool vsync_{};
     RendererMode renderer_mode_{RendererMode::gpu};
+    GpuRenderer gpu_renderer_{GpuRenderer::accurate};
     bool msu1_music_{};
     bool msu1_available_{true};
     bool rumble_{true};
@@ -1314,6 +1378,7 @@ private:
     ColourMathEffectState colour_math_effect_{};
     std::uint8_t wipe_logic_snapshot_{};
     std::array<input::TickInput, 4> secondary_inputs_{};
+    bool fixed_native_fire_brake_{};
     MouseInputState mouse_input_{};
     std::uint16_t ntt_input_{};
     std::uint8_t background_music_hold_phases_{};

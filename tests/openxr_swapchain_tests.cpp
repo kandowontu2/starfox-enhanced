@@ -6,14 +6,14 @@ namespace {
 void require(bool condition) {if(!condition) throw std::runtime_error("Swapchain assertion failed");}
 template<class T> T handle(uintptr_t n) {return reinterpret_cast<T>(n);}
 unsigned creates{},destroys{},acquires{},waits{},releases{};
-bool timeout{},bad_index{},fail_second{},fail_release{};
+bool timeout{},bad_index{},fail_second{},fail_release{},quad_mode{};
 XRAPI_ATTR XrResult XRAPI_CALL formats(XrSession,uint32_t capacity,uint32_t* count,int64_t* out) {
     *count=2;if(capacity) {out[0]=42;out[1]=43;}return XR_SUCCESS;
 }
 XRAPI_ATTR XrResult XRAPI_CALL create(XrSession,const XrSwapchainCreateInfo* info,XrSwapchain* out) {
     ++creates;
     require(info->format==43 && info->sampleCount==1 && info->arraySize==1);
-    require(info->width==100+creates && info->height==200+creates);
+    require(quad_mode?(info->width==1024 && info->height==896):(info->width==100+creates && info->height==200+creates));
     if(fail_second && creates==2) return XR_ERROR_RUNTIME_FAILURE;
     *out=handle<XrSwapchain>(creates);return XR_SUCCESS;
 }
@@ -101,6 +101,23 @@ int main() {
         creates=destroys=0;fail_second=true;
         require(!chains.initialize(handle<XrSession>(1),config,preferences));
         require(destroys==1 && chains.handle(0)==XR_NULL_HANDLE && chains.handle(1)==XR_NULL_HANDLE);
+        quad_mode=true;fail_second=fail_release=bad_index=timeout=false;
+        OpenXrQuad quad(api);require(quad.initialize(handle<XrSession>(1),43));
+        require(quad.image_count()==3 && !quad.layer(space,{}));
+        const auto prior=acquires;timeout=true;
+        require(quad.acquire()==ImageWait::waiting && !quad.image_index());
+        require(quad.acquire()==ImageWait::waiting && acquires==prior+1);
+        require(quad.cancel()==ImageWait::waiting);
+        timeout=false;require(quad.acquire()==ImageWait::ready && quad.image_index()==1);
+        require(!quad.layer(space,{}));fail_release=true;require(!quad.release());
+        fail_release=false;require(quad.release());
+        XrPosef pose{};pose.orientation.w=1;pose.position.z=-1.75F;
+        const auto* panel=quad.layer(space,pose);
+        require(panel && panel->eyeVisibility==XR_EYE_VISIBILITY_BOTH && panel->space==space
+            && panel->size.width==1.15F && panel->pose.position.z==-1.75F && panel->subImage.imageRect.extent.height==896);
+        bad_index=true;require(quad.acquire()==ImageWait::error && !quad.image_index() && !quad.layer(space,pose));
+        require(quad.cancel()==ImageWait::ready && !quad.layer(space,pose));bad_index=false;
+        require(quad.acquire()==ImageWait::ready && quad.cancel()==ImageWait::ready && !quad.layer(space,pose));
         std::cout<<"OpenXR swapchain lifecycle tests passed\n";
     } catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

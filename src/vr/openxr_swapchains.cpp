@@ -135,4 +135,80 @@ ImageWait OpenXrSwapchains::cancel_frame(XrDuration timeout) {
 const XrCompositionLayerProjection* OpenXrSwapchains::projection() const noexcept {
     return frame_ && eyes_[0].released && eyes_[1].released?&layer_:nullptr;
 }
+bool OpenXrQuad::initialize(XrSession session,int64_t format,uint32_t width,uint32_t height) {
+    close();
+    try {
+        if(!session || !width || !height || width>INT32_MAX || height>INT32_MAX)
+            throw std::runtime_error("Invalid UI swapchain dimensions/session");
+        XrSwapchainCreateInfo create{XR_TYPE_SWAPCHAIN_CREATE_INFO};
+        create.usageFlags=XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT|XR_SWAPCHAIN_USAGE_SAMPLED_BIT;
+        create.format=format;create.sampleCount=create.faceCount=create.arraySize=create.mipCount=1;
+        create.width=width;create.height=height;
+        check(api_.create(session,&create,&layer_.subImage.swapchain),"Create UI swapchain");
+        check(api_.images(layer_.subImage.swapchain,0,&count_,nullptr),"Count UI images");
+        if(!count_ || count_>64) throw std::runtime_error("Invalid UI image count");
+        layer_.subImage.imageRect.extent={int32_t(width),int32_t(height)};
+        layer_.eyeVisibility=XR_EYE_VISIBILITY_BOTH;
+        // Source glyph coverage and the 95% panel backing carry
+        // straight alpha. The compositor, not an eye billboard, blends them.
+        layer_.layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT
+            |XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
+        status_="OpenXR UI swapchain ready";return true;
+    } catch(const std::exception& e) {status_=e.what();close();return false;}
+}
+void OpenXrQuad::close() noexcept {
+    if(layer_.subImage.swapchain) api_.destroy(layer_.subImage.swapchain);
+    layer_={XR_TYPE_COMPOSITION_LAYER_QUAD};count_=index_=0;acquired_=ready_=released_=false;
+}
+bool OpenXrQuad::enumerate_images(uint32_t capacity,uint32_t* count,XrSwapchainImageBaseHeader* images) {
+    return layer_.subImage.swapchain && count && (!capacity || images)
+        && XR_SUCCEEDED(api_.images(layer_.subImage.swapchain,capacity,count,images));
+}
+ImageWait OpenXrQuad::acquire(XrDuration timeout) {
+    try {
+        if(!layer_.subImage.swapchain || timeout<0) throw std::runtime_error("Invalid UI acquisition");
+        if(!acquired_) {
+            XrSwapchainImageAcquireInfo info{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
+            check(api_.acquire(layer_.subImage.swapchain,&info,&index_),"Acquire UI image");
+            acquired_=true;released_=false;
+        }
+        if(index_>=count_) throw std::runtime_error("UI image index outside enumerated images");
+        if(!ready_) {
+            XrSwapchainImageWaitInfo info{XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};info.timeout=timeout;
+            const auto result=api_.wait(layer_.subImage.swapchain,&info);
+            if(result==XR_TIMEOUT_EXPIRED) return ImageWait::waiting;
+            check(result,"Wait UI image");ready_=true;
+        }
+        return ImageWait::ready;
+    } catch(const std::exception& e) {status_=e.what();return ImageWait::error;}
+}
+bool OpenXrQuad::release() {
+    if(!acquired_ || !ready_) return false;
+    XrSwapchainImageReleaseInfo info{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
+    const auto result=api_.release(layer_.subImage.swapchain,&info);
+    if(XR_FAILED(result)) {status_="Release UI image: "+std::to_string(result);return false;}
+    acquired_=ready_=false;released_=true;return true;
+}
+ImageWait OpenXrQuad::cancel(XrDuration timeout) {
+    released_=false;
+    if(!acquired_) return ImageWait::ready;
+    // Cancellation must also wait a runtime-acquired image, even when its
+    // returned index was invalid. It must never expose that index for drawing.
+    if(!ready_) {
+        XrSwapchainImageWaitInfo info{XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};info.timeout=timeout;
+        const auto result=api_.wait(layer_.subImage.swapchain,&info);
+        if(result==XR_TIMEOUT_EXPIRED) return ImageWait::waiting;
+        if(XR_FAILED(result)) return ImageWait::error;
+        ready_=true;
+    }
+    if(!release()) return ImageWait::error;
+    released_=false;return ImageWait::ready;
+}
+const XrCompositionLayerQuad* OpenXrQuad::layer(XrSpace space,XrPosef pose,float width) noexcept {
+    if(!released_ || acquired_ || !space || !(width>0)) return nullptr;
+    layer_.space=space;layer_.pose=pose;
+    layer_.size={width,width*float(layer_.subImage.imageRect.extent.height)/float(layer_.subImage.imageRect.extent.width)};
+    return &layer_;
+}
+
 }

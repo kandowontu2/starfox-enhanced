@@ -7,7 +7,7 @@ param([string]$Executable='build/current/starfox_pc.exe',
  [switch]$Paced,
  [switch]$PresentPacing,
  [switch]$Vsync,
- [ValidateSet('default','direct3d12','vulkan')][string]$GpuDriver='default',
+ [ValidateSet('default','direct3d12','vulkan')][string[]]$GpuDriver=@('default'),
  [switch]$LowPowerGpu,
  [switch]$TraceSceneCost,
  [switch]$TraceSceneGpuTimestamps,
@@ -42,7 +42,6 @@ param([string]$Executable='build/current/starfox_pc.exe',
  [switch]$InteriorClip,
  [switch]$FullClip,
  [ValidateRange(0,8)][int]$Stereo=0,
- [ValidateRange(1,10)][int]$RenderScale=1,
  [ValidateRange(0,1)][int]$RayTracing=0,
  [ValidateRange(0,3)][int]$Reflections=0,
  [ValidateRange(0,3)][int]$Bloom=0,
@@ -93,16 +92,22 @@ param([string]$Executable='build/current/starfox_pc.exe',
  [switch]$StereoWait,
  [switch]$DisableDlssRuntime,
  [ValidateSet('ORIGINAL','EX')][string[]]$Experiences=@('ORIGINAL','EX'),
- [ValidateSet('SOFTWARE','GPU')][string[]]$Renderers=@('SOFTWARE','GPU'),
- [ValidateSet('LEVEL1_1','LEVEL1_2','LEVEL2_3','LEVEL3_5','LEVEL5_1','LEVEL6_6')][string[]]$Levels=@('LEVEL1_1','LEVEL2_3'),
+ [ValidateSet('SOFTWARE','GPU','GPU_ACCURATE','GPU_FAST')][string[]]$Renderers=@('SOFTWARE','GPU'),
+ [string[]]$Levels=@('LEVEL1_1','LEVEL2_3'),
+ [ValidateRange(1,10)][int[]]$RenderScale=@(1),
+ [ValidateSet('4_3','16_9','32_9')][string[]]$DisplayMode=@('4_3'),
+ [string]$AsteroidModels='',
  [switch]$RealAudio,
  [switch]$EnhancedGround,
  [ValidateRange(0,9)][int]$GroundMaterial=0,
  [switch]$EnhancedSky,
  [switch]$UnbatchedTerrain,
+ # GPU FAST A/B: restore the per-model full-frame raster pass.
+ [switch]$FullFrameModelRaster,
  [switch]$GodMode,
  [ValidateRange(0,1000000)][int]$PrerollTicks=1000,
- [ValidateRange(0,1000000)][int]$SlowFrameUs=0)
+ [ValidateRange(0,1000000)][int]$SlowFrameUs=0,
+ [ValidatePattern('^(\d+x\d+)?$')][string]$WindowSize='')
 $ErrorActionPreference='Stop'
 if($FusedSmallModel -and $SeparateSmallModel){throw 'Choose single-pass or separate small-model stages, not both'}
 if($OrderedStereoQueue -and (!$Stereo -or $SerialStereoLayers -or $StereoWait -or 'SOFTWARE' -in $Renderers)) {
@@ -119,10 +124,10 @@ if($GroundMaterial -and !$EnhancedGround){throw 'GroundMaterial requires Enhance
 if($AllowBillboardOnlyScene -and !($ColourSpanTrace -or $CooperativeSpanTrace -or $FullSpanTrace)) {
  throw 'Billboard-only control requires an explicitly selected span tracer and actual model path counts'
 }
-if($TraceVulkanSubmitTimestamps -and $GpuDriver -ne 'vulkan') {
+if($TraceVulkanSubmitTimestamps -and ($GpuDriver.Count -ne 1 -or $GpuDriver[0] -ne 'vulkan')) {
  throw 'Native Vulkan timestamp diagnostics require GpuDriver vulkan'
 }
-if(($TraceSceneGpuTimestamps -or $TraceEffectsGpuTimestamps) -and $GpuDriver -notin @('direct3d12','vulkan')) {
+if(($TraceSceneGpuTimestamps -or $TraceEffectsGpuTimestamps) -and ($GpuDriver.Count -ne 1 -or $GpuDriver[0] -notin @('direct3d12','vulkan'))) {
  throw 'GPU timestamp diagnostics require an explicit direct3d12 or vulkan backend'
 }
 if($Stereo -and 'SOFTWARE' -in $Renderers){throw 'Native stereo-pair profiling requires Renderers GPU; software output does not use this pair counter'}
@@ -144,12 +149,20 @@ foreach($name in @('dxgi.dll','d3d11.dll','d3d12.dll','opengl32.dll','vulkan-1.d
   throw "Benchmark rejected: ReShade injector $name; use a clean runtime directory."
  }
 }
+foreach($experience in $Experiences) {
+ $symbols=if($experience -eq 'EX'){'assets/symbols/starfox-ex.txt'}else{'upstream-ultrastarfox/SYMBOLS.TXT'}
+ $available=@(Get-Content -LiteralPath $symbols | ForEach-Object {
+  if($_ -match '^(LEVEL(?:[1-7]_[1-9]|_BLACKHOLE|_SPECIAL|_COMET))\s'){$Matches[1]}
+ } | Sort-Object -Unique)
+ foreach($level in $Levels) {if($level -notin $available){throw "Unknown stage: $experience $level"}}
+}
 $proof=[IO.Path]::GetFullPath($OutputDirectory)
 New-Item -ItemType Directory -Path $proof -Force | Out-Null
 $saved=@{}
 Get-ChildItem Env: | Where-Object {$_.Name -match '^(STARFOX_|SDL_AUDIODRIVER$|SDL_GPU_DRIVER$|DISABLE_VK_LAYER_reshade_1$)'} | ForEach-Object {
  $saved[$_.Name]=$_.Value;Remove-Item -LiteralPath "Env:$($_.Name)"
 }
+$rows=New-Object System.Collections.Generic.List[object]
 try {
  $settings=@{
   SDL_AUDIODRIVER='dummy';STARFOX_TEST_HIDDEN='1';STARFOX_TEST_FRAMES="$Frames";
@@ -228,14 +241,18 @@ try {
  if($EnhancedGround){$settings.STARFOX_TEST_ENVIRONMENT_1=[string]$GroundMaterial}
  if($EnhancedSky){$settings.STARFOX_TEST_ENVIRONMENT_3='1'}
  if($UnbatchedTerrain){$settings.STARFOX_TEST_UNBATCHED_TERRAIN='1'}
+ if($FullFrameModelRaster){$settings.STARFOX_TEST_FULL_FRAME_MODEL_RASTER='1'}
+ if($LowPowerGpu){$settings.STARFOX_TEST_LOW_POWER_GPU='1'}
+ if($WindowSize){$settings.STARFOX_TEST_WINDOW_SIZE=$WindowSize}
+ if($AsteroidModels){$settings.STARFOX_TEST_ASTEROID_MODELS=$AsteroidModels}
+ if($TraceSceneCost){$settings.STARFOX_TRACE_SCENE_COST='1'}
  if($SlowFrameUs){$settings.STARFOX_TRACE_SLOW_FRAME_US=[string]$SlowFrameUs}
+ if($WindowSize){$settings.STARFOX_TEST_WINDOW_SIZE=$WindowSize}
  $settings.STARFOX_TEST_GOD_MODE=if($GodMode){'1'}else{'0'}
  if($Visible) {$settings.Remove('STARFOX_TEST_HIDDEN')}
  if($SharedRayPipelines){$settings.STARFOX_TEST_SHARE_DXR_PIPELINES='1'}
  if($DisableRayPrebuildCache){$settings.STARFOX_TEST_DISABLE_DXR_PREBUILD_CACHE='1'}
  if($CachedRayPrebuildSizes){$settings.STARFOX_TEST_DXR_PREBUILD_CACHE='1'}
- if($GpuDriver -ne 'default'){$settings.SDL_GPU_DRIVER=$GpuDriver}
- if($LowPowerGpu){$settings.STARFOX_TEST_LOW_POWER_GPU='1'}
  if($FixedTemporalClock){$settings.STARFOX_TEST_TEMPORAL_FPS="$Fps"}
  if($ExModelWobble -ge 0){$settings.STARFOX_TEST_EX_MODEL_WOBBLE="$ExModelWobble";$settings.STARFOX_TEST_MODEL_STYLE_RESULT='1'}
  if($TraceSceneCost){$settings.STARFOX_TRACE_SCENE_COST='1'}
@@ -282,9 +299,13 @@ try {
  }
  if($RealAudio) {$settings.Remove('SDL_AUDIODRIVER')}
  foreach($entry in $settings.GetEnumerator()) {Set-Item -LiteralPath "Env:$($entry.Key)" -Value $entry.Value}
+ foreach($driver in $GpuDriver) {
+  if($driver -ne 'default'){$env:SDL_GPU_DRIVER=$driver}else{Remove-Item -LiteralPath Env:SDL_GPU_DRIVER -ErrorAction SilentlyContinue}
  foreach($experience in $Experiences) {foreach($level in $Levels) {foreach($renderer in $Renderers) {
+ foreach($scale in $RenderScale) {foreach($display in $DisplayMode) {
   $env:STARFOX_TEST_EXPERIENCE=$experience;$env:STARFOX_TEST_RENDERER=$renderer
-  $name="$experience-$level-$renderer";$log=Join-Path $proof "$name.log"
+  $env:STARFOX_TEST_RENDER_SCALE="$scale";$env:STARFOX_TEST_DISPLAY_MODE=$display
+  $name="$experience-$level-$renderer-$driver-${scale}x-$display";$log=Join-Path $proof "$name.log"
   # Readback/BMP encoding stalls the last frame; keep visual checks separate
   # from timing runs unless explicitly requested.
   if($Capture) {$env:STARFOX_CAPTURE_PRESENTATION_PATH=Join-Path $proof "$name.bmp"}
@@ -316,7 +337,7 @@ try {
      throw "$phase GPU timestamp queries unavailable: $name"
     }
     foreach($summary in $summaries) {
-     if($summary.Value -notmatch " backend=$GpuDriver\r?$"){throw "Wrong actual timestamp backend: $name"}
+     if($summary.Value -notmatch " backend=$driver\r?$"){throw "Wrong actual timestamp backend: $name"}
     }
     $expectedSamples=0
     foreach($summary in $summaries) {
@@ -471,7 +492,7 @@ try {
   $summary=@(Get-Content -LiteralPath $log | Where-Object {$_ -match '^(logic/audio|frame-work|present-interval|input-to-present|render)-distribution-us|^render-profile-us|^presentation-pacing:'})
   if($summary.Count -ne 7) {throw "Incomplete profiling metrics: $name"}
   Write-Output $name;Write-Output $summary
- }}}
+ }}}}}}
 } finally {
  Get-ChildItem Env: | Where-Object {$_.Name -match '^(STARFOX_|SDL_AUDIODRIVER$|SDL_GPU_DRIVER$|DISABLE_VK_LAYER_reshade_1$)'} | ForEach-Object {Remove-Item -LiteralPath "Env:$($_.Name)"}
  foreach($entry in $saved.GetEnumerator()) {Set-Item -LiteralPath "Env:$($entry.Key)" -Value $entry.Value}

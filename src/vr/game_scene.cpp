@@ -51,6 +51,8 @@ GameSceneHistory::GameSceneHistory(const simulation::GameSimulation& game,
                 addresses_[i]=address;found=true;break;
             }
         }
+        // C_TYPE feeds cockpit steering. Fixed native fire/brake is applied
+        // inside GameSimulation, which owns the live control-type register.
         if(!found && std::string_view(names[i])!="C_TYPE") throw std::runtime_error(std::string("Missing scene RAM symbol: ")+names[i]);
     }
     constexpr std::array tracking_names{"PLAYERONPLANET_STRAT","PLAYERINSPACE_STRAT"};

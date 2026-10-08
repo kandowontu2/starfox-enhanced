@@ -2,6 +2,12 @@ cmake_minimum_required(VERSION 3.22)
 
 project(starfox_enhanced VERSION 0.0.8 LANGUAGES CXX)
 
+# The PS5 payload SDK toolchain (cmake/toolchains/ps5-radv.cmake) sets PROSPERO.
+if(PROSPERO)
+    set(STARFOX_PS5 TRUE)
+    include(cmake/PS5.cmake)
+endif()
+
 if(WINDOWS_STORE)
     # Apply the UWP ABI to the entire dependency graph, not only the SDL entry
     # point. The redistributable UWP framework still uses the pre-17.10 mutex
@@ -28,7 +34,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "NintendoSwitch")
     set(SWITCH TRUE)
 endif()
 
-if(WINDOWS_STORE OR ANDROID OR IOS OR SWITCH OR VITA)
+if(WINDOWS_STORE OR ANDROID OR IOS OR SWITCH OR VITA OR STARFOX_PS5)
     set(STARFOX_BUILD_TOOLS_DEFAULT OFF)
 else()
     set(STARFOX_BUILD_TOOLS_DEFAULT ON)
@@ -39,6 +45,8 @@ option(STARFOX_BUILD_RUNTIME "Build the SDL3 native PC runtime" ON)
 option(STARFOX_BUILD_VR "Build the OpenXR VR integration and runtime diagnostic" OFF)
 option(STARFOX_ENABLE_DISPLAYXR "Include optional Leia SR integration components in desktop Windows" ON)
 option(STARFOX_ENABLE_LEIASR "Include optional direct SR Platform adapter loader in desktop Windows" ON)
+option(STARFOX_BUILD_STEAM_FRAME
+    "Build the native Linux ARM64 Steam Frame OpenXR player" OFF)
 option(STARFOX_BUILD_TOOLS "Build host-side trace and asset tools"
     ${STARFOX_BUILD_TOOLS_DEFAULT})
 option(STARFOX_EMBED_RUNTIME_ASSETS
@@ -49,6 +57,18 @@ option(STARFOX_PACKAGE_MSU1_MUSIC
 option(STARFOX_ENABLE_XBRZ
     "Fetch and compile the GPLv3 xBRZ backend for the 2D presentation filter"
     ON)
+if(STARFOX_BUILD_STEAM_FRAME)
+    if(NOT STARFOX_BUILD_VR)
+        message(FATAL_ERROR "STARFOX_BUILD_STEAM_FRAME requires STARFOX_BUILD_VR=ON")
+    endif()
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        message(FATAL_ERROR "STARFOX_BUILD_STEAM_FRAME requires a Linux target")
+    endif()
+    if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)$"
+       OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+        message(FATAL_ERROR "STARFOX_BUILD_STEAM_FRAME requires a 64-bit ARM target")
+    endif()
+endif()
 if(ANDROID AND STARFOX_BUILD_VR AND CMAKE_GENERATOR MATCHES "Ninja")
     # The Quest runner has limited RAM; compiling several large simulation/VR
     # translation units at once makes the hosted runner terminate mid-build.
@@ -123,6 +143,27 @@ set(STARFOX_RETAIL_GERMANY_V10_PATCH_FILE
     "${CMAKE_CURRENT_SOURCE_DIR}/assets/patches/retail-germany-v10-to-usa-v12.bps")
 
 include(FetchContent)
+if(APPLE AND (STARFOX_BUILD_RUNTIME OR STARFOX_BUILD_VR))
+    # SDL enables Objective-C++ for its Apple sources. Enable it in the root
+    # project first so newer CMake versions publish compiler rules to this
+    # directory before SDL's nested project configures.
+    enable_language(OBJCXX)
+endif()
+# Standalone desktop VR needs SDL for gamepad/audio support even when the flat
+# runtime is not built. Use the same pinned source archive without applying the
+# flat runtime's SDL interop patches. Android continues to consume its official
+# AAR/Prefab target below.
+if(STARFOX_BUILD_VR AND NOT STARFOX_BUILD_RUNTIME AND NOT ANDROID)
+    set(SDL_SHARED OFF CACHE BOOL "Avoid a runtime SDL shared library" FORCE)
+    set(SDL_STATIC ON CACHE BOOL "Link SDL into the standalone VR executable" FORCE)
+    set(SDL_TEST_LIBRARY OFF CACHE BOOL "Do not build the SDL test library" FORCE)
+    FetchContent_Declare(
+        SDL3
+        URL https://github.com/libsdl-org/SDL/releases/download/release-3.4.14/SDL3-3.4.14.tar.gz
+        URL_HASH SHA256=30d4aa2b3037718142b32dffd4e72f917ebb6cc5227150e7bb9c45efb2153aeb
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+    FetchContent_MakeAvailable(SDL3)
+endif()
 if(STARFOX_BUILD_VR)
     include(cmake/OpenXR.cmake)
 endif()
@@ -218,6 +259,7 @@ add_library(starfox_core
     src/assets/decrunch.cpp
     src/assets/rom.cpp
     src/assets/runtime_bundle.cpp
+    src/assets/runtime_import.cpp
     src/assets/shape_decoder.cpp
     src/render/background_renderer.cpp
     src/render/dust_renderer.cpp
@@ -261,6 +303,7 @@ add_library(starfox_core
     src/render/scaled_text_renderer.cpp
     src/render/software_renderer.cpp
     src/render/face_material.cpp
+    src/render/asteroid_models.cpp
     src/render/sprite_renderer.cpp
     src/simulation/math.cpp
     src/simulation/dust_system.cpp
@@ -273,6 +316,7 @@ add_library(starfox_core
     src/simulation/particle_system.cpp
     src/simulation/path_vm.cpp
     src/simulation/prng.cpp
+    src/simulation/rumble_sequencer.cpp
     src/simulation/strategy_scheduler.cpp
     src/simulation/wdc65816.cpp
     src/timing/fixed_step.cpp
@@ -662,7 +706,13 @@ if(STARFOX_BUILD_RUNTIME)
                 DOWNLOAD_EXTRACT_TIMESTAMP TRUE
                 ${STARFOX_SDL3_PATCH_COMMAND})
         endif()
+        if(STARFOX_PS5)
+            starfox_prepare_ps5_sdl()
+        endif()
         FetchContent_MakeAvailable(SDL3)
+        if(STARFOX_PS5)
+            starfox_attach_ps5_sdl()
+        endif()
         if(APPLE OR STARFOX_METAL_INTEROP)
             # URL-based FetchContent patch hooks did not update iOS's SDL
             # source in CI. Inject the narrow native-handle functions into
@@ -1114,6 +1164,8 @@ if(STARFOX_BUILD_RUNTIME)
                 add_executable(starfox_gpu_model_check tools/check_gpu_model.cpp)
                 add_executable(starfox_gpu_terrain_batches_check tools/check_gpu_terrain_batches.cpp)
                 target_link_libraries(starfox_gpu_terrain_batches_check PRIVATE starfox_core SDL3::SDL3)
+                add_executable(starfox_gpu_model_batches_check tools/check_gpu_model_batches.cpp)
+                target_link_libraries(starfox_gpu_model_batches_check PRIVATE starfox_core SDL3::SDL3)
                 add_executable(starfox_gpu_depth_check tools/check_gpu_depth.cpp)
                 target_link_libraries(starfox_gpu_depth_check PRIVATE starfox_core SDL3::SDL3)
                 add_executable(starfox_gpu_ray_geometry_check tools/check_gpu_ray_geometry.cpp)
@@ -1366,7 +1418,7 @@ if(STARFOX_BUILD_RUNTIME)
         endif()
 
         if(NOT ANDROID AND NOT IOS AND NOT WINDOWS_STORE
-           AND NOT SWITCH AND NOT VITA)
+           AND NOT SWITCH AND NOT VITA AND NOT STARFOX_PS5)
             add_executable(starfox_asset_builder src/app/asset_builder.cpp)
             target_link_libraries(starfox_asset_builder PRIVATE
                 starfox_core starfox_embedded_assets)
@@ -1514,6 +1566,10 @@ if(STARFOX_BUILD_RUNTIME)
             "${STARFOX_VITA_TITLE_ID}" eboot.bin
             VERSION "${STARFOX_VITA_APP_VERSION}"
             NAME "Star Fox Enhanced")
+    endif()
+
+    if(STARFOX_PS5)
+        starfox_add_ps5_title(starfox_pc)
     endif()
 
     install(TARGETS starfox_pc
@@ -1682,15 +1738,66 @@ if(STARFOX_BUILD_TESTS)
         add_test(NAME starfox_3ds_game_landscape_ex COMMAND starfox_3ds_game_models_check "${STARFOX_EX_ROM_FILE}" "${STARFOX_EX_SYMBOLS_FILE}" --native-landscape-flow)
         set_tests_properties(starfox_3ds_game_menu_composition_ex starfox_3ds_game_landscape_ex PROPERTIES TIMEOUT 600)
     endif()
+    add_executable(starfox_bit_cast_compat_tests tests/bit_cast_compat_tests.cpp)
+    target_include_directories(starfox_bit_cast_compat_tests PRIVATE include)
+    target_compile_features(starfox_bit_cast_compat_tests PRIVATE cxx_std_20)
+    target_compile_definitions(starfox_bit_cast_compat_tests
+        PRIVATE STARFOX_FORCE_BIT_CAST_BUILTIN=1)
+    add_test(NAME starfox_bit_cast_compat_tests COMMAND starfox_bit_cast_compat_tests)
+    if(STARFOX_BUILD_VR AND NOT ANDROID)
+        add_executable(starfox_desktop_paths_tests
+            tests/desktop_paths_tests.cpp src/vr/desktop_paths.cpp)
+        target_include_directories(starfox_desktop_paths_tests PRIVATE src/vr)
+        target_compile_features(starfox_desktop_paths_tests PRIVATE cxx_std_20)
+        add_test(NAME starfox_desktop_paths_tests COMMAND starfox_desktop_paths_tests)
+        set_tests_properties(starfox_desktop_paths_tests PROPERTIES LABELS "vr;paths")
+    endif()
     add_executable(starfox_irq_palette_tests tests/irq_palette_tests.cpp)
     target_include_directories(starfox_irq_palette_tests PRIVATE include)
     target_compile_features(starfox_irq_palette_tests PRIVATE cxx_std_20)
     add_test(NAME starfox_irq_palette_tests COMMAND starfox_irq_palette_tests)
+    add_executable(starfox_ps5_port_tests tests/ps5_port_tests.cpp)
+    target_link_libraries(starfox_ps5_port_tests PRIVATE starfox_core)
+    add_test(NAME starfox_ps5_port_tests COMMAND starfox_ps5_port_tests)
+    # These seven macro configurations simulate target policies on a host.
+    # Native/cross console compilers already define their target macros and
+    # must not be asked to pretend to be another platform at the same time.
+    if(NOT CMAKE_CROSSCOMPILING AND NOT WINDOWS_STORE AND NOT ANDROID
+        AND NOT IOS AND NOT SWITCH AND NOT VITA AND NOT STARFOX_PS5)
+        foreach(policy IN ITEMS desktop ios android switch uwp vita ps5)
+            set(target starfox_render_scale_policy_${policy}_tests)
+            add_executable(${target} tests/render_scale_policy_tests.cpp)
+            target_include_directories(${target} PRIVATE include)
+            target_compile_features(${target} PRIVATE cxx_std_20)
+            if(policy STREQUAL desktop)
+                target_compile_definitions(${target} PRIVATE STARFOX_TEST_SCALE_LIMIT=10)
+            elseif(policy STREQUAL ios)
+                target_compile_definitions(${target} PRIVATE STARFOX_IOS_RUNTIME=1 STARFOX_TEST_SCALE_LIMIT=2)
+            else()
+                target_compile_definitions(${target} PRIVATE STARFOX_TEST_SCALE_LIMIT=4)
+                if(policy STREQUAL android)
+                    target_compile_definitions(${target} PRIVATE __ANDROID__=1)
+                elseif(policy STREQUAL switch)
+                    target_compile_definitions(${target} PRIVATE __SWITCH__=1)
+                elseif(policy STREQUAL uwp)
+                    target_compile_definitions(${target} PRIVATE STARFOX_UWP=1)
+                elseif(policy STREQUAL vita)
+                    target_compile_definitions(${target} PRIVATE SDL_PLATFORM_VITA=1)
+                elseif(policy STREQUAL ps5)
+                    target_compile_definitions(${target} PRIVATE STARFOX_PS5=1)
+                endif()
+            endif()
+            add_test(NAME ${target} COMMAND ${target})
+        endforeach()
+    endif()
     add_executable(starfox_comms_timing_check tools/check_comms_timing.cpp)
     target_link_libraries(starfox_comms_timing_check PRIVATE starfox_core)
     add_executable(starfox_bps_tests tests/bps_tests.cpp)
     target_link_libraries(starfox_bps_tests PRIVATE starfox_core)
     add_test(NAME starfox_bps_tests COMMAND starfox_bps_tests)
+    add_executable(starfox_runtime_import_tests tests/runtime_import_tests.cpp)
+    target_link_libraries(starfox_runtime_import_tests PRIVATE starfox_core)
+    add_test(NAME starfox_runtime_import_tests COMMAND starfox_runtime_import_tests "${CMAKE_CURRENT_SOURCE_DIR}")
     add_executable(starfox_pixel_filter_tests tests/pixel_filter_tests.cpp)
     add_executable(starfox_enhanced_terrain_tests tests/enhanced_terrain_tests.cpp)
     target_link_libraries(starfox_enhanced_terrain_tests PRIVATE starfox_core)
@@ -1859,6 +1966,10 @@ if(STARFOX_BUILD_TESTS)
     target_link_libraries(starfox_core_tests PRIVATE starfox_core)
     add_test(NAME starfox_core_tests COMMAND starfox_core_tests)
 
+    add_executable(starfox_rumble_sequencer_tests tests/rumble_sequencer_tests.cpp)
+    target_link_libraries(starfox_rumble_sequencer_tests PRIVATE starfox_core)
+    add_test(NAME starfox_rumble_sequencer_tests COMMAND starfox_rumble_sequencer_tests)
+
     add_executable(starfox_msu1_pack_tests tests/msu1_pack_tests.cpp)
     target_link_libraries(starfox_msu1_pack_tests PRIVATE starfox_core)
     add_test(NAME starfox_msu1_pack_tests COMMAND starfox_msu1_pack_tests)
@@ -1916,6 +2027,16 @@ if(STARFOX_BUILD_TESTS)
         target_link_options(starfox_intro_pacing_tests PRIVATE "/STACK:16777216")
     endif()
 
+    add_executable(starfox_asteroid_models_tests tests/asteroid_models_tests.cpp)
+    target_link_libraries(starfox_asteroid_models_tests PRIVATE starfox_core)
+    add_test(NAME starfox_asteroid_models_tests COMMAND starfox_asteroid_models_tests)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/upstream-ultrastarfox/SF.SFC"
+       AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/upstream-ultrastarfox/SYMBOLS.TXT")
+        add_test(NAME starfox_upstream_asteroid_models
+            COMMAND starfox_asteroid_models_tests
+                    "${CMAKE_CURRENT_SOURCE_DIR}/upstream-ultrastarfox/SF.SFC"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/upstream-ultrastarfox/SYMBOLS.TXT")
+    endif()
     add_executable(starfox_stereo_output_tests tests/stereo_output_tests.cpp)
     add_executable(starfox_temporal_aa_tests tests/temporal_aa_tests.cpp)
     add_executable(starfox_msaa_tests tests/msaa_tests.cpp)
@@ -2218,6 +2339,18 @@ if(STARFOX_BUILD_TESTS)
         add_test(NAME starfox_dlss_preview_artwork_checker
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dlss_display_preview.py")
         set_tests_properties(starfox_dlss_preview_artwork_checker PROPERTIES SKIP_RETURN_CODE 77)
+        add_test(NAME starfox_steam_frame_cmake_guards
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_steam_frame_cmake_guards.py"
+                --cmake "${CMAKE_COMMAND}"
+                --generator "${CMAKE_GENERATOR}")
+        # The Linux package fixture checks POSIX executable permission bits.
+        # Windows cannot represent those bits for its extensionless fixtures.
+        if(UNIX)
+            add_test(NAME starfox_steam_frame_package_validation
+                COMMAND "${Python3_EXECUTABLE}"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_steam_frame_package_validation.py")
+        endif()
         add_test(NAME starfox_backdrop_catalog
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_backdrop_catalog.py")
         add_test(NAME starfox_enhanced_palette_trace
@@ -2226,6 +2359,8 @@ if(STARFOX_BUILD_TESTS)
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_backdrop_region_inks.py")
         add_test(NAME starfox_android_package_oracle
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_android_package.py")
+        add_test(NAME starfox_ps5_sdl_patch
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ps5_sdl_patch.py")
         add_test(NAME starfox_quest_package_oracle
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_quest_package.py")
         if(UNIX AND NOT CMAKE_CROSSCOMPILING)
@@ -2234,6 +2369,8 @@ if(STARFOX_BUILD_TESTS)
                     "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_embed_runtime_assets.py"
                     --compiler "${CMAKE_CXX_COMPILER}")
         endif()
+        add_test(NAME starfox_asteroid_models_generated
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_asteroid_models.py" --check)
         add_test(NAME starfox_scramble_sequence_oracle
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scramble_sequence.py")
         if(STARFOX_BUILD_RUNTIME AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/upstream-ultrastarfox/SF.SFC")

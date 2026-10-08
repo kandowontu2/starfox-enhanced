@@ -56,6 +56,9 @@ struct GpuModelDraw {
     const GpuPreparedModelSource* prepared_gpu{}; // Borrowed for this encoding only.
     const PreparedFacesSource* prepared_faces{}; // Exact immutable material dependencies, per pair.
     const PreparedRayTopology* prepared_rays{}; // Requested immutable connectivity only; results remain eye-owned.
+    // GPU FAST: when fused onto the running scene, raster only the model's
+    // screen box, in place. Set by the app; never inferred.
+    bool bounded_raster{};
 };
 struct GpuRasterDraw {
     RasterCommands* commands{};
@@ -259,6 +262,10 @@ public:
     bool readback(Framebuffer&,SurfaceBuffer*);
     void release_device()noexcept;
     const std::string& status()const noexcept;
+    // GPU FAST scene options, set by the app; never inferred. Grid, dust and
+    // particle row spans then bin into compact tile lists when dense lists
+    // would not fit. Models carry their own GpuModelDraw::bounded_raster.
+    void set_gpu_fast(bool enabled)noexcept;
 private:
     friend class GpuStereoScene;
     struct Impl;std::unique_ptr<Impl> impl_;
@@ -299,6 +306,7 @@ public:
         std::span<const GpuSceneDraw> frame,double separation,double convergence,
         const GpuScene::MsaaSettings* msaa=nullptr);
     void release_device() noexcept;
+    void set_gpu_fast(bool enabled) noexcept {for(auto& eye:eyes_) eye.set_gpu_fast(enabled);}
 private:
     struct Parallel;
     std::array<GpuScene,2> eyes_;

@@ -1,0 +1,35 @@
+# Newly authored C rear module. Local metres; pivot in geometry.json.
+mtllib cockpit-c.mtl
+o right_inset
+v 0.005578193 0.135874988 0.624898939
+v 0.020578193 0.075874988 -0.625101061
+v -0.011421807 -0.104125012 -0.625101061
+v -0.034421807 -0.104125012 0.624898939
+v 0.015421807 0.134125012 0.625101061
+v 0.030421807 0.074125012 -0.624898939
+v -0.001578193 -0.105874988 -0.624898939
+v -0.024578193 -0.105874988 0.625101061
+usemtl panel_right_inset
+f 1 2 3
+usemtl panel_right_inset
+f 1 3 4
+usemtl edge_right_inset
+f 5 7 6
+usemtl edge_right_inset
+f 5 8 7
+usemtl edge_right_inset
+f 1 5 6
+usemtl edge_right_inset
+f 1 6 2
+usemtl edge_right_inset
+f 2 6 7
+usemtl edge_right_inset
+f 2 7 3
+usemtl edge_right_inset
+f 3 7 8
+usemtl edge_right_inset
+f 3 8 4
+usemtl edge_right_inset
+f 4 8 5
+usemtl edge_right_inset
+f 4 5 1

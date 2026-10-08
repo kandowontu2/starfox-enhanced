@@ -6,13 +6,14 @@
     <uses-permission android:name="org.khronos.openxr.permission.OPENXR" />
     <uses-permission android:name="org.khronos.openxr.permission.OPENXR_SYSTEM" />
     <!-- Optional, user-approved fallback on headsets without DocumentsUI.
-         Import is restricted to Download/Starfox-Assets.BIN. -->
+         Import is restricted to named Starfox ROM/BIN files in Download. -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
     <queries>
         <provider android:authorities="org.khronos.openxr.runtime_broker;org.khronos.openxr.system_runtime_broker" />
         <intent><action android:name="org.khronos.openxr.OpenXRRuntimeService" /></intent>
     </queries>
     <application android:allowBackup="false" android:label="Star Fox Enhanced VR (Development)"
+        android:icon="@drawable/ic_launcher"
         android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen">
         <meta-data android:name="com.oculus.supportedDevices" android:value="quest3" />
         <activity android:name=".AssetImportActivity" android:exported="false"

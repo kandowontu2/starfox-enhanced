@@ -9,6 +9,7 @@ dist_root="${3:-${source_root}/dist/StarFoxEnhanced-switch}"
 
 cmake -S "${source_root}" -B "${build_root}" -G Ninja \
     -DCMAKE_TOOLCHAIN_FILE="${toolchain}" \
+    -DSWITCH=ON \
     -DCMAKE_BUILD_TYPE=Release \
     -DSTARFOX_BUILD_TESTS=OFF \
     -DSTARFOX_BUILD_RUNTIME=ON \

@@ -28,9 +28,10 @@ bool VulkanEyeTargets::initialize(VkDevice device,PFN_vkGetDeviceProcAddr get,Vk
     try {
         if(!device || !get || format==VK_FORMAT_UNDEFINED) throw std::runtime_error("Invalid eye target device/format");
         depth_=depth_format!=VK_FORMAT_UNDEFINED;
-        if(depth_ != bool(depth_views[0]) || depth_ != bool(depth_views[1]))
+        if(depth_ != bool(depth_views[0]) || (!images[1].empty() && depth_ != bool(depth_views[1])))
             throw std::runtime_error("Depth format and both eye depth views must be provided together");
         for(unsigned eye=0;eye<2;++eye) {
+            if(eye==1 && images[eye].empty()) continue; // mono composition layer
             if(images[eye].empty() || images[eye].size()>64 || !extents[eye].width || !extents[eye].height)
                 throw std::runtime_error("Invalid eye target images/dimensions");
             for(auto image:images[eye]) if(!image) throw std::runtime_error("Null eye image");

@@ -3,8 +3,7 @@
 #include <utility>
 #include <algorithm>
 #include <cstring>
-#include <set>
-#include <tuple>
+#include "starfox/vr/decal_surface.hpp"
 #include <cmath>
 namespace starfox::vr {
 bool layout_source_axis_inputs(const SourceAxisInputs& input,uint64_t prefix_bytes,
@@ -518,32 +517,35 @@ bool prepare_source_span_model(const assets::Shape& shape,const render::RenderPo
         // Keep non-solid faces in the common index space for BSP output, but
         // clip zero corners: their native texture/line/sprite paths own them.
         // Removing entries here would remap every later ordered face ID.
-        // Mark exact authored solid/texture overlays, including duplicated
-        // vertex records. Bit 4 belongs to graphics; compute ignores it.
-        using Surface=std::vector<std::tuple<float,float,float,uint32_t>>;
+        // Mark authored solid/texture overlays, including inset signs and
+        // duplicated vertex records. Bit 4 belongs to graphics; compute ignores it.
         const auto surface=[&](size_t face) {
-            Surface key;
+            DecalSurface key;
             key.reserve(pending.bsp.faces[face].vertex_indices.size());
             for(auto index:pending.bsp.faces[face].vertex_indices) {
                 if(index>=pending.projection.continuous_vertices.size())
                     throw std::runtime_error("Source decal vertex is out of range");
                 const auto& v=pending.projection.continuous_vertices[index];
-                key.emplace_back(v.x,v.y,v.z,v.pose);
+                key.push_back({{v.x,v.y,v.z},v.pose});
             }
-            std::sort(key.begin(),key.end());return key;
+            return key;
         };
-        std::set<Surface> solids;
-        // Solid-only models cannot contain decals. Avoid building/sorting
-        // surface keys on their per-frame input preparation path.
+        std::vector<DecalSurface> solids;
+        // Solid-only models cannot contain decals. Avoid building
+        // surfaces on their per-frame input preparation path.
         const bool has_textures=std::any_of(pending.faces.materials.begin(),pending.faces.materials.end(),
             [](const auto& material){return material.textured!=0;});
         if(has_textures && !pending.fragmented) {
             for(size_t i=0;i<pending.faces.polygons.size();++i)
                 if(pending.faces.primitives[i]==render::PackedPrimitive::polygon && !pending.faces.materials[i].textured)
-                    solids.insert(surface(i));
+                    solids.push_back(surface(i));
             for(size_t i=0;i<pending.faces.polygons.size();++i)
-                if(pending.faces.primitives[i]==render::PackedPrimitive::polygon && pending.faces.materials[i].textured
-                    && solids.contains(surface(i))) pending.faces.polygons[i][3]|=16U;
+                if(pending.faces.primitives[i]==render::PackedPrimitive::polygon && pending.faces.materials[i].textured) {
+                    const auto overlay=surface(i);
+                    if(std::any_of(solids.begin(),solids.end(),[&](const auto& solid) {
+                        return decal_surface_contains(solid,overlay);
+                    })) pending.faces.polygons[i][3]|=16U;
+                }
         }
         for(std::size_t i=0;!colour_warp && i<pending.faces.polygons.size();++i)
             if((pending.faces.primitives[i]!=render::PackedPrimitive::polygon

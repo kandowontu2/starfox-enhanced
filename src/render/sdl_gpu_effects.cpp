@@ -1,4 +1,5 @@
 #include "starfox/render/sdl_gpu_effects.hpp"
+#include "starfox/compat/bit_cast.hpp"
 #include "starfox/render/gpu_scalefx.hpp"
 #include "starfox/render/gpu_smaa.hpp"
 #include "starfox/render/submission_retirement.hpp"
@@ -507,6 +508,11 @@ struct SdlGpuEffects::Impl {
                 throw std::runtime_error("Invalid packed resident shadow stride");
             p.shadow_enabled=s.resident_shadow.packed_row_bytes?3:2;data[3]={};
         }
+        // Capped ray resolution (GPU FAST above 4x): bits 8-15/16-23 of
+        // shadowEnabled carry the frame-to-ray ratio for stages 15 and 30.
+        const Uint32 ray_ratio=s.ray_scale_den && s.ray_scale_num<256 && s.ray_scale_den<256
+            ?(s.ray_scale_num<<8)|(s.ray_scale_den<<16):0U;
+        if(p.shadow_enabled) p.shadow_enabled|=ray_ratio;
         if(s.resident_reflection.buffer) {
             const auto& r=s.resident_reflection;
             if(r.device!=device || !r.width || !r.height || r.width>width
@@ -618,6 +624,7 @@ struct SdlGpuEffects::Impl {
             const auto& r=s.resident_reflection;auto reflection=p;
             reflection.shadow_width=r.width;reflection.shadow_height=r.height;
             reflection.shadow_y=s.reflection_offset_y;
+            reflection.shadow_enabled=(reflection.shadow_enabled&255U)|ray_ratio;
             reflection.pad0=int(std::min(s.reflection_intensity,100U));
             reflection.pad1=0;
             reflection.overlay_filter=s.reflection_material?1:0;
@@ -668,6 +675,7 @@ struct SdlGpuEffects::Impl {
             env.surface_height=backdrop?backdrop->height:0;
             env.surface_x=0;
             const bool ray_ground=s.environment.ray_water && s.resident_reflection.buffer;
+            if(ray_ground) env.shadow_enabled=(env.shadow_enabled&255U)|ray_ratio;
             // Paired real-eye timings support this on D3D12, not Vulkan. Keep
             // Vulkan's previous resolve until its submission/material stalls
             // are understood; the same exact fusion remains testable there.
@@ -882,7 +890,7 @@ struct SdlGpuEffects::Impl {
             const float decay=reset?0.f:s.persistence_mode==2?1.f:
                 float(std::exp2(-(s.presentation_seconds-history_time)/.35));
             auto temporal=p;
-            temporal.pad0=std::bit_cast<Sint32>(decay);
+            temporal.pad0=starfox::bit_cast<Sint32>(decay);
             temporal.pad1=int(std::min(s.persistence_intensity,100U));
             temporal.chromatic=(s.persistence_models?1U:0U)|(s.persistence_world?2U:0U)|(reset?4U:0U);
             dispatch(temporal,32,work[current],work[1-current],history[history_index],nullptr,history[1-history_index]);

@@ -1,0 +1,59 @@
+name: Sign UrbanRecomp Android release
+on:
+  workflow_dispatch:
+    inputs:
+      inputs_release: {description: Private UrbanRecomp APK draft in this repository, required: true, type: string}
+      apk_sha256: {description: SHA-256 of the verified unsigned APK, required: true, type: string}
+      version: {description: UrbanRecomp package version, required: true, default: enhanced-v1.0.1, type: string}
+permissions:
+  contents: write
+jobs:
+  sign:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      INPUTS_RELEASE: ${{ inputs.inputs_release }}
+      APK_SHA256: ${{ inputs.apk_sha256 }}
+      PACKAGE_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/setup-java@v4
+        with: {distribution: temurin, java-version: '17'}
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'build-tools;35.0.0'
+          log-accepted-android-sdk-licenses: 'false'
+      - name: Fetch and check finished APK
+        run: |
+          set -euo pipefail
+          [[ "$PACKAGE_VERSION" =~ ^enhanced-v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$INPUTS_RELEASE" == private-urbanrecomp-* ]]
+          gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --slurp > "$RUNNER_TEMP/releases.json"
+          asset=$(python3 -c 'import json,os,sys; r=next(r for page in json.load(open(sys.argv[1])) for r in page if r["tag_name"]==os.environ["INPUTS_RELEASE"]); assert r["draft"]; name="UrbanRecomp-"+os.environ["PACKAGE_VERSION"]+"-android-universal-unsigned.apk"; print(next(a["id"] for a in r["assets"] if a["name"]==name))' "$RUNNER_TEMP/releases.json")
+          gh api "repos/$GITHUB_REPOSITORY/releases/assets/$asset" -H 'Accept: application/octet-stream' > "$RUNNER_TEMP/urbanrecomp-unsigned.apk"
+          echo "$APK_SHA256  $RUNNER_TEMP/urbanrecomp-unsigned.apk" | sha256sum --check
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$RUNNER_TEMP/urbanrecomp-unsigned.apk" | grep -F "package: name='io.github.kandowontu2.urbanrecomp'"
+          python3 - <<'PY'
+          import os,zipfile
+          with zipfile.ZipFile(os.environ['RUNNER_TEMP']+'/urbanrecomp-unsigned.apk') as z:
+              assert z.testzip() is None
+              for n in z.namelist():
+                  assert not n.lower().endswith(('.sfc','.smc','.srm','.p12','.keystore'))
+          PY
+      - name: Sign using the existing permanent release key
+        env:
+          ANDROID_RELEASE_KEYSTORE: ${{ secrets.ANDROID_RELEASE_KEYSTORE }}
+          ANDROID_RELEASE_PASSWORD: ${{ secrets.ANDROID_RELEASE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          key="$RUNNER_TEMP/urbanrecomp-signing.p12"
+          trap 'rm -f "$key"' EXIT
+          printf '%s' "$ANDROID_RELEASE_KEYSTORE" | base64 --decode > "$key"
+          apk="UrbanRecomp-$PACKAGE_VERSION-android-universal.apk"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign --ks "$key" --ks-key-alias starfox-enhanced --ks-pass env:ANDROID_RELEASE_PASSWORD --key-pass env:ANDROID_RELEASE_PASSWORD --out "$apk" "$RUNNER_TEMP/urbanrecomp-unsigned.apk"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$apk" > "$RUNNER_TEMP/certificate.txt"
+          grep -Fqi '50bcb41f7a02c2e9bb0f68a74b1f6e14f7317fedc69d2c6fd70a165f87800fc0' "$RUNNER_TEMP/certificate.txt"
+          cat "$RUNNER_TEMP/certificate.txt"
+          sha256sum "$apk" > "$apk.sha256"
+          gh release upload "$INPUTS_RELEASE" "$apk" "$apk.sha256" --repo "$GITHUB_REPOSITORY"

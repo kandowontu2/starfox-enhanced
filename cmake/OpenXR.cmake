@@ -3,10 +3,14 @@ include("${CMAKE_CURRENT_LIST_DIR}/VRShaderChecks.cmake")
 if(WINDOWS_STORE OR SWITCH OR VITA OR IOS)
     message(FATAL_ERROR "The OpenXR build currently targets desktop Windows/Linux and Android, not this platform.")
 endif()
-# The normal runtime configures the pinned SDL dependency later in CMakeLists.
-# Standalone VR builds need an installed SDL package for PCM device output.
-if(NOT STARFOX_BUILD_RUNTIME)
-    find_package(SDL3 3.2 REQUIRED CONFIG)
+# Android runtime configuration resolves its official AAR/Prefab package in
+# CMakeLists.txt. Standalone desktop VR has already fetched pinned SDL source.
+if(NOT STARFOX_BUILD_RUNTIME AND NOT TARGET SDL3::SDL3)
+    if(ANDROID)
+        find_package(SDL3 REQUIRED CONFIG)
+    else()
+        find_package(SDL3 3.2 REQUIRED CONFIG)
+    endif()
 endif()
 set(BUILD_LOADER ON CACHE BOOL "Build the OpenXR loader" FORCE)
 set(BUILD_API_LAYERS OFF CACHE BOOL "Do not build OpenXR SDK API layers" FORCE)
@@ -39,6 +43,19 @@ FetchContent_Declare(starfox_vulkan_headers
     GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Headers.git
     GIT_TAG e5323cdea4ed92dfe825397f6047b8604a40423c)
 FetchContent_MakeAvailable(starfox_vulkan_headers)
+# Vendored shared sfvr C99 library (third_party/sfvr/VERSION): built for every
+# VR target (PCVR, Quest, Steam Frame) through starfox_vr_core.
+enable_language(C)
+add_library(starfox_sfvr STATIC
+    third_party/sfvr/src/sfvr_haptics.c third_party/sfvr/src/sfvr_perf.c
+    third_party/sfvr/src/sfvr_room.c third_party/sfvr/src/sfvr_settings.c
+    third_party/sfvr/src/sfvr_turn.c third_party/sfvr/src/sfvr_view.c)
+target_include_directories(starfox_sfvr PUBLIC third_party/sfvr/include)
+set_target_properties(starfox_sfvr PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED ON
+    C_EXTENSIONS OFF POSITION_INDEPENDENT_CODE ON)
+if(NOT MSVC)
+    target_link_libraries(starfox_sfvr PUBLIC m)
+endif()
 add_library(starfox_vr_core STATIC src/vr/openxr_runtime.cpp src/vr/openxr_session.cpp src/vr/openxr_swapchains.cpp src/vr/eye_camera.cpp src/vr/vulkan_device.cpp src/vr/vulkan_loader.cpp src/vr/stereo_renderer.cpp src/vr/vulkan_eye_targets.cpp)
 target_include_directories(starfox_vr_core PUBLIC include)
 target_sources(starfox_vr_core PRIVATE src/vr/vulkan_eye_commands.cpp)
@@ -56,14 +73,14 @@ target_sources(starfox_vr_core PRIVATE src/vr/vulkan_depth_targets.cpp)
 target_sources(starfox_vr_core PRIVATE src/vr/shape_mesh.cpp)
 target_sources(starfox_vr_core PRIVATE src/vr/shape_bsp.cpp)
 target_sources(starfox_vr_core PRIVATE src/vr/game_model_pose.cpp)
-target_sources(starfox_vr_core PRIVATE src/vr/openxr_input.cpp)
+target_sources(starfox_vr_core PRIVATE src/vr/openxr_input.cpp src/vr/refresh_rate.cpp)
 target_sources(starfox_vr_core PRIVATE src/vr/scene_material.cpp)
 target_sources(starfox_vr_core PRIVATE src/vr/shape_batch.cpp src/render/face_material.cpp)
 target_compile_features(starfox_vr_core PUBLIC cxx_std_20)
-target_link_libraries(starfox_vr_core PUBLIC OpenXR::openxr_loader Vulkan::Headers PRIVATE ${CMAKE_DL_LIBS})
+target_link_libraries(starfox_vr_core PUBLIC OpenXR::openxr_loader Vulkan::Headers starfox_sfvr PRIVATE ${CMAKE_DL_LIBS})
 add_library(starfox_vr_game STATIC src/vr/game_frame_driver.cpp src/vr/game_scene.cpp src/vr/draw_packet.cpp src/vr/vulkan_draw_packets.cpp src/vr/source_models.cpp)
 target_sources(starfox_vr_game PRIVATE src/vr/scene_packet_validation.cpp)
-target_sources(starfox_vr_game PRIVATE src/vr/scene_interpolation.cpp)
+target_sources(starfox_vr_game PRIVATE src/vr/scene_interpolation.cpp src/vr/cockpit.cpp)
 target_sources(starfox_vr_game PRIVATE src/vr/source_span_model.cpp)
 target_sources(starfox_vr_game PRIVATE src/vr/vulkan_source_bindings.cpp)
 target_sources(starfox_vr_game PRIVATE src/vr/vulkan_source_model.cpp)
@@ -71,10 +88,27 @@ target_sources(starfox_vr_game PRIVATE src/vr/vulkan_source_scene.cpp)
 target_sources(starfox_vr_game PRIVATE src/vr/background_tiles.cpp)
 target_sources(starfox_vr_game PRIVATE src/vr/source_sprites.cpp)
 target_sources(starfox_vr_game PRIVATE src/vr/pcm_output.cpp)
-target_sources(starfox_vr_game PRIVATE src/vr/application.cpp)
+target_sources(starfox_vr_game PRIVATE src/vr/application.cpp src/vr/steam_frame_application.cpp)
 target_sources(starfox_vr_game PRIVATE src/vr/cartridge_save.cpp)
 target_link_libraries(starfox_vr_game PRIVATE SDL3::SDL3)
 target_link_libraries(starfox_vr_game PUBLIC starfox_vr_core starfox_core)
+execute_process(COMMAND git -C "${PROJECT_SOURCE_DIR}" rev-parse HEAD
+    OUTPUT_VARIABLE STARFOX_SOURCE_REVISION OUTPUT_STRIP_TRAILING_WHITESPACE
+    RESULT_VARIABLE STARFOX_GIT_REVISION_RESULT ERROR_QUIET)
+if(NOT STARFOX_GIT_REVISION_RESULT EQUAL 0 OR STARFOX_SOURCE_REVISION STREQUAL "")
+    set(STARFOX_SOURCE_REVISION unknown)
+endif()
+execute_process(COMMAND git -C "${PROJECT_SOURCE_DIR}" status --porcelain
+    OUTPUT_VARIABLE STARFOX_GIT_STATUS OUTPUT_STRIP_TRAILING_WHITESPACE
+    RESULT_VARIABLE STARFOX_GIT_STATUS_RESULT ERROR_QUIET)
+if(STARFOX_GIT_STATUS_RESULT EQUAL 0 AND STARFOX_GIT_STATUS STREQUAL "")
+    set(STARFOX_SOURCE_TREE_STATE clean)
+else()
+    set(STARFOX_SOURCE_TREE_STATE dirty)
+endif()
+target_compile_definitions(starfox_vr_game PRIVATE
+    "STARFOX_SOURCE_REVISION=\"${STARFOX_SOURCE_REVISION}\""
+    "STARFOX_SOURCE_TREE_STATE=\"${STARFOX_SOURCE_TREE_STATE}\"")
 include("${CMAKE_CURRENT_LIST_DIR}/VRAssets.cmake")
 if(WIN32)
     add_executable(starfox_vulkan_external_check EXCLUDE_FROM_ALL tools/check_vulkan_external_buffer.cpp)
@@ -82,6 +116,8 @@ if(WIN32)
 endif()
 add_executable(starfox_vr_shader_bench EXCLUDE_FROM_ALL tools/benchmark_vr_shaders.cpp)
 target_link_libraries(starfox_vr_shader_bench PRIVATE starfox_vr_core)
+add_executable(starfox_vr_face_input_check EXCLUDE_FROM_ALL tests/quest_face_input_tests.cpp)
+target_link_libraries(starfox_vr_face_input_check PRIVATE starfox_vr_game)
 if(ANDROID)
     # Explicit diagnostic only: dispatch/readback on the headset GPU without XR.
     add_executable(starfox_vr_scene_check EXCLUDE_FROM_ALL tools/check_vulkan_scene.cpp)
@@ -98,7 +134,8 @@ if(NOT ANDROID)
             set_tests_properties(starfox_vr_backdrop_check PROPERTIES LABELS vr TIMEOUT 60)
         endif()
     endif()
-    add_executable(starfox_pcvr src/vr/desktop_main.cpp)
+    add_executable(starfox_pcvr src/vr/desktop_main.cpp src/vr/desktop_paths.cpp)
+    target_include_directories(starfox_pcvr PRIVATE src/vr)
     target_link_libraries(starfox_pcvr PRIVATE starfox_vr_game SDL3::SDL3)
     if(MINGW)
         target_link_options(starfox_pcvr PRIVATE -static -static-libgcc -static-libstdc++)
@@ -117,6 +154,30 @@ if(NOT ANDROID)
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/README.md"
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/misaki.txt"
         DESTINATION licenses/fonts COMPONENT pcvr)
+    if(STARFOX_BUILD_STEAM_FRAME)
+        add_executable(starfox_steamframe
+            src/vr/desktop_main.cpp src/vr/desktop_paths.cpp)
+        target_include_directories(starfox_steamframe PRIVATE src/vr)
+        target_compile_definitions(starfox_steamframe PRIVATE STARFOX_STEAM_FRAME=1)
+        target_link_libraries(starfox_steamframe PRIVATE starfox_vr_game SDL3::SDL3)
+        install(TARGETS starfox_steamframe RUNTIME DESTINATION . COMPONENT steamframe)
+        install(PROGRAMS
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/package/LAUNCH-STEAM-FRAME.sh"
+            DESTINATION . COMPONENT steamframe)
+        install(FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/package/STEAM-FRAME-START-HERE.txt"
+            "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_NOTICES.md"
+            "${CMAKE_CURRENT_SOURCE_DIR}/CREDITS.md"
+            "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE-XBRZ.txt"
+            DESTINATION . COMPONENT steamframe)
+        install(FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/package/vrpreferences.json"
+            DESTINATION . COMPONENT steamframe)
+        install(FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/README.md"
+            "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/misaki.txt"
+            DESTINATION licenses/fonts COMPONENT steamframe)
+    endif()
     add_executable(starfox_vr_cache_check tests/vulkan_pipeline_cache_tests.cpp)
     target_link_libraries(starfox_vr_cache_check PRIVATE starfox_vr_core)
     add_executable(starfox_vr_application_tests tests/vr_application_tests.cpp)
@@ -127,12 +188,28 @@ if(NOT ANDROID)
     target_compile_features(starfox_vr_runtime_tests PRIVATE cxx_std_20)
     add_executable(starfox_vr_audio_check tests/vr_pcm_output_tests.cpp)
     target_link_libraries(starfox_vr_audio_check PRIVATE starfox_vr_game SDL3::SDL3)
+    add_executable(starfox_vr_presentation_check tests/vr_presentation_tests.cpp)
+    target_link_libraries(starfox_vr_presentation_check PRIVATE starfox_vr_game)
+    if(BUILD_TESTING)
+        add_test(NAME starfox_vr_presentation_check COMMAND starfox_vr_presentation_check)
+        set_tests_properties(starfox_vr_presentation_check PROPERTIES LABELS vr TIMEOUT 60)
+    endif()
     add_executable(starfox_vr_input_check tests/openxr_input_tests.cpp)
     target_link_libraries(starfox_vr_input_check PRIVATE starfox_vr_core)
+    add_executable(starfox_vr_standard_check tests/vr_standard_tests.cpp)
+    target_link_libraries(starfox_vr_standard_check PRIVATE starfox_vr_core)
+    add_executable(starfox_vr_cockpit_geometry_check tests/vr_cockpit_geometry_tests.cpp)
+    target_link_libraries(starfox_vr_cockpit_geometry_check PRIVATE starfox_vr_game)
+    add_executable(starfox_vr_cockpit_input_check tests/vr_cockpit_input_tests.cpp)
+    target_link_libraries(starfox_vr_cockpit_input_check PRIVATE starfox_vr_game)
     add_executable(starfox_vr_game_input_check tests/vr_game_input_tests.cpp)
     target_link_libraries(starfox_vr_game_input_check PRIVATE starfox_vr_game)
+    add_executable(starfox_vr_rumble_parity_check tests/vr_rumble_parity_tests.cpp)
+    target_link_libraries(starfox_vr_rumble_parity_check PRIVATE starfox_vr_game)
     add_executable(starfox_vr_packet_check tests/vr_draw_packet_tests.cpp)
     target_link_libraries(starfox_vr_packet_check PRIVATE starfox_vr_game)
+    add_executable(starfox_vr_decal_check tests/vr_decal_tests.cpp)
+    target_link_libraries(starfox_vr_decal_check PRIVATE starfox_vr_game)
     add_executable(starfox_vr_runtime_check tools/check_openxr_runtime.cpp)
     target_link_libraries(starfox_vr_runtime_check PRIVATE starfox_vr_game)
     add_executable(starfox_vr_session_check tests/openxr_session_tests.cpp)
@@ -147,6 +224,11 @@ if(NOT ANDROID)
     target_link_libraries(starfox_vr_device_check PRIVATE starfox_vr_core)
     add_executable(starfox_vr_targets_check tests/vulkan_eye_targets_tests.cpp)
     target_link_libraries(starfox_vr_targets_check PRIVATE starfox_vr_core)
+    add_executable(starfox_vr_timestamp_check tests/vulkan_timestamp_tests.cpp)
+    target_link_libraries(starfox_vr_timestamp_check PRIVATE starfox_vr_core)
+    add_executable(starfox_vr_profile_output_check tests/vr_profile_output_tests.cpp)
+    target_include_directories(starfox_vr_profile_output_check PRIVATE include)
+    target_compile_features(starfox_vr_profile_output_check PRIVATE cxx_std_20)
     add_executable(starfox_vr_scene_check tools/check_vulkan_scene.cpp)
     target_link_libraries(starfox_vr_scene_check PRIVATE starfox_vr_game)
     add_executable(starfox_vr_mesh_check tests/shape_mesh_tests.cpp)
@@ -159,18 +241,47 @@ if(NOT ANDROID)
         add_test(NAME starfox_pcvr_help COMMAND starfox_pcvr --help)
         set_tests_properties(starfox_pcvr_help PROPERTIES LABELS vr TIMEOUT 10
             PASS_REGULAR_EXPRESSION "Requires a Vulkan-capable GPU")
+        add_test(NAME starfox_vr_profile_cli
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/vr_profile_cli_tests.py"
+                "$<TARGET_FILE:starfox_pcvr>")
+        set_tests_properties(starfox_vr_profile_cli PROPERTIES LABELS vr TIMEOUT 10)
+        if(TARGET starfox_steamframe)
+            add_test(NAME starfox_steamframe_profile_cli
+                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/vr_profile_cli_tests.py"
+                    "$<TARGET_FILE:starfox_steamframe>" --steam-frame)
+            set_tests_properties(starfox_steamframe_profile_cli PROPERTIES LABELS vr TIMEOUT 10)
+        endif()
         add_test(NAME starfox_vr_shader_freshness
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_vr_shader_freshness.py"
                 --cmake "${CMAKE_COMMAND}" --generator "${CMAKE_GENERATOR}")
         set_tests_properties(starfox_vr_shader_freshness PROPERTIES LABELS vr TIMEOUT 120)
+        add_test(NAME starfox_vr_cockpit_depth_check COMMAND starfox_vr_targets_check --cockpit-depth-only)
+        set_tests_properties(starfox_vr_cockpit_depth_check PROPERTIES LABELS vr TIMEOUT 10)
+        add_test(NAME starfox_vr_cockpit_assets
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_cockpit_assets.py" --check)
+        set_tests_properties(starfox_vr_cockpit_assets PROPERTIES LABELS vr TIMEOUT 10)
         add_test(NAME starfox_vr_ray_topology_check COMMAND starfox_vr_ray_topology_check)
         enable_testing()
+        add_test(NAME starfox_vr_timestamp_math COMMAND starfox_vr_timestamp_check --math-only)
+        add_test(NAME starfox_vr_timestamp_query COMMAND starfox_vr_timestamp_check)
+        add_test(NAME starfox_vr_profile_output_check COMMAND starfox_vr_profile_output_check)
+        set_tests_properties(starfox_vr_timestamp_math PROPERTIES LABELS vr TIMEOUT 5)
+        set_tests_properties(starfox_vr_profile_output_check PROPERTIES LABELS vr TIMEOUT 5)
+        set_tests_properties(starfox_vr_timestamp_query PROPERTIES
+            LABELS vr TIMEOUT 20 SKIP_RETURN_CODE 77)
+        option(STARFOX_REQUIRE_LAVAPIPE_TIMESTAMP_TEST
+            "Require native Lavapipe timestamp readback in host regression CI" OFF)
+        if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND STARFOX_REQUIRE_LAVAPIPE_TIMESTAMP_TEST)
+            add_test(NAME starfox_vr_timestamp_query_required
+                COMMAND starfox_vr_timestamp_check --require-native)
+            set_tests_properties(starfox_vr_timestamp_query_required PROPERTIES LABELS vr TIMEOUT 20)
+        endif()
         # These checks use mocks/synthetic inputs and need no connected HMD.
         # Keep hardware runtime/scene probes separate from unattended CTest.
         foreach(vr_check IN ITEMS
             starfox_vr_application_tests starfox_vr_runtime_tests
-            starfox_vr_audio_check starfox_vr_input_check
-            starfox_vr_packet_check starfox_vr_cache_check
+            starfox_vr_audio_check starfox_vr_input_check starfox_vr_standard_check
+            starfox_vr_packet_check starfox_vr_decal_check starfox_vr_cockpit_input_check starfox_vr_cockpit_geometry_check starfox_vr_cache_check
             starfox_vr_session_check starfox_vr_swapchain_check
             starfox_vr_camera_check starfox_vr_device_check
             starfox_vr_targets_check starfox_vr_mesh_check)
@@ -187,6 +298,15 @@ if(NOT ANDROID)
                 set(vr_test_symbols "${STARFOX_EX_SYMBOLS_FILE}")
             endif()
             if(EXISTS "${vr_test_rom}" AND EXISTS "${vr_test_symbols}")
+                add_test(NAME starfox_vr_decal_${vr_variant}
+                    COMMAND starfox_vr_decal_check "${vr_test_rom}" "${vr_test_symbols}")
+                set_tests_properties(starfox_vr_decal_${vr_variant} PROPERTIES LABELS "vr;cartridge" TIMEOUT 60)
+                add_test(NAME starfox_vr_cockpit_geometry_${vr_variant}
+                    COMMAND starfox_vr_cockpit_geometry_check "${vr_test_rom}" "${vr_test_symbols}")
+                set_tests_properties(starfox_vr_cockpit_geometry_${vr_variant} PROPERTIES LABELS "vr;cartridge" TIMEOUT 120)
+                add_test(NAME starfox_vr_cockpit_input_${vr_variant}
+                    COMMAND starfox_vr_cockpit_input_check "${vr_test_rom}" "${vr_test_symbols}")
+                set_tests_properties(starfox_vr_cockpit_input_${vr_variant} PROPERTIES LABELS "vr;cartridge" TIMEOUT 120)
                 add_test(NAME starfox_vr_game_input_${vr_variant}
                     COMMAND starfox_vr_game_input_check "${vr_test_rom}" "${vr_test_symbols}")
                 set_tests_properties(starfox_vr_game_input_${vr_variant} PROPERTIES LABELS "vr;cartridge" TIMEOUT 120)

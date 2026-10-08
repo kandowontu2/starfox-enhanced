@@ -1,4 +1,6 @@
 #pragma once
+
+#include "starfox/compat/bit_cast.hpp"
 #include "starfox/render/packed_faces.hpp"
 #include <bit>
 
@@ -49,7 +51,7 @@ inline bool pack_ray_materials(const PackedFaces& faces,
             if(index>=faces.corners.size() || index<polygon[0]
                 || std::uint64_t(index)>=std::uint64_t(polygon[0])+polygon[1]) return false;
             if(source.textured) for(unsigned axis=0;axis<2;++axis) {
-                const auto scroll=std::bit_cast<std::int32_t>(axis?source.reserved1:source.reserved0);
+                const auto scroll=starfox::bit_cast<std::int32_t>(axis?source.reserved1:source.reserved0);
                 const double uv=double(faces.corners[index][axis+1])+scroll;
                 if(uv < -1e8 || uv > 1e8) return false;
                 material.uv[corner*2+axis]=float(uv);

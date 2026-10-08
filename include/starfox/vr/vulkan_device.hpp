@@ -25,6 +25,8 @@ public:
     const XrGraphicsBindingVulkan2KHR& binding() const noexcept {return binding_;}
     VkQueue queue() const noexcept {return queue_;}
     std::uint32_t api_version() const noexcept {return version_;}
+    std::uint32_t timestamp_valid_bits() const noexcept {return timestamp_valid_bits_;}
+    double timestamp_period_ns() const noexcept {return timestamp_period_ns_;}
     bool external_shadows_enabled() const noexcept {return external_shadows_;}
     const std::optional<std::array<uint8_t,8>>& adapter_luid() const noexcept {return luid_;}
     const std::string& status() const noexcept {return status_;}
@@ -32,6 +34,8 @@ private:
     XrGraphicsBindingVulkan2KHR binding_{XR_TYPE_GRAPHICS_BINDING_VULKAN2_KHR};
     VkQueue queue_{};
     std::uint32_t version_{};
+    std::uint32_t timestamp_valid_bits_{};
+    double timestamp_period_ns_{};
     bool external_shadows_{};
     std::optional<std::array<uint8_t,8>> luid_;
     PFN_vkDestroyInstance destroy_instance_{};

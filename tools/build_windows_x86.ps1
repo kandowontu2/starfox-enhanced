@@ -26,7 +26,7 @@ $configureArguments = @(
 )
 & cmake @configureArguments
 if ($LASTEXITCODE -ne 0) { throw "x86 CMake configure failed" }
-& cmake --build $buildPath --target starfox_pc starfox_asset_builder
+& cmake --build $buildPath --parallel 1 --target starfox_pc starfox_asset_builder
 if ($LASTEXITCODE -ne 0) { throw "x86 build failed" }
 & cmake --install $buildPath --prefix $installPath
 if ($LASTEXITCODE -ne 0) { throw "x86 install failed" }

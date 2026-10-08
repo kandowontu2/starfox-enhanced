@@ -144,6 +144,12 @@ void main(uint3 id:SV_DispatchThreadID) {
     uint i=id.y*width+id.x;
     uint value=composedValue(id.xy,cpu,outputAt,uint2(outputWidth,outputHeight),nativeSample);
     float4 normal=0;uint flags=0;
+    // Emissive beams (bit 29 from scene_portable) stay unshadowed when the
+    // final pixel is still that beam pixel; later overrides clear flags.
+    if(inSource && !(cpu&0x80000000u)) {
+        uint native=nativePixels[nativeSample.y*sourceWidth+nativeSample.x];
+        if((native&0x20000000u) && (native&0xffffu)==(value&0xffffu)) flags|=0x20000000u;
+    }
     float depth=0;float4 temporal=0;
     // Depth, motion and surface ownership all inspect the same unmosaicked
     // native sample. Resolve its potentially fractional projection only once.

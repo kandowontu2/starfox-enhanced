@@ -64,9 +64,12 @@ void main(uint3 id:SV_DispatchThreadID) {
         metadata=back&0x01ff0000U;normal=backSurfaces[id.x];
     }
     if((padding&2u)!=0 && (front&0x04000000u)!=0) {
-        metadata=0;normal=float4(0,0,1,0);
+        // Emissive beams: no receiver metadata, and bit 29 keeps ray-traced
+        // shadows off them (effects stage 15), as the source draws its
+        // shadow polygon underneath.
+        metadata=0;normal=float4(0,0,1,0);colour|=0x20000000u;
     }
-    pixels[id.x]=(colour&0x9c00ffffU)|metadata;
+    pixels[id.x]=(colour&0xbc00ffffU)|metadata;
     if(wantSurfaces!=0) surfaces[id.x]=normal;
     if(wantDepth!=0) {
         // Unlike effects metadata, geometry belongs to the visible colour.

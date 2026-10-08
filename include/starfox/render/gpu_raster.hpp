@@ -22,6 +22,8 @@ struct GpuRasterDispatchInfo {
 inline constexpr std::uint8_t gpu_pixel_layer(std::uint32_t value) noexcept {
     return (value&0x80000000U)?0:std::uint8_t(value>>8);
 }
+// Highest render scale the GPU scene path accepts (GPU FAST 10x).
+inline constexpr std::uint32_t max_gpu_render_scale = 10U;
 void replay_raster_commands(const RasterCommands&,Framebuffer&,SurfaceBuffer*,bool clear_target=true);
 // Borrowed SDL GPU buffers, valid until the next render or device release.
 // pixels packs index/tag/surface-palette/valid into four bytes; surfaces is
@@ -91,7 +93,8 @@ public:
         std::uint32_t polygon_count,std::uint32_t width,std::uint32_t height,bool surface_metadata=false,void* texels=nullptr,bool pixel_coverage=false,
         const GpuRasterOutput* background=nullptr,bool wave_rows=false,
         std::int16_t wave_offset=0,std::uint32_t wave_frame=0,std::uint32_t texel_bytes=0,
-        const GpuGeometryDepthInput* geometry_depth=nullptr,std::array<std::uint32_t,2> raster_size={},std::array<float,2> raster_jitter={},std::uint32_t painter_flags=0,bool in_place_background=false);
+        const GpuGeometryDepthInput* geometry_depth=nullptr,std::array<std::uint32_t,2> raster_size={},std::array<float,2> raster_jitter={},std::uint32_t painter_flags=0,bool in_place_background=false,
+        bool bounded_in_place=false,bool compact_tiles=false);
     // Upload legacy raster commands onto a caller-owned command buffer, for
     // ordered interleaving with GpuModel/GpuScene. No submit/readback/wait.
     // Result has explicit write coverage; consume before the next operation.

@@ -1,4 +1,5 @@
 #include "starfox/render/gpu_colour_warp.hpp"
+#include "starfox/render/gpu_scene_counters.hpp"
 #if defined(STARFOX_SDL_GPU_EFFECTS)
 #include <SDL3/SDL.h>
 #include "starfox/render/gpu_preparation.hpp"
@@ -60,7 +61,7 @@ struct GpuColourWarp::Impl {
         SDL_PushGPUComputeUniformData(command,0,settings,bytes);
         SDL_GPUStorageBufferReadWriteBinding bindings[3]{};
         for(unsigned i=0;i<writes;++i){bindings[i].buffer=buffers[first+i];bindings[i].cycle=true;}
-        auto* pass=SDL_BeginGPUComputePass(command,nullptr,0,bindings,writes);require(pass);
+        auto* pass=scene_counters::begin_compute_pass(command,nullptr,0,bindings,writes);require(pass);
         SDL_BindGPUComputePipeline(pass,pipelines[index]);SDL_BindGPUComputeStorageBuffers(pass,0,inputs,reads);
         SDL_DispatchGPUCompute(pass,groups,1,1);SDL_EndGPUComputePass(pass);
     }

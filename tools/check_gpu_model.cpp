@@ -1,5 +1,6 @@
 #include "starfox/render/gpu_model.hpp"
 #include "starfox/render/gpu_scene.hpp"
+#include "starfox/render/gpu_scene_counters.hpp"
 #include "starfox/render/packed_faces.hpp"
 #include "starfox/render/face_material.hpp"
 #include "starfox/assets/shape_decoder.hpp"
@@ -96,7 +97,11 @@ int main(int argc,char** argv)try {
         std::cout<<"Pending-work and invalid-dimension rejection preserve caller cancellation; subsequent mixed rendering tests recovery\n";
     }
     const unsigned width=(live_wingman || live_ex61)?400:224,height=(live_wingman || live_ex61)?224:192;
-    SDL_GPUTransferBufferCreateInfo ti{SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD,width*height*((terrain || live_wingman || wobble_bypass || backface || colour_warp || wave || axis || billboard_batch || destruction)?16U:4U)*20+4096,0};
+    // Readback holds scale^2 pixels of colour (4 B) and surfaces (16 B).
+    // STARFOX_TEST_MODEL_SCALE=N (1-10) checks exactly that scale.
+    const unsigned requested_scale=SDL_getenv("STARFOX_TEST_MODEL_SCALE")?unsigned(std::stoul(SDL_getenv("STARFOX_TEST_MODEL_SCALE"))):0U;
+    const unsigned default_squared=(terrain || live_wingman || wobble_bypass || backface || colour_warp || wave || axis || billboard_batch || destruction)?16U:4U;
+    SDL_GPUTransferBufferCreateInfo ti{SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD,width*height*std::max(default_squared,requested_scale*requested_scale)*20+4096,0};
     auto* download=SDL_CreateGPUTransferBuffer(device,&ti);require(download);
     if(mixed_batch) {
         auto* command=SDL_AcquireGPUCommandBuffer(device);require(command);
@@ -176,17 +181,19 @@ int main(int argc,char** argv)try {
         }
         for(unsigned isolated_layer=0;isolated_layer<(isolated_layers?3U:1U);++isolated_layer)
         for(unsigned mode=0;mode<(wobble_combinations?10U:warp_alternate?5U:destruction?5U:alternate?4U:1U);++mode)
-        for(unsigned view:{0U,1U,2U,3U,4U,5U,6U}) for(unsigned scale:{1U,2U,4U}) {
+        for(unsigned view:{0U,1U,2U,3U,4U,5U,6U}) for(unsigned scale:{1U,2U,4U,requested_scale}) {
             if(view==6 && !billboard_batch) continue;
             if(const auto* requested=SDL_getenv("STARFOX_TEST_MODEL_VIEW");requested && view!=std::stoul(requested)) continue;
-            if(const auto* requested=SDL_getenv("STARFOX_TEST_MODEL_SCALE");requested && scale!=std::stoul(requested)) continue;
+            // A requested scale (GPU FAST allows up to 10x) replaces the defaults.
+            if(requested_scale && scale!=requested_scale) continue;
+            if(!scale) continue;
             check_context=name+" mode "+std::to_string(mode)+" view "+std::to_string(view)+" scale "+std::to_string(scale);
             if(SDL_getenv("STARFOX_TEST_CONTINUOUS_FIRST") && view<3) continue;
             if(native_axis && (view>=3 || scale!=1))continue;
             if(native_backface && (view>=3 || scale!=1))continue;
             if(live_wingman && view!=0) continue;
             if(live_ex61 && (view!=0 || scale!=1)) continue;
-            if(scale==4 && !terrain && !live_wingman && !wobble_bypass && !backface && !colour_warp && !wave && !axis && !billboard_batch && !destruction) continue;
+            if(scale==4 && !requested_scale && !terrain && !live_wingman && !wobble_bypass && !backface && !colour_warp && !wave && !axis && !billboard_batch && !destruction) continue;
             if(matrix_only && view>=4) continue;
             starfox::render::RenderSettings settings;settings.render_scale=scale;
             settings.backface_culling=backface;
@@ -321,12 +328,16 @@ int main(int argc,char** argv)try {
                     front=legacy.enqueue_commands(device,command,batch,metadata,((view+layer/2)&1U)!=0);
                     if(!front.pixels) {SDL_CancelGPUCommandBuffer(command);throw std::runtime_error(legacy.status());}
                 } else if(mixed_batch) {
+                    // GPU FAST: batch draws opt into the bounded in-place raster.
+                    const bool bounded=std::getenv("STARFOX_TEST_BOUNDED_MODEL_RASTER")!=nullptr;
                     if(recorded_batch) {
-                        recording.append_model(pending,{&shape,layer_pose,settings,metadata});
+                        starfox::render::GpuModelDraw recorded{&shape,layer_pose,settings,metadata};
+                        recorded.bounded_raster=bounded;
+                        recording.append_model(pending,recorded);
                         continue;
                     }
                     starfox::render::GpuModelDraw model_draw{&shape,layer_pose,settings,metadata};
-                    model_draw.geometry_depth=terrain;
+                    model_draw.geometry_depth=terrain;model_draw.bounded_raster=bounded;
                     draws.emplace_back(model_draw);
                     continue;
                 } else {
@@ -576,5 +587,12 @@ int main(int argc,char** argv)try {
     if(scene_mode) std::cout<<(mixed_scene?"Five-layer mixed":"Three-layer model")<<" resident composition: black writes, independent surfaces and ping-pong reuse passed\n";
     if(recorded_batch) std::cout<<"Recorded CPU fallback: pixels, layer tags, write coverage and surface samples match direct rendering exactly\n";
     if(queued_batch) std::cout<<"Four changing submissions without readback before each compared frame preserve final geometry and metadata\n";
+    if(std::getenv("STARFOX_TEST_BOUNDED_MODEL_RASTER") && starfox::render::scene_counters::enabled()) {
+        // With STARFOX_TRACE_SCENE_COST, prove batches really took the bounded path.
+        const auto bounded=starfox::render::scene_counters::frame_totals()[
+            std::size_t(starfox::render::scene_counters::Counter::bounded_dispatches)].load();
+        std::cout<<"bounded-dispatches="<<bounded<<'\n';
+        require(bounded!=0);
+    }
     return 0;
 }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}

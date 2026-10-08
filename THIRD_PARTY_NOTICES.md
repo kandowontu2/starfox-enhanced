@@ -112,6 +112,56 @@ was generated with AI assistance and verified on real libnx hardware. It is
 used only because upstream SDL's official Nintendo backend is NDA-gated and is
 not available to public devkitPro builds.
 
+### SDL3 PS5 backend
+
+The PS5 homebrew target registers its own SDL video, audio, filesystem and
+gamepad backend from `platform/ps5/runtime` in SDL 3.4.14.
+`tools/prepare_ps5_sdl.py` patches the pinned SDL source only to register
+those drivers, to accept the console's RADV driver (which reports no CTS
+conformance) and to build SDL's virtual-joystick driver without HIDAPI. These
+are marked modifications distributed under SDL's zlib licence.
+
+The pad and AudioOut ABI declarations in `platform/ps5/runtime/ps5_abi.h`
+come from [ps5-payload-dev/SDL](https://github.com/ps5-payload-dev/SDL)
+revision `ee4c47dc0d617b3bc8f35108f9956baf228a1322`, Copyright (C) 2026 John
+Törnblom, under SDL's zlib licence above (retained in that file). The
+intercepted-input and Create button bits and `sceAudioOutSetVolume` follow
+BlackBearReloaded's `ps5_pad.hpp` and `native_audio.hpp` (GPL-3.0-or-later) as
+used by [ProsperoEden](https://github.com/blackbearreloaded/ProsperoEden).
+
+### PS5 title artwork
+
+`platform/ps5/sce_sys` holds the PS5 launcher icon and backgrounds. They are
+frames of the game itself (its title screen, the Corneria stage start and the
+attract intro) captured with this runtime's capture mode, cropped and scaled by
+`make_artwork.py`; see `platform/ps5/sce_sys/ARTWORK.md`. Star Fox, its logo
+and characters are trademarks and copyrighted works of Nintendo.
+
+## PlayStation 5 native runtime (PS5 builds only)
+
+The PS5 title statically links, and its package carries, components built
+from these pinned public repositories by `platform/ps5/bootstrap.sh`:
+
+- [PS5_Vulkan](https://github.com/mihawk-99/PS5_Vulkan) revision
+  `3f3ee69607013b345d2baa6d6a37c86745649a08`: the title CRT and C++
+  allocation runtime, the RADV link recipe, AGC import stubs, `ps5-native-tool`
+  and the clean-room `sce_module/libc.prx`. Copyright (C) 2026 Mihawk-99 and
+  BlackBearReloaded, GPL-3.0-or-later.
+- [PS5_Mesa](https://github.com/mihawk-99/PS5_Mesa) revision
+  `0b2d6d1a61d9bbf89cf8beb88a696144f67c61f8`: Mesa 26.2 with the RADV PS5
+  winsys (the GPU's Vulkan driver, its ACO compiler and VideoOut WSI). Mesa is
+  MIT-licensed; individual files carry their own permissive notices.
+- [PS5_PayloadSDK](https://github.com/mihawk-99/PS5_PayloadSDK) revision
+  `95c08f27386fc698f6bbe21dde3030140a41d10b` over the
+  [ps5-payload-dev SDK](https://github.com/ps5-payload-dev/sdk) v0.42:
+  compiler wrappers, system-module stubs, LLVM libc++/libc++abi/libunwind
+  (Apache-2.0 WITH LLVM-exception) and the `libps5platform` platform layer
+  (GPL-3.0-or-later).
+
+Because GPL-3.0-or-later components are linked into the PS5 executable, PS5
+binaries are distributed under GPL-3.0-or-later terms with corresponding source
+available from this repository and the pinned revisions above.
+
 ## dr_flac (dr_libs)
 
 Source: <https://github.com/mackron/dr_libs>
@@ -248,3 +298,36 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+
+## OpenXR SDK 1.1.63 (loader)
+
+Source: <https://github.com/KhronosGroup/OpenXR-SDK>
+
+Pinned revision: `f2448a8797c85814aa892efc1ab8707900fbcc78`
+
+Copyright 2015-2026 The Khronos Group Inc.
+
+The VR targets build the OpenXR loader as a static library. The loader sources
+are dual-licensed `Apache-2.0 OR MIT`, and the loader's bundled jsoncpp is
+public domain or MIT. The per-file licence data in the upstream source is
+authoritative. Licence texts: <https://www.apache.org/licenses/LICENSE-2.0> and
+<https://opensource.org/licenses/MIT>.
+
+## Vulkan-Headers
+
+Source: <https://github.com/KhronosGroup/Vulkan-Headers>
+
+Pinned revision: `e5323cdea4ed92dfe825397f6047b8604a40423c`
+
+Copyright 2015-2023 The Khronos Group Inc.
+
+The VR targets use these headers under `Apache-2.0 OR MIT`. Licence texts:
+<https://www.apache.org/licenses/LICENSE-2.0> and
+<https://opensource.org/licenses/MIT>.
+
+## sfvr
+
+A small C99 library written for the Steam Frame ports of several games, vendored
+in `third_party/sfvr` at the commit recorded in `third_party/sfvr/VERSION`. It
+has no public repository. It is distributed here under this project's GPL-3.0,
+as its README says for vendored copies.

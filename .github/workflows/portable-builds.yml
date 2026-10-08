@@ -418,7 +418,7 @@ jobs:
 
   android-arm64:
     if: ${{ !inputs.quest_only }}
-    name: Android arm64 development APK
+    name: Android arm64 signed APK
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -433,7 +433,7 @@ jobs:
             platform-tools platforms;android-35 build-tools;35.0.0
             ndk;28.2.13676358
           log-accepted-android-sdk-licenses: 'false'
-      - name: Build installable development APK
+      - name: Build release-signed APK
         shell: bash
         env:
           ANDROID_RELEASE_KEYSTORE: ${{ secrets.ANDROID_RELEASE_KEYSTORE }}
@@ -441,22 +441,13 @@ jobs:
         run: |
           export ANDROID_RELEASE_KEYSTORE_PATH="$RUNNER_TEMP/starfox-release.p12"
           umask 077
-          if [[ -n "$ANDROID_RELEASE_KEYSTORE" && -n "$ANDROID_RELEASE_PASSWORD" ]]; then
-            printf '%s' "$ANDROID_RELEASE_KEYSTORE" | base64 --decode > "$ANDROID_RELEASE_KEYSTORE_PATH"
-          elif [[ "$GITHUB_REPOSITORY" != 'kandowontu/starfox-enhanced' ]]; then
-            export ANDROID_RELEASE_PASSWORD="$(openssl rand -hex 24)"
-            keytool -genkeypair -noprompt -storetype PKCS12 \
-              -keystore "$ANDROID_RELEASE_KEYSTORE_PATH" \
-              -storepass "$ANDROID_RELEASE_PASSWORD" -keypass "$ANDROID_RELEASE_PASSWORD" \
-              -alias starfox-enhanced -keyalg RSA -keysize 3072 -validity 2 \
-              -dname 'CN=Star Fox Enhanced private validation build'
-            echo 'STARFOX_VALIDATION_SIGNING=1' >> "$GITHUB_ENV"
-          else
-            echo 'Official Android signing secrets are missing' >&2
+          if [[ -z "$ANDROID_RELEASE_KEYSTORE" || -z "$ANDROID_RELEASE_PASSWORD" ]]; then
+            echo 'Permanent Android signing secrets are missing' >&2
             exit 1
           fi
+          printf '%s' "$ANDROID_RELEASE_KEYSTORE" | base64 --decode > "$ANDROID_RELEASE_KEYSTORE_PATH"
           chmod +x tools/build_android.sh platform/android/gradlew
-          tools/build_android.sh "$GITHUB_WORKSPACE" debug
+          tools/build_android.sh "$GITHUB_WORKSPACE" release
       - name: Verify APK payload
         shell: bash
         run: |
@@ -465,9 +456,7 @@ jobs:
           python3 tools/check_android_package.py "$apk" --source-root "$GITHUB_WORKSPACE"
           "${ANDROID_HOME}/build-tools/35.0.0/aapt" dump badging "${apk}"
           "${ANDROID_HOME}/build-tools/35.0.0/apksigner" verify --print-certs "${apk}" > "$RUNNER_TEMP/signing-certificate.txt"
-          if [[ "${STARFOX_VALIDATION_SIGNING:-}" != 1 ]]; then
-            grep -Fqi '50bcb41f7a02c2e9bb0f68a74b1f6e14f7317fedc69d2c6fd70a165f87800fc0' "$RUNNER_TEMP/signing-certificate.txt"
-          fi
+          grep -Fqi '50bcb41f7a02c2e9bb0f68a74b1f6e14f7317fedc69d2c6fd70a165f87800fc0' "$RUNNER_TEMP/signing-certificate.txt"
           unzip -l "${apk}" | grep -q 'lib/arm64-v8a/libmain.so'
           unzip -l "${apk}" | grep -q 'lib/arm64-v8a/libSDL3.so'
           cp "${apk}" StarFoxEnhanced-0.0.8-android-arm64.apk
@@ -476,17 +465,16 @@ jobs:
           name: StarFoxEnhanced-0.0.8-android-arm64
           path: StarFoxEnhanced-0.0.8-android-arm64.apk
           if-no-files-found: error
-      - name: Add to GitHub release
+      - name: Attach signed Android APK to release
         if: github.event_name == 'push' || inputs.release_tag != ''
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           REQUESTED_TAG: ${{ inputs.release_tag }}
         shell: bash
         run: |
           tag="${REQUESTED_TAG:-${GITHUB_REF_NAME}}"
-          gh release upload "${tag}" \
-            StarFoxEnhanced-0.0.8-android-arm64.apk --clobber
-
+          gh release upload "${tag}" StarFoxEnhanced-0.0.8-android-arm64.apk --clobber
   quest-arm64:
     name: Quest 3 arm64 signed VR development APK
     runs-on: ubuntu-latest
@@ -510,20 +498,11 @@ jobs:
         run: |
           export ANDROID_RELEASE_KEYSTORE_PATH="$RUNNER_TEMP/starfox-quest-release.p12"
           umask 077
-          if [[ -n "$ANDROID_RELEASE_KEYSTORE" && -n "$ANDROID_RELEASE_PASSWORD" ]]; then
-            printf '%s' "$ANDROID_RELEASE_KEYSTORE" | base64 --decode > "$ANDROID_RELEASE_KEYSTORE_PATH"
-          elif [[ "$GITHUB_REPOSITORY" != 'kandowontu/starfox-enhanced' ]]; then
-            export ANDROID_RELEASE_PASSWORD="$(openssl rand -hex 24)"
-            keytool -genkeypair -noprompt -storetype PKCS12 \
-              -keystore "$ANDROID_RELEASE_KEYSTORE_PATH" \
-              -storepass "$ANDROID_RELEASE_PASSWORD" -keypass "$ANDROID_RELEASE_PASSWORD" \
-              -alias starfox-enhanced -keyalg RSA -keysize 3072 -validity 2 \
-              -dname 'CN=Star Fox Enhanced private validation build'
-            echo 'STARFOX_VALIDATION_SIGNING=1' >> "$GITHUB_ENV"
-          else
-            echo 'Official Quest signing secrets are missing' >&2
+          if [[ -z "$ANDROID_RELEASE_KEYSTORE" || -z "$ANDROID_RELEASE_PASSWORD" ]]; then
+            echo 'Permanent Quest signing secrets are missing' >&2
             exit 1
           fi
+          printf '%s' "$ANDROID_RELEASE_KEYSTORE" | base64 --decode > "$ANDROID_RELEASE_KEYSTORE_PATH"
           chmod +x tools/build_android.sh platform/android/gradlew
           # The private runner has repeatedly disappeared during Quest native
           # compilation without a compiler diagnostic. Record its actual
@@ -551,9 +530,7 @@ jobs:
           "${ANDROID_HOME}/build-tools/35.0.0/aapt" dump badging "$apk" > "$RUNNER_TEMP/quest-badging.txt"
           grep -Fq "package: name='com.starfox.enhanced.quest'" "$RUNNER_TEMP/quest-badging.txt"
           "${ANDROID_HOME}/build-tools/35.0.0/apksigner" verify --print-certs "$apk" > "$RUNNER_TEMP/quest-certificate.txt"
-          if [[ "${STARFOX_VALIDATION_SIGNING:-}" != 1 ]]; then
-            grep -Fqi '50bcb41f7a02c2e9bb0f68a74b1f6e14f7317fedc69d2c6fd70a165f87800fc0' "$RUNNER_TEMP/quest-certificate.txt"
-          fi
+          grep -Fqi '50bcb41f7a02c2e9bb0f68a74b1f6e14f7317fedc69d2c6fd70a165f87800fc0' "$RUNNER_TEMP/quest-certificate.txt"
           mkdir -p quest-package
           cp "$apk" quest-package/
           cp tools/package/QUEST-START-HERE.txt quest-package/START-HERE.txt
@@ -567,14 +544,16 @@ jobs:
           name: StarFoxEnhanced-0.0.8-quest-arm64
           path: StarFoxEnhanced-0.0.8-quest-arm64.zip
           if-no-files-found: error
-      - name: Add to GitHub release
+      - name: Attach signed Quest APK package to release
         if: github.event_name == 'push' || inputs.release_tag != ''
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ inputs.release_tag || github.ref_name }}
-          files: StarFoxEnhanced-0.0.8-quest-arm64.zip
-          draft: true
-
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          REQUESTED_TAG: ${{ inputs.release_tag }}
+        shell: bash
+        run: |
+          tag="${REQUESTED_TAG:-${GITHUB_REF_NAME}}"
+          gh release upload "${tag}" StarFoxEnhanced-0.0.8-quest-arm64.zip --clobber
   windows-pcvr:
     if: ${{ !inputs.quest_only }}
     name: Windows x64 OpenXR PCVR development build

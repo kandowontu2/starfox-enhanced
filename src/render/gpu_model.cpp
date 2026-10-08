@@ -1,4 +1,7 @@
 #include "starfox/render/gpu_model.hpp"
+#include "starfox/compat/bit_cast.hpp"
+#include "starfox/render/gpu_raster.hpp"
+#include "starfox/render/gpu_scene_counters.hpp"
 #include "starfox/render/packed_projection.hpp"
 #include "starfox/render/packed_faces.hpp"
 #include "starfox/render/gpu_bsp.hpp"
@@ -204,7 +207,7 @@ struct GpuModel::Impl {
         auto* copy=SDL_BeginGPUCopyPass(command);require(copy);
         for(unsigned i=0;i<2;++i) {
             SDL_GPUTransferBufferLocation from{axis_ray_upload,i?sizes[0]:0};
-            SDL_GPUBufferRegion to{axis_ray_buffers[i],0,sizes[i]};SDL_UploadToGPUBuffer(copy,&from,&to,true);
+            SDL_GPUBufferRegion to{axis_ray_buffers[i],0,sizes[i]};scene_counters::upload_buffer(copy,&from,&to,true);
         }
         SDL_EndGPUCopyPass(copy);
         if(vertices.continuous) out.points=axis_ray_projection.enqueue_continuous(device,command,axis_ray_buffers[0],Uint32(point_count),axis_ray_buffers[1],Uint32(pose_count),&out.residuals);
@@ -222,13 +225,13 @@ struct GpuModel::Impl {
     GpuRasterOutput billboard(void* next_device,void* command,const assets::Shape& shape,
         const RenderPose& pose,const RenderSettings& settings,std::uint32_t width,std::uint32_t height,
         bool surfaces,const GpuRasterOutput* background,std::array<std::uint32_t,2> raster_size={},std::array<float,2> jitter={},bool depth=false,std::uint32_t painter_flags=0,bool in_place_background=false,
-        const GpuPreparedModelSource* gpu_source=nullptr) {
+        const GpuPreparedModelSource* gpu_source=nullptr,bool bounded=false,bool compact_tiles=false) {
         auto* next=static_cast<SDL_GPUDevice*>(next_device);
         if(device!=next){release();device=next;}
         const auto scale=settings.render_scale;
         const auto* texture=texture_for_colour(shape,pose.simple_sprite_colour,pose.colour_frame);
         if(!texture || pose.simple_sprite_world_size<=0 || pose.z<128)
-            return raster.enqueue_row_spans(device,command,nullptr,0,width*scale,height*scale,surfaces,nullptr,true,background,false,0,0,0,nullptr,raster_size,jitter,painter_flags,in_place_background);
+            return raster.enqueue_row_spans(device,command,nullptr,0,width*scale,height*scale,surfaces,nullptr,true,background,false,0,0,0,nullptr,raster_size,jitter,painter_flags,in_place_background,bounded,compact_tiles);
         for(auto value:{pose.x,pose.y,pose.z,pose.vanish_x,pose.vanish_y})
             if(!std::isfinite(value) || std::abs(value)>1000000)
                 throw std::runtime_error("GPU billboard coordinate exceeds compensated range");
@@ -279,14 +282,14 @@ struct GpuModel::Impl {
             auto* copy=SDL_BeginGPUCopyPass(cmd);require(copy);
             if(!shared) {
                 SDL_GPUTransferBufferLocation from{upload,0};SDL_GPUBufferRegion to{buffers[9],0,bytes};
-                SDL_UploadToGPUBuffer(copy,&from,&to,true);
+                scene_counters::upload_buffer(copy,&from,&to,true);
                 // Independent billboard uploads replace polygon input buffer 9.
                 snapshot_valid=false;
             }
             if(depth) {
                 SDL_GPUTransferBufferLocation plane_from{upload,texture_upload_bytes};
                 SDL_GPUBufferRegion plane_to{geometry_planes,0,16};
-                SDL_UploadToGPUBuffer(copy,&plane_from,&plane_to,true);
+                scene_counters::upload_buffer(copy,&plane_from,&plane_to,true);
             }
             SDL_EndGPUCopyPass(copy);
         }
@@ -334,8 +337,8 @@ struct GpuModel::Impl {
         const std::array<double,4> camera{pose.x,pose.y,pose.z,settings.focal_length};
         const std::array<double,4> view{pose.vanish_x,pose.vanish_y,double(pose.simple_sprite_world_size),double(scale)};
         for(unsigned i=0;i<4;++i) {
-            const auto camera_bits=std::bit_cast<std::uint64_t>(camera[i]);
-            const auto view_bits=std::bit_cast<std::uint64_t>(view[i]);
+            const auto camera_bits=starfox::bit_cast<std::uint64_t>(camera[i]);
+            const auto view_bits=starfox::bit_cast<std::uint64_t>(view[i]);
             config.camera_lo[i]=Uint32(camera_bits);config.camera_hi[i]=Uint32(camera_bits>>32);
             config.view_lo[i]=Uint32(view_bits);config.view_hi[i]=Uint32(view_bits>>32);
         }
@@ -343,11 +346,11 @@ struct GpuModel::Impl {
         config.material={texture->u_mask,texture->v_mask,settings.colour_index_base,pose.palette_override?256U+*pose.palette_override:0U};
         SDL_PushGPUComputeUniformData(cmd,0,&config,sizeof(config));
         SDL_GPUStorageBufferReadWriteBinding binding{};binding.buffer=billboard_spans;binding.cycle=true;
-        auto* pass=SDL_BeginGPUComputePass(cmd,nullptr,0,&binding,1);require(pass);
+        auto* pass=scene_counters::begin_compute_pass(cmd,nullptr,0,&binding,1);require(pass);
         SDL_BindGPUComputePipeline(pass,billboard_pipeline);SDL_DispatchGPUCompute(pass,(rows+63)/64,1,1);SDL_EndGPUComputePass(pass);
         const GpuGeometryDepthInput plane{geometry_planes,1,float(settings.focal_length*scale),float(settings.focal_length*scale),float(pose.vanish_x*scale),float(pose.vanish_y*scale),true};
         // Sprites remain unlit; their plane identifier is only a temporal guide.
-        return raster.enqueue_row_spans(device,command,billboard_spans,1,width*scale,rows,surfaces,texels,true,background,false,0,0,0,depth?&plane:nullptr,raster_size,jitter,painter_flags,in_place_background);
+        return raster.enqueue_row_spans(device,command,billboard_spans,1,width*scale,rows,surfaces,texels,true,background,false,0,0,0,depth?&plane:nullptr,raster_size,jitter,painter_flags,in_place_background,bounded,compact_tiles);
     }
     struct SurfaceSettings {
         Uint32 count,points,corners,fractional_camera;
@@ -401,7 +404,7 @@ struct GpuModel::Impl {
         SDL_GPUStorageBufferReadWriteBinding bindings[2]{};
         bindings[0].buffer=surface_materials;bindings[1].buffer=geometry_planes;
         bindings[0].cycle=bindings[1].cycle=true;
-        auto* pass=SDL_BeginGPUComputePass(command,nullptr,0,bindings,2);require(pass);
+        auto* pass=scene_counters::begin_compute_pass(command,nullptr,0,bindings,2);require(pass);
         SDL_BindGPUComputePipeline(pass,surface_pipeline);
         SDL_GPUBuffer* inputs[]{static_cast<SDL_GPUBuffer*>(camera),inputs_for_draw[6],inputs_for_draw[7],inputs_for_draw[8],inputs_for_draw[11]};
         SDL_BindGPUComputeStorageBuffers(pass,0,inputs,5);SDL_DispatchGPUCompute(pass,(settings.count+31)/32,1,1);SDL_EndGPUComputePass(pass);
@@ -441,7 +444,7 @@ void GpuModel::release_device()noexcept {
 GpuRasterOutput GpuModel::enqueue(void* device,void* command,const assets::Shape& shape,const RenderPose& unjittered_pose,
     const RenderSettings& settings,std::uint32_t width,std::uint32_t height,bool surface_metadata,const GpuRasterOutput* background,GpuModelDiagnostics* diagnostics,bool geometry_depth,GpuModelRaySource* ray_source,const RenderPose* previous_pose,std::array<float,2> raster_jitter,std::array<std::uint32_t,2> raster_size,GpuMsaaFaces* msaa_faces,unsigned msaa_samples,
     std::optional<GpuProjection::MotionSurfaceSettings>* deferred_motion,std::uint32_t painter_flags,bool in_place_background,const PreparedBspSource* source_topology,
-    const PreparedProjectionSource* source_projection,const GpuPreparedModelSource* gpu_source,const PreparedFacesSource* source_faces,const PreparedRayTopology* source_rays) {
+    const PreparedProjectionSource* source_projection,const GpuPreparedModelSource* gpu_source,const PreparedFacesSource* source_faces,const PreparedRayTopology* source_rays,bool bounded_raster,bool compact_tiles) {
     if(msaa_faces) *msaa_faces={};
     impl_->last_upload={};
     if(deferred_motion) deferred_motion->reset();
@@ -455,7 +458,7 @@ GpuRasterOutput GpuModel::enqueue(void* device,void* command,const assets::Shape
 #if defined(STARFOX_SDL_GPU_EFFECTS)
     try {
         if(SDL_getenv("STARFOX_TRACE_GPU_MODEL_DISPATCH")) std::cerr<<"model-enqueue: "<<shape.name<<'\n';
-        if(!device || !command || !width || !height || width>32767 || height>32767 || settings.render_scale<1 || settings.render_scale>10)
+        if(!device || !command || !width || !height || width>32767 || height>32767 || settings.render_scale<1 || settings.render_scale>max_gpu_render_scale)
             throw std::runtime_error("Invalid GPU model input");
         if(previous_pose && background)
             throw std::runtime_error("Temporal model draws must be merged after motion generation");
@@ -485,7 +488,7 @@ GpuRasterOutput GpuModel::enqueue(void* device,void* command,const assets::Shape
             pose.vanish_y+=raster_jitter[1]/scale_y;
         }
         if(pose.simple_scaled_sprite) {
-            auto output=impl_->billboard(device,command,shape,pose,settings,width,height,surface_metadata,background,raster_size,raster_jitter,geometry_depth,painter_flags,in_place_background,gpu_source);
+            auto output=impl_->billboard(device,command,shape,pose,settings,width,height,surface_metadata,background,raster_size,raster_jitter,geometry_depth,painter_flags,in_place_background,gpu_source,bounded_raster,compact_tiles);
             if(!output.pixels) throw std::runtime_error(impl_->raster.status());
             if(previous_pose && output.geometry_depth && !background
                 && previous_pose->simple_scaled_sprite
@@ -613,7 +616,7 @@ GpuRasterOutput GpuModel::enqueue(void* device,void* command,const assets::Shape
         const auto& faces=source_faces?source_faces->faces():local_faces;
         const auto vertex_count=std::uint32_t(vertices.continuous?vertices.continuous_input().size():vertices.native_input().size());
         if(!vertex_count || faces.polygons.empty()) {
-            auto output=impl_->raster.enqueue_row_spans(device,command,nullptr,0,raster_width,raster_height,surface_metadata,nullptr,true,background,false,0,0,0,nullptr,{},{},painter_flags,in_place_background);
+            auto output=impl_->raster.enqueue_row_spans(device,command,nullptr,0,raster_width,raster_height,surface_metadata,nullptr,true,background,false,0,0,0,nullptr,{},{},painter_flags,in_place_background,bounded_raster,compact_tiles);
             if(!output.pixels) throw std::runtime_error(impl_->raster.status());
             if(SDL_getenv("STARFOX_TEST_MODEL_PATH_RESULT")) ++impl_->model_path_draws[2];
             impl_->status="Empty GPU model cleared resident";return output;
@@ -741,7 +744,7 @@ GpuRasterOutput GpuModel::enqueue(void* device,void* command,const assets::Shape
             auto* copy=SDL_BeginGPUCopyPass(cmd);Impl::require(copy);offset=0;
             for(unsigned i=0;i<sizes.size();++i) if(changed[i]) {
                 SDL_GPUTransferBufferLocation from{impl_->upload,offset};SDL_GPUBufferRegion to{impl_->buffers[i],0,sizes[i]};
-                SDL_UploadToGPUBuffer(copy,&from,&to,true);offset+=sizes[i];
+                scene_counters::upload_buffer(copy,&from,&to,true);offset+=sizes[i];
             }
             SDL_EndGPUCopyPass(copy);
         }
@@ -835,7 +838,7 @@ GpuRasterOutput GpuModel::enqueue(void* device,void* command,const assets::Shape
             ss.fractional_normal=!pose.use_rotation_matrix || pose.subpixel_projection;
             if(ss.fractional_normal) {
                 const auto& normal_pose=vertices.continuous_poses[1];
-                for(unsigned i=0;i<3;++i) {ss.row0[i]=std::bit_cast<std::int32_t>(normal_pose.row0[i]);ss.row1[i]=std::bit_cast<std::int32_t>(normal_pose.row1[i]);ss.row2[i]=std::bit_cast<std::int32_t>(normal_pose.row2[i]);}
+                for(unsigned i=0;i<3;++i) {ss.row0[i]=starfox::bit_cast<std::int32_t>(normal_pose.row0[i]);ss.row1[i]=starfox::bit_cast<std::int32_t>(normal_pose.row1[i]);ss.row2[i]=starfox::bit_cast<std::int32_t>(normal_pose.row2[i]);}
             } else for(unsigned i=0;i<3;++i) {ss.row0[i]=pose.rotation_matrix[i];ss.row1[i]=pose.rotation_matrix[3+i];ss.row2[i]=pose.rotation_matrix[6+i];}
             materials=impl_->emit_surface(cmd,vertices.continuous?projected:camera,ss,b);
         }
@@ -865,7 +868,7 @@ GpuRasterOutput GpuModel::enqueue(void* device,void* command,const assets::Shape
         if(!colour_warp && SDL_getenv("STARFOX_TEST_SMALL_CLIP") && !SDL_getenv("STARFOX_TEST_FULL_CLIP")) for(const auto& polygon:faces.polygons)
             verified_corners=std::max(verified_corners,polygon[1]);
         auto* clipped=impl_->clip.enqueue(device,command,projected,clip_corners,clip_polygons,visible,cs,vertices.continuous,
-            vertices.continuous?b[10]:camera,vertices.continuous?cs.polygon_count:vertex_count,point_residuals,point_residuals?cs.point_count:0,verified_corners);
+            vertices.continuous?b[10]:camera,vertices.continuous?cs.polygon_count:vertex_count,point_residuals,point_residuals?cs.point_count:0,verified_corners,settings.render_scale,raster_size);
         if(!clipped) throw std::runtime_error(impl_->clip.status());
         // Diagnostic boundary only: separate exact clipping/material setup
         // from row-span construction without another pass or submission.
@@ -878,7 +881,7 @@ GpuRasterOutput GpuModel::enqueue(void* device,void* command,const assets::Shape
         const bool repeated_rows=(pose.wobble_mode&1U)!=0;
         auto* spans=impl_->clip.enqueue_spans(command,materials,custom_raster || settings.render_scale>1,settings.render_scale,colour_warp?nullptr:&order,settings.wireframe_thickness,
             repeated_rows?b[9]:nullptr,repeated_rows?std::uint32_t(faces.texels.size()):0,repeated_rows?&masked_texels:nullptr,raster_size,
-            diagnostics==nullptr,repeated_rows && msaa_faces!=nullptr?msaa_samples:0);
+            diagnostics==nullptr,repeated_rows && msaa_faces!=nullptr?msaa_samples:0,compact_tiles);
         if(!spans) throw std::runtime_error(impl_->clip.status());
         if(SDL_getenv("STARFOX_TEST_MODEL_PATH_RESULT")) ++impl_->model_path_draws[0];
         if(SDL_getenv("STARFOX_TEST_MODEL_STYLE_RESULT") && pose.wobble_mode<=3) {
@@ -903,7 +906,7 @@ GpuRasterOutput GpuModel::enqueue(void* device,void* command,const assets::Shape
             float((vertices.continuous?pose.vanish_y:vertices.native_pose.vanish[1])*scale_y)};
         mark_model_gpu_time(command);
         auto output=impl_->raster.enqueue_row_spans(device,command,spans,slots,raster_width,raster_height,surface_metadata,repeated_rows?masked_texels:b[9],true,background,pose.wave_mode,pose.wave_offset,pose.animation_frame,
-            repeated_rows?impl_->clip.mask_buffer_bytes():std::uint32_t(faces.texels.size()),planar_depth?&depth_input:nullptr,{},{},painter_flags,in_place_background);
+            repeated_rows?impl_->clip.mask_buffer_bytes():std::uint32_t(faces.texels.size()),planar_depth?&depth_input:nullptr,{},{},painter_flags,in_place_background,bounded_raster,compact_tiles);
         if(!output.pixels) throw std::runtime_error(impl_->raster.status());
         if(previous_pose && output.geometry_depth && !background && planar_depth
             && !pose.explosion_progress && !previous_pose->explosion_progress

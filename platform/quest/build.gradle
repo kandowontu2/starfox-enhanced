@@ -4,12 +4,16 @@ android {
     namespace 'com.starfox.enhanced.quest'
     compileSdk 35
     ndkVersion '28.2.13676358'
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
     defaultConfig {
         applicationId 'com.starfox.enhanced.quest'
         minSdk 29
         targetSdk 35
-        versionCode 13
-        versionName '0.0.8-vr-dev'
+        versionCode 14
+        versionName '0.0.8-quest3-local.2'
         externalNativeBuild {
             cmake {
                 targets 'starfox_quest'

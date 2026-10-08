@@ -1,0 +1,47 @@
+STAR FOX ENHANCED - STEAM FRAME DEVELOPMENT BUILD
+
+This is a native Linux ARM64 OpenXR build. It requires the Steam Frame system
+Vulkan driver and an active OpenXR runtime. The package does not include a
+cartridge, generated Starfox-Assets.BIN, soundtrack pack, save data, or Vulkan
+driver files.
+
+Prepare Starfox-Assets.BIN from your own supported, unmodified retail ROM with
+the matching starfox_asset_builder from a desktop build. Copy the generated
+BIN to:
+
+  $XDG_DATA_HOME/StarFoxEnhanced/Starfox-Assets.BIN
+
+If XDG_DATA_HOME is unset or relative, the default is:
+
+  $HOME/.local/share/StarFoxEnhanced/Starfox-Assets.BIN
+
+The same directory stores saves, preferences, and the shader cache. Package
+files can remain read-only. Run LAUNCH-STEAM-FRAME.sh from any working
+directory. To choose another asset bundle, data directory, or optional MSU-1
+pack, pass --bundle PATH, --data-dir PATH, or --msu PATH. Run
+starfox_steamframe --help for startup options.
+
+Native Frame controls: A brake, B bomb, X shoot, Y boost; bumpers roll.
+Menu is source Start/pause; View is source Select. Cartridge control type and
+face-button swap options still apply to gameplay.
+
+Menu + View, held for half a second, opens this game's runtime menu, which is
+its VR settings. Use the stick/D-pad to move and A or Menu to confirm; B or a short
+View press goes back.
+OPTIONS > VR PRESENTATION selects the existing camera
+(default) or pilot/cockpit view, world scale, head translation strength,
+cockpit XYZ origin calibration, and RECENTER. OPTIONS > HAPTICS STRENGTH sets
+the vibration strength (default 60%). Head translation preserves IPD.
+Hold View for 1 second to recentre (keeps your height); hold 3 seconds to
+recentre and recalibrate height. Both buzz both controllers.
+RESET GAME (runtime menu, with a confirm) restarts at the start menu and keeps
+saves. QUIT TO STEAM, then YES / QUIT TO STEAM, ends the session and exits;
+NO / BACK returns.
+
+Optional environment overrides (set before launch, not saved): SFX_VR_HAPTICS
+(0 to 1 haptics strength), SFX_VR_TIMING_GPU (1 enables GPU timing in the
+[vr-perf] log line) and SFX_VR_REFRESH_RATE (target Hz, default 90).
+
+No ROM, generated BIN, private music, saves, or keys are included or should be
+redistributed with this package. See docs/STEAM-FRAME.md in the source repository for what has and hasn't
+been tested on a headset.

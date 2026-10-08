@@ -13,7 +13,7 @@ struct Fake {
     std::deque<XrSessionState> events;
     std::deque<XrEventDataReferenceSpaceChangePending> origin_changes;
     std::vector<int> calls;
-    bool render=true,tracked=true,fail_space=false,fail_locate=false;
+    bool render=true,tracked=true,fail_space=false,fail_locate=false,fail_exit=false;
     uint32_t submitted=99;
     XrTime submitted_time{};
     XrTime predicted_time{123456};
@@ -51,6 +51,7 @@ XrResult XRAPI_PTR begin(XrSession,const XrSessionBeginInfo* info) {
     fake.calls.push_back(3);return XR_SUCCESS;
 }
 XrResult XRAPI_PTR stop(XrSession) {fake.calls.push_back(8);return XR_SUCCESS;}
+XrResult XRAPI_PTR request_exit(XrSession) {fake.calls.push_back(11);return fake.fail_exit?XR_ERROR_SESSION_NOT_RUNNING:XR_SUCCESS;}
 XrResult XRAPI_PTR wait(XrSession,const XrFrameWaitInfo*,XrFrameState* out) {
     fake.calls.push_back(4);out->predictedDisplayTime=fake.predicted_time;out->predictedDisplayPeriod=11111;
     out->shouldRender=fake.render;return XR_SUCCESS;
@@ -73,7 +74,7 @@ XrResult XRAPI_PTR views(XrSession,const XrViewLocateInfo* info,XrViewState* sta
     }
     return XR_SUCCESS;
 }
-SessionApi api() {return {create,destroy,space,destroy_space,modes,poll,begin,stop,wait,begin_frame,end_frame,views};}
+SessionApi api() {return {create,destroy,space,destroy_space,modes,poll,begin,stop,wait,begin_frame,end_frame,views,request_exit};}
 void start(OpenXrSession& session) {
     int graphics_binding=1;
     require(session.initialize(handle<XrInstance>(1),7,&graphics_binding),"session initialization failed");
@@ -147,6 +148,40 @@ int main() try {
         require(s.poll_events() && s.exit_requested() && !s.begin_frame(),"loss did not stop frame production");
     }
     require(fake.calls[fake.calls.size()-2]==9 && fake.calls.back()==10,"space/session destruction order wrong");
+    // Quit to Steam: xrRequestExitSession, then the runtime's STOPPING and
+    // EXITING events end the session cleanly (xrEndSession in between).
+    fake=Fake{};
+    {
+        OpenXrSession s(api());int binding=1;
+        require(!s.request_exit(),"exit request accepted without a session");
+        require(s.initialize(handle<XrInstance>(1),7,&binding),"exit fixture init failed");
+        fake.events.push_back(XR_SESSION_STATE_READY);fake.events.push_back(XR_SESSION_STATE_FOCUSED);
+        require(s.poll_events() && s.running() && !s.exit_requested() && !s.exit_in_progress(),"exit fixture not running");
+        require(s.request_exit() && s.exit_in_progress() && !s.exit_requested()
+            && fake.calls.back()==11 && s.running(),"running session did not request exit from the runtime");
+        const auto calls=fake.calls.size();
+        require(s.request_exit() && fake.calls.size()==calls,"exit request repeated");
+        fake.events.push_back(XR_SESSION_STATE_STOPPING);
+        require(s.poll_events() && !s.running() && !s.exit_requested() && fake.calls.back()==8,
+            "STOPPING after exit request did not end the session");
+        fake.events.push_back(XR_SESSION_STATE_EXITING);
+        require(s.poll_events() && s.exit_requested() && !s.begin_frame(),"EXITING did not finish the exit");
+    }
+    fake=Fake{};
+    {
+        OpenXrSession s(api());int binding=1;
+        require(s.initialize(handle<XrInstance>(1),7,&binding),"idle exit fixture init failed");
+        require(s.request_exit() && s.exit_requested() && fake.calls.back()!=11,
+            "a session that never began must exit without asking the runtime");
+    }
+    fake=Fake{};fake.fail_exit=true;
+    {
+        OpenXrSession s(api());int binding=1;
+        require(s.initialize(handle<XrInstance>(1),7,&binding),"refused exit fixture init failed");
+        fake.events.push_back(XR_SESSION_STATE_READY);require(s.poll_events() && s.running(),"refused exit fixture not running");
+        require(!s.request_exit() && s.exit_requested() && !s.running()
+            && s.status().find("Request OpenXR session exit")!=std::string::npos,"refused exit request not reported");
+    }
     fake=Fake{};fake.fail_space=true;
     {
         OpenXrSession s(api());int binding=1;

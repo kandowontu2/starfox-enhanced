@@ -1,7 +1,7 @@
 #include "starfox/vr/shape_batch.hpp"
 #include <algorithm>
 #include <unordered_map>
-#include <map>
+#include "starfox/vr/decal_surface.hpp"
 namespace starfox::vr {
 bool build_shape_batch(const assets::Shape& shape,const ShapeMesh& mesh,const render::RenderPose& pose,
     std::size_t depth,const std::array<int8_t,3>& light,std::span<const render::Rgba8> palette,
@@ -20,21 +20,17 @@ bool build_shape_batch(const assets::Shape& shape,const ShapeMesh& mesh,const re
         materials.push_back(render::face_material(shape,shape.faces[i],pose.colour_frame,depth,light,pose,std::nullopt,base));
         has_textures|=materials.back().texture!=nullptr;
     }
-    // The source uses painter-order decals (notably Mario/Luigi's eyes): a
-    // textured polygon repeats a skin polygon's exact positions. Depth alone
-    // cannot distinguish them. Detect these authored overlays without moving
-    // ordinary textured surfaces or disabling occlusion for the whole model.
-    std::map<std::vector<std::array<float,3>>,std::size_t> solid_surfaces;
+    // Classify authored coplanar overlays before either packet path projects them.
+    std::vector<DecalSurface> solid_surfaces;
+    const auto surface=[&](const ShapeMeshFace& face) {
+        DecalSurface points;
+        for(auto index:face.indices) points.push_back({mesh.vertices[index].position});
+        return points;
+    };
     if(has_textures && !pose.explosion_progress) for(const auto& face:mesh.faces) {
-        if(face.sprite || face.indices.size()<3) continue;
-        const auto& material=materials[face.source_face];
-        if(material.texture) continue;
-        std::vector<std::array<float,3>> key;
-        for(auto index:face.indices) {
-            if(index>=mesh.vertices.size()) return fail("Invalid mesh face vertex");
-            key.push_back(mesh.vertices[index].position);
-        }
-        std::sort(key.begin(),key.end());solid_surfaces.emplace(std::move(key),face.source_face);
+        if(face.sprite || face.indices.size()<3 || materials[face.source_face].texture) continue;
+        for(auto index:face.indices) if(index>=mesh.vertices.size()) return fail("Invalid mesh face vertex");
+        solid_surfaces.push_back(surface(face));
     }
     std::vector<ShapeFaceInstance> instances;
     if(pose.explosion_progress) {
@@ -103,10 +99,10 @@ bool build_shape_batch(const assets::Shape& shape,const ShapeMesh& mesh,const re
             prototype.texture[0]=found->second;prototype.texture[1]=texture.u_mask;
             prototype.texture[2]=texture.v_mask;prototype.texture[3]=1U|(srgb?2U:0U);
             if(!face.sprite && !pose.explosion_progress) {
-                std::vector<std::array<float,3>> key;
-                for(auto index:face.indices) key.push_back(mesh.vertices[index].position);
-                std::sort(key.begin(),key.end());
-                if(solid_surfaces.contains(key)) prototype.texture[3]|=32768U;
+                const auto overlay=surface(face);
+                if(std::any_of(solid_surfaces.begin(),solid_surfaces.end(),[&](const auto& solid) {
+                    return decal_surface_contains(solid,overlay);
+                })) prototype.texture[3]|=32768U;
             }
         } else if(!apply_scene_material(prototype,material,palette,base,scale,srgb)) return fail("Invalid GPU material palette/dither scale");
         if(pose.explosion_progress) {

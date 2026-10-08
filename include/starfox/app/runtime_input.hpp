@@ -213,6 +213,9 @@ struct PregameSettings {
     std::uint8_t renderer_backend{}; // AUTO/Vulkan/D3D12/D3D11/Metal/GLES; host-only preference.
     std::uint8_t dlss45_mode{}; // Separate from standard DLSS; OFF/QUALITY/BALANCED/PERFORMANCE/DLAA.
     bool leia_sr{}; // Native desktop display preference, independent of hardware availability.
+    std::uint8_t asteroid_models{}; // render::AsteroidModels: 0=SPRITE, 1-3=SUPER FX LOW/MEDIUM/HIGH.
+    // 0=GPU ACCURATE (default), 1=GPU FAST. Optional key GPU_RENDERER.
+    std::uint8_t gpu_renderer{};
 
     [[nodiscard]] bool operator==(const PregameSettings&) const = default;
 };

@@ -91,6 +91,12 @@ The optional `Starfox-MSU1.PAK` companion uses SunlitSpace542's
 which is based on Aelieth's Church of Kondo set with additions and remapping
 for Sunlit's patch. The pack README also thanks qwertymodo for MSUPCM++.
 
+## 3D asteroid models
+
+The SUPER FX STYLE asteroid models (3D OPTIONS > 3D ASTEROIDS) are by
+CarltonCracker, MIT licensed; see
+[assets/models/asteroids](assets/models/asteroids/README.md).
+
 ## Libraries and legal notices
 
 Library authors, pinned revisions, licences, and the MSU asset notice are in

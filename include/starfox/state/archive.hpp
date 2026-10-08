@@ -1,5 +1,7 @@
 #pragma once
 
+#include "starfox/compat/bit_cast.hpp"
+
 #include <array>
 #include <algorithm>
 #include <bit>
@@ -33,7 +35,7 @@ private:
             bytes_.push_back(field ? 1U : 0U);
         } else {
             using U = std::make_unsigned_t<T>;
-            const auto bits = std::bit_cast<U>(field);
+            const auto bits = starfox::bit_cast<U>(field);
             for (unsigned i=0; i<sizeof(T); ++i)
                 bytes_.push_back(static_cast<std::uint8_t>(bits >> (i*8U)));
         }
@@ -43,7 +45,7 @@ private:
     template<std::floating_point T> void value(T field) {
         static_assert(sizeof(T)==4 || sizeof(T)==8);
         using U = std::conditional_t<sizeof(T)==4, std::uint32_t, std::uint64_t>;
-        value(std::bit_cast<U>(field));
+        value(starfox::bit_cast<U>(field));
     }
     template<class T, std::size_t N> void value(const std::array<T,N>& fields) {
         for (const auto& field : fields) value(field);
@@ -106,7 +108,7 @@ private:
             U bits{};
             for (unsigned i=0;i<sizeof(T);++i)
                 bits |= static_cast<U>(static_cast<U>(bytes_[i]) << (i*8U));
-            field=std::bit_cast<T>(bits);
+            field=starfox::bit_cast<T>(bits);
         }
         bytes_=bytes_.subspan(sizeof(T));
     }
@@ -117,7 +119,7 @@ private:
     template<std::floating_point T> void value(T& field) {
         static_assert(sizeof(T)==4 || sizeof(T)==8);
         using U = std::conditional_t<sizeof(T)==4,std::uint32_t,std::uint64_t>;
-        U bits{}; value(bits); field=std::bit_cast<T>(bits);
+        U bits{}; value(bits); field=starfox::bit_cast<T>(bits);
     }
     template<class T,std::size_t N> void value(std::array<T,N>& fields) {
         for (auto& field:fields) value(field);

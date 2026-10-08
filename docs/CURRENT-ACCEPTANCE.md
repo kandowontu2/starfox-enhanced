@@ -1,5 +1,18 @@
 # Current acceptance index
 
+October 8 collaboration snapshot follow-up: R88 trial25557 completed with
+exit1 (51c3a2): the sRGB moving lava/mirror cohort rejected the required curved
+model reuse coverage (zero admitted curved-model paths). Earlier water cohorts
+and static R86 passes remain valid; full moving-owner acceptance is not achieved.
+The experimental production opt-in remains OFF. R87 trial41342 completed
+exit0 (e6b0c5), with941379 native model-stream checks: Fortuna reached boss,
+damage, results and map at phases12096/15823/17784/18195, including120
+consecutive fully visible map frames,195 full-LCD water comparisons and34
+source painter comparisons across the complete route. These are host
+source/policy checks, not ARM gameplay, native PICA pixels or hardware FPS.
+Both frozen trial processes are now absent (bde93e). The historical in-progress
+entry below records the earlier observation, not the current terminal state.
+
 October 8 R88 real source-owner motion qualification: build/eight hosts PASS;
 fixed-eye rigid-model/wave native trial25557 LIVE; normal opt-in OFF:
 

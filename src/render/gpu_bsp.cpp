@@ -1,4 +1,5 @@
 #include "starfox/render/gpu_bsp.hpp"
+#include "starfox/render/gpu_scene_counters.hpp"
 #if defined(STARFOX_SDL_GPU_EFFECTS)
 #include <SDL3/SDL.h>
 #include "starfox/render/gpu_preparation.hpp"
@@ -117,7 +118,7 @@ GpuBspOutput GpuBsp::enqueue(void* device,void* command,void* nodes,void* visibi
         SDL_GPUStorageBufferReadWriteBinding writes[2]{};
         writes[0].buffer=impl_->order;writes[1].buffer=impl_->results;
         writes[0].cycle=writes[1].cycle=true;
-        auto* pass=SDL_BeginGPUComputePass(cmd,nullptr,0,writes,2);Impl::require(pass);
+        auto* pass=scene_counters::begin_compute_pass(cmd,nullptr,0,writes,2);Impl::require(pass);
         SDL_BindGPUComputePipeline(pass,impl_->pipeline);
         SDL_GPUBuffer* inputs[]{static_cast<SDL_GPUBuffer*>(nodes),static_cast<SDL_GPUBuffer*>(visibility),
             static_cast<SDL_GPUBuffer*>(faces),static_cast<SDL_GPUBuffer*>(trees)};

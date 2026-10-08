@@ -29,7 +29,7 @@ cbuffer Settings:register(b0,space2) {
     uint texel_bytes,reserved1,reserved2,painterFlags;
     uint want_depth,plane_count,has_back_depth,depth_padding;
     float4 depth_projection; // focal x/y, center x/y in output pixels.
-    float2 rasterJitter;uint2 jitterPadding;
+    float2 rasterJitter;uint2 jitterPadding; // jitterPadding.x: compact list length in uints
 };
 // Source wave arithmetic uses signed 16-bit wrapping before both phase steps.
 int waveShift(int x,int offset,uint frame) {
@@ -74,6 +74,10 @@ void main(uint3 id:SV_DispatchThreadID,uint3 group:SV_GroupID,uint lane:SV_Group
 #else
 void main(uint3 id:SV_DispatchThreadID) {
 #endif
+    // GPU FAST stores bounded origin control separately from painter flags.
+#if !defined(STARFOX_SINGLE_FACE_RASTER) && !defined(STARFOX_MASK_TILE_RASTER) && !defined(STARFOX_ROW_TILE_RASTER)
+    if((painterFlags&0x40000000u)!=0) id.xy+=uint2(rows[12],rows[13]);
+#endif
     uint outputWidth=reserved1!=0?reserved1:width,outputHeight=reserved2!=0?reserved2:height;
     if(id.x>=outputWidth || id.y>=outputHeight) return;
     uint outputIndex=id.y*outputWidth+id.x;
@@ -108,7 +112,7 @@ void main(uint3 id:SV_DispatchThreadID) {
     bool tiled_spans=row_spans && (padding&0x80000000U)!=0;
 #endif
     int wave_delta=wave_rows?waveShift(int(id.x),int((padding>>1)&65535U),(padding>>17)&15U):0;
-    bool in_place=depth_padding!=0;
+    bool in_place=(depth_padding&1u)!=0 || (painterFlags&0x80000000u)!=0;
     // Last covering command wins, as in the source painter. Surface metadata
     // survives later non-surface lines/sprites, matching SurfaceBuffer::set.
     uint row=id.y*((width+63)/64)+id.x/64;
@@ -118,13 +122,32 @@ void main(uint3 id:SV_DispatchThreadID) {
 #endif
     uint begin=row_spans?0:rows[row];
     if(tiled_spans) begin=row*((reserved&0x3fffffffU)+1)+1;
+    // GPU FAST compact lists (raster_bins stages 10-14): CSR offsets per box
+    // tile, box in rows[11..14]. An overflowed fill walks every polygon.
+#if defined(STARFOX_SINGLE_FACE_RASTER) || defined(STARFOX_MASK_TILE_RASTER) || defined(STARFOX_ROW_TILE_RASTER)
+    bool compact_spans=false;
+#else
+    bool compact_spans=row_spans && !tiled_spans && (padding&0x40000000U)!=0;
+#endif
+    uint compact_end=0;
+    if(compact_spans) {
+        uint tiles=((width+63)/64)*height,entries=tiles+1+(tiles+63)/64+1;
+        uint box_tiles=rows[14];
+        if(entries+indices[box_tiles]>jitterPadding.x) compact_spans=false;
+        else {
+            uint column=(id.x-rows[12])/64,box_row=id.y-rows[13];
+            bool inside=id.x>=rows[12] && id.y>=rows[13] && column<rows[11] && box_row*rows[11]+column<box_tiles;
+            uint tile=box_row*rows[11]+column;
+            begin=inside?entries+indices[tile]:0;compact_end=inside?entries+indices[tile+1]:0;
+        }
+    }
     // The ordered owner explicitly lends a fully initialized canonical target.
     // Empty tiles need neither a background fetch nor any output write.
     if(in_place && tiled_spans && indices[begin-1]==0) return;
 #if defined(STARFOX_SINGLE_FACE_RASTER)
     [unroll] for(uint cursor=1;cursor>0;) {
 #else
-    for(uint cursor=tiled_spans?begin+indices[begin-1]:row_spans?(reserved&0x3fffffffU)*(wave_rows?2U:1U):rows[row+1];cursor>begin;) {
+    for(uint cursor=compact_spans?compact_end:tiled_spans?begin+indices[begin-1]:row_spans?(reserved&0x3fffffffU)*(wave_rows?2U:1U):rows[row+1];cursor>begin;) {
 #endif
 #if defined(STARFOX_ROW_TILE_RASTER) || defined(STARFOX_MASK_TILE_RASTER)
         // Walk only live commands, in exact descending painter order. Empty
@@ -140,7 +163,7 @@ void main(uint3 id:SV_DispatchThreadID) {
         int source_y=int(id.y)-(wave_candidate?wave_delta:0);
         if(source_y<0 || source_y>=int(height)) continue;
         uint polygon=wave_rows?cursor/2U:cursor;
-        uint command_index=tiled_spans?indices[cursor]:row_spans?polygon*height+uint(source_y):indices[cursor+(sparse?height*((width+63)/64):0)];
+        uint command_index=(tiled_spans || compact_spans)?indices[cursor]:row_spans?polygon*height+uint(source_y):indices[cursor+(sparse?height*((width+63)/64):0)];
         uint owner=command_index+1;
         // Sparse atomic scatter is unordered. Once both independent owners
         // outrank this command, neither coverage nor texture transparency
@@ -298,11 +321,11 @@ void main(uint3 id:SV_DispatchThreadID) {
     if((painterFlags&1u)!=0 && have_pixel && nativeTag(packed)==1u) packed|=0x10000000u;
     if(has_back!=0) {
         uint back=in_place?pixels[outputIndex]:back_pixels[id.y*width+id.x];
-        if(!have_pixel) packed=(packed&0x01ff0000U)|(back&0x9c00ffffU);
+        if(!have_pixel) packed=(packed&0x01ff0000U)|(back&0xbc00ffffU);
 #if !defined(STARFOX_PIXEL_ONLY_RASTER)
         if(want_depth!=0 && !have_pixel && has_back_depth!=0) depth=in_place?geometry_depth[outputIndex]:back_depth[id.y*width+id.x];
         if((packed&0x01000000U)==0 && has_back_surface!=0 && (back&0x01000000U)!=0) {
-            packed=(packed&0x9c00ffffU)|(back&0x01ff0000U);
+            packed=(packed&0xbc00ffffU)|(back&0x01ff0000U);
             surface=in_place?surfaces[outputIndex]:back_surfaces[id.y*width+id.x];
         }
 #endif

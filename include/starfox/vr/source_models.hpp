@@ -2,6 +2,7 @@
 #include "starfox/vr/game_scene.hpp"
 #include "starfox/vr/draw_packet.hpp"
 #include "starfox/assets/shape_decoder.hpp"
+#include "starfox/render/asteroid_models.hpp"
 #include "starfox/vr/scene_interpolation.hpp"
 #include "starfox/vr/source_span_model.hpp"
 #include <unordered_map>
@@ -61,11 +62,12 @@ public:
         double alpha,bool srgb_target=false,float units_per_metre=256,bool gpu=false,bool fixed_landscape_height=false) const;
     SourceModelPackets assemble(const GameSceneSnapshot&,bool srgb_target=false,float units_per_metre=256);
     SourceModelPackets assemble_interpolated(const GameSceneSnapshot& previous,const GameSceneSnapshot& current,
-        double alpha,bool srgb_target=false,float units_per_metre=256,bool fixed_landscape_height=false);
+        double alpha,bool srgb_target=false,float units_per_metre=256,bool fixed_landscape_height=false,bool cpu_pilot_rig=false);
     // Same ordered world passes used by the live app and headless preflight:
     // grid, dust, then native model/shadow order. Does not include PPU overlays.
     SourceModelPackets assemble_world_interpolated(const GameSceneSnapshot& previous,
-        const GameSceneSnapshot& current,double alpha,bool srgb_target=false,bool surround_stars=false);
+        const GameSceneSnapshot& current,double alpha,bool srgb_target=false,bool surround_stars=false,bool cpu_pilot_rig=false);
+    void set_asteroid_models(render::AsteroidModels mode) noexcept {asteroid_models_=mode;}
 private:
     struct GeometryKey {
         const assets::Shape* shape{};
@@ -88,17 +90,20 @@ private:
     bool cache_geometry_{};
     bool compute_solids_{};
     bool compute_shadows_{true};
+    render::AsteroidModels asteroid_models_{};
     DrawPacket connected_grid_pose(const GameSceneSnapshot&,const timing::RenderTransform&,
         const simulation::MatrixQ15&,bool,bool gpu=false) const;
     DrawPacket grid_pose(const GameSceneSnapshot&,const timing::RenderTransform&,
         const simulation::MatrixQ15&,bool,float,bool gpu=false) const;
     DrawPacket dust_pose(const GameSceneSnapshot&,const timing::RenderTransform&,
         const simulation::MatrixQ15&,bool,float,bool gpu=false) const;
-    SourceModelPackets assemble_poses(const GameSceneSnapshot&,std::span<const render::RenderPose>,std::span<const render::RenderPose>,bool,float,double);
+    SourceModelPackets assemble_poses(const GameSceneSnapshot&,std::span<const render::RenderPose>,std::span<const render::RenderPose>,bool,float,double,bool cpu_pilot_rig=false);
     SceneInterpolationRules interpolation_;
     const assets::RomImage* rom_{};
     uint32_t scaled_font_{},scaled_messages_{},star_colours_{};
     uint16_t intro_laser_shape_{};
+    uint16_t pilot_shape_{}; // MY_DEMOS, drawn for the player in the cockpit rig
+    std::array<uint16_t,4> flight_shapes_{}; // MYSHIP_4/L/R/B, replaced by pilot_shape_
     std::array<uint32_t,4> intro_showcase_strategies_{};
     assets::ShapeDecoder decoder_;
     std::array<uint16_t,3> colours_{};

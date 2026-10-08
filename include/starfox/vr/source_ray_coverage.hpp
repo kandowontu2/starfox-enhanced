@@ -1,4 +1,6 @@
 #pragma once
+
+#include "starfox/compat/bit_cast.hpp"
 #include "starfox/vr/source_ray_topology.hpp"
 #include "starfox/render/dxr_shadows.hpp"
 #include <bit>
@@ -36,7 +38,7 @@ inline bool source_ray_coverage(const render::PackedFaces& faces,
             const auto index=triangle[corner];
             if(index>=faces.corners.size() || index<polygon[0] || uint64_t(index)>=uint64_t(polygon[0])+polygon[1]) return false;
             if(coverage.flags) for(unsigned axis=0;axis<2;++axis) {
-                const auto scroll=std::bit_cast<int32_t>(axis?material.reserved1:material.reserved0);
+                const auto scroll=starfox::bit_cast<int32_t>(axis?material.reserved1:material.reserved0);
                 const double uv=double(faces.corners[index][axis+1])+scroll;
                 if(uv < -1e8 || uv > 1e8) return false;
                 coverage.uv[corner*2+axis]=float(uv);

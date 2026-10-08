@@ -22,6 +22,7 @@ unsigned submissions{},idles{},pool_destroys{},fence_destroys{};
 unsigned shader_destroys{},draws{};
 VkPrimitiveTopology expected_topology=VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 unsigned expected_vertex_count=3;
+bool expected_depth_test=false,expected_depth_write=false;
 std::array<unsigned char,1024> uploaded{};
 unsigned flushes{},unmaps{},buffers_destroyed{},memory_freed{};
 bool fail_flush{};
@@ -57,6 +58,8 @@ VKAPI_ATTR void VKAPI_CALL destroy_layout(VkDevice,VkPipelineLayout,const VkAllo
 VKAPI_ATTR VkResult VKAPI_CALL create_pipeline(VkDevice,VkPipelineCache,uint32_t count,const VkGraphicsPipelineCreateInfo* info,const VkAllocationCallbacks*,VkPipeline* out) {
     require(count==1 && info->stageCount==2 && info->pVertexInputState->vertexAttributeDescriptionCount==15);
     require(info->pDynamicState->dynamicStateCount==2 && info->pInputAssemblyState->topology==expected_topology);
+    require(bool(info->pDepthStencilState->depthTestEnable)==expected_depth_test
+        && bool(info->pDepthStencilState->depthWriteEnable)==expected_depth_write);
     *out=handle<VkPipeline>(1);return VK_SUCCESS;
 }
 VKAPI_ATTR void VKAPI_CALL destroy_pipeline(VkDevice,VkPipeline,const VkAllocationCallbacks*) {}
@@ -146,7 +149,19 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL get(VkDevice,const char* name) {
     return nullptr;
 }
 }
-int main() try {
+int main(int argc,char** argv) try {
+    if(argc==2 && std::string_view(argv[1])=="--cockpit-depth-only") {
+        VulkanScenePipeline pipeline;
+        require(pipeline.initialize(handle<VkDevice>(1),get,handle<VkRenderPass>(1)));
+        expected_depth_test=true;expected_depth_write=false;
+        require(pipeline.initialize(handle<VkDevice>(1),get,handle<VkRenderPass>(1),true,
+            SceneTopology::triangles,VK_NULL_HANDLE,SceneBlend::opaque,nullptr,false));
+        expected_depth_write=true;
+        require(pipeline.initialize(handle<VkDevice>(1),get,handle<VkRenderPass>(1),true));
+        std::cout<<"Cockpit HUD depth-read/no-write and unchanged default/world pipeline policy passed (mock Vulkan)\n";
+        return 0;
+    }
+    require(argc==1);
     {
         SceneVertex vertex{};
         starfox::render::Palette256 palette{};palette[3]={128,64,255,128};palette[4]={255,0,0,255};
@@ -194,6 +209,10 @@ int main() try {
         require(pipeline.record(handle<VkCommandBuffer>(1),sizes[0],handle<VkBuffer>(1),3,camera));
         require(draws==1);
         expected_topology=VK_PRIMITIVE_TOPOLOGY_LINE_LIST;expected_vertex_count=2;
+        expected_depth_test=true;expected_depth_write=false;
+        require(pipeline.initialize(handle<VkDevice>(1),get,targets.render_pass(),true,
+            SceneTopology::lines,VK_NULL_HANDLE,SceneBlend::opaque,nullptr,false));
+        expected_depth_write=true;
         require(pipeline.initialize(handle<VkDevice>(1),get,targets.render_pass(),true,SceneTopology::lines));
         require(!pipeline.record(handle<VkCommandBuffer>(1),sizes[0],handle<VkBuffer>(1),3,camera));
         require(pipeline.record(handle<VkCommandBuffer>(1),sizes[0],handle<VkBuffer>(1),2,camera));
@@ -248,6 +267,13 @@ int main() try {
         const auto timing=draw.take_completion_timing();
         require(timing.eyes==2 && timing.total_ms>=timing.maximum_ms && timing.maximum_ms>=0);
         require(draw.take_completion_timing().eyes==0);
+    }
+    {
+        VulkanEyeCommands unsupported;
+        require(unsupported.initialize(handle<VkDevice>(1),handle<VkQueue>(1),2,get,
+            VulkanEyeCommands::TimestampConfig{0,1000.}));
+        require(!unsupported.gpu_timestamps_available()
+            && unsupported.timestamp_status().find("timestampValidBits is zero")!=std::string::npos);
     }
     targets.close();targets.close();
     require(destroyed_passes==1 && destroyed_views==4 && destroyed_frames==4);

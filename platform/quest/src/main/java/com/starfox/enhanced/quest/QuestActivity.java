@@ -1,6 +1,7 @@
 package com.starfox.enhanced.quest;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
@@ -53,14 +54,14 @@ public class QuestActivity extends Activity {
         panel.setPadding(padding, padding, padding, padding);
         status = new TextView(this);status.setTextSize(18);
         panel.addView(status);
-        importBundle = button(panel, "Import Starfox-Assets.BIN", () -> pick(PICK_BUNDLE));
-        button(panel, "Import Starfox-Assets.BIN from Downloads", this::importDownloads);
+        importBundle = button(panel, "Import ROM (.sfc/.smc) or Starfox-Assets.BIN", () -> pick(PICK_BUNDLE));
+        button(panel, "Import ROM or BIN from Downloads", this::importDownloads);
         start = button(panel, "Start VR", this::startSession);
         stopButton = button(panel, "Stop VR", () -> {stop.set(true);stopButton.setEnabled(false);});
         setContentView(panel);
         refreshInputs();
         if (inputsReady() && !isImportPanel()) startSession();
-        else status.setText("Create Starfox-Assets.BIN with the PC asset extractor, then import it here. It supplies both Original and EX. Existing saves and source files are preserved.");
+        else status.setText("Select your own unmodified Star Fox/Starwing ROM (.sfc/.smc, extracted from ZIP) or Starfox-Assets.BIN. Original and EX assets are prepared on this headset. Then choose Start VR.");
     }
 
     private Button button(LinearLayout panel, String label, Runnable action) {
@@ -86,7 +87,7 @@ public class QuestActivity extends Activity {
         intent.addCategory(Intent.CATEGORY_OPENABLE);intent.setType("*/*");
         try {startActivityForResult(intent, request);}
         catch (RuntimeException error) {
-            status.setText("This headset has no usable file picker. Put Starfox-Assets.BIN in Download, then choose Import from Downloads. Android will ask for file access; this importer reads only that named file.");
+            status.setText("This headset has no usable file picker. Put Starfox.sfc, Starfox.smc or Starfox-Assets.BIN in Download, then choose Import from Downloads. Android will ask for file access; only the selected named file is read.");
         }
     }
     private void importDownloads() {
@@ -97,7 +98,7 @@ public class QuestActivity extends Activity {
         }
         if (!Environment.isExternalStorageManager()) {
             awaitingDownloadsPermission = true;
-            status.setText("Allow file access in Android settings, then return. The importer reads only Download/Starfox-Assets.BIN; you may revoke access after import.");
+            status.setText("Allow file access in Android settings, then return. Choose Starfox.sfc, Starfox.smc or Starfox-Assets.BIN from Download; you may revoke access after import.");
             try {
                 startActivity(new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
                     Uri.parse("package:" + getPackageName())));
@@ -107,12 +108,20 @@ public class QuestActivity extends Activity {
             }
             return;
         }
-        File bundle = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Starfox-Assets.BIN");
-        if (!bundle.isFile()) {
-            status.setText("Not found: Download/Starfox-Assets.BIN. Copy the extracted BIN there and try again.");
+        File downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+        java.util.ArrayList<String> candidates = new java.util.ArrayList<>();
+        for (String name : new String[]{"Starfox.sfc", "Starfox.smc", "Starfox-Assets.BIN"}) {
+            if (new File(downloads, name).isFile()) candidates.add(name);
+        }
+        if (candidates.isEmpty()) {
+            status.setText("Not found: Download/Starfox.sfc, Starfox.smc or Starfox-Assets.BIN. Extract your ROM from ZIP, rename it Starfox.sfc and copy it to Download.");
             return;
         }
-        importSelected(Uri.fromFile(bundle));
+        if (candidates.size() == 1) importSelected(Uri.fromFile(new File(downloads, candidates.get(0))));
+        else new AlertDialog.Builder(this).setTitle("Choose input")
+            .setItems(candidates.toArray(new String[0]), (dialog, index) ->
+                importSelected(Uri.fromFile(new File(downloads, candidates.get(index)))))
+            .setNegativeButton("Cancel", null).show();
     }
     @Override @SuppressWarnings("deprecation") protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
@@ -125,12 +134,14 @@ public class QuestActivity extends Activity {
         final SessionGate.Lease lease = sessions.tryAcquire();
         if (lease == null) {status.setText("A VR session or import is still finishing. Please try again.");return;}
         final String name = "Starfox-Assets.BIN";
-        busy = true;refreshInputs();status.setText("Importing " + name + "...");
+        busy = true;refreshInputs();status.setText("Checking input and preparing Original + EX assets...");
         try {
             new Thread(() -> {
                 String message;
+                File staging = null, prepared = null;
                 try {
-                    File staging = inputFile(name + ".import");
+                    staging = inputFile(name + ".import");
+                    prepared = inputFile(name + ".prepared");
                     AtomicFile target = new AtomicFile(staging);
                     FileOutputStream output = null;
                     try {
@@ -142,19 +153,23 @@ public class QuestActivity extends Activity {
                         target.finishWrite(output);output = null;
                     } finally {if (output != null) target.failWrite(output);}
                     System.loadLibrary("SDL3");System.loadLibrary("starfox_quest");
-                    QuestBridge.validateBundle(staging.getAbsolutePath());
+                    QuestBridge.prepareInput(staging.getAbsolutePath(), prepared.getAbsolutePath());
                     AtomicFile installed = new AtomicFile(inputFile(name));
                     output = null;
                     try {
                         output = installed.startWrite();
-                        try (InputStream input = new java.io.FileInputStream(staging)) {
+                        try (InputStream input = new java.io.FileInputStream(prepared)) {
                             InputCopy.copy(input, output, 64L * 1024 * 1024);
                         }
                         installed.finishWrite(output);output = null;
                     } finally {if (output != null) installed.failWrite(output);}
                     message = "Imported and validated " + name + ". Original and EX are ready.";
                 } catch (Throwable error) {message = "Import failed; previous input retained: " + error;}
-                finally {lease.close(() -> {});}
+                finally {
+                    if (staging != null) new AtomicFile(staging).delete();
+                    if (prepared != null) prepared.delete();
+                    lease.close(() -> {});
+                }
                 final String resultMessage = message;
                 runOnUiThread(() -> {if (!isDestroyed()) {busy = false;refreshInputs();status.setText(resultMessage);}});
             }, "StarFox-Quest-Import").start();

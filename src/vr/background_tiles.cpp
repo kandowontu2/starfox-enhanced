@@ -1,4 +1,5 @@
 #include "starfox/vr/background_tiles.hpp"
+#include "starfox/compat/bit_cast.hpp"
 #include "starfox/vr/backdrop_texture.hpp"
 #include "starfox/vr/packed_vram.hpp"
 #include "starfox/render/palette.hpp"
@@ -408,7 +409,7 @@ void place_landscape_ground(DrawPacket& packet,float ground_y,bool gpu) {
             cached_source=packet.geometry.shared_vertices;cached_vertices=std::move(prepared);
         }
         packet.geometry.vertices.clear();packet.geometry.shared_vertices=cached_vertices;
-        packet.geometry.texels.push_back(std::bit_cast<uint32_t>(ground_y));
+        packet.geometry.texels.push_back(starfox::bit_cast<uint32_t>(ground_y));
         return;
     }
     auto vertices=std::make_shared<std::vector<SceneVertex>>(source.begin(),source.end());

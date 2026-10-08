@@ -1,4 +1,5 @@
 #include "starfox/simulation/particle_system.hpp"
+#include "starfox/compat/bit_cast.hpp"
 #include "starfox/state/archive.hpp"
 
 #include "starfox/simulation/math.hpp"
@@ -37,11 +38,11 @@ std::uint32_t rom_symbol(
 }
 
 std::uint8_t byte(std::int8_t value) noexcept {
-    return std::bit_cast<std::uint8_t>(value);
+    return starfox::bit_cast<std::uint8_t>(value);
 }
 
 std::int8_t signed_byte(std::uint8_t value) noexcept {
-    return std::bit_cast<std::int8_t>(value);
+    return starfox::bit_cast<std::int8_t>(value);
 }
 
 std::int8_t div2(std::int8_t value) noexcept {
@@ -112,7 +113,7 @@ std::uint16_t ParticleSystem::next_random() noexcept {
 }
 
 std::int8_t ParticleSystem::circle(std::size_t index) const {
-    return std::bit_cast<std::int8_t>(rom_->read8(
+    return starfox::bit_cast<std::int8_t>(rom_->read8(
         circle_table_ + static_cast<std::uint32_t>(index)));
 }
 

@@ -5,6 +5,8 @@ param(
     [string]$Symbols = 'upstream-ultrastarfox/SYMBOLS.TXT',
     [string]$Experience = 'ORIGINAL',
     [ValidateSet('vulkan','direct3d12','metal')][string]$GpuDriver = 'vulkan',
+    # FAST checks GPU FAST against the same CPU reference as ACCURATE.
+    [ValidateSet('ACCURATE','FAST')][string]$GpuRenderer = 'ACCURATE',
     [ValidatePattern('^[A-Za-z0-9_]+$')][string]$Level = 'LEVEL1_1',
     [int]$Ticks = 1000,
     [int]$Frames = 120,
@@ -25,7 +27,7 @@ param(
     [switch]$Bomb,
     [switch]$ScrambleWipe,
     [ValidateRange(0,3)][int]$Bloom=2,
-    [ValidateSet(1,2,4)][int[]]$Scales=@(1,2,4),
+    [ValidateRange(1,10)][int[]]$Scales=@(1,2,4),
     [switch]$FpsOverlay,
     [ValidateSet('','Slot','Exit')][string]$PanelOverlay='',
     [ValidateRange(-1,255)][int]$Message=-1
@@ -55,7 +57,7 @@ $env:STARFOX_TEST_PROFILE_WARMUP = "$Warmup"
 $env:STARFOX_TEST_UNPACED = '1'
 $env:STARFOX_TEST_PREROLL_TICKS = "$Ticks"
 $env:STARFOX_TEST_EXPERIENCE = $Experience
-$env:STARFOX_TEST_RENDERER = 'GPU'
+$env:STARFOX_TEST_RENDERER = if($GpuRenderer -eq 'FAST'){'GPU_FAST'}else{'GPU'}
 $env:STARFOX_TEST_PRESENTATION_FPS = "$PresentationFps"
 $env:STARFOX_TEST_SDL_GPU = '1'
 $env:STARFOX_DISABLE_GPU_NATIVE = '1'

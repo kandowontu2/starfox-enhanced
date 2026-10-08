@@ -13,6 +13,14 @@ EX headset presentation now
 omits the separate native cockpit shell without changing the cartridge camera
 or console views. Build and regression results belong to the investigation
 checkpoint, not to the already published APK.
+## Steam Frame
+
+I added a native Steam Frame target, see [STEAM-FRAME.md](STEAM-FRAME.md). It
+has its own loop and menu (`steam_frame_application.cpp` and `frame_menu.hpp`),
+which only `starfox_steamframe` turns on through `ApplicationHost::steam_frame`.
+PCVR and Quest keep running `application.cpp` and `startup_menu.hpp` as they
+were, so their input, menus, preferences and presentation are unchanged.
+`third_party/sfvr` is used by the Frame loop only.
 
 ## Current native Linux PCVR regression (September 23)
 

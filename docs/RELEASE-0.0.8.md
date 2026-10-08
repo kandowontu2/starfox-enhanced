@@ -88,6 +88,9 @@ supported retail ROM and game assets. No cartridge ROM or user save is included.
 - Improved Android GPU-startup recovery and runtime asset packaging. Android
   and Quest include the backdrop assets in bounded native resource units. The
   Windows downloads include a separate asset-builder package and setup guide.
+- Android and Quest APKs are included in the release downloads and signed with
+  the recovered permanent release certificate. CI verifies the certificate
+  fingerprint before attaching either package.
 - Updated release automation and package checks for Windows x64/x86, Xbox UWP,
   Linux, macOS, iOS, Android, Quest 3, PCVR, Nintendo Switch and PS Vita.
   Packages include their required notices and exclude ROMs and signing secrets.

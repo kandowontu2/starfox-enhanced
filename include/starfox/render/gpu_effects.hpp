@@ -141,6 +141,10 @@ struct GpuEffectSettings {
     bool reflection_material{}; // Conductor/reflective 3D material, not a plain dielectric model.
     std::uint32_t shadow_width{},shadow_height{};
     std::int32_t shadow_offset_y{};
+    // GPU FAST above 4x traces shadows and reflections at a capped scale:
+    // their buffers hold frame pixels x ray_scale_num / ray_scale_den (both
+    // below 256). Zero means the frame's own stored resolution.
+    std::uint32_t ray_scale_num{},ray_scale_den{};
     bool shadow_before_style{}; // Combined native pipeline preserves early shadow order.
     // Optional pre/post-bloom snapshots for the separately scaled glow layer.
     std::vector<std::uint8_t>* bloom_base{};

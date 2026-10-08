@@ -1,5 +1,6 @@
 #include "starfox/vr/vulkan_draw_packets.hpp"
 #include "starfox/vr/scene_packet_validation.hpp"
+#include "starfox/compat/bit_cast.hpp"
 #include "starfox/vr/backdrop_texture.hpp"
 #include "starfox/vr/source_span_layout.hpp"
 #include "starfox/vr/source_models.hpp"
@@ -29,7 +30,7 @@ struct VulkanDrawPackets::State {
     std::size_t vertex_uploads{},texture_uploads{};
     std::size_t grid_allocations{},grid_reuses{};
     bool keyed{};
-    bool depth_test{true};
+    bool depth_test{true},depth_write{true};
 };
 VulkanDrawPackets::VulkanDrawPackets()=default;
 VulkanDrawPackets::~VulkanDrawPackets()=default;
@@ -60,7 +61,7 @@ bool VulkanDrawPackets::update_models(std::span<const Matrix4> models) noexcept 
     return true;
 }
 bool VulkanDrawPackets::initialize(VkDevice device,PFN_vkGetDeviceProcAddr get,
-    const VkPhysicalDeviceMemoryProperties& memory,VkRenderPass pass,std::span<const DrawPacket> packets,std::span<const uint32_t> object_keys,bool depth_test) {
+    const VkPhysicalDeviceMemoryProperties& memory,VkRenderPass pass,std::span<const DrawPacket> packets,std::span<const uint32_t> object_keys,bool depth_test,bool depth_write) {
     try {
         if(!device || !get || !pass || packets.size()>4096) throw std::runtime_error("Invalid native scene upload");
         if(!object_keys.empty()) {
@@ -74,11 +75,11 @@ bool VulkanDrawPackets::initialize(VkDevice device,PFN_vkGetDeviceProcAddr get,
         for(const auto& packet:packets) validator.add(packet);
         auto next=std::make_unique<State>();next->items.reserve(packets.size());
         next->device=device;next->get=get;next->pass=pass;
-        next->depth_test=depth_test;
+        next->depth_test=depth_test;next->depth_write=depth_write;
         next->keyed=!object_keys.empty();
         const bool compatible=state_ && state_->device==device && state_->get==get && state_->pass==pass;
         if(compatible) next->grid_pipeline=state_->grid_pipeline;
-        if(compatible && state_->depth_test==depth_test) next->pipelines=state_->pipelines;
+        if(compatible && state_->depth_test==depth_test && state_->depth_write==depth_write) next->pipelines=state_->pipelines;
         std::unordered_map<uint32_t,const State::Item*> prior;
         std::unordered_map<const std::vector<uint32_t>*,std::shared_ptr<VulkanSceneTextures>> shared_images;
         if(compatible) for(const auto& item:state_->items)
@@ -178,11 +179,11 @@ bool VulkanDrawPackets::initialize(VkDevice device,PFN_vkGetDeviceProcAddr get,
             auto& ready=photograph?pipelines.photographs_ready:pipelines.triangles_ready;
             if(item.geometry->triangles && !ready) {
                 if(!triangles.initialize(device,get,pass,depth_test,SceneTopology::triangles,layout,
-                    photograph?SceneBlend::alpha:SceneBlend::opaque,cache_)) throw std::runtime_error(triangles.status());
+                    photograph?SceneBlend::alpha:SceneBlend::opaque,cache_,depth_write)) throw std::runtime_error(triangles.status());
                 ready=true;
             }
             if(item.geometry->lines && !pipelines.lines_ready) {
-                if(!pipelines.lines.initialize(device,get,pass,depth_test,SceneTopology::lines,layout,SceneBlend::opaque,cache_))
+                if(!pipelines.lines.initialize(device,get,pass,depth_test,SceneTopology::lines,layout,SceneBlend::opaque,cache_,depth_write))
                     throw std::runtime_error(pipelines.lines.status());
                 pipelines.lines_ready=true;
             }

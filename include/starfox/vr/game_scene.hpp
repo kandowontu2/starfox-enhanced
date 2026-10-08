@@ -1,5 +1,5 @@
 #pragma once
-#if !defined(__3DS__) && !defined(STARFOX_SCENE_SOURCE_ONLY) && __has_include("starfox/vr/presentation.hpp")
+#if !defined(__3DS__) && !defined(STARFOX_SCENE_SOURCE_ONLY) && __has_include("starfox/vr/presentation.hpp") && __has_include(<openxr/openxr.h>)
 #include "starfox/vr/presentation.hpp"
 #define STARFOX_SCENE_TRACKED_HELPERS
 #endif
@@ -54,11 +54,10 @@ struct GameSceneSnapshot {
     bool shadows_enabled{};
     simulation::GameFlowState flow{};
     simulation::ObjectHandle player{};
-    // Preserve upstream tracked-headset metadata independently of draw-list
-    // visibility. Native consoles keep the unmodified cartridge camera.
+    // A live player reference is captured independently of draw visibility.
     std::optional<render::ObjectPresentationSnapshot> pilot_reference;
     bool pilot_tracking{};
-    uint8_t control_type{};
+    uint8_t control_type{}; // Native C_TYPE; bit 1 inverts the vertical pad axis.
     render::ObjectSnapshotMap transforms;
     std::vector<GameSceneObject> objects; // Native draw-list order, never sorted.
     std::array<simulation::ParticleState,simulation::kMaximumParticles> particles{};
@@ -117,6 +116,8 @@ inline bool pilot_view_active(const GameSceneSnapshot& scene,const PresentationP
         && (scene.flow==simulation::GameFlowState::gameplay || scene.flow==simulation::GameFlowState::training);
 }
 inline bool world_panel_scene(const GameSceneSnapshot& scene) noexcept {
+    // Complete authored interface scenes share one raster/quad, including their
+    // menu-preview models. Gameplay world geometry remains stereoscopic.
     return scene.paused || scene.briefing.active
         || scene.flow==simulation::GameFlowState::title
         || scene.flow==simulation::GameFlowState::controls_type
@@ -126,6 +127,8 @@ inline bool world_panel_scene(const GameSceneSnapshot& scene) noexcept {
         || scene.flow==simulation::GameFlowState::ex_pregame_menu;
 }
 inline EyeCamera source_panel_camera(const GameSceneSnapshot& scene) noexcept {
+    // Source focal length 256; 256x224 PPU canvas contains the 224x192 FX
+    // viewport at (16,16). Preserve dynamic authored vanishing points.
     auto result=EyeCamera{identity_matrix,{}};
     result.projection={2,0,0,0,0,-512.F/224,0,0,
         1.F-2.F*(scene.source_vanishing_point[0]+16)/256.F,

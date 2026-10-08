@@ -57,6 +57,12 @@ android {
         }
         release {
             minifyEnabled false
+            externalNativeBuild {
+                cmake {
+                    arguments '-DCMAKE_C_FLAGS_RELEASE=-O2 -DNDEBUG',
+                        '-DCMAKE_CXX_FLAGS_RELEASE=-O2 -DNDEBUG'
+                }
+            }
             if (System.getenv('ANDROID_RELEASE_KEYSTORE_PATH')) {
                 signingConfig signingConfigs.permanent
             }

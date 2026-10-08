@@ -3,6 +3,7 @@
 // accumulate a coverage mask rather than overwrite earlier row spans.
 // Input is GpuClip's 129-int4 block.
 #include "msaa_coverage.hlsli"
+#include "scaled_round.hlsli"
 struct Command {
     int left,top,right,bottom;
     uint even,odd,dither,tag;
@@ -37,8 +38,12 @@ int advanceX(int x,int increment){
 int roundAway(float value){return value<0?-int(floor(-value+0.5)):int(floor(value+0.5));}
 int2 pointAt(uint base,uint vertex){
     int4 raw=clipped[base+1+vertex];
-    float2 value=asfloat(raw.xy)*(maskPadding!=0?rasterScale:float2(renderScale,renderScale));
+    float2 scale=maskPadding!=0?rasterScale:float2(renderScale,renderScale);
+    float2 value=asfloat(raw.xy)*scale;
     int2 xy=fractional!=0?int2(roundAway(value.x),roundAway(value.y)):raw.xy*int(renderScale);
+    // Above 4x the float product can itself round onto a half pixel.
+    if(fractional!=0 && scale.x>4) xy.x=sr_scaled_round(asfloat(raw.x),scale.x);
+    if(fractional!=0 && scale.y>4) xy.y=sr_scaled_round(asfloat(raw.y),scale.y);
     return clamp(xy,int2(0,0),int2(width,height));
 }
 int2 uvAt(uint base,uint vertex){

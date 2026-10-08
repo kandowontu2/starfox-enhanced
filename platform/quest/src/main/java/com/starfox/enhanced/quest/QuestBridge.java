@@ -8,6 +8,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public final class QuestBridge {
     private QuestBridge() {}
     public static native void validateBundle(String path);
+    public static native void prepareInput(String sourcePath, String destinationPath);
     public static native int run(Activity activity, Context applicationContext,
         String romPath, String symbolsPath, AtomicBoolean stopRequested);
 }

@@ -1,10 +1,18 @@
 #include "starfox/audio/spc700_audio.hpp"
+#include "starfox/compat/bit_cast.hpp"
 #include "starfox/render/effects.hpp"
 #include "starfox/render/global_enhancements.hpp"
 #include "starfox/render/frame_persistence.hpp"
 #include "starfox/render/scene_motion_blur.hpp"
 #include "starfox/render/adaptive_exposure.hpp"
 #include <functional>
+#if defined(STARFOX_PS5)
+extern "C" void StarfoxPS5_PollGamepads(void);
+extern "C" void StarfoxPS5_InstallLog(void);
+extern "C" const char* StarfoxPS5_DataPath(void);
+extern "C" void StarfoxPS5_ProcessSetup(void);
+extern "C" void StarfoxPS5_HideSplashScreen(void);
+#endif
 #include "starfox/render/bloom.hpp"
 #include "starfox/render/object_snapshot.hpp"
 #include "starfox/audio/msu1_audio.hpp"
@@ -51,6 +59,7 @@
 #include "starfox/render/displayxr_desktop.hpp"
 #include "starfox/render/displayxr_recovery.hpp"
 #endif
+#include "starfox/render/gpu_scene_counters.hpp"
 #include "starfox/render/gpu_effects.hpp"
 #include "starfox/render/gpu_fsr1.hpp"
 #include "starfox/render/gpu_temporal_aa.hpp"
@@ -84,9 +93,11 @@
 #include "starfox/render/terrain_profile.hpp"
 #include "starfox/render/sprite_renderer.hpp"
 #include "starfox/render/colour_math.hpp"
+#include "starfox/render/asteroid_models.hpp"
 #include "starfox/render/model_smoothing.hpp"
 #include "starfox/simulation/game_simulation.hpp"
 #include "starfox/simulation/math.hpp"
+#include "starfox/simulation/rumble_sequencer.hpp"
 #include "starfox/timing/fixed_step.hpp"
 #include "starfox/state/archive.hpp"
 #include "starfox/state/container.hpp"
@@ -430,6 +441,8 @@ struct PresentationEffects {
     std::array<starfox::render::shadows::GpuShadowOutput,2> stereo_resident_shadows;
     std::uint32_t shadow_width{}, shadow_height{};
     std::int32_t shadow_offset_y{};
+    // Ray buffers hold frame pixels x ray_scale_num / ray_scale_den (0: 1:1).
+    std::uint32_t ray_scale_num{}, ray_scale_den{};
     std::uint8_t chromatic_aberration{};
     std::uint8_t hdr_effect{};
     bool touch_controls{};
@@ -454,6 +467,16 @@ starfox::render::GpuEffectSettings::HorizontalWipe gpu_horizontal_wipe(
     w.guard_width=std::max(1U,(frame.width()+221U)/223U)*frame.draw_scale();
     w.origin_x=int((frame.width()-snes_width)/2);
     return w;
+}
+
+// STARFOX_TRACE_GPU_PASS_COST reports presentation passes slower than this.
+// STARFOX_TRACE_GPU_PASS_COST_US overrides the 20 ms default (0 = every frame).
+std::uint64_t gpu_pass_cost_threshold_us() noexcept {
+    static const std::uint64_t value=[] {
+        const auto* text=std::getenv("STARFOX_TRACE_GPU_PASS_COST_US");
+        return text?std::strtoull(text,nullptr,10):20000ULL;
+    }();
+    return value;
 }
 
 std::uint32_t display_width_for(
@@ -534,10 +557,10 @@ constexpr std::array<std::string_view,
     "4X",
     "5X",
     "6X",
-    "7X (CONFIG)",
-    "8X (CONFIG)",
-    "9X (CONFIG)",
-    "10X (CONFIG)",
+    "7X",
+    "8X",
+    "9X",
+    "10X",
 }};
 
 ButtonMask with_swapped_face_buttons(
@@ -567,6 +590,25 @@ std::uint32_t render_scale_index(
 std::uint32_t render_scale_factor(
     starfox::simulation::RenderScale scale) noexcept {
     return render_scale_index(scale) + 1U;
+}
+
+// 5x-10x belong to GPU FAST. A test override or a renderer switch must not
+// hand them to SOFTWARE or GPU ACCURATE.
+std::uint32_t effective_render_scale_factor(
+    const starfox::simulation::GameSimulation& game) noexcept {
+    const auto factor = render_scale_factor(game.render_scale());
+    return game.gpu_fast() ? factor : std::min<std::uint32_t>(factor,
+        static_cast<std::uint32_t>(starfox::simulation::standard_render_scale_count));
+}
+
+// Above 4x, GPU FAST traces ray-traced shadows and reflections at 4x: their
+// detail matches 4x play while models and everything else keep the full
+// render scale. Rays dominate the 5x-10x frame (11 ms of 25 ms at 10x 32:9).
+// STARFOX_TEST_FULL_RES_RAYS=1 traces at the render scale instead.
+std::uint32_t ray_trace_scale(std::uint32_t render_scale) noexcept {
+    static const bool full=std::getenv("STARFOX_TEST_FULL_RES_RAYS")!=nullptr;
+    return full ? render_scale : std::min<std::uint32_t>(render_scale,
+        static_cast<std::uint32_t>(starfox::simulation::standard_render_scale_count));
 }
 
 std::string_view render_scale_name(
@@ -973,6 +1015,11 @@ std::filesystem::path choose_runtime_input(
         "Starfox-Assets.BIN was not found. Create it on a PC with "
         "starfox_asset_builder, then copy it to "
         "ux0:data/StarFoxEnhanced/Starfox-Assets.BIN"};
+#elif defined(STARFOX_PS5)
+    throw std::runtime_error{
+        "Starfox-Assets.BIN was not found. Create it on a PC with "
+        "starfox_asset_builder, then copy it to "
+        "/data/StarFoxEnhanced/ or into the title folder beside eboot.bin"};
 #elif defined(STARFOX_UWP)
     if (renderer == nullptr) {
         throw std::runtime_error{
@@ -1242,6 +1289,8 @@ std::filesystem::path writable_runtime_directory(
     return executable_directory.empty()
         ? std::filesystem::path{"sdmc:/switch/StarFoxEnhanced"}
         : executable_directory;
+#elif defined(STARFOX_PS5)
+    return std::filesystem::path{StarfoxPS5_DataPath()};
 #elif defined(SDL_PLATFORM_VITA)
     // The installed application directory under ux0:app is read-only.
     // Keep generated assets, optional music, settings, and SRAM together in
@@ -1294,6 +1343,10 @@ std::filesystem::path find_msu1_pack(
 #if defined(SDL_PLATFORM_VITA)
     candidates.emplace_back(std::filesystem::path{
         "ux0:data/StarFoxEnhanced"} / starfox::audio::msu1_pack_filename);
+#endif
+#if defined(STARFOX_PS5)
+    candidates.emplace_back(std::filesystem::path{
+        "/data/StarFoxEnhanced"} / starfox::audio::msu1_pack_filename);
 #endif
 #if defined(STARFOX_UWP)
     // Preserve packs copied to the nested SDL preference directory used by
@@ -1407,6 +1460,13 @@ RuntimeAssetSet load_or_compile_runtime_assets(
     companion_candidates.emplace_back(
         "ux0:data/StarFoxEnhanced/Starfox-Assets.BIN");
 #endif
+#if defined(STARFOX_PS5)
+    // /data may be readable while the data folder fell back to the sandbox,
+    // and the title folder (/app0) is always readable; a companion found in
+    // either is copied into the writable data folder like any other.
+    companion_candidates.emplace_back("/data/StarFoxEnhanced/Starfox-Assets.BIN");
+    companion_candidates.emplace_back(executable_directory / "Starfox-Assets.BIN");
+#endif
 #if defined(STARFOX_UWP)
     // Migrate companions provisioned according to the first UWP build's
     // nested SDL preference path into the now-documented LocalState root.
@@ -1427,9 +1487,20 @@ RuntimeAssetSet load_or_compile_runtime_assets(
             / "Star Fox Enhanced" / "Starfox-Assets.BIN");
     }
 #endif
+#if defined(STARFOX_PS5)
+    // The console shows no file picker: the error names every place checked.
+    std::string checked;
+#endif
     for (const auto& requested : companion_candidates) {
         const auto candidate = resolve_companion_case(requested);
+#if defined(STARFOX_PS5)
+        if (!std::filesystem::is_regular_file(candidate)) {
+            checked += "\n  " + candidate.string() + ": not found";
+            continue;
+        }
+#else
         if (!std::filesystem::is_regular_file(candidate)) continue;
+#endif
         try {
             const auto bytes = read_binary_file(candidate);
             auto assets = unpack_runtime_assets(
@@ -1438,7 +1509,12 @@ RuntimeAssetSet load_or_compile_runtime_assets(
                 write_asset_companion(companion_path, bytes);
             }
             return assets;
+#if defined(STARFOX_PS5)
+        } catch (const std::exception& error) {
+            checked += "\n  " + candidate.string() + ": " + error.what();
+#else
         } catch (const std::exception&) {
+#endif
             // An update can legitimately invalidate a previously compiled
             // companion. Rebuild it below from the user's validated retail
             // image; if that image is unavailable, the resulting error tells
@@ -1447,6 +1523,15 @@ RuntimeAssetSet load_or_compile_runtime_assets(
     }
 
     auto retail = find_required_retail(executable_directory);
+#if defined(STARFOX_PS5)
+    if (!retail) {
+        std::cerr << "Starfox-Assets.BIN candidates:" << checked << '\n';
+        throw std::runtime_error{
+            "Starfox-Assets.BIN was not usable. Create it on a PC with "
+            "starfox_asset_builder and copy it to /data/StarFoxEnhanced/ or "
+            "beside eboot.bin. Checked:" + checked};
+    }
+#endif
     if (!retail) {
         const auto selected = choose_runtime_input(companion_path, renderer);
 #if defined(SDL_PLATFORM_IOS)
@@ -1503,6 +1588,13 @@ class SdlContext {
 public:
     SdlContext() {
         starfox::app::configure_native_gamepad_support();
+#if defined(STARFOX_PS5)
+        // The console has no visible stderr; SDL's log goes to sdl.log.
+        StarfoxPS5_InstallLog();
+        SDL_SetHintWithPriority(SDL_HINT_VIDEO_DRIVER, "ps5", SDL_HINT_OVERRIDE);
+        SDL_SetHintWithPriority(SDL_HINT_AUDIO_DRIVER, "ps5", SDL_HINT_OVERRIDE);
+        SDL_SetHintWithPriority(SDL_HINT_GPU_DRIVER, "vulkan", SDL_HINT_OVERRIDE);
+#endif
 #if defined(__SWITCH__)
         // AUDOUT owns two device buffers.  Keep each one short enough that
         // button/fire audio remains perceptually attached to its video frame.
@@ -1521,6 +1613,9 @@ public:
         if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD | SDL_INIT_AUDIO)) {
             throw std::runtime_error{std::string{"SDL_Init: "} + SDL_GetError()};
         }
+#if defined(STARFOX_PS5)
+        StarfoxPS5_PollGamepads();
+#endif
     }
 
     ~SdlContext() { SDL_Quit(); }
@@ -1642,8 +1737,20 @@ public:
         auto window_flags = SDL_WINDOW_RESIZABLE;
         if (start_fullscreen) window_flags |= SDL_WINDOW_FULLSCREEN;
 #endif
+        // Benchmarks can present at a real output size (e.g. 3840x2160).
+        int window_width=1024,window_height=896;
+        if (const auto* size=std::getenv("STARFOX_TEST_WINDOW_SIZE");
+            size && std::getenv("STARFOX_TEST_FRAMES")) {
+            char* end=nullptr;
+            const auto width=std::strtol(size,&end,10);
+            const auto height=end && *end=='x' ? std::strtol(end+1,&end,10) : 0L;
+            if (end && *end=='\0' && width>=256 && width<=16384
+                && height>=224 && height<=16384) {
+                window_width=int(width);window_height=int(height);
+            }
+        }
         window_ = trace_startup_work("window-create",[&] {return SDL_CreateWindow(
-            "Star Fox Enhanced - native PC runtime", 1024, 896,
+            "Star Fox Enhanced - native PC runtime", window_width, window_height,
             window_flags | (std::getenv("STARFOX_TEST_HIDDEN") ? SDL_WINDOW_HIDDEN : 0));});
         if (window_ == nullptr) {
             throw std::runtime_error{
@@ -1652,6 +1759,11 @@ public:
         recreate_renderer(renderer_mode);
         if(!std::getenv("STARFOX_TEST_HIDDEN")) SDL_ShowWindow(window_);
         static_cast<void>(SDL_SyncWindow(window_));
+        if (std::getenv("STARFOX_TEST_WINDOW_SIZE")) {
+            int pixels_w=0,pixels_h=0;
+            SDL_GetWindowSizeInPixels(window_,&pixels_w,&pixels_h);
+            std::cerr<<"test-window-pixels: "<<pixels_w<<'x'<<pixels_h<<'\n';
+        }
         // Put an actual black frame on the desktop before ROM decoding, game
         // construction or audio-device setup can begin. A merely-created SDL
         // window can remain compositor-transparent until its first present.
@@ -2000,6 +2112,13 @@ public:
     void set_touch_layout_config(const starfox::app::TouchLayoutConfig* config) noexcept {
         touch_layout_config_=config;
     }
+    // GPU FAST scene options (compact row-span tile lists for grid, dust and
+    // particles). Models carry their own bounded_raster flag.
+    void set_gpu_fast(bool enabled) noexcept {
+        native_scene_.set_gpu_fast(enabled);late_scene_.set_gpu_fast(enabled);
+        background_scene_.set_gpu_fast(enabled);native_stereo_scene_.set_gpu_fast(enabled);
+        for(auto& scene:isolated_overlay_scenes_) scene.set_gpu_fast(enabled);
+    }
     void set_touch_editor(bool active,
         std::optional<starfox::app::TouchGroup> selected={}) noexcept {
         touch_editor_active_=active;
@@ -2213,7 +2332,11 @@ public:
                 || model->settings.focal_length!=temporal_projection->settings.focal_length)
                 temporal_projection_consistent=false;
         }
+        // DLSS/FSR reconstruct from a reduced render; above 4x that would only
+        // render below the output again, and their motion surfaces stop at
+        // 4096 pixels wide. 5x-10x present the native-resolution scene.
         if(!temporal_paused_ && temporal_enabled_ && stereo_mode==0 && output_width && output_height
+            && source_scale<=starfox::simulation::standard_render_scale_count
             && temporal_projection && temporal_projection_consistent
             && (fsr1_enabled() || (dlss_scene_enabled() && dlss_->native_raster()))) {
             const auto spatial=starfox::render::fsr1_input_extent({output_width,output_height},
@@ -3096,6 +3219,7 @@ public:
         window_scale_=frame.draw_scale();
         const bool trace_native_cost=std::getenv("STARFOX_TRACE_GPU_PASS_COST")!=nullptr;
         const auto native_begin=trace_native_cost?std::chrono::steady_clock::now():std::chrono::steady_clock::time_point{};
+        std::chrono::steady_clock::time_point layers_at=native_begin;
         // A single compositor/effects owner waits for its previous eye before
         // reusing buffers. Keep distinct owners so the right eye can be queued
         // while the GPU is still processing the left. All rendering remains
@@ -3332,6 +3456,7 @@ public:
                         result=isolated_overlay_scenes_[i].resident_output();return true;
                     },isolated_outputs[i])) {isolated_ready=false;break;}
         }
+        if(trace_native_cost) layers_at=std::chrono::steady_clock::now();
         const bool composition_inputs_ready=!force_replay && steady && late_ready && background_ready && isolated_ready;
         // Both eyes use the same authoritative host artwork/masks/palette.
         // Submit that backing once; only the native scene, sky parallax,
@@ -3517,6 +3642,7 @@ public:
             settings.reflection_intensity=effects.reflection_intensity;
             settings.reflection_material=effects.reflection_material;
             settings.reflection_offset_y=effects.reflection_offset_y;
+            settings.ray_scale_num=effects.ray_scale_num;settings.ray_scale_den=effects.ray_scale_den;
             if(effects.shadow_mask || effects.resident_shadow.buffer) {
                 if(effects.shadow_mask) settings.shadow_mask=*effects.shadow_mask;
                 settings.resident_shadow=effects.resident_shadow;settings.shadow_width=effects.shadow_width;
@@ -3979,8 +4105,9 @@ public:
                 if(trace_native_cost) {
                     const auto done=std::chrono::steady_clock::now();
                     const auto us=[](auto a,auto b){return std::chrono::duration_cast<std::chrono::microseconds>(b-a).count();};
-                    if(std::getenv("STARFOX_TRACE_GPU_PASS_COST_ALL") || us(native_begin,done)>=20000)
-                        std::cerr<<"gpu-native-cost-us compose="<<us(native_begin,composed_at)
+                    if(std::uint64_t(us(native_begin,done))>=gpu_pass_cost_threshold_us())
+                        std::cerr<<"gpu-native-cost-us layers="<<us(native_begin,layers_at)
+                            <<" compose="<<us(layers_at,composed_at)
                             <<" setup="<<us(composed_at,effects_begin)<<" effects="<<us(effects_begin,effects_done)
                             <<" draw="<<us(effects_done,done)<<'\n';
                 }
@@ -4606,6 +4733,7 @@ public:
         early_gpu.reflection_intensity=effects.reflection_intensity;
         early_gpu.reflection_material=effects.reflection_material;
         early_gpu.reflection_offset_y=effects.reflection_offset_y;
+        early_gpu.ray_scale_num=effects.ray_scale_num;early_gpu.ray_scale_den=effects.ray_scale_den;
         if(effects.shadow_mask || effects.resident_shadow.buffer) {
             if(effects.shadow_mask) early_gpu.shadow_mask=*effects.shadow_mask;
             early_gpu.resident_shadow=effects.resident_shadow;
@@ -4636,11 +4764,15 @@ public:
             cpu_shadow=&fallback_shadow;
         }
         if (!early_on_gpu && cpu_shadow != nullptr) {
+            // A capped ray scale maps frame pixels to the nearest mask pixel.
+            const std::uint32_t ray_num=effects.ray_scale_den?effects.ray_scale_num:1U;
+            const std::uint32_t ray_den=effects.ray_scale_den?effects.ray_scale_den:1U;
             for (std::uint32_t y=0; y<framebuffer.stored_height(); ++y) {
-                const auto sy=static_cast<int>(y)-effects.shadow_offset_y;
+                const auto frame_y=static_cast<int>(y)-effects.shadow_offset_y;
+                const auto sy=frame_y<0?frame_y:static_cast<int>(std::uint32_t(frame_y)*ray_num/ray_den);
                 if (sy<0 || sy>=static_cast<int>(effects.shadow_height)) continue;
                 for (std::uint32_t x=0; x<framebuffer.stored_width(); ++x) {
-                    const auto sx=x;
+                    const auto sx=x*ray_num/ray_den;
                     if (sx>=effects.shadow_width) continue;
                     const auto layer=framebuffer.layer_stored(x,y);
                     if (layer!=starfox::render::PixelLayer::background
@@ -5196,7 +5328,7 @@ private:
         if(trace_pass_cost) {
             const auto done=std::chrono::steady_clock::now();
             const auto us=[](auto a,auto b){return std::chrono::duration_cast<std::chrono::microseconds>(b-a).count();};
-            if(us(pass_begin,done)>=20000)
+            if(std::uint64_t(us(pass_begin,done))>=gpu_pass_cost_threshold_us())
                 std::cerr<<"gpu-pass-cost-us flush="<<us(pass_begin,flushed)
                     <<" apply="<<us(flushed,done)<<" present="<<(settings.presentation_texture!=nullptr)<<'\n';
         }
@@ -5316,6 +5448,10 @@ private:
         // uploads the same pixels to a texture without changing their content.
         const auto* renderer_driver = mode == starfox::simulation::RendererMode::software
             ? "opengles2" : "gpu";
+#elif defined(STARFOX_PS5)
+        // The PS5 has no CPU presentation path: SDL GPU on RADV only.
+        const auto* renderer_driver = "gpu";
+        mode = starfox::simulation::RendererMode::gpu;
 #else
         const auto* renderer_driver = mode == starfox::simulation::RendererMode::software
             ? "software" : std::string_view(SDL_GetCurrentVideoDriver())=="dummy"?nullptr:"gpu";
@@ -5367,7 +5503,11 @@ private:
 #if !defined(_WIN32)
             else if(!std::getenv("SDL_GPU_DRIVER")) SDL_ResetHint(SDL_HINT_GPU_DRIVER);
 #endif
+#if defined(STARFOX_PS5)
+            constexpr bool hardware = true;
+#else
             const bool hardware=std::getenv("STARFOX_TEST_SOFTWARE_GPU")==nullptr;
+#endif
             if(std::getenv("STARFOX_TEST_FRAMES") && std::getenv("STARFOX_TEST_LOW_POWER_GPU"))
                 SDL_SetBooleanProperty(props,SDL_PROP_GPU_DEVICE_CREATE_PREFERLOWPOWER_BOOLEAN,true);
             if(std::getenv("STARFOX_TEST_FRAMES") && std::getenv("STARFOX_TEST_GPU_VALIDATION"))
@@ -5421,6 +5561,7 @@ private:
             if(!renderer_) renderer_=SDL_CreateRenderer(window_,"software");
         }
 #endif
+#if !defined(STARFOX_PS5)
         if(!renderer_ && mode==starfox::simulation::RendererMode::gpu) {
             std::cerr<<"SDL GPU unavailable: "<<SDL_GetError()<<"; using native renderer fallback\n";
             gpu_fallback_reason_=starfox::app::GpuFallbackReason::renderer_unavailable;
@@ -5433,6 +5574,7 @@ private:
             renderer_=SDL_CreateRenderer(window_,"software");
 #endif
         }
+#endif
         if (renderer_ == nullptr) {
             throw std::runtime_error{
                 std::string{"SDL_CreateRenderer: "} + SDL_GetError()};
@@ -6858,50 +7000,19 @@ private:
 class RumbleOutput {
 public:
     explicit RumbleOutput(const starfox::assets::SymbolMap& symbols)
-        : command_(address(symbols, "RUMBLE_CMD")),
-          time_(address(symbols, "RUMBLE_TIME")),
-          index_(address(symbols, "RUMBLE_INDEX")),
-          table_(address(symbols, "RUMBLE_TABLE")) {}
+        : sequencer_(symbols) {}
 
     void advance(starfox::simulation::MapVm& map, SDL_Gamepad* gamepad,
         bool enabled) noexcept {
-        if (!available() || !enabled || gamepad == nullptr) {
+        if (!sequencer_.available() || !enabled || gamepad == nullptr) {
             stop(gamepad);
             return;
         }
-        auto output = std::uint8_t{};
-        auto sequence_index = map.read_native_byte(index_);
-        for (std::size_t guard = 0U; guard < 4U; ++guard) {
-            if (sequence_index == 0U) {
-                output = map.read_native_byte(time_) == 0U
-                    ? 0U : map.read_native_byte(command_);
-                break;
-            }
-            output = map.read_native_byte(
-                table_ + static_cast<std::uint32_t>(sequence_index - 1U));
-            sequence_index = static_cast<std::uint8_t>(sequence_index + 1U);
-            map.write_native_byte(index_, sequence_index);
-            if (output == 0x19U) {
-                map.write_native_byte(index_, 0U);
-                output = 0U;
-                break;
-            }
-            if (output != 0x91U) break;
-            sequence_index = 1U;
-            map.write_native_byte(index_, sequence_index);
-        }
-        const auto remaining = map.read_native_byte(time_);
-        if (remaining != 0U) {
-            map.write_native_byte(time_,
-                static_cast<std::uint8_t>(remaining - 1U));
-        }
-        const auto high_frequency = static_cast<std::uint16_t>(
-            (output & 0x0fU) * 0x1111U);
-        const auto low_frequency = static_cast<std::uint16_t>(
-            ((output >> 4U) & 0x0fU) * 0x1111U);
+        const auto effect=sequencer_.advance(map,true);
+        if(!effect) {stop(gamepad);return;}
         static_cast<void>(SDL_RumbleGamepad(
-            gamepad, low_frequency, high_frequency, 40U));
-        active_ = output != 0U;
+            gamepad,effect->low_frequency,effect->high_frequency,effect->duration_ms));
+        active_ = effect->active();
     }
 
     void stop(SDL_Gamepad* gamepad) noexcept {
@@ -6913,19 +7024,7 @@ public:
     }
 
 private:
-    static std::uint32_t address(
-        const starfox::assets::SymbolMap& symbols, const char* name) noexcept {
-        const auto found = symbols.find(name);
-        return found.empty() ? 0U : found.front();
-    }
-    [[nodiscard]] bool available() const noexcept {
-        return command_ != 0U && time_ != 0U && index_ != 0U && table_ != 0U;
-    }
-
-    std::uint32_t command_{};
-    std::uint32_t time_{};
-    std::uint32_t index_{};
-    std::uint32_t table_{};
+    starfox::simulation::RumbleSequencer sequencer_;
     bool active_{};
 };
 
@@ -7363,7 +7462,7 @@ std::int16_t interpolate_source_word(
     const auto value = static_cast<std::int64_t>(std::lround(
         static_cast<double>(previous)
         + source_word_difference(current, previous) * alpha));
-    return std::bit_cast<std::int16_t>(static_cast<std::uint16_t>(value));
+    return starfox::bit_cast<std::int16_t>(static_cast<std::uint16_t>(value));
 }
 
 starfox::simulation::CircleEffectState interpolate_circle_effect(
@@ -7429,6 +7528,8 @@ std::filesystem::path executable_path(const char* argv0) {
     }
     return std::filesystem::path{
         "sdmc:/switch/StarFoxEnhanced/StarFoxEnhanced.nro"};
+#elif defined(STARFOX_PS5)
+    return std::filesystem::path{"/app0/eboot.bin"};
 #elif defined(SDL_PLATFORM_VITA)
     // Vita application files live under the title-id directory, while all
     // writable companions are deliberately redirected to ux0:data above.
@@ -7538,6 +7639,21 @@ int main(int argc, char** argv) {
     };
 #endif
 #if defined(_WIN32) && !defined(STARFOX_UWP)
+    // Profiling: STARFOX_PIX_GPU_CAPTURER names PIX's WinPixGpuCapturer.dll,
+    // loaded before any D3D12 device exists. With STARFOX_PIX_CAPTURE_FRAME=N
+    // and STARFOX_PIX_CAPTURE_FILE=path.wpix, presentation frame N is captured
+    // programmatically (CaptureNextFrame, as PIXGpuCaptureNextFrames does).
+    using PixCaptureNextFrames = HRESULT(WINAPI*)(PCWSTR, UINT32);
+    PixCaptureNextFrames pix_capture_next_frames = nullptr;
+    if (const auto* capturer = std::getenv("STARFOX_PIX_GPU_CAPTURER")) {
+        if (auto* module = LoadLibraryA(capturer))
+            pix_capture_next_frames = reinterpret_cast<PixCaptureNextFrames>(
+                reinterpret_cast<void*>(GetProcAddress(module, "CaptureNextFrame")));
+        if (!pix_capture_next_frames)
+            std::cerr << "PIX GPU capturer failed to load: " << capturer << std::endl;
+    }
+#endif
+#if defined(_WIN32) && !defined(STARFOX_UWP)
     // Keep the lock alive through the catch block and its modal error dialog.
     // If it lived inside try, stack unwinding released it before MessageBoxA;
     // a second launch could then enter and display an identical second box.
@@ -7575,6 +7691,9 @@ int main(int argc, char** argv) {
             }
         }
     }
+#endif
+#if defined(STARFOX_PS5)
+    StarfoxPS5_ProcessSetup();
 #endif
     std::optional<StartupTrace> startup_trace;
     try {
@@ -7746,6 +7865,9 @@ int main(int argc, char** argv) {
                 else if(std::string_view(forced)=="GPU") startup_renderer=starfox::simulation::RendererMode::gpu;
             }
         }
+#if defined(STARFOX_PS5)
+        startup_renderer = starfox::simulation::RendererMode::gpu;
+#endif
         // SDL creates its swapchain with the renderer. Set the saved DLSS
         // preference first so OFF starts on the unwrapped native swapchain.
         auto startup_dlss_mode=saved_pregame.dlss_mode;
@@ -7790,6 +7912,7 @@ int main(int argc, char** argv) {
         log_uwp_startup("window and renderer created");
 #endif
         std::string initial_map = "BOOT";
+        if (const auto* test_map = std::getenv("STARFOX_TEST_MAP")) initial_map = test_map;
         const auto msu1_pack=trace_startup_work("msu-pack-load",[&] {
             return starfox::audio::Msu1Pack{find_msu1_pack(executable_directory)};});
 #if defined(STARFOX_HAS_EMBEDDED_ASSETS)
@@ -8059,6 +8182,8 @@ int main(int argc, char** argv) {
                 static_cast<std::uint8_t>(window.renderer_backend()),
                 game.dlss45_mode(),
                 window.leia_requested(),
+                static_cast<std::uint8_t>(game.asteroid_models()),
+                static_cast<std::uint8_t>(game.gpu_renderer()),
             };
         };
         {
@@ -8125,6 +8250,9 @@ int main(int argc, char** argv) {
             game.set_renderer_mode(
                 static_cast<starfox::simulation::RendererMode>(
                     saved_pregame.renderer_mode));
+            game.set_gpu_renderer(saved_pregame.gpu_renderer == 1U
+                ? starfox::simulation::GpuRenderer::fast
+                : starfox::simulation::GpuRenderer::accurate);
             game.set_msu1_available(msu1_pack.available());
             game.set_msu1_music(saved_pregame.msu1_music);
             game.set_rumble(saved_pregame.rumble);
@@ -8144,6 +8272,10 @@ int main(int argc, char** argv) {
                 game.set_renderer_mode(value == "SOFTWARE" || value == "1"
                     ? starfox::simulation::RendererMode::software
                     : starfox::simulation::RendererMode::gpu);
+                // GPU and GPU_ACCURATE select the original path.
+                game.set_gpu_renderer(value == "GPU_FAST"
+                    ? starfox::simulation::GpuRenderer::fast
+                    : starfox::simulation::GpuRenderer::accurate);
             }
             if (const auto* forced_enhanced = std::getenv(
                     "STARFOX_TEST_ENHANCED")) {
@@ -8246,6 +8378,7 @@ int main(int argc, char** argv) {
             game.set_bloom(saved_pregame.bloom);
             game.set_bloom_2d(saved_pregame.bloom_2d);
             game.set_model_smoothing(saved_pregame.model_smoothing);
+            game.set_asteroid_models(saved_pregame.asteroid_models);
             game.set_language(saved_pregame.language);
             if (const auto* language = std::getenv("STARFOX_TEST_LANGUAGE"))
                 game.set_language(static_cast<std::uint8_t>(std::atoi(language)));
@@ -8292,6 +8425,8 @@ int main(int argc, char** argv) {
                 game.set_hdr_effect(static_cast<std::uint8_t>(std::atoi(hdr)));
             if (const auto* smoothing = std::getenv("STARFOX_TEST_MODEL_SMOOTHING"))
                 game.set_model_smoothing(static_cast<std::uint8_t>(std::atoi(smoothing)));
+            if (const auto* asteroids = std::getenv("STARFOX_TEST_ASTEROID_MODELS"))
+                game.set_asteroid_models(static_cast<std::uint8_t>(std::atoi(asteroids)));
             if (const auto* separated = std::getenv("STARFOX_TEST_SEPARATED_MODELS"))
                 game.set_smooth_polys(std::atoi(separated) != 0);
             if (saved_pregame.effect == static_cast<std::uint8_t>(starfox::render::Effect::bloom)
@@ -9096,7 +9231,7 @@ int main(int argc, char** argv) {
         // dialogue retain their original 224x192 coordinates in a centred
         // inset layer.
         auto render_scale = game.flow_state()==starfox::simulation::GameFlowState::pregame_menu
-            && !menu_preview && !editor_preview?1U:render_scale_factor(game.effective_render_scale());
+            && !menu_preview && !editor_preview?1U:effective_render_scale_factor(game);
 #if defined(SDL_PLATFORM_IOS)
         auto ios_logged_scale=render_scale;
         auto ios_logged_flow=game.flow_state();
@@ -9426,6 +9561,10 @@ int main(int argc, char** argv) {
         MouseCameraState mouse_camera;
         ExMouseInputLatch ex_mouse_input;
         TouchControls touch_controls;
+        const auto touch_controls_enabled = [&] {
+            return game.on_screen_controls()
+                && (gamepad == nullptr || !SDL_GamepadConnected(gamepad));
+        };
         std::uint32_t launch_wipe_reveal_frames{};
         bool window_focused = true;
         bool frame_frozen{};
@@ -9785,6 +9924,7 @@ int main(int argc, char** argv) {
                 } else if (event.type == SDL_EVENT_GAMEPAD_ADDED
                            || event.type == SDL_EVENT_GAMEPAD_REMOVED) {
                     refresh_gamepads();
+                    touch_controls.reset();
                     for (std::size_t player = 0;
                          player < secondary_inputs.size(); ++player) {
                         const auto held = player + 1U < gamepads.size()
@@ -9795,7 +9935,8 @@ int main(int argc, char** argv) {
                 }
                 if (event.type == SDL_EVENT_FINGER_DOWN
                     || event.type == SDL_EVENT_FINGER_MOTION) {
-                    if(!hud_editor.active && !touch_editor.active)
+                    if(touch_controls_enabled()
+                        && !hud_editor.active && !touch_editor.active)
                         touch_controls.update(event.tfinger.fingerID,
                             event.tfinger.x, event.tfinger.y,window.touch_layout());
                 } else if (event.type == SDL_EVENT_FINGER_UP
@@ -10281,7 +10422,7 @@ int main(int argc, char** argv) {
             // Read the remappable in-game L/R actions, not fixed physical
             // shoulder buttons. The setup navigation mask intentionally omits
             // them, so sample the active bindings separately for this chord.
-            const auto touch_buttons = game.on_screen_controls()
+            const auto touch_buttons = touch_controls_enabled()
                 ? touch_controls.buttons() : ButtonMask{};
             const bool reset_held = window_focused && game.in_setup_menu()
                 && !remap_menu.active && !hud_editor.active && !touch_editor.active
@@ -11120,7 +11261,7 @@ int main(int argc, char** argv) {
                             : game.pregame_page() == starfox::simulation::PregamePage::two_d
                                 ? "2D OPTIONS" : game.pregame_page()==starfox::simulation::PregamePage::global
                                     ? "GLOBAL ENHANCEMENTS" : "3D OPTIONS", 27, 10U);
-                        std::array<std::int32_t, 79> row_y;
+                        std::array<std::int32_t, 80> row_y;
                         row_y.fill(-1);
                         const auto selected_row=std::size_t(std::find(visual_order.begin(),visual_order.end(),game.pregame_selection())-visual_order.begin());
                         const auto first_visible=!main_page && visual_order.size()>14
@@ -11198,6 +11339,9 @@ int main(int argc, char** argv) {
                             game.pregame_selection() == 6U);
                         draw_graphics_row("AA TYPE", std::array<std::string_view,7>{"FXAA","SHARP EDGE","SOFT EDGE","SSAA","TAA","SMAA","MSAA"}[game.aa_type()],
                             row_y[42], game.pregame_selection()==42U);
+                        draw_graphics_row("3D ASTEROIDS", starfox::render::asteroid_model_names[
+                            static_cast<std::size_t>(game.asteroid_models())], row_y[79],
+                            game.pregame_selection()==79U);
                         draw_graphics_row("AA QUALITY",
                             !window.leia_active() && game.aa_type()>=4 && !window.native_gpu_enabled()?"GPU REQUIRED":
                                 !window.leia_active() && game.aa_type()==4 && game.stereo_output()!=0?"MONO REQUIRED":
@@ -11558,7 +11702,7 @@ int main(int argc, char** argv) {
                 ? snes_height : superfx_height;
             const auto scene_offset_y = extend_scene_vertical
                 ? 0 : superfx_offset_y;
-            render_scale = render_scale_factor(game.effective_render_scale());
+            render_scale = effective_render_scale_factor(game);
             // DLSS quality controls its SDK input resolution, not this user's
             // independent render-upscale/output selection. Window size or DPI
             // must never silently promote 1x/2x/etc. to 6x.
@@ -11964,6 +12108,9 @@ int main(int argc, char** argv) {
             superfx_surfaces.clear();
             const bool record_raster=(std::getenv("STARFOX_TEST_GPU_RASTER") || window.native_gpu_enabled())
                 && game.renderer_mode()==starfox::simulation::RendererMode::gpu && !gpu_raster_failed;
+#if defined(STARFOX_PS5)
+            if (!record_raster) throw std::runtime_error{"Native GPU rasterizer unavailable"};
+#endif
             bool resident_raster=false;
             std::unique_ptr<DeferredBackground> deferred_background;
             std::unique_ptr<DeferredBackground> late_cartridge;
@@ -11974,6 +12121,12 @@ int main(int argc, char** argv) {
             const bool record_models=record_raster && window.native_gpu_enabled()
                 && (std::getenv("STARFOX_DISABLE_GPU_GEOMETRY")==nullptr || game.stereo_output()!=0U);
             if(record_models) recorded_scene.reset(superfx_frame.stored_width(),superfx_frame.stored_height());
+            // GPU FAST rasters each fused model only within its screen box,
+            // in place; STARFOX_TEST_FULL_FRAME_MODEL_RASTER restores the
+            // per-model full-frame pass for A/B.
+            const bool bounded_model_raster=game.gpu_fast()
+                && !std::getenv("STARFOX_TEST_FULL_FRAME_MODEL_RASTER");
+            window.set_gpu_fast(game.gpu_fast());
             bool ray_scene_complete=true;
             controls_model_draws.clear();
             const auto draw_model=[&](const starfox::assets::Shape& shape,
@@ -12023,6 +12176,7 @@ int main(int argc, char** argv) {
                         shadows!=nullptr && !pose.simple_scaled_sprite
                             && std::any_of(shape.faces.begin(),shape.faces.end(),[](const auto& face){return !face.sprite && face.vertex_indices.size()>=3;})};
                     draw.emissive = emissive_beam;
+                    draw.bounded_raster = bounded_model_raster;
                     draw.ray_materials = game.reflective_surfaces()!=0
                         || (game.ray_tracing() && game.environment()[0]
                             && (game.environment()[1]==0
@@ -12059,11 +12213,11 @@ int main(int argc, char** argv) {
             std::optional<starfox::render::shadows::ReceiverPlane> reflection_ground;
             bool mono_shadows_deferred=false,cpu_casters_collected=false;
             std::array<bool,2> stereo_resident_shadow{};
-            superfx_ui.record_to(nullptr);comms_hud.record_to(nullptr);
+            superfx_ui.record_to(nullptr);comms_hud.record_to(nullptr);superfx_hud.record_to(nullptr);
             superfx_ui.clear(0U);
             superfx_hud.clear(0U);
             comms_hud.clear(0U);
-            std::array<starfox::render::RasterCommands,2> host_ink_commands;
+            std::array<starfox::render::RasterCommands,3> host_ink_commands;
             if (controls_scene) controls_player_layer.clear(0U);
             const auto begin_late_cartridge=[&]() {
                 if(late_cartridge) return;
@@ -12128,9 +12282,16 @@ int main(int argc, char** argv) {
                 background_renderer.recording=deferred_background.get();background_renderer.target=&framebuffer;
                 framebuffer.record_to(&deferred_background->pending);
             }
+            // GPU FAST also records the Super FX HUD layer (cockpit lines,
+            // comms face, meters). Otherwise it is drawn into a CPU image at
+            // stored resolution and uploaded whole every frame: about 4.9 MB
+            // of pixels and layer tags per frame at 4x 32:9.
+            const bool record_superfx_hud=record_background && game.gpu_fast()
+                && !std::getenv("STARFOX_TEST_UNRECORDED_SUPERFX_HUD");
             if(record_background) {
-                for(unsigned i=0;i<2;++i) {
-                    auto& target=i?superfx_ui:comms_hud;
+                for(unsigned i=0;i<3;++i) {
+                    if(i==2 && !record_superfx_hud) continue;
+                    auto& target=i==2?superfx_hud:i?superfx_ui:comms_hud;
                     host_ink_commands[i].reset(target.stored_width(),target.stored_height());
                     target.record_to(&host_ink_commands[i]);
                 }
@@ -13797,6 +13958,7 @@ int main(int argc, char** argv) {
                             // Preserve relief normals for lighting/reflections.
                             starfox::render::GpuModelDraw draw{&mesh.shape,pose,terrain_settings,surface_effects};
                             draw.geometry_depth=true;draw.ray_geometry=capture_shadow_scene;draw.ray_materials=game.reflective_surfaces()!=0;
+                            draw.bounded_raster=bounded_model_raster;
                             // Static landscape is already sorted far-to-near.
                             // Do not route each tile through the world-sprite
                             // merge/motion path: it allocates full-screen
@@ -13820,6 +13982,7 @@ int main(int argc, char** argv) {
                         pose.vanish_y=game.map().read_native_word(vanish_y_address)+(extend_scene_vertical?superfx_offset_y:0);
                         starfox::render::GpuModelDraw draw{&batch.shape,pose,terrain_settings,surface_effects};
                         draw.geometry_depth=true;draw.ray_geometry=capture_shadow_scene;draw.ray_materials=game.reflective_surfaces()!=0;
+                        draw.bounded_raster=bounded_model_raster;
                         recorded_scene.append_model(raster_commands,draw);
                     }
                     if(test_frames && presented_frames+1U==test_frames)
@@ -13869,12 +14032,12 @@ int main(int argc, char** argv) {
                 if ((object.strategy_flags[0] & 0x40U) != 0U) {
                     if(record_models && &target==&superfx_frame) {
                         auto text=text_renderer.prepare_projected(object.colour_table,object.extended[21],
-                            std::bit_cast<std::int8_t>(object.texture_scroll_x),make_pose(item,false));
+                            starfox::bit_cast<std::int8_t>(object.texture_scroll_x),make_pose(item,false));
                         if(!text.glyphs.empty() && std::getenv("STARFOX_TRACE_GPU")) std::cerr<<"GPU projected text recorded\n";
                         recorded_scene.append_text(raster_commands,{std::move(text),target.draw_scale()});
                     } else {
                         text_renderer.draw(object.colour_table, object.extended[21],
-                            std::bit_cast<std::int8_t>(object.texture_scroll_x),make_pose(item, false), target);
+                            starfox::bit_cast<std::int8_t>(object.texture_scroll_x),make_pose(item, false), target);
                     }
                     continue;
                 }
@@ -13918,7 +14081,7 @@ int main(int argc, char** argv) {
                 }
                 if ((object.strategy_flags[0] & 0x20U) != 0U) {
                     auto size_adjustment = static_cast<std::int16_t>(
-                        std::bit_cast<std::int8_t>(object.texture_scroll_x));
+                        starfox::bit_cast<std::int8_t>(object.texture_scroll_x));
                     for (std::uint8_t shift = 0; shift < base_header.shift; ++shift) {
                         size_adjustment = starfox::simulation::add16(
                             size_adjustment, size_adjustment);
@@ -13931,10 +14094,25 @@ int main(int argc, char** argv) {
                     pose.simple_sprite_colour = object.extended[21];
                     pose.simple_sprite_world_size = diameter;
                 }
-                draw_model(found->second, pose, target, false,
-                    &target == &superfx_frame
-                            && surface_effects
-                        ? &superfx_surfaces : nullptr,
+                const auto* drawn_shape = &found->second;
+                if (const auto* model = starfox::render::substitute_asteroid_model(
+                        found->second, pose, game.asteroid_models())) {
+                    drawn_shape = model;
+                }
+                auto* surfaces = &target == &superfx_frame && surface_effects
+                    ? &superfx_surfaces : nullptr;
+                if (drawn_shape != &found->second) {
+                    // The GPU model path rasterises each model over the whole
+                    // frame (~0.4 ms per rock at 4x), so a field of rocks cost
+                    // more than everything else combined. Project rocks into
+                    // the shared raster command stream instead: consecutive
+                    // rocks share one raster pass, still in painter order
+                    // with the other models. Asteroids never cast shadows,
+                    // so they also stay out of the ray and shadow scenes.
+                    renderer.draw(*drawn_shape, pose, target, false, surfaces, nullptr);
+                    continue;
+                }
+                draw_model(*drawn_shape, pose, target, false, surfaces,
                     capture_shadow_scene ? &shadow_scene : nullptr,
                     starfox::render::GpuModelIdentity{item.handle,
                         game.objects().generation(item.handle), object.shape,
@@ -13962,11 +14140,12 @@ int main(int argc, char** argv) {
                     ground=starfox::render::shadows::ReceiverPlane{
                         {point.x,point.y,point.z},{normal.x,normal.y,normal.z}};
                 }
+                const auto ray_scale=ray_trace_scale(render_scale);
                 const starfox::render::shadows::Camera shadow_camera{
-                    superfx_frame.stored_width(),superfx_frame.stored_height(),256.0*render_scale,
-                        static_cast<double>(game.map().read_native_word(vanish_x_address)+superfx_ui_offset_x)*render_scale,
+                    superfx_frame.stored_width()*ray_scale/render_scale,superfx_frame.stored_height()*ray_scale/render_scale,256.0*ray_scale,
+                        static_cast<double>(game.map().read_native_word(vanish_x_address)+superfx_ui_offset_x)*ray_scale,
                         static_cast<double>(game.map().read_native_word(vanish_y_address)
-                            +(extend_scene_vertical?superfx_offset_y:0))*render_scale,0,
+                            +(extend_scene_vertical?superfx_offset_y:0))*ray_scale,0,
                         game.ray_tracing()?game.ray_tracing_quality():2U,game.shadow_softness()};
                 reflection_ground=ground;
                 const bool resident_casters=resident_raster && record_models
@@ -14461,13 +14640,21 @@ int main(int argc, char** argv) {
                     recorded_scene.finish(raster_commands);
                     resident_raster=!std::getenv("STARFOX_CAPTURE_INDEXED_PATH")
                         && window.submit_scene(recorded_scene,superfx_frame.stored_width(),superfx_frame.stored_height(),game.stereo_output(),framebuffer.stored_width(),framebuffer.stored_height(),framebuffer.draw_scale(),superfx_frame.draw_scale());
+#if defined(STARFOX_PS5)
+                    if (!resident_raster) throw std::runtime_error{"Native GPU scene submission failed"};
+#else
                     if(!resident_raster) recorded_scene.replay(superfx_frame,metadata);
+#endif
                 } else {
                 resident_raster=window.native_gpu_enabled()
                     && !std::getenv("STARFOX_CAPTURE_INDEXED_PATH")
                     && window.submit_native(raster_commands,surface_effects);
                 if(!resident_raster && !gpu_raster.render(raster_commands,superfx_frame,metadata)) {
+#if defined(STARFOX_PS5)
+                    throw std::runtime_error{std::string{"Native GPU rasterization failed: "} + gpu_raster.status()};
+#else
                     starfox::render::replay_raster_commands(raster_commands,superfx_frame,metadata);
+#endif
                     gpu_raster_failed=true;
                 }
                 }
@@ -14483,7 +14670,8 @@ int main(int argc, char** argv) {
             const auto composite_superfx = [&framebuffer, viewport_origin, boss_roll,
                                                 &ppu,&resident_raster,&resident_layer,&superfx_frame,
                                                 &deferred_background,&late_cartridge,&background_cpu_coverage,&temporal_background,&dlss,
-                                                &software_reflections,&software_reflection_background,&software_camera_world,&window,camera_response_requested](
+                                                &software_reflections,&software_reflection_background,&software_camera_world,&window,camera_response_requested,
+                                                skip_empty_ink=game.gpu_fast() && !std::getenv("STARFOX_TEST_KEEP_EMPTY_HOST_INK")](
                                                const auto& source,
                                                std::int32_t offset_x,
                                                std::int32_t offset_y,
@@ -14529,6 +14717,10 @@ int main(int argc, char** argv) {
                     resident_layer=settings;framebuffer.begin_write_coverage();return;
                 }
                 if(auto* source_commands=source.command_buffer()) {
+                    // GPU FAST: an empty recording is a fully transparent
+                    // layer. Skip it, rather than replaying it into a fresh
+                    // stored-resolution CPU image or merging it on the GPU.
+                    if(skip_empty_ink && source_commands->commands.empty()) return;
                     auto* destination=late_cartridge && framebuffer.command_buffer()==&late_cartridge->pending
                         ?late_cartridge.get():deferred_background && framebuffer.command_buffer()==&deferred_background->pending
                         ?deferred_background.get():nullptr;
@@ -14673,7 +14865,7 @@ int main(int argc, char** argv) {
                 superfx_offset_y + comms_offset.y, false);
             composite_superfx(
                 superfx_ui, superfx_ui_offset_x, superfx_offset_y, false);
-            comms_hud.record_to(nullptr);superfx_ui.record_to(nullptr);
+            comms_hud.record_to(nullptr);superfx_ui.record_to(nullptr);superfx_hud.record_to(nullptr);
 
             // Everything in this final cartridge pass is above the world and
             // host HUD. Record it for all scenes, not just title screens.
@@ -15058,10 +15250,11 @@ int main(int argc, char** argv) {
             }
             std::function<bool()> rebuild_mono_reflections;
             if((game.reflective_surfaces() || water_input) && hardware_ray_tracing && resident_raster) {
+                const auto ray_scale=ray_trace_scale(render_scale);
                 const starfox::render::shadows::Camera reflection_camera{
-                    superfx_frame.stored_width(),superfx_frame.stored_height(),256.0*render_scale,
-                    double(game.map().read_native_word(vanish_x_address)+superfx_ui_offset_x)*render_scale,
-                    double(game.map().read_native_word(vanish_y_address)+(extend_scene_vertical?superfx_offset_y:0))*render_scale};
+                    superfx_frame.stored_width()*ray_scale/render_scale,superfx_frame.stored_height()*ray_scale/render_scale,256.0*ray_scale,
+                    double(game.map().read_native_word(vanish_x_address)+superfx_ui_offset_x)*ray_scale,
+                    double(game.map().read_native_word(vanish_y_address)+(extend_scene_vertical?superfx_offset_y:0))*ray_scale};
                 bool reflected=false;
                 std::optional<starfox::render::GpuBackgroundDraw> enhanced_reflection_background;
                 const starfox::render::GpuBackgroundDraw* reflection_background=nullptr;
@@ -15116,6 +15309,7 @@ int main(int argc, char** argv) {
                         presentation_effects.reflection_intensity=std::array<unsigned,4>{0,35,65,100}[game.reflective_surfaces()]
                             ;
                     presentation_effects.reflection_offset_y=scene_offset_y*int(render_scale);
+                    if(ray_trace_scale(render_scale)!=render_scale) {presentation_effects.ray_scale_num=ray_trace_scale(render_scale);presentation_effects.ray_scale_den=render_scale;}
                     if(test_frames && presented_frames+1U==test_frames)
                         std::cerr<<"reflection-scene: GPU resident, intensity="<<presentation_effects.reflection_intensity
                             <<", background="<<(reflection_background?"authored BG2":"fallback")
@@ -15134,9 +15328,10 @@ int main(int argc, char** argv) {
                     presentation_effects.stereo_resident_shadows[eye]=window.stereo_shadow_output(eye);
                 if(!shadow_mask.empty()) presentation_effects.shadow_mask=&shadow_mask;
                 if(resident_shadow) presentation_effects.resident_shadow=window.shadow_output();
-                presentation_effects.shadow_width=superfx_frame.stored_width();
-                presentation_effects.shadow_height=superfx_frame.stored_height();
+                presentation_effects.shadow_width=superfx_frame.stored_width()*ray_trace_scale(render_scale)/render_scale;
+                presentation_effects.shadow_height=superfx_frame.stored_height()*ray_trace_scale(render_scale)/render_scale;
                 presentation_effects.shadow_offset_y=scene_offset_y*static_cast<int>(render_scale);
+                if(ray_trace_scale(render_scale)!=render_scale) {presentation_effects.ray_scale_num=ray_trace_scale(render_scale);presentation_effects.ray_scale_den=render_scale;}
             }
             if (game.in_setup_menu() && !menu_peek) {
                 presentation_effects.setup_overlay = &setup_overlay;
@@ -15240,7 +15435,7 @@ int main(int argc, char** argv) {
                     &exit_confirmation_overlay;
             }
             presentation_effects.touch_controls = touch_editor.active
-                || (game.on_screen_controls() && !hud_editor.active
+                || (touch_controls_enabled() && !hud_editor.active
                     && (touch_controls.visible()
                         || std::getenv("STARFOX_TEST_TOUCH_OVERLAY")!=nullptr));
             window.set_touch_editor(touch_editor.active,touch_editor.gesture.selected());
@@ -15402,6 +15597,11 @@ int main(int argc, char** argv) {
                     <<preparation_events.jobs<<" event-pumps="<<preparation_events.pumps<<'\n';
 #endif
             }
+#if defined(STARFOX_PS5)
+            // The system's launch splash covers the title until the title
+            // hides it (ProsperoEden hides it on its first presented frame).
+            if(presented_frames==0) StarfoxPS5_HideSplashScreen();
+#endif
             const auto profile_present_done = std::chrono::steady_clock::now();
             const auto work_without_pacing=[&](std::chrono::steady_clock::time_point start) {
                 const auto elapsed=static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -15558,6 +15758,22 @@ int main(int argc, char** argv) {
                         << '/' << unsigned(circle.affected_layers) << '\n';
                 }
             }
+            starfox::render::scene_counters::end_frame(std::cerr,presented_frames,
+                presented_frames>=profile_warmup);
+#if defined(_WIN32) && !defined(STARFOX_UWP)
+            if (pix_capture_next_frames) {
+                static const auto pix_frame = [] {
+                    const auto* text = std::getenv("STARFOX_PIX_CAPTURE_FRAME");
+                    return text ? std::strtoull(text, nullptr, 10) : 0ULL;
+                }();
+                const auto* file = std::getenv("STARFOX_PIX_CAPTURE_FILE");
+                if (file && pix_frame && presented_frames + 1U == pix_frame) {
+                    const std::filesystem::path target{file};
+                    const auto result = pix_capture_next_frames(target.wstring().c_str(), 1U);
+                    std::cerr << "pix-capture: frame=" << pix_frame << " result=" << std::hex << result << std::dec << std::endl;
+                }
+            }
+#endif
             ++presented_frames;
 #if defined(__ANDROID__)
             if(android_deferred_gpu_start) {
@@ -15584,6 +15800,7 @@ int main(int argc, char** argv) {
                         <<" present="<<f[7]<<" bg="<<f[8]<<" flow="<<f[9]<<" terrain-batches="<<f[10]
                         <<" scene-retire="<<f[11]<<" scene-encode="<<f[12]<<" scene-submit="<<f[13]<<" draws="<<f[14]<<'\n';
                 }
+                starfox::render::scene_counters::print_summary(std::cerr);
                 if(capture_results && !results_capture_ready)
                     throw std::runtime_error("Results capture deadline reached without a visible completed tally");
                 if(results_capture_ready) std::cerr<<"results-capture: frame="<<presented_frames

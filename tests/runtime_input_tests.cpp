@@ -1,3 +1,4 @@
+#include "starfox/render/asteroid_models.hpp"
 #include "starfox/app/runtime_input.hpp"
 #include "starfox/app/atomic_file.hpp"
 #include "starfox/app/android_renderer_window.hpp"
@@ -13,6 +14,8 @@
 #include "starfox/render/dlss_menu_status.hpp"
 #include "starfox/render/reflection_menu_status.hpp"
 
+#include <string_view>
+#include <iterator>
 #include <SDL3/SDL.h>
 
 #include <array>
@@ -1111,6 +1114,67 @@ int main(int argc, char** argv) {
         settings.render_scale = 10;
         require(!starfox::app::save_pregame_settings(pregame_test_path, settings),
             "out-of-range render scale saved");
+    }
+    {
+        // ASTEROID_MODELS is optional: it round-trips, rejects unknown modes,
+        // and a file written without it (every upstream build) loads as SPRITE.
+        auto settings = saved_pregame;
+        settings.asteroid_models = 1U;
+        require(starfox::app::save_pregame_settings(pregame_test_path, settings)
+            && starfox::app::load_pregame_settings(pregame_test_path, loaded_pregame)
+            && loaded_pregame == settings, "asteroid models did not round-trip");
+        settings.asteroid_models = starfox::render::asteroid_model_mode_count;
+        require(!starfox::app::save_pregame_settings(pregame_test_path, settings),
+            "invalid asteroid mode was saved");
+        settings.asteroid_models = 1U;
+        require(starfox::app::save_pregame_settings(pregame_test_path, settings), "asteroid settings not saved");
+        std::string text;
+        {
+            std::ifstream input{pregame_test_path};
+            text.assign(std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{});
+        }
+        const auto key = text.find("ASTEROID_MODELS 1\n");
+        require(key != std::string::npos, "asteroid mode missing from settings file");
+        text.erase(key, std::string_view{"ASTEROID_MODELS 1\n"}.size());
+        {
+            std::ofstream output{pregame_test_path, std::ios::trunc};
+            output << text;
+        }
+        require(starfox::app::load_pregame_settings(pregame_test_path, loaded_pregame)
+            && loaded_pregame.asteroid_models == 0U, "settings without ASTEROID_MODELS did not default to sprites");
+    }
+    {
+        // GPU_RENDERER is optional: older files lack it, and a value from a
+        // newer build must not reset every other setting.
+        auto fast = saved_pregame;fast.gpu_renderer = 1;
+        require(starfox::app::save_pregame_settings(pregame_test_path, fast)
+            && starfox::app::load_pregame_settings(pregame_test_path, loaded_pregame)
+            && loaded_pregame == fast, "GPU FAST setting round trip failed");
+        std::string kept;
+        {
+            std::ifstream saved{pregame_test_path};
+            for (std::string line; std::getline(saved, line);)
+                if (line.rfind("GPU_RENDERER ", 0) != 0) kept += line + '\n';
+        }
+        std::ofstream{pregame_test_path} << kept;
+        require(starfox::app::load_pregame_settings(pregame_test_path, loaded_pregame)
+            && loaded_pregame.gpu_renderer == 0U && loaded_pregame.timing_mode == fast.timing_mode,
+            "settings without GPU_RENDERER did not load as GPU ACCURATE");
+        std::ofstream{pregame_test_path, std::ios::app} << "GPU_RENDERER 2\n";
+        require(starfox::app::load_pregame_settings(pregame_test_path, loaded_pregame)
+            && loaded_pregame.gpu_renderer == 0U,
+            "unknown GPU_RENDERER value did not fall back to GPU ACCURATE");
+        auto invalid = saved_pregame;invalid.gpu_renderer = 2;
+        require(!starfox::app::save_pregame_settings(pregame_test_path, invalid),
+            "invalid GPU renderer setting was saved");
+        // 5x-10x render scales belong to GPU FAST.
+        auto ten = saved_pregame;ten.gpu_renderer = 1;ten.render_scale = 9;
+        require(starfox::app::save_pregame_settings(pregame_test_path, ten)
+            && starfox::app::load_pregame_settings(pregame_test_path, loaded_pregame)
+            && loaded_pregame.render_scale == 9U, "GPU FAST 10x render scale round trip failed");
+        auto accurate_ten = saved_pregame;accurate_ten.render_scale = 9;
+        require(starfox::app::save_pregame_settings(pregame_test_path, accurate_ten),
+            "explicit 10x configuration override was rejected");
     }
     for (std::uint8_t style = 0; style < starfox::render::effect_count; ++style) {
         auto settings = saved_pregame;

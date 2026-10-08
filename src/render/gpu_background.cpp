@@ -1,5 +1,8 @@
 #include "starfox/render/gpu_background.hpp"
 #include "starfox/render/gpu_image_extent.hpp"
+#include "starfox/compat/bit_cast.hpp"
+#include "starfox/render/gpu_raster.hpp"
+#include "starfox/render/gpu_scene_counters.hpp"
 #include "starfox/render/temporal_jitter.hpp"
 #include <algorithm>
 #include <array>
@@ -81,7 +84,7 @@ GpuRasterOutput GpuBackground::enqueue(void* device,void* command,const simulati
     const auto logical_width=custom?s.logical_viewport[0]:width/(scale?scale:1);
     const auto logical_height=custom?s.logical_viewport[1]:height/(scale?scale:1);
     if(!valid_raster_jitter(s.raster_jitter) || !std::isfinite(s.stereo_sky_source_x) || std::abs(s.stereo_sky_source_x)>65536
-        || !device || !command || !bounded_gpu_image_extent(width,height) || !scale || scale>10
+        || !device || !command || !bounded_gpu_image_extent(width,height) || !scale || scale>max_gpu_render_scale
         || (!custom && (width%scale || height%scale)) || !logical_width || !logical_height || logical_width>4096 || logical_height>4096 || s.layer<1 || s.layer>3
         || unsigned(s.priority)>2 || unsigned(s.tag)>4 || s.horizontal_origin < -65536 || s.horizontal_origin>65536
         || s.scroll_x < -1000000 || s.scroll_x>1000000 || s.scroll_y < -1000000 || s.scroll_y>1000000 || s.unique_regions.size()>64) {
@@ -117,7 +120,7 @@ GpuRasterOutput GpuBackground::enqueue(void* device,void* command,const simulati
         auto* cmd=static_cast<SDL_GPUCommandBuffer*>(command);
         auto* copy=SDL_BeginGPUCopyPass(cmd);Impl::require(copy);
         SDL_GPUTransferBufferLocation from{impl_->upload,0};SDL_GPUBufferRegion to{impl_->memory,0,upload_bytes};
-        SDL_UploadToGPUBuffer(copy,&from,&to,true);SDL_EndGPUCopyPass(copy);
+        scene_counters::upload_buffer(copy,&from,&to,true);SDL_EndGPUCopyPass(copy);
         if(s.layer==2) {
             impl_->initialize_bg2();
             const unsigned flags=(s.extend_horizontal?1U:0U)|(s.wrap_horizontal?2U:0U)
@@ -134,15 +137,15 @@ GpuRasterOutput GpuBackground::enqueue(void* device,void* command,const simulati
                 s.extend_horizontal?int(logical_width):std::min(int(logical_width),std::max(s.horizontal_origin+256,0)),
                 (ppu.mosaic&2)?int((ppu.mosaic>>4)+1):1,ppu.bg2_tile_size_16?16:8,int(s.priority),
                 int(s.tag),(ppu.main_screen&2)?1:0,s.transparent_cgram_black?1:0,int(flags),
-                std::bit_cast<std::int32_t>(s.single_occurrence_top_rows),int(s.unique_regions.size()),ppu.bg2_scroll_x,ppu.bg2_scroll_y,
+                starfox::bit_cast<std::int32_t>(s.single_occurrence_top_rows),int(s.unique_regions.size()),ppu.bg2_scroll_x,ppu.bg2_scroll_y,
                 int(s.terrain_source_rows[0]),int(s.terrain_source_rows[1]),int(logical_width),int(logical_height),
-                std::bit_cast<std::int32_t>(s.raster_jitter[0]),std::bit_cast<std::int32_t>(s.raster_jitter[1]),int(s.sky_source_min),std::bit_cast<std::int32_t>(s.stereo_sky_source_x)};
+                starfox::bit_cast<std::int32_t>(s.raster_jitter[0]),starfox::bit_cast<std::int32_t>(s.raster_jitter[1]),int(s.sky_source_min),starfox::bit_cast<std::int32_t>(s.stereo_sky_source_x)};
             for(unsigned phase=0;phase<2;++phase) {
                 data[3]=int(phase);SDL_PushGPUComputeUniformData(cmd,0,data.data(),sizeof(data));
                 SDL_GPUStorageBufferReadWriteBinding outputs[2]{};
                 outputs[0].buffer=impl_->pixels;outputs[1].buffer=impl_->prepared;
                 outputs[0].cycle=outputs[1].cycle=phase==0;
-                auto* pass=SDL_BeginGPUComputePass(cmd,nullptr,0,outputs,2);Impl::require(pass);
+                auto* pass=scene_counters::begin_compute_pass(cmd,nullptr,0,outputs,2);Impl::require(pass);
                 SDL_BindGPUComputePipeline(pass,impl_->bg2_pipeline);SDL_BindGPUComputeStorageBuffers(pass,0,&impl_->memory,1);
                 SDL_DispatchGPUCompute(pass,phase?(logical_width+63)/64:1,1,1);SDL_EndGPUComputePass(pass);
             }
@@ -166,10 +169,10 @@ GpuRasterOutput GpuBackground::enqueue(void* device,void* command,const simulati
             (bg1?ppu.bg1_tile_size_16:ppu.bg3_tile_size_16)?16:8,int(s.priority),int(s.tag),
             (ppu.main_screen&mask) && (!bg1 || (ppu.background_mode>=1 && ppu.background_mode<=3))?1:0,
             bg1 && s.transparent_cgram_black?1:0,bg1 && s.text_outline?1:0,int(logical_width),int(logical_height),
-            std::bit_cast<std::int32_t>(s.raster_jitter[0]),std::bit_cast<std::int32_t>(s.raster_jitter[1])};
+            starfox::bit_cast<std::int32_t>(s.raster_jitter[0]),starfox::bit_cast<std::int32_t>(s.raster_jitter[1])};
         SDL_PushGPUComputeUniformData(cmd,0,constants.data(),sizeof(constants));
         SDL_GPUStorageBufferReadWriteBinding output{};output.buffer=impl_->pixels;output.cycle=true;
-        auto* pass=SDL_BeginGPUComputePass(cmd,nullptr,0,&output,1);Impl::require(pass);
+        auto* pass=scene_counters::begin_compute_pass(cmd,nullptr,0,&output,1);Impl::require(pass);
         SDL_BindGPUComputePipeline(pass,impl_->pipeline);
         SDL_BindGPUComputeStorageBuffers(pass,0,&impl_->memory,1);
         SDL_DispatchGPUCompute(pass,(width+7)/8,(height+7)/8,1);SDL_EndGPUComputePass(pass);

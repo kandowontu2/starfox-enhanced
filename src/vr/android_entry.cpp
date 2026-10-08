@@ -2,6 +2,7 @@
 #include "starfox/assets/embedded.hpp"
 #include "starfox/assets/runtime_bundle.hpp"
 #include "starfox/vr/diagnostic_log.hpp"
+#include "starfox/assets/runtime_import.hpp"
 #include <fstream>
 #include <jni.h>
 #include <stdexcept>
@@ -86,6 +87,33 @@ Java_com_starfox_enhanced_quest_QuestBridge_validateBundle(JNIEnv* env,jclass,js
     }
 }
 // All JNI access uses that thread's JNIEnv; no native handle outlives this call.
+extern "C" JNIEXPORT void JNICALL
+Java_com_starfox_enhanced_quest_QuestBridge_prepareInput(JNIEnv* env,jclass,jstring source,jstring destination) {
+    try {
+        const auto source_path = path(env, source);
+        const auto destination_path = path(env, destination);
+        if (source_path == destination_path) throw std::runtime_error("Import needs a separate output file");
+        std::ifstream input(source_path, std::ios::binary | std::ios::ate);
+        if (!input) throw std::runtime_error("Cannot open selected input");
+        const auto size = input.tellg();
+        if (size <= 0 || size > 64 * 1024 * 1024) throw std::runtime_error("Invalid input size");
+        std::vector<std::uint8_t> bytes(static_cast<size_t>(size));
+        input.seekg(0);
+        if (!input.read(reinterpret_cast<char*>(bytes.data()), std::streamsize(bytes.size())))
+            throw std::runtime_error("Incomplete input file");
+        const auto prepared = starfox::assets::prepare_runtime_input(bytes, starfox::assets::embedded_asset);
+        std::ofstream output(destination_path, std::ios::binary | std::ios::trunc);
+        output.write(reinterpret_cast<const char*>(prepared.bundle.data()), std::streamsize(prepared.bundle.size()));
+        output.close();
+        if (!output) throw std::runtime_error("Cannot write prepared assets; check free storage");
+    } catch (const std::exception& error) {
+        if (!env->ExceptionCheck()) {
+            const auto type = env->FindClass("java/lang/IllegalStateException");
+            if (type) {env->ThrowNew(type, error.what()); env->DeleteLocalRef(type);}
+        }
+    }
+}
+
 extern "C" JNIEXPORT jint JNICALL
 Java_com_starfox_enhanced_quest_QuestBridge_run(JNIEnv* env,jclass,jobject activity,
         jobject context,jstring rom,jstring symbols,jobject stop) {

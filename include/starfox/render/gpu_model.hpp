@@ -178,7 +178,8 @@ public:
         const PreparedProjectionSource* source_projection=nullptr,
         const GpuPreparedModelSource* gpu_source=nullptr,
         const PreparedFacesSource* source_faces=nullptr,
-        const PreparedRayTopology* source_rays=nullptr);
+        const PreparedRayTopology* source_rays=nullptr,
+        bool bounded_raster=false,bool compact_tiles=false);
     void release_device() noexcept;
     // Explicit single-recording scope for byte-exact read-only input reuse.
     // End on every success/error path BEFORE submitting/canceling this command.

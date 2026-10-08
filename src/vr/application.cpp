@@ -33,6 +33,7 @@
 #include "starfox/vr/background_tiles.hpp"
 #include "starfox/vr/game_frame_driver.hpp"
 #include "starfox/vr/startup_menu.hpp"
+#include "starfox/vr/startup_preferences.hpp"
 #include "starfox/state/files.hpp"
 #include "starfox/vr/pcm_output.hpp"
 #include "starfox/audio/spc700_audio.hpp"
@@ -138,6 +139,8 @@ struct LiveGame {
 };
 }
 int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& host) {
+    // The Steam Frame player has its own loop, so this one stays as it was.
+    if(host.steam_frame) return run_steam_frame_application(argc,argv,host);
     if(host.stop_requested && host.stop_requested()) return 0;
     bool graphics=false,loader_only=false,render_clear=false,render_triangle=false,render_model=false,render_game=false;
     const char* model_rom=nullptr;const char* model_symbols=nullptr;const char* model_name=nullptr;const char* msu_path=nullptr;
@@ -576,6 +579,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
     unsigned sprite_uploads=0,sprite_reuses=0;
     bool cancelled=false;
     starfox::vr::StartupMenu startup;
+    startup.fixed_face_buttons=host.android!=nullptr;
     startup.ray_tracing_available=ray_supported;startup.ray_tracing=ray_tracing;
     starfox::vr::VulkanScenePipeline circle_pipeline;
     starfox::vr::VulkanSceneBuffer circle_vertices;
@@ -619,8 +623,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
         :host.cartridge_save_path.parent_path()/"vr-preferences.bin";
     if(startup.open && !preferences_path.empty()) try {
         if(std::filesystem::exists(preferences_path)) {
-            if((std::filesystem::file_size(preferences_path)!=16 && std::filesystem::file_size(preferences_path)!=20)
-                || !startup.restore_preferences(starfox::state::read_file(preferences_path)))
+            if(!starfox::vr::load_startup_preferences(startup,preferences_path))
                 std::cerr<<"Invalid VR preferences; using defaults\n";
         }
     } catch(const std::exception& error) {
@@ -758,7 +761,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                         game_controls.fire=game_controls.bomb=game_controls.boost=game_controls.brake=false;
                         game_controls.steer={};game_controls.select=game_controls.select_pressed=false;
                     }
-                    const auto advance=live->driver->advance(time,game_controls,playing);
+                    const auto advance=live->driver->advance(time,game_controls,playing,{},startup.fixed_face_buttons);
                     if(!live->game.paused() && sandbox.active()) {
                         sandbox.commit(live->game.objects());live->history->capture();
                     }
@@ -815,6 +818,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                     // The startup/runtime panel replaces the scene. Do not
                     // compile or upload invisible game resources while it is open.
                     if(!startup.open || startup.preview) {
+                    live->models.set_asteroid_models(startup.asteroid_model_mode());
                     auto packets=live->models.assemble_world_interpolated(*live->history->previous(),*live->history->current(),alpha,srgb,true);
                     if(live->game.paused()) {
                         if(!sandbox.active()) {

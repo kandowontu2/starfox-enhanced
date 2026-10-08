@@ -1,5 +1,6 @@
 #include "starfox/simulation/object_pool.hpp"
 #include "starfox/simulation/object_record.hpp"
+#include "starfox/compat/bit_cast.hpp"
 #include "starfox/state/archive.hpp"
 
 #include <algorithm>
@@ -259,7 +260,7 @@ std::uint8_t ObjectPool::read_base_byte(
     };
     const auto read_i16_byte = [offset](std::int16_t field, std::uint16_t base) {
         return static_cast<std::uint8_t>(
-            std::bit_cast<std::uint16_t>(field) >> ((offset - base) * 8U));
+            starfox::bit_cast<std::uint16_t>(field) >> ((offset - base) * 8U));
     };
 
     if (offset >= 4 && offset <= 5) return read_u16_byte(object.shape, 4);
@@ -274,16 +275,16 @@ std::uint8_t ObjectPool::read_base_byte(
     if (offset == 18) return object.rotation_x;
     if (offset == 19) return object.rotation_y;
     if (offset == 20) return object.rotation_z;
-    if (offset == 21) return std::bit_cast<std::uint8_t>(object.velocity);
+    if (offset == 21) return starfox::bit_cast<std::uint8_t>(object.velocity);
     if (offset >= 22 && offset <= 24) {
         return static_cast<std::uint8_t>(object.strategy_address >> ((offset - 22U) * 8U));
     }
     if (offset >= 25 && offset <= 26) return read_u16_byte(object.immune_object, 25);
     if (offset >= 27 && offset <= 28) return read_u16_byte(object.collision_object, 27);
     if (offset >= 29 && offset <= 32) return object.strategy_flags[offset - 29U];
-    if (offset == 33) return std::bit_cast<std::uint8_t>(object.skid_y);
+    if (offset == 33) return starfox::bit_cast<std::uint8_t>(object.skid_y);
     if (offset >= 34 && offset <= 37) {
-        return std::bit_cast<std::uint8_t>(object.scratch_bytes[offset - 34U]);
+        return starfox::bit_cast<std::uint8_t>(object.scratch_bytes[offset - 34U]);
     }
     if (offset >= 38 && offset <= 39) return read_i16_byte(object.scratch_words[0], 38);
     if (offset >= 40 && offset <= 41) return read_i16_byte(object.scratch_words[1], 40);
@@ -299,7 +300,7 @@ std::uint8_t ObjectPool::read_base_byte(
         if (offset == 53) return object.weapon_type; // EX's al_weaponnum
         if (offset == 54) return object.open_al;
         if (offset >= 55 && offset <= 56) {
-            return std::bit_cast<std::uint8_t>(object.scratch_bytes[offset - 51U]);
+            return starfox::bit_cast<std::uint8_t>(object.scratch_bytes[offset - 51U]);
         }
     } else {
         if (offset == 44) return object.weapon_type;
@@ -310,7 +311,7 @@ std::uint8_t ObjectPool::read_base_byte(
         if (offset >= 51 && offset <= 52) return read_i16_byte(object.velocity_z, 51);
         if (offset == 53) return object.hit_flags;
         if (offset >= 54 && offset <= 55) {
-            return std::bit_cast<std::uint8_t>(object.scratch_bytes[offset - 50U]);
+            return starfox::bit_cast<std::uint8_t>(object.scratch_bytes[offset - 50U]);
         }
     }
     throw std::out_of_range{"alien-block byte offset is outside al_size"};
@@ -333,11 +334,11 @@ void ObjectPool::write_base_byte(
         field = static_cast<std::remove_reference_t<decltype(field)>>(bits);
     };
     const auto write_i16_byte = [offset, value](std::int16_t& field, std::uint16_t base) {
-        auto bits = std::bit_cast<std::uint16_t>(field);
+        auto bits = starfox::bit_cast<std::uint16_t>(field);
         const auto shift = static_cast<unsigned>((offset - base) * 8U);
         bits = static_cast<std::uint16_t>(
             (bits & ~(std::uint16_t{0xff} << shift)) | (std::uint16_t{value} << shift));
-        field = std::bit_cast<std::int16_t>(bits);
+        field = starfox::bit_cast<std::int16_t>(bits);
     };
 
     if (offset >= 4 && offset <= 5) write_u16_byte(object.shape, 4);
@@ -352,7 +353,7 @@ void ObjectPool::write_base_byte(
     else if (offset == 18) object.rotation_x = value;
     else if (offset == 19) object.rotation_y = value;
     else if (offset == 20) object.rotation_z = value;
-    else if (offset == 21) object.velocity = std::bit_cast<std::int8_t>(value);
+    else if (offset == 21) object.velocity = starfox::bit_cast<std::int8_t>(value);
     else if (offset >= 22 && offset <= 24) {
         const auto shift = static_cast<unsigned>((offset - 22U) * 8U);
         object.strategy_address = (object.strategy_address & ~(std::uint32_t{0xff} << shift))
@@ -360,9 +361,9 @@ void ObjectPool::write_base_byte(
     } else if (offset >= 25 && offset <= 26) write_u16_byte(object.immune_object, 25);
     else if (offset >= 27 && offset <= 28) write_u16_byte(object.collision_object, 27);
     else if (offset >= 29 && offset <= 32) object.strategy_flags[offset - 29U] = value;
-    else if (offset == 33) object.skid_y = std::bit_cast<std::int8_t>(value);
+    else if (offset == 33) object.skid_y = starfox::bit_cast<std::int8_t>(value);
     else if (offset >= 34 && offset <= 37) {
-        object.scratch_bytes[offset - 34U] = std::bit_cast<std::int8_t>(value);
+        object.scratch_bytes[offset - 34U] = starfox::bit_cast<std::int8_t>(value);
     } else if (offset >= 38 && offset <= 39) write_i16_byte(object.scratch_words[0], 38);
     else if (offset >= 40 && offset <= 41) write_i16_byte(object.scratch_words[1], 40);
     else if (offset == 42) object.health = value;
@@ -388,7 +389,7 @@ void ObjectPool::write_base_byte(
         object.open_al = value;
     } else if (layout_ == ObjectMemoryLayout::starfox_ex
                && offset >= 55 && offset <= 56) {
-        object.scratch_bytes[offset - 51U] = std::bit_cast<std::int8_t>(value);
+        object.scratch_bytes[offset - 51U] = starfox::bit_cast<std::int8_t>(value);
     } else if (layout_ == ObjectMemoryLayout::original && offset == 44) {
         object.weapon_type = value;
     } else if (layout_ == ObjectMemoryLayout::original && offset == 45) {
@@ -408,7 +409,7 @@ void ObjectPool::write_base_byte(
         object.hit_flags = value;
     } else if (layout_ == ObjectMemoryLayout::original
                && offset >= 54 && offset <= 55) {
-        object.scratch_bytes[offset - 50U] = std::bit_cast<std::int8_t>(value);
+        object.scratch_bytes[offset - 50U] = starfox::bit_cast<std::int8_t>(value);
     } else {
         throw std::out_of_range{"alien-block byte offset is outside al_size"};
     }

@@ -2,6 +2,7 @@
 #include "starfox/vr/openxr_input.hpp"
 #include "starfox/vr/menu_stick.hpp"
 #include "starfox/localization/menu_catalog.hpp"
+#include "starfox/render/asteroid_models.hpp"
 #include "starfox/render/effect_types.hpp"
 #include <array>
 #include <string>
@@ -14,12 +15,18 @@ public:
     Page page{Page::main};
     bool open{true},god_mode{},extended{},alternate_available{},runtime{};
     bool infinite_bombs{},infinite_boost{},infinite_lives{},swap_face_buttons{};
+    bool fixed_face_buttons{}; // Quest host policy; not a saved preference.
     bool unlocked_pace{true};
     bool msu_available{},msu_music{};
     bool ray_tracing{},ray_tracing_available{};
     bool enhanced_sky{};
     bool preview{}; // Session-only: never resume a game into preview automatically.
     unsigned model_effect{},world_effect{},model_intensity{100},world_intensity{100};
+    unsigned asteroid_models{}; // render::AsteroidModels.
+    render::AsteroidModels asteroid_model_mode() const noexcept {
+        return asteroid_models<render::asteroid_model_mode_count
+            ?static_cast<render::AsteroidModels>(asteroid_models):render::AsteroidModels::sprite;
+    }
     static constexpr std::array<unsigned,11> supported_effects{0,1,4,8,9,10,11,13,14,15,16};
     static std::string_view style_name(unsigned style) noexcept {
         // Preserve existing VR display names; IDs are shared with desktop.
@@ -46,19 +53,21 @@ public:
     std::array<std::vector<unsigned>,2> level_choices{{{0},{0}}};
     // Versioned preferences deliberately exclude navigation, level jumps and
     // cartridge availability. Those belong to the current session only.
-    std::array<uint8_t,20> preferences() const noexcept {
-        return {'S','F','V','R',5,uint8_t(language),uint8_t(god_mode),
+    std::array<uint8_t,21> preferences() const noexcept {
+        return {'S','F','V','R',6,uint8_t(language),uint8_t(god_mode),
             uint8_t(default_laser),uint8_t(msu_music),uint8_t(music_volume),
             uint8_t(sfx_volume),uint8_t(unsigned(unlocked_pace)|(unsigned(ray_tracing)<<1)|(unsigned(enhanced_sky)<<2)
                 |(steer_sensitivity_index<<3)),uint8_t(crosshair_colour),
             uint8_t(swap_face_buttons),uint8_t(infinite_bombs),uint8_t(unsigned(infinite_boost)|(unsigned(infinite_lives)<<1)),
-            uint8_t(model_effect),uint8_t(world_effect),uint8_t(model_intensity),uint8_t(world_intensity)};
+            uint8_t(model_effect),uint8_t(world_effect),uint8_t(model_intensity),uint8_t(world_intensity),
+            uint8_t(asteroid_models)};
     }
     bool restore_preferences(std::span<const uint8_t> bytes) noexcept {
-        if((bytes.size()!=16 && bytes.size()!=20) || bytes[0]!='S' || bytes[1]!='F' || bytes[2]!='V'
-            || bytes[3]!='R' || (bytes[4]<1 || bytes[4]>5) || bytes[5]>=6 || bytes[7]>=3
+        if((bytes.size()!=16 && bytes.size()!=20 && bytes.size()!=21) || bytes[0]!='S' || bytes[1]!='F' || bytes[2]!='V'
+            || bytes[3]!='R' || (bytes[4]<1 || bytes[4]>6) || bytes[5]>=6 || bytes[7]>=3
             || bytes[9]>100 || bytes[10]>100 || bytes[12]>=8) return false;
-        if(bytes.size()!=(bytes[4]>=4?20U:16U)) return false;
+        if(bytes.size()!=(bytes[4]>=6?21U:bytes[4]>=4?20U:16U)) return false;
+        if(bytes[4]>=6 && bytes[20]>=render::asteroid_model_mode_count) return false;
         if(bytes[4]>=4) {
             for(unsigned i:{16U,17U}) {
                 bool valid=false;for(auto effect:supported_effects) valid|=bytes[i]==effect;
@@ -81,14 +90,15 @@ public:
         infinite_lives=bytes[4]>=3 && (bytes[15]&2)!=0;++revision;
         model_effect=bytes[4]>=4?bytes[16]:0;world_effect=bytes[4]>=4?bytes[17]:0;
         model_intensity=bytes[4]>=4?bytes[18]:100;world_intensity=bytes[4]>=4?bytes[19]:100;
+        asteroid_models=bytes[4]>=6?bytes[20]:0;
         return true;
     }
-    unsigned row_count() const noexcept {return page==Page::main?6:page==Page::options?10:page==Page::three_d?(ray_tracing_available?5:4):page==Page::two_d?5:7;}
+    unsigned row_count() const noexcept {return page==Page::main?6:page==Page::options?10:page==Page::three_d?(ray_tracing_available?6:5):page==Page::two_d?5:7;}
     unsigned first_visible_row() const noexcept {return selection<6?0:selection-5;}
     VrControls gameplay_controls(VrControls controls) const noexcept {
         // Native mapping is Y=fire, X=boost, A=bomb, B=brake.
         // Keep menu confirmation unchanged when gameplay buttons are swapped.
-        if(swap_face_buttons) {
+        if(swap_face_buttons && !fixed_face_buttons) {
             std::swap(controls.fire,controls.boost);
             std::swap(controls.bomb,controls.brake);
         }
@@ -127,7 +137,7 @@ public:
             } else if(page==Page::options) {
                 if(selection==0) {page=Page::cheats;selection=0;}
                 else if(selection==1) crosshair_colour=(crosshair_colour+1)%8;
-                else if(selection==2) swap_face_buttons=!swap_face_buttons;
+                else if(selection==2) {if(!fixed_face_buttons) swap_face_buttons=!swap_face_buttons;}
                 else if(selection==3) music_volume=(music_volume+10)%110;
                 else if(selection==4) sfx_volume=(sfx_volume+10)%110;
                 else if(selection==5) language=(language+1)%6;
@@ -140,6 +150,8 @@ public:
                 else if(selection==1) model_intensity=(model_intensity+25)%125;
                 else if(selection==2) preview=!preview;
                 else if(selection==3 && ray_tracing_available) {ray_tracing=!ray_tracing;}
+                else if(selection==(ray_tracing_available?4U:3U))
+                    asteroid_models=(asteroid_models+1)%render::asteroid_model_mode_count;
                 else {page=Page::options;selection=6;}
             } else if(page==Page::two_d) {
                 if(selection==0) world_effect=next_style(world_effect,true);
@@ -175,6 +187,8 @@ public:
             rows.push_back(std::string("PREVIEW: ")+(preview?"ON":"OFF"));
             if(!models) rows.push_back(std::string("ENHANCED SKY: ")+(enhanced_sky?"ON":"OFF"));
             if(models && ray_tracing_available) rows.push_back(std::string("RAY TRACING: ")+(ray_tracing?"ON":"OFF"));
+            if(models) rows.push_back("3D ASTEROIDS: "+std::string(render::asteroid_model_names[
+                static_cast<std::size_t>(asteroid_model_mode())]));
             rows.push_back("BACK");return rows;
         }
         if(page==Page::cheats) return {std::string("GOD MODE: ")+(god_mode?"ON":"OFF"),
@@ -186,7 +200,7 @@ public:
         constexpr const char* languages[]{"ENGLISH","JAPANESE","GERMAN","FRENCH","SPANISH","ENGLISH (EUROPE)"};
         constexpr const char* colours[]{"GREEN","WHITE","BLUE","RED","YELLOW","CYAN","MAGENTA","ORANGE"};
         if(page==Page::options) return {"CHEATS",std::string("CROSSHAIR COLOR: ")+colours[crosshair_colour%8],
-            std::string("SWAP A/B + Y/X: ")+(swap_face_buttons?"ON":"OFF"),
+            fixed_face_buttons?"A: FIRE / Y: BRAKE":std::string("SWAP A/B + Y/X: ")+(swap_face_buttons?"ON":"OFF"),
             "MUSIC VOLUME: "+std::to_string(music_volume)+"%","SFX VOLUME: "+std::to_string(sfx_volume)+"%",
             std::string("LANGUAGE: ")+languages[language<6?language:0],"3D OPTIONS","2D OPTIONS",
             "STICK SENSITIVITY: "+std::to_string(steer_sensitivities[steer_sensitivity_index%steer_sensitivities.size()])+"%","BACK"};

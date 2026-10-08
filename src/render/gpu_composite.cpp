@@ -1,4 +1,5 @@
 #include "starfox/render/gpu_composite.hpp"
+#include "starfox/compat/bit_cast.hpp"
 #include "starfox/render/temporal_jitter.hpp"
 #include "starfox/render/submission_retirement.hpp"
 #include <algorithm>
@@ -19,7 +20,30 @@
 #endif
 namespace starfox::render {
 #if defined(STARFOX_SDL_GPU_EFFECTS)
-namespace {void checked(bool ok) {if(!ok) throw std::runtime_error(SDL_GetError());}}
+namespace {void checked(bool ok) {if(!ok) throw std::runtime_error(SDL_GetError());}
+// Same answer as std::all_of(bytes,==value). The composition reuse check runs
+// over every stored pixel, tag and coverage byte each frame (11.5 MB at 4x
+// 32:9), so test 4 KiB blocks a word at a time, which compilers vectorize.
+// STARFOX_TEST_SCALAR_UNIFORM_SCAN=1 keeps the byte-wise loop for A/B.
+bool all_bytes_equal(std::span<const std::uint8_t> bytes,std::uint8_t value) noexcept {
+    static const bool scalar=std::getenv("STARFOX_TEST_SCALAR_UNIFORM_SCAN")!=nullptr;
+    if(scalar) return std::all_of(bytes.begin(),bytes.end(),[value](std::uint8_t byte){return byte==value;});
+    const auto* data=bytes.data();
+    const std::size_t size=bytes.size();
+    const std::uint64_t pattern=0x0101010101010101ULL*value;
+    constexpr std::size_t block=4096;
+    std::size_t at=0;
+    for(;size-at>=block;at+=block) {
+        std::uint64_t difference=0;
+        for(std::size_t offset=0;offset<block;offset+=8) {
+            std::uint64_t word;std::memcpy(&word,data+at+offset,8);difference|=word^pattern;
+        }
+        if(difference) return false;
+    }
+    for(;at<size;++at) if(data[at]!=value) return false;
+    return true;
+}
+}
 struct GpuComposite::Impl {
     SDL_GPUDevice* device{};SDL_GPUComputePipeline* pipeline{},*edge_pipeline{};
     SDL_GPUBuffer* buffers[8]{};Uint32 capacities[8]{};
@@ -28,6 +52,9 @@ struct GpuComposite::Impl {
     std::vector<SDL_GPUFence*> retired_fences;
     Uint32 width{},height{};bool valid{},has_depth{},has_motion{},ordered_queue_reuse{};
     std::vector<Uint32> packed;
+    // Raw inputs that produced `packed`, so an unchanged CPU layer can skip
+    // the per-pixel pack/compare loop. Valid only right after that loop ran.
+    std::array<std::vector<Uint8>,5> packedInputs;bool packedInputsValid{},packedInputsTags{};
     std::vector<std::pair<Uint32,Uint32>> dirtySpans;
     std::array<Uint32,256> cachedPalette{};
     Uint32 cachedUniformValue{},cachedUniformBytes{},lastCpuUploadBytes{},lastPaletteUploadBytes{};
@@ -202,7 +229,7 @@ struct GpuComposite::Impl {
             uniformValue=input.value;stripeValue=input.stripeValue;stripes=input.stripes;
             // The next ordinary compose cannot reuse this owner's older host
             // upload cache after a shared-input submission.
-            cachedUniformValid=cachedPackedValid=cachedPaletteValid=false;
+            cachedUniformValid=cachedPackedValid=cachedPaletteValid=packedInputsValid=false;
         } else {
             const auto same_mask=[](std::span<const Uint8> mask,bool expected) {
                 return mask.empty()? !expected : std::all_of(mask.begin(),mask.end(),
@@ -282,6 +309,17 @@ struct GpuComposite::Impl {
             if(!uniform && !striped) {
                 const bool comparePrevious=allowCpuCache && cachedPackedValid && capacities[0]>=bytes
                     && cachedUniformBytes==bytes && packed.size()==count;
+                const std::array<std::span<const Uint8>,5> inputs{std::span<const Uint8>{cpu->pixels()},
+                    cpu->layer_tags_enabled()?std::span<const Uint8>{cpu->layer_tags()}:std::span<const Uint8>{},
+                    foreground,backgroundCoverage,afterLate};
+                const bool sameInputs=comparePrevious && packedInputsValid
+                    && packedInputsTags==cpu->layer_tags_enabled()
+                    && !std::getenv("STARFOX_TEST_REPACK_STATIC_CPU_LAYER")
+                    && std::equal(inputs.begin(),inputs.end(),packedInputs.begin(),[](auto now,const auto& before) {
+                        return now.size()==before.size() && (now.empty() || std::memcmp(now.data(),before.data(),now.size())==0);
+                    });
+                if(sameInputs) {uniform=false;uniformValue=packed[0];}
+                else {
                 packed.resize(count);
                 uniform=true;
                 for(Uint32 y=0;y<cpuHeight;++y) {
@@ -306,7 +344,10 @@ struct GpuComposite::Impl {
                     }
                 }
                 if(!comparePrevious) dirtySpans.emplace_back(0,Uint32(count));
-            }
+                for(std::size_t i=0;i<inputs.size();++i) packedInputs[i].assign(inputs[i].begin(),inputs[i].end());
+                packedInputsTags=cpu->layer_tags_enabled();packedInputsValid=true;
+                }
+            } else packedInputsValid=false;
             gpuUniform=allowCpuCache && uniform;
             gpuStriped=allowCpuCache && striped;
             if(gpuUniform || gpuStriped) dirtySpans.clear();
@@ -399,11 +440,11 @@ struct GpuComposite::Impl {
             settings.clip_right,settings.clip_bottom,settings.mosaic_origin_x,settings.mosaic_origin_y,
             late?1:0,background?1:0,1,background?Sint32(background->margin_origin):0,
             background?Sint32(background->margin_width):0,background && background->repair_transparent_margins?1:0,has_depth?1:0,has_motion?1:0,
-            worldOnly?1:0,std::bit_cast<Sint32>(jitter[0]),std::bit_cast<Sint32>(jitter[1]),background && background->match_right_margin?1:0,Sint32(sourceReferenceWidth),Sint32(sourceReferenceHeight),Sint32(width),Sint32(height),
+            worldOnly?1:0,starfox::bit_cast<Sint32>(jitter[0]),starfox::bit_cast<Sint32>(jitter[1]),background && background->match_right_margin?1:0,Sint32(sourceReferenceWidth),Sint32(sourceReferenceHeight),Sint32(width),Sint32(height),
             late?Sint32(late->width):0,late?Sint32(late->height):0,
             background?Sint32(background->raster.width):0,background?Sint32(background->raster.height):0,
-            gpuUniform?1:0,std::bit_cast<Sint32>(uniformValue),gpuStriped?1:0,
-            std::bit_cast<Sint32>(stripeValue),Sint32(stripes[0].first),Sint32(stripes[0].second),
+            gpuUniform?1:0,starfox::bit_cast<Sint32>(uniformValue),gpuStriped?1:0,
+            starfox::bit_cast<Sint32>(stripeValue),Sint32(stripes[0].first),Sint32(stripes[0].second),
             Sint32(stripes[1].first),Sint32(stripes[1].second),source.msaa_color?1:0,
             late && late->msaa_color?1:0,background && background->raster.msaa_color?1:0,0};
         SDL_GPUStorageTextureReadWriteBinding texture{};texture.texture=rgba;
@@ -546,6 +587,7 @@ bool GpuComposite::compose(const GpuRasterOutput& source,std::uint32_t scale,con
         impl_->compose(source,scale,&cpu,foreground,settings,palette,late,background,afterLate,worldOnly,mapping,jitter);return true;}
     catch(const std::exception& e) {if(impl_->command) {SDL_CancelGPUCommandBuffer(impl_->command);impl_->command=nullptr;}
         impl_->valid=false;impl_->cachedUniformValid=impl_->cachedPackedValid=impl_->cachedPaletteValid=false;
+        impl_->packedInputsValid=false;
         impl_->status=e.what();return false;}
 #else
     (void)source;(void)scale;(void)cpu;(void)foreground;(void)settings;(void)palette;(void)late;(void)background;(void)afterLate;(void)worldOnly;(void)mapping;return false;

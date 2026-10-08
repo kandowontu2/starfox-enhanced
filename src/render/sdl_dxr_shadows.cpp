@@ -8,6 +8,10 @@
 #endif
 #if defined(STARFOX_SDL_GPU_EFFECTS) && defined(STARFOX_DXR)
 #define STARFOX_NATIVE_SDL_DXR 1
+#define WIN32_LEAN_AND_MEAN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include "starfox/render/sdl_d3d12_bridge.h"
 #include <SDL3/SDL.h>
 #include <windows.h>
@@ -15,6 +19,10 @@
 #define VK_NO_PROTOTYPES
 #include <vulkan/vulkan.h>
 #include "starfox/render/sdl_vulkan_bridge.h"
+#if defined(__MINGW32__) && !defined(__REQUIRED_RPCNDR_H_VERSION__)
+// Match SDL/DirectX-Headers: MinGW's RPC headers expose version 475.
+#define __REQUIRED_RPCNDR_H_VERSION__ 475
+#endif
 #include <d3d12.h>
 #include <wrl/client.h>
 #include <cstring>
