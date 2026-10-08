@@ -270,7 +270,12 @@ int main() {
                 if(remap) {
                     remap->update(pad);bindings=remap->bindings();
                     if(!remap->active()) {
-                        session->finish_controller_remap();audio->pause(false);checkpoint(true);remap.reset();continue;
+                        session->finish_controller_remap();
+                        // Returning to runtime Options must keep queued NDSP
+                        // playback paused, like the HUD editor return. BOOT's
+                        // ordinary pre-game menu still resumes its own audio.
+                        audio->pause(session->game().runtime_options_open());
+                        checkpoint(true);remap.reset();continue;
                     }
                     checkpoint(false);
 #if defined(STARFOX_3DS_CORE_PICA)

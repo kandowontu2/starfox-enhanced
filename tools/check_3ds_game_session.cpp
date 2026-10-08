@@ -875,14 +875,14 @@ void editor_resume_parity(const assets::RomImage& rom,const assets::SymbolMap& s
     std::cout<<(hud_editor?"  HUD editor":"  Controller")<<" resume: independent VM/SPC/PCM parity through partial audio phase "<<frozen_phase%3
         <<" and 24 post-editor rasters checked\n";
 }
-void runtime_hud_resume_parity(const assets::RomImage& rom,const assets::SymbolMap& symbols) {
+void runtime_editor_resume_parity(const assets::RomImage& rom,const assets::SymbolMap& symbols,bool hud_editor) {
     for(unsigned partial=0;partial<3;++partial) {
         std::vector<std::int16_t> pcm;
         GameSession session(rom,symbols,[&](auto samples){pcm.insert(pcm.end(),samples.begin(),samples.end());},"LEVEL1_1");
         SourceOracle source(rom,symbols,"LEVEL1_1");std::int64_t time{};session.advance(time,0);
         const auto compare=[&] {
-            require(session.game().save_state()==source.game.save_state(),"Runtime HUD changed independent cartridge state");
-            require(session.audio().save_state()==source.spc.save_state() && pcm==source.pcm,"Runtime HUD lost partial SPC/PCM phase");
+            require(session.game().save_state()==source.game.save_state(),"Runtime editor changed independent cartridge state");
+            require(session.audio().save_state()==source.spc.save_state() && pcm==source.pcm,"Runtime editor lost partial SPC/PCM phase");
         };
         for(unsigned raster=1;raster<=partial;++raster) {time=timestamp(raster);session.advance(time,0);source.raster();compare();}
         require(session.toggle_runtime_options() && source.game.toggle_runtime_options(),"Stage fixture could not open runtime options");
@@ -890,7 +890,7 @@ void runtime_hud_resume_parity(const assets::RomImage& rom,const assets::SymbolM
         const auto menu_step=[&](input::ButtonMask held,bool host_action=false) {
             time+=50'000'000;source.input.sample(host_action?0:held);
             const auto result=session.advance(time,held);
-            require(result.video_phases>0 && result.video_phases<=3 && !result.audio_blocks,"Runtime HUD menu clock resumed audio prematurely");
+            require(result.video_phases>0 && result.video_phases<=3 && !result.audio_blocks,"Runtime editor menu clock resumed audio prematurely");
             // Menu input still uses source raster/logic timing, but its paused
             // cartridge and SPC have no clock or handshake service.
             for(unsigned raster=0;raster<result.video_phases;++raster) {
@@ -903,25 +903,39 @@ void runtime_hud_resume_parity(const assets::RomImage& rom,const assets::SymbolM
         const auto select=[&](unsigned id) {
             const auto order=simulation::pregame_menu_order(session.game().pregame_page());
             for(std::size_t i=0;session.game().pregame_selection()!=id && i<order.size();++i) tap(input::down);
-            require(session.game().pregame_selection()==id,"Runtime HUD fixture could not select source option");
+            require(session.game().pregame_selection()==id,"Runtime editor fixture could not select source option");
         };
-        select(14);tap(input::a);select(3);
-        require(menu_step(input::a,true).requested_hud_customization,"Runtime Customize Screen did not open native editor");
+        select(14);tap(input::a);select(hud_editor?3:8);
+        const auto opening=menu_step(input::a,true);
+        require(hud_editor?opening.requested_hud_customization:opening.requested_controller_remap,
+            "Runtime Options did not open the selected native editor");
         source.input.reset();const auto map=session.game().map().save_state(),spc=session.audio().save_state();
         const auto wait=session.advance(time+60'000'000'000LL,input::start);
         require(!wait.video_phases && !wait.audio_blocks && map==session.game().map().save_state() && spc==session.audio().save_state(),
-            "Runtime HUD editor advanced paused cartridge/audio");compare();
-        auto layout=session.preferences().hud_layout;layout.widgets[unsigned(HudWidget::shield)].x=20;
-        session.finish_hud_customization(layout);compare();
-        require(session.game().runtime_options_open(),"Apply unexpectedly closed source runtime menu");
-        require(session.toggle_runtime_options() && source.game.toggle_runtime_options(),"Runtime HUD options could not close");
+            "Runtime editor advanced paused cartridge/audio");compare();
+        if(hud_editor) {
+            auto layout=session.preferences().hud_layout;layout.widgets[unsigned(HudWidget::shield)].x=20;
+            session.finish_hud_customization(layout);
+        } else session.finish_controller_remap();
+        compare();
+        require(session.game().runtime_options_open(),"Editor return unexpectedly closed source runtime menu");
+        // The player must retain NDSP pause on this return: spend additional
+        // ordinary menu rasters here without any SPC service or new PCM. This
+        // verifies source cadence, not the physical DSP's paused DMA status.
+        source.input.reset();time+=60'000'000'001LL;
+        require(!session.advance(time,0).video_phases,"Runtime editor return caught up paused wall time");compare();
+        for(unsigned menu_frame=0;menu_frame<6;++menu_frame)menu_step(0);
+        require(session.game().runtime_options_open() && session.audio().save_state()==spc,
+            "Returning to runtime Options prematurely resumed source audio");
+        require(session.toggle_runtime_options() && source.game.toggle_runtime_options(),"Runtime editor options could not close");
         source.input.reset();time+=60'000'000'001LL;session.advance(time,0);compare();
         for(unsigned raster=1;raster<=24;++raster) {
             const auto resumed=session.advance(time+timestamp(raster),0);
-            require(resumed.video_phases==1,"Runtime HUD resume duplicated/dropped source raster");source.raster();compare();
+            require(resumed.video_phases==1,"Runtime editor resume duplicated/dropped source raster");source.raster();compare();
         }
     }
-    std::cout<<"  Runtime HUD resume: independent VM/SPC/PCM continuation for all three partial audio phases checked\n";
+    std::cout<<(hud_editor?"  Runtime HUD":"  Runtime controller")
+        <<" resume: paused Options return and independent VM/SPC/PCM continuation for all three partial audio phases checked\n";
 }
 void actual_hud_customization(const assets::RomImage& rom,const assets::SymbolMap& symbols) {
     GameSession session(rom,symbols,[](auto){});MenuDriver controls(session);
@@ -986,9 +1000,14 @@ int main(int argc,char** argv) {
     try {
         const bool states_only=argc==4 && std::string_view(argv[3])=="--states-only";
         const bool capabilities_only=argc==4 && std::string_view(argv[3])=="--capabilities-only";
-        if(argc!=3 && !states_only && !capabilities_only && !(argc==5 && std::string_view(argv[3])=="--capture"))
-            throw std::invalid_argument("Usage: game_session_check ROM SYMBOLS [--capture DIRECTORY | --states-only | --capabilities-only]");
+        const bool runtime_editors=argc==4 && std::string_view(argv[3])=="--runtime-editor-parity";
+        if(argc!=3 && !states_only && !capabilities_only && !runtime_editors && !(argc==5 && std::string_view(argv[3])=="--capture"))
+            throw std::invalid_argument("Usage: game_session_check ROM SYMBOLS [--capture DIRECTORY | --states-only | --capabilities-only | --runtime-editor-parity]");
         const auto rom=assets::RomImage::load(argv[1]);const auto symbols=assets::SymbolMap::load(argv[2]);
+        if(runtime_editors) {
+            runtime_editor_resume_parity(rom,symbols,false);runtime_editor_resume_parity(rom,symbols,true);
+            std::cout<<"3DS runtime editors: "<<checks<<" checks passed; source parity, not physical NDSP pause acceptance\n";return 0;
+        }
         if(capabilities_only) {
             native_capability_restore(rom,symbols);
             std::cout<<"3DS native capabilities: "<<checks<<" checks passed; host state imports, not console acceptance\n";return 0;
@@ -1007,7 +1026,8 @@ int main(int argc,char** argv) {
         editor_resume_parity(rom,symbols);
         actual_hud_customization(rom,symbols);
         editor_resume_parity(rom,symbols,true);
-        runtime_hud_resume_parity(rom,symbols);
+        runtime_editor_resume_parity(rom,symbols,false);
+        runtime_editor_resume_parity(rom,symbols,true);
         full_state_parity(rom,symbols);
         merged_menu_compatibility(rom,symbols);
         GameSession failed(rom,symbols,[](auto){throw std::runtime_error("PCM device failed");});
@@ -1017,4 +1037,3 @@ int main(int argc,char** argv) {
         std::cout<<"3DS actual game session: "<<checks<<" checks passed; host source parity, not PICA/NDSP or hardware acceptance\n";
     } catch(const std::exception& error) {std::cerr<<"3DS actual game session: "<<error.what()<<'\n';return 1;}
 }
-
