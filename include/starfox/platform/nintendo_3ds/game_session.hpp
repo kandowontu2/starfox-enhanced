@@ -104,6 +104,9 @@ private:
     void publish_raster();
     assets::RomImage rom_;
     assets::SymbolMap symbols_;
+    simulation::TrigTables native_model_trig_;
+    std::array<std::uint32_t,10> native_model_addresses_{};
+    std::uint32_t native_model_depth_tables_{};
     simulation::Experience cartridge_experience_;
     // The counts outlive the simulation's non-owning pace-table pointer.
     std::unordered_map<std::uint32_t,std::uint32_t> face_counts_;

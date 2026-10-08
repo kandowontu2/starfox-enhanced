@@ -170,6 +170,17 @@ PicaFrame GameModels::prepare(const GamePresentation& frame) {
             throw std::runtime_error("3DS object "+std::to_string(item.handle)+" shape "+std::to_string(object.shape)+": "+error.what());
         }
     }
+    if(frame.raster->native_model && (scene.flow==simulation::GameFlowState::continue_choice
+        || scene.flow==simulation::GameFlowState::ex_pregame_menu)) {
+        const auto& viewer=*frame.raster->native_model;
+        const auto model=shape(viewer.shape,viewer.colour_table);
+        const auto prepared=renderer_.prepare_primitives(*model,viewer.pose);
+        // Dedicated source launch, not an object: no fabricated shadow, LOD,
+        // camera transform or Huge Models scale. Preserve source BSP ordering;
+        // front BG2 artwork still owns the viewer window border/occlusion.
+        next.append(prepared,palette,source_origin,&frame.plan,PicaShapeOrder::painter);
+        count.primitives+=prepared.primitives.size();++count.models;
+    }
     // Texture-view allocation is part of preparation, not a possible failure
     // after replacing the last complete published scene.
     const auto completed=next.frame(frame.plan);

@@ -4,6 +4,7 @@
 #include "starfox/platform/nintendo_3ds/game_menu.hpp"
 #include "starfox/platform/nintendo_3ds/game_layers.hpp"
 #include "starfox/platform/nintendo_3ds/frame_profile.hpp"
+#include "starfox/compat/bit_cast.hpp"
 #include <cctype>
 
 namespace starfox::platform::nintendo_3ds {
@@ -24,11 +25,25 @@ input::ButtonMask gameplay_buttons(input::ButtonMask held,bool swap) noexcept {
 GameSession::GameSession(assets::RomImage rom,assets::SymbolMap symbols,PcmSink sink,
     std::string initial_map,std::span<const std::uint8_t> cartridge_ram,const GameSessionOptions& options)
     :rom_(std::move(rom)),symbols_(std::move(symbols)),
+     native_model_trig_(simulation::TrigTables::load(rom_,symbols_)),
      cartridge_experience_(symbols_.find("SPECWEPCNTONE").empty()
          ?simulation::Experience::original:simulation::Experience::starfox_ex),
      decoder_(rom_,symbols_),game_(rom_,symbols_,initial_map,cartridge_ram,true),
      sink_(std::move(sink)),hud_(rom_,symbols_),history_(game_,rom_,symbols_,vr::SceneCameraPolicy::source) {
     if(!sink_) throw std::invalid_argument("3DS game requires a PCM consumer");
+    constexpr std::array native_names{"M_BIGZ","M_DEPTHSTAB","M_DEPTHTABLE",
+        "M_WIREMODE","M_WOBBLEMODE","M_WABBLEMODE","M_CELMODE",
+        "M_SINEOFFSET","M_COLORWARP","M_PROJPNTS"};
+    for(unsigned i=0;i<native_names.size();++i) {
+        for(auto address:symbols_.find(native_names[i])) if((address>>16)==0x70) {
+            native_model_addresses_[i]=address;break;
+        }
+        if(i<3 && !native_model_addresses_[i])
+            throw std::runtime_error(std::string("Missing 3DS viewer symbol: ")+native_names[i]);
+    }
+    const auto& depth_tables=symbols_.find("DEPTHTABLES");
+    if(depth_tables.empty()) throw std::runtime_error("Missing 3DS viewer depth tables");
+    native_model_depth_tables_=depth_tables.front();
     game_.set_experience(cartridge_experience_);
     game_.set_timing_mode(simulation::TimingMode::original_speed);
     game_.set_shape_face_counts(&face_counts_);
@@ -165,6 +180,36 @@ void GameSession::publish_raster() {
     next->boss_roll=game_.boss_roll_active();
     next->stage_hud=game_.stage_results_state().visible;
     next->final_score=game_.final_score_active();
+    const auto& native=game_.map().native_model_draw();
+    const auto flow=game_.flow_state();
+    if(native.active && native.shape && (flow==simulation::GameFlowState::continue_choice
+        || flow==simulation::GameFlowState::ex_pregame_menu)) {
+        const auto word=[&](unsigned i) {
+            return native_model_addresses_[i]?game_.map().peek_ram_word(native_model_addresses_[i]).value():std::uint16_t{};
+        };
+        const auto byte=[&](unsigned i) {
+            return native_model_addresses_[i]?game_.map().peek_ram_byte(native_model_addresses_[i]).value():std::uint8_t{};
+        };
+        auto& viewer=next->native_model.emplace();viewer.shape=native.shape;viewer.colour_table=native.colour_table;
+        auto& pose=viewer.pose;pose.x=native.x;pose.y=native.y;
+        // The source shoulder handler updates M_BIGZ after the FX launch.
+        // Peek, never read_native_word: even a bus read changes VM latch state.
+        pose.z=starfox::bit_cast<std::int16_t>(word(0));
+        pose.pitch=(native.rotation_x&255U)<<8;pose.yaw=(native.rotation_y&255U)<<8;
+        pose.roll=(native.rotation_z&255U)<<8;
+        pose.rotation_matrix=simulation::rotation_matrix_q15(native_model_trig_,
+            starfox::bit_cast<std::int16_t>(std::uint16_t(pose.pitch)),
+            starfox::bit_cast<std::int16_t>(std::uint16_t(pose.yaw)),
+            starfox::bit_cast<std::int16_t>(std::uint16_t(pose.roll)));
+        pose.use_rotation_matrix=true;pose.scale=1; // MSHOWOBJ3 bypasses Huge Models/normal LODs.
+        pose.vanish_x=native.vanish_x;pose.vanish_y=native.vanish_y;
+        pose.animation_frame=native.animation_frame;pose.colour_frame=native.colour_frame;
+        pose.wireframe_mode=byte(3);pose.wobble_mode=byte(4);pose.wave_mode=byte(5)!=0;
+        pose.cel_mode=byte(6)!=0;pose.wave_offset=starfox::bit_cast<std::int16_t>(word(7));
+        pose.colour_warp=word(8)!=0;
+        if(native_model_addresses_[9]) pose.projected_points_address=std::uint16_t(native_model_addresses_[9]);
+        render::apply_source_depth_tables(rom_,native_model_depth_tables_,word(1),word(2),0,pose);
+    }
     hud_frame_=hud_.capture(game_);hud_.update(hud_frame_);
     raster_=std::move(next);
 }

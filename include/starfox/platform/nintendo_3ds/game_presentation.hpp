@@ -13,6 +13,10 @@ inline std::optional<PicaClip> game_controls_clip(simulation::GameFlowState flow
     if(flow==controls_type || flow==controls_choice) return PicaClip{96,32,208,120};
     return std::nullopt;
 }
+struct GameNativeModelSnapshot {
+    std::uint16_t shape{},colour_table{};
+    render::RenderPose pose;
+};
 struct GameRasterSnapshot {
     // Native 60 Hz display state is independent of slower FX model updates.
     // Fades, OAM, HDMA, flashes and wipes must not inherit a 20 Hz lock.
@@ -20,6 +24,10 @@ struct GameRasterSnapshot {
     simulation::CircleEffectState circle;
     simulation::WindowWipeState wipe;
     simulation::ColourMathEffectState colour_math;
+    // MSHOWOBJ3 (Continue and EX model viewer) has no ObjectPool entry.
+    // Capture its complete source pose with the raster, including live zoom;
+    // model preparation and either eye must never read mutable VM registers.
+    std::optional<GameNativeModelSnapshot> native_model;
     std::uint8_t brightness{};
     bool boss_roll{},stage_hud{},final_score{}; // Source flow policy, captured with the 60 Hz raster.
 };
