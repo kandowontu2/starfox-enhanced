@@ -48,6 +48,95 @@ inline void release_pica_texture_cache(std::vector<std::uint8_t>& cache) noexcep
     // clear() leaves each inactive slot's old peak allocation resident.
     std::vector<std::uint8_t>().swap(cache);
 }
+// One reusable comparison cache per native colour/ownership allocation. Pack
+// directly into the GPU allocation, not a fresh complete-image staging copy.
+// Reserve both caches before changing GPU bytes, then commit nonthrowing byte
+// copies. An upload failure invalidates that plane so retrying an older image
+// repairs native bytes instead of accepting stale CPU equality as residency.
+class PicaTextureResidency {
+public:
+    void release_colour() noexcept {
+        release_pica_texture_cache(pixels_);colour_valid_=false;
+        width_=height_=channels_=0;repeat_=false;
+    }
+    void release_layers() noexcept {
+        release_pica_texture_cache(layers_);layers_valid_=true;
+        layer_width_=layer_height_=classes_=0;layer_repeat_=false;
+    }
+    bool colour_matches(PicaImage image) const noexcept {
+        return colour_valid_ && image.width==width_ && image.height==height_
+            && image.channels==channels_ && image.repeat==repeat_
+            && rows_equal(image.pixels,image.pitch,image.width*image.channels,image.height,pixels_);
+    }
+    bool layers_match(PicaImage image) const noexcept {
+        if(!layers_valid_)return false;
+        if(image.source_layers.empty())return layers_.empty();
+        return !layers_.empty() && image.width==layer_width_ && image.height==layer_height_
+            && image.repeat==layer_repeat_
+            && rows_equal(image.source_layers,image.layer_pitch,image.width,image.height,layers_);
+    }
+    template<class ColourUpload,class LayerUpload>
+    bool prepare(PicaImage image,ColourUpload colour_upload,LayerUpload layer_upload) {
+        const auto layout=pica_texture_layout(image);
+        const bool colour_same=colour_matches(image),layers_same=layers_match(image);
+        if(colour_same && layers_same)return false;
+        // A layout change/reserve must not invalidate its own borrowed input.
+        for(const auto input:{image.pixels,image.source_layers})
+            for(const auto retained:{std::span<const std::uint8_t>(pixels_),std::span<const std::uint8_t>(layers_)}) {
+                if(input.empty() || retained.empty())continue;
+                const auto from=reinterpret_cast<std::uintptr_t>(input.data()),saved=reinterpret_cast<std::uintptr_t>(retained.data());
+                if((from>=saved && from-saved<retained.size()) || (saved>=from && saved-from<input.size()))
+                    throw std::invalid_argument("3DS texture residency requires independent source storage");
+            }
+        auto classes=classes_;
+        if(!image.source_layers.empty() && (!colour_same || !layers_same))
+            classes=validate_pica_layers(image);
+        if(!colour_same)pixels_.reserve(std::size_t(image.width)*image.height*image.channels);
+        if(!layers_same && !image.source_layers.empty())
+            layers_.reserve(std::size_t(image.width)*image.height);
+        if(!colour_same) {
+            colour_valid_=false;colour_upload(image,layout);
+            copy_rows(image.pixels,image.pitch,image.width*image.channels,image.height,pixels_);
+            width_=image.width;height_=image.height;channels_=image.channels;repeat_=image.repeat;
+            colour_valid_=true;
+        }
+        if(!layers_same) {
+            layers_valid_=false;layer_upload(image,layout,image.source_layers.empty()?0:classes);
+            if(image.source_layers.empty())release_layers();
+            else {
+                copy_rows(image.source_layers,image.layer_pitch,image.width,image.height,layers_);
+                layer_width_=image.width;layer_height_=image.height;layer_repeat_=image.repeat;
+                classes_=classes;layers_valid_=true;
+            }
+        }
+        return true;
+    }
+    std::span<const std::uint8_t> pixels() const noexcept {return pixels_;}
+    std::span<const std::uint8_t> layers() const noexcept {return layers_;}
+    std::size_t colour_capacity() const noexcept {return pixels_.capacity();}
+    std::size_t layer_capacity() const noexcept {return layers_.capacity();}
+    unsigned classes() const noexcept {return classes_;}
+private:
+    static bool rows_equal(std::span<const std::uint8_t> source,unsigned pitch,unsigned row_bytes,
+        unsigned height,const std::vector<std::uint8_t>& cache) noexcept {
+        if(cache.size()!=std::size_t(row_bytes)*height || !source.data()
+            || pitch<row_bytes || !height
+            || source.size()<std::size_t(pitch)*(height-1)+row_bytes)return false;
+        for(unsigned y=0;y<height;++y)
+            if(!std::equal(source.begin()+std::size_t(y)*pitch,
+                source.begin()+std::size_t(y)*pitch+row_bytes,cache.begin()+std::size_t(y)*row_bytes))return false;
+        return true;
+    }
+    static void copy_rows(std::span<const std::uint8_t> source,unsigned pitch,unsigned row_bytes,
+        unsigned height,std::vector<std::uint8_t>& cache) {
+        cache.resize(std::size_t(row_bytes)*height); // prepare reserved before upload.
+        for(unsigned y=0;y<height;++y)
+            std::copy_n(source.begin()+std::size_t(y)*pitch,row_bytes,cache.begin()+std::size_t(y)*row_bytes);
+    }
+    std::vector<std::uint8_t> pixels_,layers_;
+    unsigned width_{},height_{},channels_{},layer_width_{},layer_height_{},classes_{};
+    bool colour_valid_{},layers_valid_{true},repeat_{},layer_repeat_{};
+};
 // The native presenter calls this ONLY after its previous GPU work completes.
 // Preflight everything, release ALL obsolete allocations, THEN upload. Updating
 // slots one at a time can exceed 4 MiB during a valid 4 MiB -> 4 MiB transition.

@@ -1,10 +1,14 @@
 #include "starfox/platform/nintendo_3ds/pica_frame.hpp"
 #include "starfox/platform/nintendo_3ds/pica_residency.hpp"
 #include <iostream>
+#include <cstdlib>
+#include <new>
 
 namespace {
 using namespace starfox::platform::nintendo_3ds;
 unsigned checks{};
+std::size_t texture_allocations{};
+bool count_texture_allocations{};
 void require(bool value,const char* message) {++checks;if(!value) throw std::runtime_error(message);}
 template<class F> void rejects(F action,const char* message) {
     bool rejected=false;try {action();} catch(const std::invalid_argument&) {rejected=true;}
@@ -109,6 +113,105 @@ void texture_upload() {
     image={std::span(storage).first(255),8,8,32,4};
     rejects([&]{pica_texture_layout(image);},"Short logical rows rejected");
     image={storage,8,8,32,2};rejects([&]{pica_texture_layout(image);},"Unsupported pixel format rejected");
+}
+void reusable_texture_cache() {
+    constexpr unsigned width=27,height=17,pitch=width*4+7,layer_pitch=width+5;
+    std::vector<std::uint8_t> pixels(pitch*height,0xA7),layers(layer_pitch*height,0xD9);
+    for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x) {
+        const unsigned p=y*pitch+x*4;
+        pixels[p]=x*7;pixels[p+1]=y*11;pixels[p+2]=(x+y)*3;pixels[p+3]=255;
+        layers[y*layer_pitch+x]=1U<<((x+y)%6);
+    }
+    PicaImage image{pixels,width,height,pitch,4,false,layers,layer_pitch};
+    PicaTextureResidency cache;
+    std::vector<std::uint8_t> packed,packed_layers;
+    unsigned colour_uploads{},layer_uploads{},removed{};
+    bool fail_colour{},fail_layers{};
+    const auto colour=[&](PicaImage source,PicaTextureLayout layout) {
+        require(source.pixels.data()==pixels.data(),"Texture upload used a complete-image staging copy");
+        ++colour_uploads;packed.resize(layout.bytes);pack_pica_texture(source,packed);
+        if(fail_colour)throw std::runtime_error("Injected colour flush failure");
+    };
+    const auto ownership=[&](PicaImage source,PicaTextureLayout layout,unsigned classes) {
+        require(source.source_layers.data()==layers.data() || source.source_layers.empty(),
+            "Ownership upload used a complete-image staging copy");
+        ++layer_uploads;
+        if(source.source_layers.empty()) {packed_layers.clear();++removed;}
+        else {
+            packed_layers.resize(layout.width*layout.height);
+            require(pack_pica_layers(source,packed_layers)==classes,"Cache changed source ownership classes");
+        }
+        if(fail_layers)throw std::runtime_error("Injected ownership flush failure");
+    };
+    require(cache.prepare(image,colour,ownership) && colour_uploads==1 && layer_uploads==1,
+        "Initial texture planes did not upload exactly once");
+    const auto* colour_address=cache.pixels().data();const auto* layer_address=cache.layers().data();
+    const auto colour_capacity=cache.colour_capacity(),layer_capacity=cache.layer_capacity();
+    require(cache.colour_matches(image) && cache.layers_match(image) && cache.classes()==63,
+        "Initial texture comparison cache omitted source rows/classes");
+    PicaImage self{cache.pixels(),8,8,width*4,4,false,cache.layers(),width};
+    rejects([&]{cache.prepare(self,colour,ownership);},"Layout change accepted an input aliasing its own comparison cache");
+    require(colour_uploads==1 && layer_uploads==1 && cache.colour_matches(image) && cache.layers_match(image),
+        "Aliased preflight changed native or comparison storage");
+    texture_allocations=0;count_texture_allocations=true;
+    for(unsigned phase=0;phase<180;++phase) {
+        const auto old_colour=colour_uploads,old_layers=layer_uploads;
+        pixels[0]^=1;require(cache.prepare(image,colour,ownership),"Changed palette did not upload");
+        require(colour_uploads==old_colour+1 && layer_uploads==old_layers,
+            "Palette change unnecessarily uploaded the A8 ownership plane");
+        layers[1]=layers[1]==1?2:1;
+        require(cache.prepare(image,colour,ownership) && colour_uploads==old_colour+1 && layer_uploads==old_layers+1,
+            "Ownership-only change uploaded RGBA or skipped A8");
+        pixels[3]=pixels[3]?0:255;layers[0]=pixels[3]?1:0;
+        require(cache.prepare(image,colour,ownership) && colour_uploads==old_colour+2 && layer_uploads==old_layers+2,
+            "Opacity/ownership change did not update both planes");
+        require(cache.colour_matches(image) && cache.layers_match(image)
+            && cache.pixels().data()==colour_address && cache.layers().data()==layer_address
+            && cache.colour_capacity()==colour_capacity && cache.layer_capacity()==layer_capacity,
+            "Warm texture updates replaced comparison storage or failed exact commit");
+        require(!cache.prepare(image,colour,ownership),"Held image performed another texture upload");
+        // Independent Morton/ABGR checks on every padded texel. No temporary
+        // full-image oracle allocations inside the measured update boundary.
+        constexpr unsigned spread[]{0,1,4,5,16,17,20,21};
+        const auto layout=pica_texture_layout(image);
+        for(unsigned y=0;y<layout.height;++y)for(unsigned x=0;x<layout.width;++x) {
+            const unsigned at=(((y/8)*(layout.width/8)+x/8)*64+spread[x%8]+2*spread[y%8]);
+            const unsigned sx=std::min(x,width-1),sy=std::min(y,height-1),from=sy*pitch+sx*4;
+            require(packed[at*4]==pixels[from+3] && packed[at*4+1]==pixels[from+2]
+                && packed[at*4+2]==pixels[from+1] && packed[at*4+3]==pixels[from]
+                && packed_layers[at]==layers[sy*layer_pitch+sx],"Changed upload lost exact colour or ownership bytes");
+        }
+    }
+    count_texture_allocations=false;
+    require(texture_allocations==0,"Warmed native texture updates still allocate complete-image staging copies");
+    std::cout<<"Warmed native texture comparison/packing: "<<texture_allocations
+        <<" allocations over 540 changed plane preparations; exact Morton/ABGR/A8 bytes\n";
+    const auto old_pixels=pixels,old_layers=layers;
+    pixels[0]^=64;fail_colour=true;bool failed=false;
+    try{cache.prepare(image,colour,ownership);}catch(const std::runtime_error&){failed=true;}
+    require(failed && !cache.colour_matches(image),"Failed colour upload retained valid CPU equality");
+    pixels=old_pixels;image.pixels=pixels;fail_colour=false;const auto colour_retry=colour_uploads;
+    require(cache.prepare(image,colour,ownership) && colour_uploads==colour_retry+1 && cache.colour_matches(image),
+        "Restoring old RGB skipped repair after a failed native write");
+    layers[1]=layers[1]==1?2:1;fail_layers=true;failed=false;
+    try{cache.prepare(image,colour,ownership);}catch(const std::runtime_error&){failed=true;}
+    require(failed && !cache.layers_match(image),"Failed ownership upload retained valid CPU equality");
+    layers=old_layers;image.source_layers=layers;fail_layers=false;const auto layer_retry=layer_uploads;
+    require(cache.prepare(image,colour,ownership) && layer_uploads==layer_retry+1 && cache.layers_match(image),
+        "Restoring old ownership skipped repair after a failed native write");
+    const auto before_invalid=colour_uploads;pixels[3]=128;
+    rejects([&]{cache.prepare(image,colour,ownership);},"Palette-only edit bypassed ownership/alpha validation");
+    require(colour_uploads==before_invalid,"Invalid provenance reached the native upload callback");
+    pixels=old_pixels;image.pixels=pixels;
+    auto without_layers=image;without_layers.source_layers={};without_layers.layer_pitch=0;
+    require(cache.prepare(without_layers,colour,ownership) && removed==1 && cache.layers().empty()
+        && cache.layer_capacity()==0 && cache.classes()==0 && cache.colour_matches(without_layers),
+        "Removed ownership retained GPU or peak CPU storage");
+    require(!cache.prepare(without_layers,colour,ownership),"Held unmasked image performed an upload");
+    require(cache.prepare(image,colour,ownership) && cache.layers_match(image),"Restored ownership failed to upload");
+    cache.release_colour();cache.release_layers();
+    require(!cache.colour_matches(image) && cache.pixels().empty() && cache.layers().empty()
+        && !cache.colour_capacity() && !cache.layer_capacity(),"Inactive texture cache retained allocations");
 }
 void texture_residency() {
     struct Ledger {
@@ -378,8 +481,26 @@ void sampled_texture_orientation() {
     }
 }
 }
+#if defined(_MSC_VER)
+#define STARFOX_TEXTURE_NOINLINE __declspec(noinline)
+#elif defined(__GNUC__)
+#define STARFOX_TEXTURE_NOINLINE __attribute__((noinline))
+#else
+#define STARFOX_TEXTURE_NOINLINE
+#endif
+STARFOX_TEXTURE_NOINLINE void* operator new(std::size_t count) {
+    if(count_texture_allocations)++texture_allocations;
+    if(auto* memory=std::malloc(std::max(count,std::size_t{1})))return memory;
+    throw std::bad_alloc{};
+}
+STARFOX_TEXTURE_NOINLINE void* operator new[](std::size_t count) {return ::operator new(count);}
+STARFOX_TEXTURE_NOINLINE void operator delete(void* memory) noexcept {std::free(memory);}
+STARFOX_TEXTURE_NOINLINE void operator delete[](void* memory) noexcept {std::free(memory);}
+STARFOX_TEXTURE_NOINLINE void operator delete(void* memory,std::size_t) noexcept {std::free(memory);}
+STARFOX_TEXTURE_NOINLINE void operator delete[](void* memory,std::size_t) noexcept {std::free(memory);}
+#undef STARFOX_TEXTURE_NOINLINE
 int main() try {
-    texture_upload();texture_residency();vertex_residency();projection_and_draws();layer_upload();sampled_texture_orientation();
+    texture_upload();texture_residency();reusable_texture_cache();vertex_residency();projection_and_draws();layer_upload();sampled_texture_orientation();
     require(pica_uv_mode(false,false)==std::array<float,4>{1,0,0,0},"Ordinary texture projection changed");
     require(pica_uv_mode(true,false)==std::array<float,4>{0,1,0,0},"LCD parity texture lost its homogeneous Q");
     require(pica_uv_mode(false,true)==std::array<float,4>{0,0,1,0},"Source terrain mode zeroed ordinary UVs before projection");
@@ -397,4 +518,4 @@ int main() try {
     draw.space=PicaSpace::screen;draw.depth_test=draw.depth_write=false;
     rejects(valid,"Projected source terrain cannot become a mono overlay");
     std::cout<<"3DS PICA upload/projection/pass contracts: "<<checks<<" checks passed\n";
-} catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
+} catch(const std::exception& error) {count_texture_allocations=false;std::cerr<<error.what()<<'\n';return 1;}

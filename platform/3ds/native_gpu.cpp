@@ -41,19 +41,18 @@ void upload_matrix(int location,const PicaMatrix& rows) {
 struct ResidentTexture {
     C3D_Tex texture{};
     C3D_Tex layers{};
-    std::vector<std::uint8_t> pixels;
-    std::vector<std::uint8_t> source_layers;
+    PicaTextureResidency cache;
     unsigned width{},height{},channels{};
     unsigned layer_width{},layer_height{},layer_classes{};
     bool ready{},repeat{};
     bool layers_ready{},layer_repeat{};
     void release_layers() noexcept {
         if(layers_ready) C3D_TexDelete(&layers);
-        layers={};layers_ready=false;layer_repeat=false;release_pica_texture_cache(source_layers);layer_width=layer_height=layer_classes=0;
+        layers={};layers_ready=false;layer_repeat=false;cache.release_layers();layer_width=layer_height=layer_classes=0;
     }
     void release_colour() noexcept {
         if(ready) C3D_TexDelete(&texture);
-        texture={};ready=false;release_pica_texture_cache(pixels);width=height=channels=0;repeat=false;
+        texture={};ready=false;cache.release_colour();width=height=channels=0;repeat=false;
     }
     void release() noexcept {
         release_colour();
@@ -65,45 +64,8 @@ struct ResidentTexture {
         if(!keep.colour) release_colour();
         if(!keep.layers) release_layers();
     }
-    bool matches(PicaImage image) const noexcept {
-        if(!ready || image.width!=width || image.height!=height || image.channels!=channels || image.repeat!=repeat) return false;
-        const auto row_bytes=std::size_t(width)*channels;
-        for(unsigned y=0;y<height;++y)
-            if(!std::equal(image.pixels.begin()+std::size_t(y)*image.pitch,
-                image.pixels.begin()+std::size_t(y)*image.pitch+row_bytes,pixels.begin()+y*row_bytes)) return false;
-        return true;
-    }
-    bool matches_layers(PicaImage image) const noexcept {
-        if(image.source_layers.empty()) return !layers_ready;
-        if(!layers_ready || image.width!=layer_width || image.height!=layer_height || image.repeat!=layer_repeat) return false;
-        for(unsigned y=0;y<image.height;++y)
-            if(!std::equal(image.source_layers.begin()+std::size_t(y)*image.layer_pitch,
-                image.source_layers.begin()+std::size_t(y)*image.layer_pitch+image.width,
-                source_layers.begin()+std::size_t(y)*image.width)) return false;
-        return true;
-    }
     void update(PicaImage image) {
-        const bool colour_same=matches(image),layers_same=matches_layers(image);
-        if(colour_same && layers_same) return;
-        const auto layout=pica_texture_layout(image);
-        std::vector<std::uint8_t> packed_layers,next_layers;
-        unsigned classes=layer_classes;
-        if(!image.source_layers.empty() && !layers_same) {
-            // Revalidate alpha/ownership on changed RGBA as well. A palette
-            // fade keeps the resident A8 texture and causes no mask upload.
-            packed_layers.resize(layout.width*layout.height);
-            classes=pack_pica_layers(image,packed_layers);
-            next_layers.resize(std::size_t(image.width)*image.height);
-            for(unsigned y=0;y<image.height;++y)
-                std::copy_n(image.source_layers.begin()+std::size_t(y)*image.layer_pitch,image.width,
-                    next_layers.begin()+std::size_t(y)*image.width);
-        }
-        else if(!image.source_layers.empty() && !colour_same) static_cast<void>(validate_pica_layers(image));
-        if(!colour_same) {
-            std::vector<std::uint8_t> next(std::size_t(image.width)*image.height*image.channels);
-            for(unsigned y=0;y<image.height;++y)
-                std::copy_n(image.pixels.begin()+std::size_t(y)*image.pitch,std::size_t(image.width)*image.channels,
-                    next.begin()+std::size_t(y)*image.width*image.channels);
+        cache.prepare(image,[&](PicaImage source,PicaTextureLayout layout) {
             if(!ready || texture.width!=layout.width || texture.height!=layout.height) {
                 if(ready) C3D_TexDelete(&texture);
                 texture={};ready=false;
@@ -111,28 +73,31 @@ struct ResidentTexture {
                     throw std::runtime_error("3DS GPU texture allocation failed");
                 ready=true;
             }
-            pack_pica_texture(image,{static_cast<std::uint8_t*>(texture.data),layout.bytes});
+            pack_pica_texture(source,{static_cast<std::uint8_t*>(texture.data),layout.bytes});
             C3D_TexSetFilter(&texture,GPU_NEAREST,GPU_NEAREST);
             C3D_TexSetWrap(&texture,image.repeat?GPU_REPEAT:GPU_CLAMP_TO_EDGE,image.repeat?GPU_REPEAT:GPU_CLAMP_TO_EDGE);
             C3D_TexFlush(&texture);
-            width=image.width;height=image.height;channels=image.channels;repeat=image.repeat;pixels=std::move(next);
-        }
-        if(!layers_same) {
-            if(image.source_layers.empty()) release_layers();
+            width=image.width;height=image.height;channels=image.channels;repeat=image.repeat;
+        },[&](PicaImage source,PicaTextureLayout layout,unsigned classes) {
+            if(source.source_layers.empty()) {
+                if(layers_ready)C3D_TexDelete(&layers);
+                layers={};layers_ready=false;layer_repeat=false;layer_width=layer_height=layer_classes=0;
+            }
             else {
                 if(!layers_ready || layers.width!=layout.width || layers.height!=layout.height) {
-                    release_layers();
+                    if(layers_ready)C3D_TexDelete(&layers);
+                    layers={};layers_ready=false;
                     if(!C3D_TexInit(&layers,layout.width,layout.height,GPU_A8))
                         throw std::runtime_error("3DS GPU source-layer allocation failed");
                     layers_ready=true;
                 }
-                std::memcpy(layers.data,packed_layers.data(),packed_layers.size());
+                pack_pica_layers(source,{static_cast<std::uint8_t*>(layers.data),layout.width*layout.height});
                 C3D_TexSetFilter(&layers,GPU_NEAREST,GPU_NEAREST);
                 C3D_TexSetWrap(&layers,image.repeat?GPU_REPEAT:GPU_CLAMP_TO_EDGE,image.repeat?GPU_REPEAT:GPU_CLAMP_TO_EDGE);
                 C3D_TexFlush(&layers);
-                source_layers=std::move(next_layers);layer_width=image.width;layer_height=image.height;layer_classes=classes;layer_repeat=image.repeat;
+                layer_width=image.width;layer_height=image.height;layer_classes=classes;layer_repeat=image.repeat;
             }
-        }
+        });
     }
 };
 } // namespace
