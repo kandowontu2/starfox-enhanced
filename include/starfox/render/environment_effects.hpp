@@ -607,7 +607,7 @@ inline void apply_environment(const EnvironmentEffects& e,const Framebuffer& fra
     std::optional<WaterCausticVisibility> water_visibility;
     const auto grid_start=water_grid_ms?std::chrono::steady_clock::now():std::chrono::steady_clock::time_point{};
     if(e.cpu_water_scene && !e.ray_water) water_visibility.emplace(*e.cpu_water_scene,e.cpu_water);
-    const unsigned water_step=std::max(1U,frame.draw_scale())*(e.cpu_water.quality>=3?4U:e.cpu_water.quality==2?6U:8U);
+    const unsigned water_step=std::max<std::uint32_t>(1U,frame.draw_scale())*(e.cpu_water.quality>=3?4U:e.cpu_water.quality==2?6U:8U);
     const unsigned water_columns=(width+water_step-1)/water_step+1;
     const unsigned water_rows=(frame.stored_height()+water_step-1)/water_step+1;
     std::vector<std::optional<std::array<float,3>>> water_grid;

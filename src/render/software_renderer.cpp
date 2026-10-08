@@ -974,8 +974,8 @@ void draw_line(
     // Lines and their dither stay one logical pixel wide at every supported
     // render scale, up to GPU FAST's 10x (matching spans_portable). The old
     // 4x ceiling only mirrored the previous maximum scale.
-    const auto dither_scale = static_cast<int>(std::clamp(render_scale, 1U, 10U));
-    const auto thickness = static_cast<int>(std::clamp(render_scale, 1U, 10U)
+    const auto dither_scale = static_cast<int>(std::clamp<std::uint32_t>(render_scale, 1U, 10U));
+    const auto thickness = static_cast<int>(std::clamp<std::uint32_t>(render_scale, 1U, 10U)
         * std::clamp<unsigned>(wireframe_thickness, 1U, 4U));
     const auto offset = (thickness - 1) / 2;
     const auto plot = [&] {
