@@ -7,6 +7,7 @@
 #include "effects_compute_shader.hpp"
 #include <cstring>
 #include <stdexcept>
+#include <bit>
 #endif
 namespace starfox::render {
 #if defined(STARFOX_GPU_EFFECTS)
@@ -32,8 +33,12 @@ struct Parameters {
     std::array<std::uint32_t,16> backdrop_ramp{};
     std::array<float,4> scroll_fraction{};
     std::array<std::array<float,4>,2> ground_gradient{};
+    std::array<float,4> scene_camera{};
+    std::array<std::array<float,4>,scene_fx_capacity*3> scene_data{};
+    std::array<std::uint32_t,4> depth_modes{};
+    std::array<float,4> depth_camera{};
 };
-static_assert(sizeof(Parameters)==2176);
+static_assert(sizeof(Parameters)==4528);
 static_assert(sizeof(SurfaceSample)==20 && offsetof(SurfaceSample,valid)==17);
 }
 struct GpuEffects::Impl {
@@ -184,6 +189,8 @@ struct GpuEffects::Impl {
             settings.shadow_width,settings.shadow_height,settings.shadow_offset_y,0};
         p.environment_classes=settings.environment.classes;p.environment_modes=settings.environment.modes;p.environment_motion=settings.environment.motion;p.environment_plane=settings.environment.plane;p.scroll_fraction=settings.environment.scroll_fraction;
         p.ground_gradient=settings.environment.ground_gradient;
+        p.scene_camera=settings.scene_fx.camera;p.scene_data=settings.scene_fx.data;
+        p.depth_modes[0]=settings.depth_fx.modes;p.depth_camera=settings.depth_fx.camera;
         p.backdrop_projection=settings.environment.backdrop_projection;p.backdrop_keep=settings.environment.backdrop_keep;
         p.backdrop_palette=settings.environment.backdrop_palette;
         p.backdrop_ramp=settings.environment.backdrop_ramp;
@@ -209,7 +216,7 @@ struct GpuEffects::Impl {
             context->UpdateSubresource(shadow_data.Get(),0,nullptr,mask.data(),0,0);
             p.shadow_enabled=1;
         }
-        if((settings.lighting || model_presentation) && settings.surfaces && !settings.surfaces->empty()) {
+        if((settings.lighting || model_presentation || settings.scene_fx.active() || settings.depth_fx.active()) && settings.surfaces && !settings.surfaces->empty()) {
             const auto& surface=*settings.surfaces;
             p.lighting=settings.lighting;p.surface_width=surface.width();p.surface_height=surface.height();
             p.surface_x=settings.surface_x;p.surface_y=settings.surface_y;
@@ -233,9 +240,10 @@ struct GpuEffects::Impl {
         auto* cb=parameters.Get(); context->CSSetConstantBuffers(0,1,&cb);
         unsigned current=0;
         const bool enabled[]{false,p.hdr!=0,p.chromatic!=0,p.smoothing!=0,
-            p.model_effect!=0 || p.world_effect!=0 || decorative_material(static_cast<Effect>(settings.material)) || spatial_manipulation(static_cast<Effect>(settings.manipulation)),p.aa!=0};
-        for(const auto stage:std::array<unsigned,9>{14,6,1,2,31,3,4,5,15}) {
-            p.pad2=stage==31?(settings.environment.water_reflections && !settings.environment.ray_water?1:0):(settings.overlay_filter?1:0);
+            p.model_effect!=0 || p.world_effect!=0 || settings.extra_effects!=std::array<std::uint8_t,3>{} || decorative_material(static_cast<Effect>(settings.material)) || spatial_manipulation(static_cast<Effect>(settings.manipulation)),p.aa!=0};
+        for(const auto stage:std::array<unsigned,13>{14,6,1,2,31,41,3,4,35,34,33,5,15}) {
+            if(stage==33) {p.pad0=int(settings.global_enhancements&0x03ffffffU);p.pad1=std::bit_cast<std::int32_t>(float(settings.presentation_seconds));}
+            p.pad2=stage==31?0:(settings.overlay_filter?1:0);
             if(stage==5 && (p.bloom_model || p.bloom_world)) {
                 if(glow_presentation) {
                     for(unsigned i=0;i<2;++i) if(!split_snapshots[i]) {
@@ -270,7 +278,7 @@ struct GpuEffects::Impl {
                 else if(settings.bloom_base || settings.bloom_glow)
                     context->CopyResource(bloom_snapshots[1].Get(),images[current].Get());
             }
-            if(stage==31?!settings.environment.active():stage==15?!p.shadow_enabled:stage==14?!p.filter:stage==6?!p.lighting:!enabled[stage]) continue;
+            if(stage==41?!environment_screen_reflections(settings.environment):stage==35?!settings.depth_fx.active():stage==34?!settings.scene_fx.active():stage==33?!settings.global_enhancements:stage==31?!settings.environment.active():stage==15?!p.shadow_enabled:stage==14?!p.filter:stage==6?!p.lighting:!enabled[stage]) continue;
             if(stage==14) {
                 resize_filter(width/p.scale,height/p.scale);
                 p.stage=13;context->UpdateSubresource(parameters.Get(),0,nullptr,&p,0,0);
@@ -309,11 +317,16 @@ struct GpuEffects::Impl {
                 p.model_effect=model;p.world_effect=world;p.model_intensity=intensity;
             }
             dispatch_style();
-            if(stage==4 && spatial_manipulation(static_cast<Effect>(settings.manipulation)) && settings.manipulation_intensity) {
+            if(stage==4 && ((spatial_manipulation(static_cast<Effect>(settings.manipulation)) && settings.manipulation_intensity) || settings.extra_effects[0])) {
                 const auto model=p.model_effect,world=p.world_effect,intensity=p.model_intensity;
-                p.model_effect=settings.manipulation;p.world_effect=0;p.model_intensity=settings.manipulation_intensity;
+                p.model_effect=spatial_manipulation(static_cast<Effect>(settings.manipulation))?settings.manipulation:0;p.world_effect=settings.extra_effects[0];p.model_intensity=settings.manipulation_intensity;
+                p.world_intensity=100;p.pad1=std::bit_cast<std::int32_t>(float(settings.presentation_seconds));
                 dispatch_style();
                 p.model_effect=model;p.world_effect=world;p.model_intensity=intensity;
+            }
+            if(stage==4 && (settings.extra_effects[1] || settings.extra_effects[2])) {
+                const auto saved=p;p.model_effect=settings.extra_effects[1];p.world_effect=settings.extra_effects[2];p.model_intensity=p.world_intensity=100;
+                p.pad1=std::bit_cast<std::int32_t>(float(settings.presentation_seconds));dispatch_style();p=saved;
             }
         }
         context->CSSetShader(nullptr,nullptr,0);
@@ -403,8 +416,8 @@ bool GpuEffects::readback(std::vector<std::uint8_t>& rgba) {
 }
 bool GpuEffects::apply(void* source,const Framebuffer& frame,std::vector<std::uint8_t>& rgba,
     const GpuEffectSettings& settings) {
-    if(settings.resident_shadow.buffer || settings.resident_reflection.buffer) return false; // SDL GPU buffers are not D3D11 resources.
-    if(settings.planet_fade) return false; // SDL GPU or matching CPU fallback.
+    if(settings.motion_blur || settings.particle_shutter || settings.resident_shadow.buffer || settings.resident_reflection.buffer || settings.volumetric.buffer) return false; // SDL GPU buffers are not D3D11 resources.
+    if(settings.planet_fade || settings.phosphor || settings.exposure || settings.camera_response) return false; // SDL GPU or matching CPU fallback.
     if(const auto* sky=settings.environment.modes[2]?settings.environment.backdrop:nullptr; sky &&
         (!sky->width || !sky->height || sky->pixels.size()!=std::size_t(sky->width)*sky->height
             || sky->pixels.size()>32U*1024U*1024U)) return false;

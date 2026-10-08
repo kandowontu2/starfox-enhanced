@@ -41,6 +41,55 @@ struct PackedWarpShading {
 // Keeps untextured cel/wave/wireframe flags; descriptor decode chooses textures
 // and their UVs later, independently for every painter-order occurrence.
 [[nodiscard]] PackedFaces pack_warp_faces(const assets::Shape&,const PackedBsp&,const RenderPose&,const RenderSettings&);
+// Immutable ordinary-face inputs for ONE stereo recording. Source shapes and
+// topology must remain immutable until both encoders join. Camera projection,
+// visibility, painter order and fragment expansion are never shared here.
+class PreparedFacesSource {
+public:
+    PreparedFacesSource(const assets::Shape&,const PreparedBspSource&,const RenderPose&,const RenderSettings&);
+    [[nodiscard]] static bool supported(const RenderPose&) noexcept;
+    [[nodiscard]] bool matches(const assets::Shape&,const PreparedBspSource&,
+        const RenderPose&,const RenderSettings&) const noexcept;
+    [[nodiscard]] const PackedFaces& faces() const noexcept {return faces_;}
+    [[nodiscard]] std::uint64_t storage_bytes() const noexcept;
+private:
+    // These are the complete non-source dependencies of pack_faces_impl and
+    // face_material. Compare derived source shading, not eye-space geometry.
+    struct State {
+        std::uint32_t colour_frame{};
+        std::size_t depth_band{};
+        std::array<std::int8_t,3> light{};
+        std::array<std::array<std::uint8_t,32>,4> depth_colours{};
+        std::optional<std::uint8_t> palette_override;
+        std::int32_t scroll_x{},scroll_y{};
+        std::int16_t wave_offset{};
+        std::uint8_t wave_frame{},wireframe{},wobble{},forced_colour{},colour_base{};
+        bool depth_tables{},force_colour{},terrain{},world{},cel{},wave{},cull{};
+        bool operator==(const State&) const = default;
+    };
+    [[nodiscard]] static State state(const RenderPose&,const RenderSettings&) noexcept;
+    const assets::Shape* shape_{};
+    const PreparedBspSource* topology_{};
+    State state_{};
+    PackedFaces faces_;
+};
+// Immutable connectivity for a requested ray consumer in ONE stereo pair.
+// Includes every polygon, including offscreen/back-facing ones. No camera
+// vertices or ray results are retained. Materials are optional for shadows.
+class PreparedRayTopology {
+public:
+    explicit PreparedRayTopology(const PreparedFacesSource&,bool materials);
+    [[nodiscard]] bool matches(const PreparedFacesSource& faces,bool materials) const noexcept {
+        return faces_==&faces && (!materials || materials_);
+    }
+    [[nodiscard]] std::span<const std::array<std::uint32_t,4>> triangles() const noexcept {return triangles_;}
+    [[nodiscard]] std::span<const std::array<std::uint32_t,4>> material_topology() const noexcept {return topology_;}
+    [[nodiscard]] std::uint64_t storage_bytes() const noexcept;
+private:
+    const PreparedFacesSource* faces_{};
+    bool materials_{};
+    std::vector<std::array<std::uint32_t,4>> triangles_,topology_;
+};
 // Expand authored corners into per-fragment GPU transform inputs. Vertex
 // rotation/displacement still run on GPU; the returned poses share its ABI.
 [[nodiscard]] std::vector<ContinuousTransformPose> pack_continuous_fragments(

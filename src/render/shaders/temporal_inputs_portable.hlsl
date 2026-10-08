@@ -44,5 +44,9 @@ void main(uint3 id : SV_DispatchThreadID) {
     projectedDepth[id.xy]=validDepth?saturate((1.0-nearPlane/z)/(1.0-nearPlane/farPlane)):1.0;
     bool validMotion=validDepth && reset==0 && m.w==1.0 && finiteValue(m.x) && finiteValue(m.y)
         && finiteValue(m.z) && abs(m.z-z)<=max(0.001,abs(z)*0.00001);
-    pixelMotion[id.xy]=validMotion?m.xy:float2(asfloat(0xff7fffffu),asfloat(0xff7fffffu));
+    // Only the explicitly frozen source scene supplies this guarantee. Do not
+    // infer it from missing model identity, paused presentation or zero camera
+    // velocity during gameplay. Jitter remains separate from physical motion.
+    pixelMotion[id.xy]=padding!=0 && reset==0?float2(0,0)
+        :validMotion?m.xy:float2(asfloat(0xff7fffffu),asfloat(0xff7fffffu));
 }

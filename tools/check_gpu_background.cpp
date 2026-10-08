@@ -46,6 +46,42 @@ int main(int argc,char** argv) {
         {
         GpuBackground gpu;BackgroundRenderer reference;
         {
+            // Wide/portrait stored outputs cross 4096 without increasing the
+            // pixel budget. Compare actual samples to the software decoder,
+            // not only a successful allocation or two GPU implementations.
+            starfox::simulation::SnesPpuState p{};
+            p.background_mode=1;p.main_screen=7;
+            p.bg1_screen_base=p.bg2_screen_base=p.bg3_screen_base=0x7000;
+            for(unsigned i=0;i<128;++i) p.vram[i]=std::uint8_t(i*31U+11U);
+            for(unsigned i=0;i<256;++i) p.cgram[i]=std::uint16_t(i?32767:0);
+            unsigned checked=0;
+            for(auto size:std::array<std::array<unsigned,2>,2>{{{800,2},{2,800}}})
+            for(unsigned layer=1;layer<=3;++layer) {
+                GpuBackgroundSettings s;s.layer=layer;s.extend_horizontal=true;
+                Framebuffer expected(size[0],size[1],6);expected.enable_layer_tags(true);
+                expected.set_layer_override(s.tag);
+                expected.begin_write_coverage();
+                if(layer==1) reference.draw_bg1(p,expected,TilePriorityPass::all,0,true);
+                if(layer==2) reference.draw_bg2(p,0,0,expected,TilePriorityPass::all,0,true);
+                if(layer==3) reference.draw_bg3(p,expected,TilePriorityPass::all,0,true);
+                const auto output=run(device,gpu,p,size[0],size[1],6,s);
+                for(std::size_t i=0;i<output.size();++i) {
+                    const unsigned packed=expected.write_coverage()[i]
+                        ?expected.pixels()[i]|(unsigned(expected.layer_tags()[i])<<8)|0x04000000U:0;
+                    if(output[i]!=packed) throw std::runtime_error("Wide/portrait background layer="+std::to_string(layer)
+                        +" logical="+std::to_string(size[0])+"x"+std::to_string(size[1])+" pixel="+std::to_string(i)
+                        +" actual="+std::to_string(output[i])+" expected="+std::to_string(packed));
+                    ++checked;
+                }
+            }
+            auto* command=SDL_AcquireGPUCommandBuffer(device);require(command,"background bounds command");
+            GpuBackgroundSettings s;s.logical_viewport={800,224};
+            require(!gpu.enqueue(device,command,p,8193,1,1,s).pixels,"Oversized background axis accepted");
+            require(!gpu.enqueue(device,command,p,8192,2049,1,s).pixels,"Background pixel budget exceeded");
+            SDL_CancelGPUCommandBuffer(command);
+            std::cout<<"Wide/portrait 6x backgrounds: "<<checked<<" independent software pixels; axis/pixel budget rejection passed\n";
+        }
+        {
             // Independent text semantics, not just two matching decoders.
             starfox::simulation::SnesPpuState p{};
             p.background_mode=1;p.main_screen=1;p.bg1_screen_base=0x7000;
@@ -302,10 +338,42 @@ int main(int argc,char** argv) {
                     const bool terrain=(base[i]&0x04000000u) && source_y>=16 && source_y<40;
                     require(classified[i]==(base[i]|(terrain?0x08000000u:0)),"terrain source-row classification");
                 }
+                for(int shift:{-4,4}) {
+                    s.stereo_sky_source_x=float(shift);
+                    const auto shifted=run(device,gpu,*ppu,256,64,scale,s);
+                    for(unsigned y=0;y<64*scale;++y) for(unsigned x=4*scale;x<252*scale;++x) {
+                        const unsigned source_y=unsigned(int(y/scale)+scroll)&255u;
+                        const bool ground=source_y>=16 && source_y<40;
+                        const auto expected=classified[y*256*scale+unsigned(int(x)+(ground?0:shift*int(scale)))];
+                        require(shifted[y*256*scale+x]==expected,"stereo sky moved terrain or wrong sky sample");
+                    }
+                }
+                s.stereo_sky_source_x=0;
                 ppu->tunnel_scene=true;
                 const auto tunnel=run(device,gpu,*ppu,256,64,scale,s);
+                s.stereo_sky_source_x=4;
+                require(run(device,gpu,*ppu,256,64,scale,s)==tunnel,"stereo sky shifted tunnel walls");
                 for(auto value:tunnel) require(!(value&0x08000000u),"tunnel classified as terrain");
                 ppu->tunnel_scene=false;
+            }
+            // A banked sky must translate horizontally in screen space, not
+            // shift only U while retaining the other eye's column V offset.
+            auto banked=*ppu;banked.bg2_vertical_offsets_enabled=true;
+            for(int slope:{-2,2}) for(unsigned scale:{1U,2U,4U}) {
+                for(unsigned column=0;column<32;++column) {
+                    const auto word=0x4000U|(unsigned(64+int(column)*slope)&8191U);
+                    banked.vram[0x5f40+column*2]=std::uint8_t(word);
+                    banked.vram[0x5f41+column*2]=std::uint8_t(word>>8);
+                }
+                GpuBackgroundSettings sky;sky.layer=2;
+                const auto baseline=run(device,gpu,banked,256,64,scale,sky);
+                for(int shift:{-8,8}) {
+                    sky.stereo_sky_source_x=float(shift);
+                    const auto shifted=run(device,gpu,banked,256,64,scale,sky);
+                    for(unsigned y=0;y<64*scale;++y) for(unsigned x=16*scale;x<240*scale;++x)
+                        require(shifted[y*256*scale+x]==baseline[y*256*scale+unsigned(int(x)+shift*int(scale))],
+                            "banked stereo sky has vertical disparity");
+                }
             }
             GpuBackgroundSettings s;s.layer=2;s.terrain_source_rows={0,256};
             const auto expected=run(device,gpu,*ppu,256,64,1,s);
@@ -329,7 +397,9 @@ int main(int argc,char** argv) {
             for(unsigned i=0;i<composed.size();++i) {
                 const unsigned x=i%256;
                 const bool visible=!(x>=64 && x<128) && x<192;
-                require((composed[i]&0x08000000u)==(visible?(expected[i]&0x08000000u):0),"terrain leaked through model or black HUD");
+                if((composed[i]&0x08000000u)!=(visible?(expected[i]&0x08000000u):0))
+                    throw std::runtime_error("terrain ownership mismatch at "+std::to_string(x)+","+std::to_string(i/256)
+                        +" actual="+std::to_string(composed[i])+" background="+std::to_string(expected[i]));
             }
             ink.left=192;ink.right=256;ink.even=ink.odd=0;ink.tag=unsigned(PixelLayer::two_d);native.add(ink);
             const auto snapshot=std::make_shared<const starfox::simulation::SnesPpuState>(*ppu);

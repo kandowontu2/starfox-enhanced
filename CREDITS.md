@@ -73,6 +73,13 @@ README credits:
 ## Star Fox Enhanced native PC port
 
 - KandoWontU — project creator and repository author.
+- agrofubris — [stereo fork](https://github.com/agrofubris/starfox-enhanced-stereo)
+  reviewed for Crossview output and single-player Steam Deck controller priority;
+  direct SR Platform offscreen-weave handoff at `129d917`.
+- bo3b (Bo3b Johnson) — [SR-lib](https://github.com/bo3b/SR-lib) SDK packaging,
+  optional-runtime and weaver lifecycle reference.
+- oneup03 — [RT64 3D](https://github.com/oneup03/rt64-3D), credited by the stereo
+  fork as the original SR integration approach.
 - UltraStarFox and Team SFEX contributors — original and EX source mechanics,
   data, tools, research, and documentation on which the native runtime is
   based, credited individually above.

@@ -3,24 +3,32 @@
 #include "starfox/render/sdl_gpu_effects.hpp"
 #include "starfox/render/colour_math.hpp"
 #include "starfox/render/pixel_filter.hpp"
+#include "starfox/render/model_smoothing.hpp"
 #include <SDL3/SDL.h>
 #include <iostream>
 #include <stdexcept>
+#include <cstdlib>
+#include <cstring>
+#if defined(_WIN32)
+#include <dxgi1_4.h>
+#include <wrl/client.h>
+#endif
+#include "check_composite_pipeline_guides.inc"
 namespace {
 struct SplitTextures {
     SDL_GPUDevice* device;
     unsigned width,height;
-    std::array<SDL_GPUTexture*,3> textures{};
+    std::vector<SDL_GPUTexture*> textures;
     SDL_GPUTransferBuffer* download{};
-    SplitTextures(void* source,unsigned w,unsigned h):device(static_cast<SDL_GPUDevice*>(source)),width(w),height(h) {
+    SplitTextures(void* source,unsigned w,unsigned h,unsigned count=3):device(static_cast<SDL_GPUDevice*>(source)),width(w),height(h),textures(count) {
         SDL_GPUTextureCreateInfo info{};info.type=SDL_GPU_TEXTURETYPE_2D;
         info.format=SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
         info.usage=SDL_GPU_TEXTUREUSAGE_SAMPLER|SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_READ;
         info.width=w;info.height=h;info.layer_count_or_depth=1;info.num_levels=1;
         for(auto& texture:textures) texture=SDL_CreateGPUTexture(device,&info);
-        SDL_GPUTransferBufferCreateInfo transfer{SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD,w*h*12,0};
+        SDL_GPUTransferBufferCreateInfo transfer{SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD,w*h*4*count,0};
         download=SDL_CreateGPUTransferBuffer(device,&transfer);
-        if(!download || !textures[0] || !textures[1] || !textures[2]) {
+        if(!download || std::any_of(textures.begin(),textures.end(),[](auto* t){return !t;})) {
             const std::string error=SDL_GetError();
             for(auto* t:textures) if(t) SDL_ReleaseGPUTexture(device,t);
             if(download) SDL_ReleaseGPUTransferBuffer(device,download);
@@ -29,6 +37,7 @@ struct SplitTextures {
     }
     ~SplitTextures() {for(auto* t:textures) SDL_ReleaseGPUTexture(device,t);SDL_ReleaseGPUTransferBuffer(device,download);}
     std::vector<uint8_t> read(unsigned count) {
+        if(count>textures.size()) throw std::runtime_error("Snapshot count exceeds allocation");
         auto* command=SDL_AcquireGPUCommandBuffer(device);
         if(!command) throw std::runtime_error(SDL_GetError());
         auto* pass=SDL_BeginGPUCopyPass(command);
@@ -51,6 +60,198 @@ struct SplitTextures {
         SDL_UnmapGPUTransferBuffer(device,download);return result;
     }
 };
+// Retain EVERY frame on the GPU before inspecting any pixels. Readback after
+// each apply would accidentally hide reuse/staging hazards behind a CPU wait.
+bool shared_cpu_check(starfox::render::GpuRaster& raster) {
+    using namespace starfox::render;
+    constexpr unsigned frames=16;
+    unsigned cases=0;
+    for(unsigned scale:{1U,2U,3U}) for(unsigned width:{64U,120U}) {
+        constexpr unsigned height=48;
+        Framebuffer frame(width,height,scale);frame.enable_layer_tags(true);
+        RasterCommands commands;commands.reset(frame.stored_width(),frame.stored_height());
+        RasterCommand c;c.left=width*scale/4;c.right=width*scale*3/4;
+        c.top=height*scale/4;c.bottom=height*scale*3/4;c.even=17;c.odd=53;c.dither=1;
+        c.has_surface=1;c.surface={0,0,1,100};commands.commands.push_back(c);
+        if(!raster.render(commands,frame,nullptr)) return false;
+        const auto source=raster.resident_output();
+        GpuComposite owner,shared,reference;
+        if(shared.compose_with_cpu_inputs(owner,source,scale,{})
+            || owner.compose_with_cpu_inputs(owner,source,scale,{})) return false;
+        SplitTextures snapshots(source.device,frame.stored_width(),frame.stored_height(),frames*2);
+        std::vector<uint8_t> foreground(frame.pixels().size()),afterLate(foreground.size()),backgroundCoverage(foreground.size());
+        Palette256 palette;
+        for(unsigned i=0;i<frames;++i) {
+            for(unsigned p=0;p<256;++p) palette[p]={uint8_t(p*7+i*13),uint8_t(p*11+i*5),uint8_t(p*3+i*17),uint8_t(p*13+i)};
+            for(unsigned y=0;y<frame.stored_height();++y) for(unsigned x=0;x<frame.stored_width();++x) {
+                const auto p=y*frame.stored_width()+x;
+                const unsigned pattern=i%4;
+                const uint8_t value=pattern==0?7:pattern==1?(x<8*scale || x>=frame.stored_width()-8*scale?13:7):uint8_t(x*3+y*7+i*19);
+                frame.set_stored(x,y,value,pattern<2?PixelLayer::background:((x+y+i)%13?PixelLayer::background:PixelLayer::two_d));
+                foreground[p]=pattern==3 && (x+i*5)%31<4;
+                afterLate[p]=pattern==3 && (x+y+i)%29<3;
+                backgroundCoverage[p]=pattern==3 && (x+i)%23<2;
+            }
+            GpuCompositeBackground background{source,backgroundCoverage};
+            LayerCompositeSettings mapping;
+            if(i%5==0) {mapping.clip_left=3;mapping.clip_top=2;mapping.mosaic=0x11;}
+            if(!owner.compose(source,scale,frame,foreground,mapping,palette,&source,&background,afterLate)
+                || !reference.compose(source,scale,frame,foreground,mapping,palette,&source,&background,afterLate)
+                || !shared.compose_with_cpu_inputs(owner,source,scale,mapping,&source,&background)
+                || shared.last_cpu_upload_bytes()!=0 || shared.last_palette_upload_bytes()!=0) {
+                std::cerr<<"Shared CPU composition: "<<shared.status()<<'\n';return false;
+            }
+            const auto output=shared.output(),expected=reference.output();
+            auto* device=static_cast<SDL_GPUDevice*>(source.device);
+            auto* command=SDL_AcquireGPUCommandBuffer(device);
+            if(!command) return false;
+            auto* copy=SDL_BeginGPUCopyPass(command);
+            if(!copy) {SDL_CancelGPUCommandBuffer(command);return false;}
+            for(unsigned pair=0;pair<2;++pair) {
+                SDL_GPUTextureLocation from{static_cast<SDL_GPUTexture*>(pair?output.rgba:expected.rgba),0,0,0,0,0};
+                SDL_GPUTextureLocation to{snapshots.textures[i*2+pair],0,0,0,0,0};
+                SDL_CopyGPUTextureToTexture(copy,&from,&to,output.width,output.height,1,false);
+            }
+            SDL_EndGPUCopyPass(copy);
+            if(!SDL_SubmitGPUCommandBuffer(command)) return false;
+            ++cases;
+        }
+        // Release the producer before waiting for the retained snapshots.
+        // Submitted consumers must retain their GPU inputs through teardown.
+        owner.release_device();
+        const auto actual=snapshots.read(frames*2);
+        const auto bytes=std::size_t(frame.stored_width())*frame.stored_height()*4;
+        for(unsigned i=0;i<frames;++i) if(!std::equal(actual.begin()+i*2*bytes,actual.begin()+(i*2+1)*bytes,actual.begin()+(i*2+1)*bytes)) {
+            std::cerr<<"Shared CPU snapshot mismatch scale="<<scale<<" width="<<width<<" frame="<<i<<'\n';return false;
+        }
+        // Returning to independently uploaded inputs must not retain a stale
+        // cache from before the shared submission, including a changed palette.
+        std::vector<uint8_t> independent,restored;Framebuffer a(width,height,scale),b(width,height,scale);
+        a.enable_layer_tags(true);b.enable_layer_tags(true);
+        SurfaceBuffer expectedNormals(a.stored_width(),a.stored_height()),actualNormals(b.stored_width(),b.stored_height());
+        if(!reference.readback(a,independent,&expectedNormals) || !shared.readback(b,restored,&actualNormals)
+            || independent!=restored || !std::equal(a.pixels().begin(),a.pixels().end(),b.pixels().begin())
+            || !std::equal(a.layer_tags().begin(),a.layer_tags().end(),b.layer_tags().begin())
+            || !std::equal(expectedNormals.samples().begin(),expectedNormals.samples().end(),actualNormals.samples().begin(),
+                [](const auto& x,const auto& y) {return x.valid==y.valid && x.palette_index==y.palette_index
+                    && x.depth==y.depth && x.normal_x==y.normal_x && x.normal_y==y.normal_y && x.normal_z==y.normal_z;})) return false;
+        if(!reference.compose(source,scale,frame,foreground,{},palette)
+            || !shared.compose(source,scale,frame,foreground,{},palette)
+            || !reference.readback(a,independent) || !shared.readback(b,restored) || independent!=restored) return false;
+        if(shared.compose_with_cpu_inputs(owner,source,scale,{})) return false;
+    }
+    std::cout<<cases<<" shared CPU input frames match independent uploads exactly; retained GPU snapshots, animated palette, uniform/striped/dense inputs, foreground/background/after-late coverage, tags/normals, producer release and recovery pass\n";
+    return true;
+}
+bool ordered_queue_check(starfox::render::GpuRaster& raster,unsigned width=64,unsigned height=48,
+    unsigned scale=2,unsigned count=32,bool moving_source=false,bool transitions=false,void* device=nullptr) {
+    using namespace starfox::render;
+    Framebuffer models(width,height,scale);models.enable_layer_tags(true);
+    RasterCommands commands;commands.reset(models.stored_width(),models.stored_height());
+    RasterCommand model;model.left=width*scale/4;model.right=width*scale*3/4;
+    model.top=height*scale/4;model.bottom=height*scale*3/4;
+    model.even=17;model.odd=53;model.dither=1;model.has_surface=1;model.surface={0,0,1,100};
+    commands.commands.push_back(model);
+    if(!(device?raster.render_resident(device,commands,true):raster.render(commands,models,nullptr))) {
+        std::cerr<<"Ordered-queue source: "<<raster.status()<<'\n';return false;
+    }
+    const auto source=raster.resident_output();
+    auto* selected=static_cast<SDL_GPUDevice*>(source.device);
+    std::cout<<"Ordered-queue adapter: "
+        <<SDL_GetStringProperty(SDL_GetGPUDeviceProperties(selected),SDL_PROP_GPU_DEVICE_NAME_STRING,"unknown")
+        <<" driver="<<SDL_GetGPUDeviceDriver(selected)<<std::endl;
+    std::vector<uint8_t> expected;
+    for(bool ordered:{false,true,false}) {
+        GpuComposite composite;SdlGpuEffects effects;GpuRaster moving;
+        composite.set_ordered_queue_reuse(ordered);effects.set_ordered_queue_reuse(ordered);
+        SplitTextures snapshots(source.device,width*scale,height*scale,count);
+        Framebuffer frame(width,height,scale);frame.enable_layer_tags(true);
+        std::vector<uint8_t> coverage(frame.pixels().size()),rgba;
+        Palette256 palette;
+        for(unsigned i=0;i<count;++i) {
+            // Exercise policy changes on the SAME owners, not freshly created
+            // ones. No image readback until the whole sequence is submitted.
+            const bool queued=ordered && (!transitions || i%24<16);
+            composite.set_ordered_queue_reuse(queued);effects.set_ordered_queue_reuse(queued);
+            auto input=source;
+            if(moving_source) {
+                // Update resident geometry without a CPU readback. Earlier
+                // queued consumers must finish with their own source contents.
+                commands.commands[0].even=1+(i*11)%255;
+                commands.commands[0].odd=1+(i*17+37)%255;
+                commands.commands[0].left=width*scale/8+(i*3)%(width*scale/4);
+                commands.commands[0].surface[3]=40+i%37;
+                if(!moving.render_resident(source.device,commands,true)) {
+                    std::cerr<<"Ordered-queue moving source: "<<moving.status()<<'\n';return false;
+                }
+                input=moving.resident_output();
+            }
+            for(unsigned p=0;p<256;++p) palette[p]={uint8_t(p*7+i*13),uint8_t(p*11+i*5),uint8_t(p*3+i*17),255};
+            for(unsigned y=0;y<frame.stored_height();++y) for(unsigned x=0;x<frame.stored_width();++x) {
+                const auto p=y*frame.stored_width()+x;
+                const bool dense=!moving_source || i%6>=2;
+                const auto value=dense?1+(x*3+y*7+i*19)%255:i%6==1 && (x<4*scale || x>=frame.stored_width()-4*scale)?13:7;
+                frame.set_stored(x,y,value,dense && (x+y+i)%13==0?PixelLayer::two_d:PixelLayer::background);
+                coverage[p]=dense && (x+i*5)%31<4;
+            }
+            if(transitions && i%16==7) {
+                if(composite.compose(input,0,frame,coverage,{},palette) || composite.output().rgba) {
+                    std::cerr<<"Transition failure exposed a stale compositor output\n";return false;
+                }
+            }
+            if(!composite.compose(input,scale,frame,coverage,{},palette)) {
+                std::cerr<<"Ordered-queue composition (ordered="<<ordered<<", frame="<<i<<"): "<<composite.status()<<'\n';return false;
+            }
+            GpuEffectSettings settings;settings.presentation_texture=snapshots.textures[i];
+            settings.bloom_model=1;settings.bloom_world=1;settings.hdr=i%4;
+            const auto phase=i%32;
+            settings.world_effect=i/8%47;settings.presentation_seconds=i/60.;settings.scene_epoch=i/16;
+            settings.persistence_slot=1;settings.persistence_mode=phase<8?0:phase<24?1:2;
+            settings.persistence_models=settings.persistence_world=true;settings.phosphor=phase<16?0:1;
+            settings.exposure=phase<16?0:2;
+            if(transitions && i%32==23) {
+                auto invalid=settings;invalid.circle=GpuEffectSettings::Circle{};invalid.circle->radius=-1;
+                if(effects.apply_resident(composite.output(),frame,rgba,invalid)) {
+                    std::cerr<<"Transition fixture accepted an invalid circle radius\n";return false;
+                }
+                // A failed effects owner is recreated by the application.
+                // Retire its real pending fences before releasing textures;
+                // both reference and candidate reset history at this boundary.
+                effects.release_device();effects.set_ordered_queue_reuse(queued);
+            }
+            if(!effects.apply_resident(composite.output(),frame,rgba,settings)) {
+                std::cerr<<"Ordered-queue effects (ordered="<<ordered<<", frame="<<i<<"): "<<effects.status()<<'\n';return false;
+            }
+        }
+        const auto actual=snapshots.read(count);
+        if(expected.empty()) expected=actual;
+        else if(expected!=actual) {
+            const auto mismatch=std::mismatch(expected.begin(),expected.end(),actual.begin()).first-expected.begin();
+            unsigned maximum{},different{};
+            for(unsigned p=0;p<actual.size();++p) if(actual[p]!=expected[p]) {
+                ++different;maximum=std::max(maximum,unsigned(std::abs(int(actual[p])-int(expected[p]))));
+            }
+            std::cerr<<"Ordered-queue pixels differ (ordered="<<ordered<<") at byte "<<mismatch<<" (frame "
+                <<mismatch/(width*height*scale*scale*4)<<"), bytes="<<different<<" max-error="<<maximum
+                <<" expected="<<unsigned(expected[mismatch])<<" actual="<<unsigned(actual[mismatch])<<'\n';return false;
+        }
+        // Explicit captures still wait and return the last complete frame.
+        std::vector<uint8_t> last;
+        if(!effects.readback(last) || last.size()!=width*height*scale*scale*4
+            || !std::equal(last.begin(),last.end(),actual.end()-last.size())) {
+            std::cerr<<"Ordered-queue final readback differs\n";return false;
+        }
+        // Failure must not expose an old successful composition as a new frame.
+        if(composite.compose(source,0,frame,coverage,{},palette) || composite.output().rgba) {
+            std::cerr<<"Ordered-queue malformed composition remained valid\n";return false;
+        }
+    }
+    std::cout<<"Ordered-queue reuse: "<<count<<" retained "<<width*scale<<'x'<<height*scale
+        <<" frames match synchronous composition/effects, changing palettes, coverage, bloom, persistence, exposure and phosphor"
+        <<(moving_source?", moving resident geometry and uniform/striped/dense uploads":"")
+        <<(transitions?", same-owner queued/wait transitions, malformed compose recovery and pending effects teardown":"")<<'\n';
+    return true;
+}
 bool reference_subtractive(starfox::render::SdlGpuEffects& gpu,void* device,
     const starfox::render::Framebuffer& ink,std::span<const starfox::render::Rgba8> palette,
     unsigned scale,unsigned filter,unsigned brightness,std::vector<uint8_t>& pixels,bool independent_cpu=false) {
@@ -126,6 +327,64 @@ int main(int argc,char** argv) {
     struct Lifetime {~Lifetime(){SDL_Quit();}} lifetime;
     GpuRaster raster;GpuScene overlays;GpuComposite composite;SdlGpuEffects effects,referenceEffects;
     shadows::PortableShadows residentShadows;
+    if(argc==2 && std::string_view(argv[1])=="--pipeline-guides") {
+        try {return composite_pipeline_guides_check(raster)?0:194;}
+        catch(const std::exception& e) {std::cerr<<"Compositor guide fixture: "<<e.what()<<'\n';return 195;}
+    }
+    if(argc==2 && std::string_view(argv[1])=="--shared-cpu") {
+        try {return shared_cpu_check(raster)?0:192;}
+        catch(const std::exception& e) {std::cerr<<"Shared CPU fixture: "<<e.what()<<'\n';return 193;}
+    }
+    if(argc==2 && std::string_view(argv[1])=="--ordered-queue") {
+        try {return ordered_queue_check(raster)?0:190;}
+        catch(const std::exception& e) {std::cerr<<"Ordered-queue fixture: "<<e.what()<<'\n';return 191;}
+    }
+    if(argc==2 && std::string_view(argv[1])=="--ordered-queue-stress") {
+        try {return ordered_queue_check(raster,256,224,2,96,true)
+            && ordered_queue_check(raster,120,90,3,128,true)?0:196;}
+        catch(const std::exception& e) {std::cerr<<"Ordered-queue stress fixture: "<<e.what()<<'\n';return 197;}
+    }
+    if(argc==2 && std::string_view(argv[1])=="--ordered-queue-transitions") {
+        try {
+            const auto properties=SDL_CreateProperties();
+            if(!properties) throw std::runtime_error(SDL_GetError());
+            SDL_SetBooleanProperty(properties,SDL_PROP_GPU_DEVICE_CREATE_SHADERS_SPIRV_BOOLEAN,true);
+            SDL_SetBooleanProperty(properties,SDL_PROP_GPU_DEVICE_CREATE_SHADERS_DXIL_BOOLEAN,true);
+            SDL_SetBooleanProperty(properties,SDL_PROP_GPU_DEVICE_CREATE_DEBUGMODE_BOOLEAN,true);
+            SDL_SetBooleanProperty(properties,SDL_PROP_GPU_DEVICE_CREATE_PREFERLOWPOWER_BOOLEAN,
+                SDL_getenv("STARFOX_TEST_LOW_POWER_GPU")!=nullptr);
+#if defined(_WIN32)
+            if(SDL_getenv("STARFOX_TEST_NVIDIA_GPU")) {
+                // Windows can apply a per-EXE preference before DXGI's normal
+                // high-performance ordering. Select the fixture adapter by its
+                // real LUID using the same SDL binding contract as Leia; never
+                // relabel an Intel result as dedicated-GPU evidence.
+                Microsoft::WRL::ComPtr<IDXGIFactory4> factory;
+                if(FAILED(CreateDXGIFactory1(IID_PPV_ARGS(factory.GetAddressOf()))))
+                    throw std::runtime_error("Fixture DXGI enumeration failed");
+                bool found=false;
+                for(unsigned i=0;;++i) {
+                    Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter;
+                    if(FAILED(factory->EnumAdapters1(i,adapter.GetAddressOf()))) break;
+                    DXGI_ADAPTER_DESC1 desc{};
+                    if(FAILED(adapter->GetDesc1(&desc)) || desc.VendorId!=0x10de || (desc.Flags&DXGI_ADAPTER_FLAG_SOFTWARE)) continue;
+                    SDL_SetBooleanProperty(properties,"starfox.d3d12.require_adapter_luid",true);
+                    SDL_SetNumberProperty(properties,"starfox.d3d12.adapter_luid_low",desc.AdapterLuid.LowPart);
+                    SDL_SetNumberProperty(properties,"starfox.d3d12.adapter_luid_high",desc.AdapterLuid.HighPart);
+                    found=true;break;
+                }
+                if(!found) throw std::runtime_error("Requested NVIDIA fixture adapter is unavailable");
+            }
+#endif
+            auto* device=SDL_CreateGPUDeviceWithProperties(properties);SDL_DestroyProperties(properties);
+            if(!device) throw std::runtime_error(SDL_GetError());
+            struct Owner {SDL_GPUDevice* device;~Owner(){SDL_WaitForGPUIdle(device);SDL_DestroyGPUDevice(device);}} owner{device};
+            GpuRaster borrowed;
+            return ordered_queue_check(borrowed,256,224,2,96,true,true,device)
+                && ordered_queue_check(borrowed,120,90,3,128,true,true,device)?0:198;
+        }
+        catch(const std::exception& e) {std::cerr<<"Ordered-queue transition fixture: "<<e.what()<<'\n';return 199;}
+    }
     if(argc==3) {
         std::array<std::optional<Framebuffer>,2> layers;
         Palette256 colours{};unsigned next=1;
@@ -177,6 +436,51 @@ int main(int argc,char** argv) {
     shadowScene.add({{-10,-10,40},{10,-10,40},{0,10,45}});shadowScene.build();
     Palette256 palette;
     for(unsigned i=0;i<256;++i) palette[i]={std::uint8_t(i),std::uint8_t(i*7),std::uint8_t(255-i),std::uint8_t(i*13)};
+    // Authored dither pairs must resolve even in single-pixel-wide faces. No
+    // spatial pattern recognizer can recover these alternates at the edges.
+    for(unsigned scale:{1U,2U,3U,4U}) for(bool merged:{false,true}) {
+        Framebuffer native(8,8,scale),base(8,8,scale),actual(8,8,scale);
+        for(auto* f:{&native,&base,&actual}) f->enable_layer_tags(true);
+        RasterCommands commands;commands.reset(native.stored_width(),native.stored_height());
+        for(unsigned x=0;x<native.stored_width();++x) {
+            RasterCommand c;c.left=x;c.right=x+1;c.bottom=native.stored_height();
+            c.even=x%4?17:0;c.odd=53;c.dither=1;c.tag=x%3==0?0:x%3==1?1:4;
+            c.has_surface=1;c.surface={0,0,1,100};commands.commands.push_back(c);
+        }
+        SurfaceBuffer normals(native.stored_width(),native.stored_height());
+        if(!raster.render(commands,native,&normals)) {std::cerr<<raster.status();return 120;}
+        for(unsigned i=0;i<base.pixels().size();++i) base.pixels()[i]=7;
+        std::vector<uint8_t> coverage(base.pixels().size());
+        for(unsigned x=0;x<base.stored_width();++x) {coverage[x]=1;base.set_stored(x,0,9,PixelLayer::two_d);}
+        auto source=raster.resident_output();GpuRaster front;GpuScene merge;
+        if(merged) {
+            auto* device=static_cast<SDL_GPUDevice*>(source.device);
+            auto* cb=SDL_AcquireGPUCommandBuffer(device);if(!cb) return 124;
+            auto layer=front.enqueue_commands(device,cb,commands,true);
+            source=merge.enqueue(cb,layer,nullptr);
+            if(!source.pixels) {SDL_CancelGPUCommandBuffer(cb);return 125;}
+            auto* fence=SDL_SubmitGPUCommandBufferAndAcquireFence(cb);
+            if(!fence || !SDL_WaitForGPUFences(device,true,&fence,1)) return 126;
+            SDL_ReleaseGPUFence(device,fence);
+        }
+        if(!composite.compose(source,scale,base,coverage,{},palette)) return 121;
+        std::vector<uint8_t> rgba;
+        if(!composite.readback(actual,rgba)) return 122;
+        for(unsigned y=0;y<base.stored_height();++y) for(unsigned x=0;x<base.stored_width();++x) {
+            const auto i=y*base.stored_width()+x;const auto index=native.pixels()[i];
+            const auto tag=x%3==0?0U:x%3==1?1U:4U;
+            const bool resolve=scale>1 && tag==0 && y!=0;
+            auto expected=palette[y==0?9:resolve?index:index?index:7];
+            if(resolve) {
+                const auto a=palette[x%4?17:0],b=palette[53];
+                expected.r=uint8_t((unsigned(a.r)+b.r+1)/2);expected.g=uint8_t((unsigned(a.g)+b.g+1)/2);expected.b=uint8_t((unsigned(a.b)+b.b+1)/2);
+            }
+            if(rgba[i*4]!=expected.r || rgba[i*4+1]!=expected.g || rgba[i*4+2]!=expected.b || rgba[i*4+3]!=expected.a
+                || (y!=0 && (index || resolve) && actual.layer_tags()[i]!=tag)) {
+                std::cerr<<"Authored dither material resolve mismatch scale="<<scale<<" x="<<x<<" y="<<y;return 123;
+            }
+        }
+    }
     {
         Framebuffer base(400,224,2),portrait(400,224),text(400,224),deviceFrame(1,1);
         base.enable_layer_tags(true);
@@ -224,6 +528,9 @@ int main(int argc,char** argv) {
             || cached.last_cpu_upload_bytes()!=0U
             || cached.last_palette_upload_bytes()!=1024U
             || !cached.readback(read,first)) return 118;
+        std::vector<MotionBlurGuide> unavailable_guides(1,{42,0,10,true,true});
+        if(cached.readback_motion_guides(true,unavailable_guides)
+            || unavailable_guides.size()!=1 || unavailable_guides[0].motion_x!=42) return 180;
         if(!cached.compose(raster.resident_output(),1,blank,{},plain,palette)
             || cached.last_cpu_upload_bytes()!=0U
             || cached.last_palette_upload_bytes()!=0U
@@ -358,6 +665,31 @@ int main(int argc,char** argv) {
             return 143;
         }
     }
+    for(unsigned scale:{2U,4U}) for(unsigned mosaic:{0U,0x11U}) {
+        Framebuffer source(8,8,scale),expected(8,8,scale),recorded(8,8,scale),actual(8,8,scale),replayed(8,8,scale);
+        source.enable_layer_tags(true);source.enable_dither_pairs(true);
+        for(unsigned y=0;y<source.stored_height();++y) for(unsigned x=0;x<source.stored_width();++x) {
+            source.set_stored(x,y,(x+y)&1?53:0,PixelLayer::three_d);
+            source.set_dither_alternate(std::size_t(y)*source.stored_width()+x,(x+y)&1?0:53);
+        }
+        LayerCompositeSettings settings;settings.mosaic=mosaic;settings.mosaic_layer_mask=1;
+        composite_transparent_layer(source,expected,settings);
+        RasterCommands batch;batch.reset(recorded.stored_width(),recorded.stored_height());recorded.record_to(&batch);
+        composite_transparent_layer(source,recorded,settings);recorded.record_to(nullptr);
+        replay_raster_commands(batch,replayed,nullptr);
+        if(!raster.render(batch,actual,nullptr)) {std::cerr<<raster.status();return 144;}
+        std::vector<std::uint8_t> reference,cpuImage,gpuImage;
+        expand_rgba(expected,reference,palette);expand_rgba(replayed,cpuImage,palette);expand_rgba(actual,gpuImage,palette);
+        if(reference!=cpuImage || reference!=gpuImage) {std::cerr<<"Recorded material pair lost during layer composition";return 145;}
+        GpuIndexedLayerDraw indexed;indexed.commands=&batch;indexed.source_scale=indexed.scale=scale;
+        indexed.reference_size={actual.stored_width(),actual.stored_height()};
+        const std::array<GpuSceneDraw,1> indexedDraws{indexed};GpuScene indexedScene;
+        if(!indexedScene.render_resident(raster.resident_output().device,actual.stored_width(),actual.stored_height(),indexedDraws)) {std::cerr<<indexedScene.status();return 146;}
+        Framebuffer mapped(8,8,scale);
+        if(!indexedScene.readback(mapped,nullptr)) {std::cerr<<indexedScene.status();return 147;}
+        expand_rgba(mapped,gpuImage,palette);
+        if(reference!=gpuImage) {std::cerr<<"Resident indexed remap dropped palette-zero material samples";return 148;}
+    }
     unsigned cases=0;
     for(unsigned sourceScale:{1U,2U,4U}) for(unsigned scale:{1U,2U,4U})
     for(int offset:{-7,0,3}) for(unsigned mosaic:{0U,0x31U}) for(bool clipped:{false,true}) {
@@ -404,7 +736,26 @@ int main(int argc,char** argv) {
             if(coverage[std::size_t(y)*actual.stored_width()+x] && surface.get(x,y).valid) {
                 std::cerr<<"CPU foreground inherited hidden model lighting";return 99;
             }
+        if(clipped) for(unsigned y=0;y<actual.stored_height();++y) for(unsigned x=0;x<actual.stored_width();++x) {
+            const int lx=int(x/scale),ly=int(y/scale);
+            if((lx<settings.clip_left || lx>=settings.clip_right || ly<settings.clip_top || ly>=settings.clip_bottom)
+                && surface.get(x,y).valid) {
+                std::cerr<<"Clipped model leaked lighting metadata at "<<x<<","<<y;return 149;
+            }
+        }
         if(offset==0 && mosaic==0 && !clipped) {
+            // A motion-blur underlay hides the native layer with an empty clip.
+            // It must not retain normals, even with matching palette entries.
+            GpuComposite underlay;LayerCompositeSettings hidden;hidden.clip_left=hidden.clip_right=0;
+            Framebuffer behind=cpu;SurfaceBuffer behind_surfaces(cpu.stored_width(),cpu.stored_height());
+            std::vector<uint8_t> behind_rgba,behind_reference;
+            if(!underlay.compose(raster.resident_output(),sourceScale,cpu,coverage,hidden,palette)
+                || !underlay.readback(behind,behind_rgba,&behind_surfaces)) return 150;
+            expand_rgba(cpu,behind_reference,palette);
+            if(behind_rgba!=behind_reference) {std::cerr<<"Empty clip changed underlay colour";return 151;}
+            for(const auto& sample:behind_surfaces.samples()) if(sample.valid) {
+                std::cerr<<"Empty clip retained model surfaces in underlay";return 152;
+            }
             Framebuffer base(23,17,sourceScale),world(23,17,sourceScale);base.enable_layer_tags(true);world.enable_layer_tags(true);
             for(unsigned y=0;y<base.stored_height();++y) for(unsigned x=0;x<base.stored_width();++x)
                 base.set_stored(x,y,x?9:7,x?PixelLayer::background:PixelLayer::two_d);
@@ -645,6 +996,28 @@ int main(int argc,char** argv) {
         if(result!=reference) {std::cerr<<"Resident effects mismatch case "<<cases;return 8;}
         if(effects.last_staging_upload_bytes()!=0) {std::cerr<<"Resident effects uploaded placeholder data";return 53;}
         {
+            GpuEffectSettings resolve;resolve.smoothing=4;
+            auto wanted=rgba;std::vector<std::uint8_t> scratch;
+            smooth_models(4,actual,wanted,scratch);
+            if(!effects.apply_resident(composite.output(),cpu,result,resolve) || result!=wanted) {
+                std::cerr<<"Upscaled dither resolve differs from CPU";return 115;
+            }
+        }
+        for(unsigned type:{0U,1U,2U,3U,5U}) for(unsigned quality=1;quality<=3;++quality) {
+            GpuEffectSettings aa;aa.anti_aliasing=type*4+quality;
+            auto wanted=rgba;
+            if(!referenceEffects.apply(raster.resident_output().device,actual,wanted,aa)
+                || !effects.apply_resident(composite.output(),cpu,result,aa) || result!=wanted) {
+                std::cerr<<"AA type/quality resident mismatch";return 113;
+            }
+            for(std::size_t i=0;i<actual.layer_tags().size();++i)
+                if(!anti_aliasing_eligible(static_cast<PixelLayer>(actual.layer_tags()[i])))
+                    for(unsigned channel=0;channel<4;++channel)
+                        if(result[i*4+channel]!=rgba[i*4+channel]) {
+                            std::cerr<<"AA altered protected HUD pixels";return 114;
+                        }
+        }
+        {
             SdlGpuEffects backdropEffects;
             BackdropImage sky;sky.width=16;sky.height=16;sky.pixels.assign(256,0xff553311);
             GpuEffectSettings skySettings;auto& env=skySettings.environment;
@@ -660,6 +1033,53 @@ int main(int argc,char** argv) {
             }
         }
         {
+            // Per-eye source shifts cover both panoramas and unique bodies,
+            // including fractional offsets, without moving foreground/HUD.
+            BackdropImage stereoSky;stereoSky.width=32;stereoSky.height=48;
+            for(unsigned y=0;y<48;++y) for(unsigned x=0;x<32;++x)
+                stereoSky.pixels.push_back(0xff000000u|((x*7u)&255u)|(((y*5u)&255u)<<8)|(((x+y)*3u&255u)<<16));
+            for(float offset:{-4.25f,4.25f}) for(float projection:{0.f,1.f,3.f,4.f,6.f,7.f}) {
+                GpuEffectSettings shifted;auto& env=shifted.environment;
+                env.backdrop=&stereoSky;env.modes[2]=1;env.motion[0]=1000;env.plane[3]=1;
+                env.classes.fill(6);env.scroll_fraction[2]=offset;
+                env.backdrop_projection={1/32.f,1/24.f,.5f,projection};
+                env.backdrop_keep[0]={0,8,6,6};
+                if(projection==4) env.backdrop_keep[1]={.1f,-.1f,0,0};
+                auto wanted=rgba;apply_environment(env,actual,wanted);
+                if(!effects.apply_resident(composite.output(),cpu,result,shifted)) return 116;
+                for(std::size_t i=0;i<result.size();++i) if(std::abs(int(result[i])-int(wanted[i]))>1) {
+                    std::cerr<<"Stereo enhanced backdrop CPU/GPU mismatch";return 117;
+                }
+                for(std::size_t i=0;i<actual.layer_tags().size();++i) if(actual.layer_tags()[i]!=unsigned(PixelLayer::background))
+                    for(unsigned c=0;c<4;++c) if(result[i*4+c]!=rgba[i*4+c]) {
+                        std::cerr<<"Stereo backdrop shifted foreground or HUD";return 118;
+                    }
+            }
+        }
+        {
+            // Bomb/death disks must tint the replacement sky, not be erased by it.
+            BackdropImage sky;sky.width=16;sky.height=16;sky.pixels.assign(256,0xff553311);
+            for(bool subtract:{false,true}) {
+                GpuEffectSettings flash;
+                auto& env=flash.environment;env.backdrop=&sky;env.modes[2]=1;
+                env.motion[0]=1000;env.plane[3]=1;
+                flash.circle=GpuEffectSettings::Circle{0,0,100000,0,0,
+                    int(cpu.stored_width()),int(cpu.stored_height()),31,9,0,subtract,false,false};
+                auto wanted=rgba;apply_environment(env,actual,wanted);
+                for(std::size_t i=0;i<actual.pixels().size();++i) {
+                    if(actual.pixels()[i]>=128) continue;
+                    for(unsigned channel=0;channel<3;++channel) {
+                        auto& value=wanted[i*4+channel];
+                        const int fixed=channel==0?31:channel==1?9:0;
+                        int v=(unsigned(value)*31+127)/255;
+                        v=std::clamp(v+(subtract?-fixed:fixed),0,31);
+                        value=std::uint8_t((v<<3)|(v>>2));
+                    }
+                }
+                if(!effects.apply_resident(composite.output(),cpu,result,flash) || result!=wanted) {
+                    std::cerr<<"Enhanced scenery covered bomb/death colour disk";return 112;
+                }
+            }
             SplitTextures split(raster.resident_output().device,cpu.stored_width(),cpu.stored_height());
             for(bool bloom:{false,true}) {
                 auto separated=bloom?s:GpuEffectSettings{};separated.surfaces=&surface;

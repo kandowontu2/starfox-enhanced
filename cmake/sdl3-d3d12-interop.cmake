@@ -3,6 +3,46 @@
 # Use exact, guarded source anchors for this pinned two-insertion extension.
 set(backend "${SOURCE_DIR}/src/gpu/d3d12/SDL_gpu_d3d12.c")
 file(READ "${backend}" code)
+# Native display runtimes return an exact adapter LUID. Selecting SDL's
+# default/high-performance adapter can target a different GPU on laptops.
+# These opt-in create properties leave all ordinary device selection intact.
+string(FIND "${code}" "starfox.d3d12.require_adapter_luid" luid_installed)
+if(luid_installed LESS 0)
+    set(luid_anchor "    // Get information about the selected adapter. Used for logging info.")
+    string(FIND "${code}" "${luid_anchor}" luid_found)
+    if(luid_found LESS 0)
+        message(FATAL_ERROR "Pinned SDL D3D12 adapter selection anchor missing")
+    endif()
+    set(luid_selection [=[
+    if (SDL_GetBooleanProperty(props, "starfox.d3d12.require_adapter_luid", false)) {
+        const Uint32 required_low = (Uint32)SDL_GetNumberProperty(props, "starfox.d3d12.adapter_luid_low", 0);
+        const Sint32 required_high = (Sint32)SDL_GetNumberProperty(props, "starfox.d3d12.adapter_luid_high", 0);
+        IDXGIAdapter1 *candidate = NULL;
+        bool found = false;
+        IDXGIAdapter1_Release(renderer->adapter);
+        renderer->adapter = NULL;
+        for (UINT index = 0; SUCCEEDED(IDXGIFactory4_EnumAdapters1(renderer->factory, index, &candidate)); ++index) {
+            DXGI_ADAPTER_DESC1 description;
+            if (SUCCEEDED(IDXGIAdapter1_GetDesc1(candidate, &description))
+                && description.AdapterLuid.LowPart == required_low && description.AdapterLuid.HighPart == required_high) {
+                renderer->adapter = candidate;
+                found = true;
+                break;
+            }
+            IDXGIAdapter1_Release(candidate);
+            candidate = NULL;
+        }
+        if (!found) {
+            D3D12_INTERNAL_DestroyRenderer(renderer);
+            SDL_SetError("Required native display D3D12 adapter is unavailable");
+            return NULL;
+        }
+    }
+
+]=])
+    string(REPLACE "${luid_anchor}" "${luid_selection}${luid_anchor}" code "${code}")
+    file(WRITE "${backend}" "${code}")
+endif()
 string(FIND "${code}" "starfox_present_hooks" present_hooks_installed)
 if(present_hooks_installed LESS 0)
     set(create_anchor "    CHECK_D3D12_ERROR_AND_RETURN(\"Could not create IDXGISwapChain3\", false);")
@@ -27,7 +67,20 @@ string(FIND "${code}" "${properties}" installed)
 set(texture_property "    SDL_SetPointerProperty(renderer->props, STARFOX_SDL_D3D12_TEXTURE_BRIDGE, (void *)&starfox_d3d12_texture_bridge);")
 set(compute_property "    SDL_SetPointerProperty(renderer->props, STARFOX_SDL_D3D12_COMPUTE_BRIDGE, (void *)&starfox_d3d12_compute_bridge);")
 set(present_property "    SDL_SetPointerProperty(renderer->props, STARFOX_SDL_D3D12_PRESENT_BRIDGE, (void *)&starfox_d3d12_present_bridge);")
+set(xr_property "    SDL_SetPointerProperty(renderer->props, STARFOX_SDL_D3D12_XR_BRIDGE, (void *)&starfox_d3d12_xr_bridge);")
+set(timestamps_property "    SDL_SetPointerProperty(renderer->props, STARFOX_SDL_D3D12_TIMESTAMPS, (void *)&starfox_d3d12_timestamps);")
+set(weave_property "    SDL_SetPointerProperty(renderer->props, STARFOX_SDL_D3D12_OWNED_WEAVE, (void *)&starfox_d3d12_owned_weave_bridge);")
 if(included GREATER_EQUAL 0 AND installed GREATER_EQUAL 0)
+    string(FIND "${code}" "STARFOX_SDL_D3D12_OWNED_WEAVE," weave_installed)
+    if(weave_installed LESS 0)
+        string(REPLACE "${properties}" "${properties}\n${weave_property}" code "${code}")
+        file(WRITE "${backend}" "${code}")
+    endif()
+    string(FIND "${code}" "STARFOX_SDL_D3D12_TIMESTAMPS," timestamps_installed)
+    if(timestamps_installed LESS 0)
+        string(REPLACE "${properties}" "${properties}\n${timestamps_property}" code "${code}")
+        file(WRITE "${backend}" "${code}")
+    endif()
     string(FIND "${code}" "STARFOX_SDL_D3D12_GEOMETRY_BRIDGE," geometry_installed)
     if(geometry_installed LESS 0)
         string(REPLACE "${properties}" "${properties}\n    SDL_SetPointerProperty(renderer->props, STARFOX_SDL_D3D12_GEOMETRY_BRIDGE, (void *)&starfox_d3d12_geometry_bridge);" code "${code}")
@@ -48,6 +101,11 @@ if(included GREATER_EQUAL 0 AND installed GREATER_EQUAL 0)
         string(REPLACE "${properties}" "${properties}\n${present_property}" code "${code}")
         file(WRITE "${backend}" "${code}")
     endif()
+    string(FIND "${code}" "STARFOX_SDL_D3D12_XR_BRIDGE," xr_installed)
+    if(xr_installed LESS 0)
+        string(REPLACE "${properties}" "${properties}\n${xr_property}" code "${code}")
+        file(WRITE "${backend}" "${code}")
+    endif()
     return()
 endif()
 string(FIND "${code}" "${anchor}" found_anchor)
@@ -57,5 +115,5 @@ if(included GREATER_EQUAL 0 OR installed GREATER_EQUAL 0 OR found_anchor LESS 0 
 endif()
 string(REPLACE "${anchor}" "${inclusion}\n\n${anchor}" code "${code}")
 string(REPLACE "${tail}" "    renderer->sdlGPUDevice = result;\n\n${properties}\n    SDL_SetPointerProperty(renderer->props, STARFOX_SDL_D3D12_GEOMETRY_BRIDGE, (void *)&starfox_d3d12_geometry_bridge);\n    return result;" code "${code}")
-string(REPLACE "${properties}" "${properties}\n${texture_property}\n${compute_property}\n${present_property}" code "${code}")
+string(REPLACE "${properties}" "${properties}\n${texture_property}\n${compute_property}\n${present_property}\n${xr_property}\n${timestamps_property}\n${weave_property}" code "${code}")
 file(WRITE "${backend}" "${code}")

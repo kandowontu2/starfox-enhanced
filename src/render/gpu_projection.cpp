@@ -1,4 +1,6 @@
 #include "starfox/render/gpu_projection.hpp"
+#include "starfox/render/gpu_dispatch.hpp"
+#include "starfox/render/gpu_image_extent.hpp"
 #include "starfox/render/temporal_jitter.hpp"
 #include "starfox/render/grid_projection.hpp"
 #include <cmath>
@@ -6,11 +8,14 @@
 #include <algorithm>
 #if defined(STARFOX_SDL_GPU_EFFECTS)
 #include <SDL3/SDL.h>
+#include "starfox/render/gpu_preparation.hpp"
 #include "shaders/generated/projection_portable.hpp"
 #include "shaders/generated/motion_portable.hpp"
 #include "shaders/generated/visibility_portable.hpp"
 #include "shaders/generated/transform_portable.hpp"
 #include "shaders/generated/continuous_portable.hpp"
+#include "shaders/generated/transform_inline_portable.hpp"
+#include "shaders/generated/continuous_inline_portable.hpp"
 #include "shaders/generated/continuous_visibility_portable.hpp"
 #include "shaders/generated/axis_portable.hpp"
 #include "shaders/generated/grid_portable.hpp"
@@ -41,6 +46,7 @@ struct GpuProjection::Impl {
     std::uint32_t visibility_capacity{},point_count{};
     SDL_GPUComputePipeline* transform_pipeline{};
     SDL_GPUComputePipeline* continuous_pipeline{};
+    SDL_GPUComputePipeline *transform_inline_pipeline{},*continuous_inline_pipeline{};
     SDL_GPUComputePipeline* continuous_visibility_pipeline{};
     SDL_GPUComputePipeline* axis_pipeline{};
     SDL_GPUComputePipeline* grid_pipeline{};
@@ -114,6 +120,9 @@ struct GpuProjection::Impl {
         if(transformed) SDL_ReleaseGPUBuffer(device,transformed);
         if(transform_pipeline) SDL_ReleaseGPUComputePipeline(device,transform_pipeline);
         if(continuous_pipeline) SDL_ReleaseGPUComputePipeline(device,continuous_pipeline);
+        if(transform_inline_pipeline) SDL_ReleaseGPUComputePipeline(device,transform_inline_pipeline);
+        if(continuous_inline_pipeline) SDL_ReleaseGPUComputePipeline(device,continuous_inline_pipeline);
+        transform_inline_pipeline=continuous_inline_pipeline=nullptr;
         if(continuous_visibility_pipeline) SDL_ReleaseGPUComputePipeline(device,continuous_visibility_pipeline);
         continuous_visibility_pipeline=nullptr;continuous_count=0;
         continuous_pipeline=nullptr;
@@ -126,35 +135,55 @@ struct GpuProjection::Impl {
         output=nullptr;pipeline=nullptr;device=nullptr;capacity=0;
     }
     void initialize(SDL_GPUDevice* next) {
-        if(device==next && pipeline && visibility_pipeline && transform_pipeline && continuous_pipeline && continuous_visibility_pipeline) return;
-        release();device=next;
+        if(device==next) return;
+        release();
+        const auto formats=SDL_GetGPUShaderFormats(next);
+        if(!(formats&(SDL_GPU_SHADERFORMAT_SPIRV|SDL_GPU_SHADERFORMAT_DXIL|SDL_GPU_SHADERFORMAT_MSL)))
+            throw std::runtime_error("Native projection requires Vulkan, Metal or D3D12");
+        device=next;
+    }
+    enum class Stage { projection, visibility, transform, continuous, continuous_visibility, transform_inline, continuous_inline };
+    void initialize_stage(SDL_GPUDevice* next,Stage stage) {
+        initialize(next);
+        auto** target=stage==Stage::projection?&pipeline:stage==Stage::visibility?&visibility_pipeline:
+            stage==Stage::transform?&transform_pipeline:stage==Stage::continuous?&continuous_pipeline:
+            stage==Stage::transform_inline?&transform_inline_pipeline:stage==Stage::continuous_inline?&continuous_inline_pipeline:&continuous_visibility_pipeline;
+        if(*target) return;
+        // A grid, particle, motion or continuous draw must not compile all five
+        // unrelated word/visibility/transform shaders. Keep independently lazy
+        // stages alive when the same recording changes projection policy.
         const bool spirv=(SDL_GetGPUShaderFormats(device)&SDL_GPU_SHADERFORMAT_SPIRV)!=0;
         const bool dxil=(SDL_GetGPUShaderFormats(device)&SDL_GPU_SHADERFORMAT_DXIL)!=0;
-        if(!spirv && !dxil && !(SDL_GetGPUShaderFormats(device)&SDL_GPU_SHADERFORMAT_MSL))
-            throw std::runtime_error("Native projection requires Vulkan, Metal or D3D12");
         SDL_GPUComputePipelineCreateInfo info{};
         info.format=spirv?SDL_GPU_SHADERFORMAT_SPIRV:dxil?SDL_GPU_SHADERFORMAT_DXIL:SDL_GPU_SHADERFORMAT_MSL;
-        info.code=spirv?projection_shader::spirv:dxil?projection_shader::dxil:reinterpret_cast<const Uint8*>(projection_shader::metal);
-        info.code_size=spirv?sizeof(projection_shader::spirv):dxil?sizeof(projection_shader::dxil):std::strlen(projection_shader::metal);
         info.entrypoint=(spirv||dxil)?"main":"main0";
-        info.num_readonly_storage_buffers=1;info.num_readwrite_storage_buffers=1;
+        info.num_readonly_storage_buffers=stage==Stage::projection || stage==Stage::transform_inline || stage==Stage::continuous_inline?1:2;
+        info.num_readwrite_storage_buffers=stage==Stage::continuous || stage==Stage::continuous_inline?2:1;
         info.num_uniform_buffers=1;info.threadcount_x=64;info.threadcount_y=info.threadcount_z=1;
-        pipeline=SDL_CreateGPUComputePipeline(device,&info);require(pipeline);
-        info.code=spirv?visibility_shader::spirv:dxil?visibility_shader::dxil:reinterpret_cast<const Uint8*>(visibility_shader::metal);
-        info.code_size=spirv?sizeof(visibility_shader::spirv):dxil?sizeof(visibility_shader::dxil):std::strlen(visibility_shader::metal);
-        info.num_readonly_storage_buffers=2;
-        visibility_pipeline=SDL_CreateGPUComputePipeline(device,&info);require(visibility_pipeline);
-        info.code=spirv?transform_shader::spirv:dxil?transform_shader::dxil:reinterpret_cast<const Uint8*>(transform_shader::metal);
-        info.code_size=spirv?sizeof(transform_shader::spirv):dxil?sizeof(transform_shader::dxil):std::strlen(transform_shader::metal);
-        transform_pipeline=SDL_CreateGPUComputePipeline(device,&info);require(transform_pipeline);
-        info.code=spirv?continuous_shader::spirv:dxil?continuous_shader::dxil:reinterpret_cast<const Uint8*>(continuous_shader::metal);
-        info.code_size=spirv?sizeof(continuous_shader::spirv):dxil?sizeof(continuous_shader::dxil):std::strlen(continuous_shader::metal);
-        info.num_readwrite_storage_buffers=2;
-        continuous_pipeline=SDL_CreateGPUComputePipeline(device,&info);require(continuous_pipeline);
-        info.num_readwrite_storage_buffers=1;
-        info.code=spirv?continuous_visibility_shader::spirv:dxil?continuous_visibility_shader::dxil:reinterpret_cast<const Uint8*>(continuous_visibility_shader::metal);
-        info.code_size=spirv?sizeof(continuous_visibility_shader::spirv):dxil?sizeof(continuous_visibility_shader::dxil):std::strlen(continuous_visibility_shader::metal);
-        continuous_visibility_pipeline=SDL_CreateGPUComputePipeline(device,&info);require(continuous_visibility_pipeline);
+        switch(stage) {
+        case Stage::projection:
+            info.code=spirv?projection_shader::spirv:dxil?projection_shader::dxil:reinterpret_cast<const Uint8*>(projection_shader::metal);
+            info.code_size=spirv?sizeof(projection_shader::spirv):dxil?sizeof(projection_shader::dxil):std::strlen(projection_shader::metal);break;
+        case Stage::visibility:
+            info.code=spirv?visibility_shader::spirv:dxil?visibility_shader::dxil:reinterpret_cast<const Uint8*>(visibility_shader::metal);
+            info.code_size=spirv?sizeof(visibility_shader::spirv):dxil?sizeof(visibility_shader::dxil):std::strlen(visibility_shader::metal);break;
+        case Stage::transform:
+            info.code=spirv?transform_shader::spirv:dxil?transform_shader::dxil:reinterpret_cast<const Uint8*>(transform_shader::metal);
+            info.code_size=spirv?sizeof(transform_shader::spirv):dxil?sizeof(transform_shader::dxil):std::strlen(transform_shader::metal);break;
+        case Stage::continuous:
+            info.code=spirv?continuous_shader::spirv:dxil?continuous_shader::dxil:reinterpret_cast<const Uint8*>(continuous_shader::metal);
+            info.code_size=spirv?sizeof(continuous_shader::spirv):dxil?sizeof(continuous_shader::dxil):std::strlen(continuous_shader::metal);break;
+        case Stage::continuous_visibility:
+            info.code=spirv?continuous_visibility_shader::spirv:dxil?continuous_visibility_shader::dxil:reinterpret_cast<const Uint8*>(continuous_visibility_shader::metal);
+            info.code_size=spirv?sizeof(continuous_visibility_shader::spirv):dxil?sizeof(continuous_visibility_shader::dxil):std::strlen(continuous_visibility_shader::metal);break;
+        case Stage::transform_inline:
+            info.code=spirv?transform_inline_shader::spirv:dxil?transform_inline_shader::dxil:reinterpret_cast<const Uint8*>(transform_inline_shader::metal);
+            info.code_size=spirv?sizeof(transform_inline_shader::spirv):dxil?sizeof(transform_inline_shader::dxil):std::strlen(transform_inline_shader::metal);break;
+        case Stage::continuous_inline:
+            info.code=spirv?continuous_inline_shader::spirv:dxil?continuous_inline_shader::dxil:reinterpret_cast<const Uint8*>(continuous_inline_shader::metal);
+            info.code_size=spirv?sizeof(continuous_inline_shader::spirv):dxil?sizeof(continuous_inline_shader::dxil):std::strlen(continuous_inline_shader::metal);break;
+        }
+        *target=create_gpu_compute_pipeline(device,&info);require(*target);
     }
 #endif
 };
@@ -164,10 +193,8 @@ void* GpuProjection::enqueue_motion(void* device,void* command,void* current_poi
     void* previous_points,std::uint32_t count,float scale_x,float scale_y,bool reset_history) {
     return enqueue_motion_impl(device,command,current_points,previous_points,count,scale_x,scale_y,reset_history,nullptr);
 }
-void* GpuProjection::enqueue_motion_surface(void* device,void* command,void* camera_depth,
-    const MotionSurfaceSettings& settings) {
-    bool valid=settings.width && settings.height && settings.width<=4096 && settings.height<=4096
-        && std::uint64_t(settings.width)*settings.height<=65535U*64U;
+bool GpuProjection::valid_motion_surface_settings(const MotionSurfaceSettings& settings) noexcept {
+    bool valid=bounded_gpu_image_extent(settings.width,settings.height);
     for(const auto* row:{settings.current_projection,settings.previous_projection,
         settings.previous_row0,settings.previous_row1,settings.previous_row2})
         for(unsigned i=0;i<4;++i) valid=valid && std::isfinite(row[i]);
@@ -175,7 +202,11 @@ void* GpuProjection::enqueue_motion_surface(void* device,void* command,void* cam
         && settings.previous_projection[0]>0 && settings.previous_projection[1]>0
         && std::isfinite(settings.jitter_x) && std::isfinite(settings.jitter_y)
         && std::isfinite(settings.previous_near) && settings.previous_near>=0;
-    if(!valid) {impl_->status="Invalid per-pixel motion settings";return nullptr;}
+    return valid;
+}
+void* GpuProjection::enqueue_motion_surface(void* device,void* command,void* camera_depth,
+    const MotionSurfaceSettings& settings) {
+    if(!valid_motion_surface_settings(settings)) {impl_->status="Invalid per-pixel motion settings";return nullptr;}
     return enqueue_motion_impl(device,command,camera_depth,camera_depth,settings.width*settings.height,
         1,1,settings.reset_history!=0,&settings);
 }
@@ -183,7 +214,7 @@ void* GpuProjection::enqueue_motion_impl(void* device,void* command,void* curren
     void* previous_points,std::uint32_t count,float scale_x,float scale_y,bool reset_history,
     const MotionSurfaceSettings* surface) {
     if(!device || !command || !current_points || !previous_points || !count
-        || count>65535U*64U || !std::isfinite(scale_x) || !std::isfinite(scale_y)
+        || count>(surface?4096U*4096U:65535U*64U) || !std::isfinite(scale_x) || !std::isfinite(scale_y)
         || scale_x<=0 || scale_y<=0) {
         impl_->status="Invalid GPU motion input";return nullptr;
     }
@@ -204,7 +235,7 @@ void* GpuProjection::enqueue_motion_impl(void* device,void* command,void* curren
             info.num_readonly_storage_buffers=2;info.num_readwrite_storage_buffers=1;
             info.num_uniform_buffers=1;
             info.threadcount_x=64;info.threadcount_y=info.threadcount_z=1;
-            impl_->motion_pipeline=SDL_CreateGPUComputePipeline(impl_->device,&info);
+            impl_->motion_pipeline=create_gpu_compute_pipeline(impl_->device,&info);
             Impl::require(impl_->motion_pipeline);
         }
         if(count>impl_->motion_capacity) {
@@ -220,6 +251,8 @@ void* GpuProjection::enqueue_motion_impl(void* device,void* command,void* curren
         Settings settings{count,reset_history?1U:0U,scale_x,scale_y,{}};
         static_assert(sizeof(Settings)==128);
         if(surface) settings.surface=*surface;
+        const auto dispatch=linear_gpu_dispatch64(count);
+        settings.surface.reserved=dispatch.row_stride;
         auto* cmd=static_cast<SDL_GPUCommandBuffer*>(command);
         SDL_PushGPUComputeUniformData(cmd,0,&settings,sizeof(settings));
         SDL_GPUStorageBufferReadWriteBinding out{};
@@ -228,7 +261,7 @@ void* GpuProjection::enqueue_motion_impl(void* device,void* command,void* curren
         SDL_BindGPUComputePipeline(pass,impl_->motion_pipeline);
         SDL_GPUBuffer* inputs[]{static_cast<SDL_GPUBuffer*>(current_points),static_cast<SDL_GPUBuffer*>(previous_points)};
         SDL_BindGPUComputeStorageBuffers(pass,0,inputs,2);
-        SDL_DispatchGPUCompute(pass,(count+63)/64,1,1);SDL_EndGPUComputePass(pass);
+        SDL_DispatchGPUCompute(pass,dispatch.x,dispatch.y,1);SDL_EndGPUComputePass(pass);
         impl_->status=surface?"GPU-resident per-pixel motion":"GPU-resident vertex motion";
         return impl_->motion_output;
     }catch(const std::exception& error){impl_->status=error.what();return nullptr;}
@@ -244,7 +277,7 @@ void* GpuProjection::enqueue_text(void* device,void* command,const ScaledTextRen
     try {
         const bool custom=logical_viewport[0] || logical_viewport[1];
         if(!device || !command || !width || !height || width>8192 || height>8192
-            || !scale || scale>4 || (!custom && (width%scale || height%scale))
+            || !scale || scale>10 || (!custom && (width%scale || height%scale))
             || (custom && (!logical_viewport[0] || !logical_viewport[1]
                 || logical_viewport[0]>2048 || logical_viewport[1]>2048)) || frame.glyphs.size()>256
             || frame.character_size< -1 || frame.character_size>254
@@ -263,7 +296,7 @@ void* GpuProjection::enqueue_text(void* device,void* command,const ScaledTextRen
             info.entrypoint=(spirv||dxil)?"main":"main0";info.num_uniform_buffers=1;
             info.num_readonly_storage_buffers=info.num_readwrite_storage_buffers=1;
             info.threadcount_x=64;info.threadcount_y=info.threadcount_z=1;
-            impl_->text_pipeline=SDL_CreateGPUComputePipeline(impl_->device,&info);Impl::require(impl_->text_pipeline);
+            impl_->text_pipeline=create_gpu_compute_pipeline(impl_->device,&info);Impl::require(impl_->text_pipeline);
         }
         if(!impl_->text_glyphs) {
             SDL_GPUBufferCreateInfo info{SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ,256*16*4,0};
@@ -392,7 +425,7 @@ void* GpuProjection::enqueue_particles(void* device,void* command,void* points,c
             info.entrypoint=(spirv||dxil)?"main":"main0";info.num_uniform_buffers=1;
             info.num_readonly_storage_buffers=1;info.num_readwrite_storage_buffers=1;
             info.threadcount_x=64;info.threadcount_y=info.threadcount_z=1;
-            impl_->particle_pipeline=SDL_CreateGPUComputePipeline(impl_->device,&info);Impl::require(impl_->particle_pipeline);
+            impl_->particle_pipeline=create_gpu_compute_pipeline(impl_->device,&info);Impl::require(impl_->particle_pipeline);
         }
         if(!impl_->particle_output) {
             SDL_GPUBufferCreateInfo info{SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ|SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE,300*32,0};
@@ -482,7 +515,7 @@ void* GpuProjection::enqueue_dust(void* device,void* command,void* points,void* 
             info.entrypoint=(spirv||dxil)?"main":"main0";
             info.num_readonly_storage_buffers=2;info.num_readwrite_storage_buffers=1;info.num_uniform_buffers=1;
             info.threadcount_x=64;info.threadcount_y=info.threadcount_z=1;
-            impl_->dust_pipeline=SDL_CreateGPUComputePipeline(impl_->device,&info);Impl::require(impl_->dust_pipeline);
+            impl_->dust_pipeline=create_gpu_compute_pipeline(impl_->device,&info);Impl::require(impl_->dust_pipeline);
         }
         if(!impl_->dust_output) {
             SDL_GPUBufferCreateInfo info{SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ|SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE,511*16,0};
@@ -543,7 +576,7 @@ void* GpuProjection::enqueue_point_spans(void* command,std::uint32_t height,
             info.entrypoint=(spirv||dxil)?"main":"main0";
             info.num_readonly_storage_buffers=1;info.num_readwrite_storage_buffers=1;info.num_uniform_buffers=1;
             info.threadcount_x=64;info.threadcount_y=info.threadcount_z=1;
-            impl_->grid_spans_pipeline=SDL_CreateGPUComputePipeline(impl_->device,&info);Impl::require(impl_->grid_spans_pipeline);
+            impl_->grid_spans_pipeline=create_gpu_compute_pipeline(impl_->device,&info);Impl::require(impl_->grid_spans_pipeline);
         }
         const Uint32 count=kind==3?impl_->particle_count:kind==2?impl_->dust_count:line_start?675:225;
         const Uint32 size=count*height*96;
@@ -593,7 +626,7 @@ void* GpuProjection::enqueue_grid(void* device,void* command,const GridLattice& 
             info.entrypoint=(spirv||dxil)?"main":"main0";
             info.num_readwrite_storage_buffers=1;info.num_uniform_buffers=1;
             info.threadcount_x=64;info.threadcount_y=info.threadcount_z=1;
-            impl_->grid_pipeline=SDL_CreateGPUComputePipeline(impl_->device,&info);Impl::require(impl_->grid_pipeline);
+            impl_->grid_pipeline=create_gpu_compute_pipeline(impl_->device,&info);Impl::require(impl_->grid_pipeline);
         }
         if(!impl_->grid_output) {
             SDL_GPUBufferCreateInfo info{SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ|SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE,225*16,0};
@@ -644,7 +677,7 @@ void* GpuProjection::enqueue_axis_points(void* device,void* command,void* points
             info.entrypoint=(spirv||dxil)?"main":"main0";
             info.num_readonly_storage_buffers=3;info.num_readwrite_storage_buffers=2;info.num_uniform_buffers=1;
             info.threadcount_x=2;info.threadcount_y=info.threadcount_z=1;
-            impl_->axis_pipeline=SDL_CreateGPUComputePipeline(impl_->device,&info);Impl::require(impl_->axis_pipeline);
+            impl_->axis_pipeline=create_gpu_compute_pipeline(impl_->device,&info);Impl::require(impl_->axis_pipeline);
         }
         if(!impl_->axis_output) {
             SDL_GPUBufferCreateInfo info{SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ|SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE,64,0};
@@ -672,16 +705,19 @@ void* GpuProjection::enqueue_axis_points(void* device,void* command,void* points
 #endif
 }
 void* GpuProjection::enqueue_continuous(void* device,void* command,void* vertices,
-    std::uint32_t count,void* poses,std::uint32_t pose_count,void** residual_points,bool lossless_camera) {
+    std::uint32_t count,void* poses,std::uint32_t pose_count,void** residual_points,bool lossless_camera,
+    std::span<const ContinuousTransformPose> inline_poses) {
     if(residual_points) *residual_points=nullptr;
-    if(!device || !command || !vertices || !poses || !count || count>4'000'000 || !pose_count) {
+    const bool inlined=!inline_poses.empty();
+    if(!device || !command || !vertices || !count || count>4'000'000 || !pose_count
+        || (inlined?(poses || inline_poses.size()!=pose_count || pose_count>6):!poses)) {
         impl_->status="Invalid continuous transform input";return nullptr;
     }
 #if defined(STARFOX_SDL_GPU_EFFECTS)
     try {
-        if(vertices==impl_->transformed || poses==impl_->transformed || vertices==impl_->continuous_residuals || poses==impl_->continuous_residuals)
+        if(vertices==impl_->transformed || (poses && poses==impl_->transformed) || vertices==impl_->continuous_residuals || (poses && poses==impl_->continuous_residuals))
             throw std::runtime_error("Continuous transform input aliases output");
-        impl_->initialize(static_cast<SDL_GPUDevice*>(device));
+        impl_->initialize_stage(static_cast<SDL_GPUDevice*>(device),inlined?Impl::Stage::continuous_inline:Impl::Stage::continuous);
         // Never let word visibility silently consume an older source frame.
         impl_->point_count=0;
         if(impl_->transform_capacity<count) {
@@ -700,14 +736,20 @@ void* GpuProjection::enqueue_continuous(void* device,void* command,void* vertice
             impl_->continuous_residuals=replacement;impl_->residual_capacity=residual_count;
         }
         const Uint32 settings[]{count,pose_count,residual_points?(lossless_camera?2U:1U):0U,0};
-        SDL_PushGPUComputeUniformData(cmd,0,settings,sizeof(settings));
+        if(inlined) {
+            struct {Uint32 settings[4];ContinuousTransformPose poses[6];} constants{};
+            static_assert(sizeof(constants)==496);
+            std::copy(std::begin(settings),std::end(settings),constants.settings);
+            std::copy(inline_poses.begin(),inline_poses.end(),constants.poses);
+            SDL_PushGPUComputeUniformData(cmd,0,&constants,sizeof(constants));
+        } else SDL_PushGPUComputeUniformData(cmd,0,settings,sizeof(settings));
         SDL_GPUStorageBufferReadWriteBinding bindings[2]{};
         bindings[0].buffer=impl_->transformed;bindings[0].cycle=true;
         bindings[1].buffer=impl_->continuous_residuals;bindings[1].cycle=true;
         auto* pass=SDL_BeginGPUComputePass(cmd,nullptr,0,bindings,2);Impl::require(pass);
-        SDL_BindGPUComputePipeline(pass,impl_->continuous_pipeline);
+        SDL_BindGPUComputePipeline(pass,inlined?impl_->continuous_inline_pipeline:impl_->continuous_pipeline);
         SDL_GPUBuffer* inputs[]{static_cast<SDL_GPUBuffer*>(vertices),static_cast<SDL_GPUBuffer*>(poses)};
-        SDL_BindGPUComputeStorageBuffers(pass,0,inputs,2);
+        SDL_BindGPUComputeStorageBuffers(pass,0,inputs,inlined?1:2);
         SDL_DispatchGPUCompute(pass,(count+63)/64,1,1);SDL_EndGPUComputePass(pass);
         impl_->status="Continuous transform and projection GPU resident";
         impl_->continuous_count=count;
@@ -719,16 +761,19 @@ void* GpuProjection::enqueue_continuous(void* device,void* command,void* vertice
 #endif
 }
 void* GpuProjection::enqueue_transformed(void* device,void* command,void* vertices,
-    std::uint32_t count,void* poses,std::uint32_t pose_count,void** camera_points) {
+    std::uint32_t count,void* poses,std::uint32_t pose_count,void** camera_points,
+    std::span<const NativeTransformPose> inline_poses) {
     if(camera_points) *camera_points=nullptr;
-    if(!device || !command || !vertices || !poses || !count || count>4'000'000 || !pose_count) {
+    const bool inlined=!inline_poses.empty();
+    if(!device || !command || !vertices || !count || count>4'000'000 || !pose_count
+        || (inlined?(poses || inline_poses.size()!=pose_count || pose_count!=1):!poses)) {
         impl_->status="Invalid native transform input";return nullptr;
     }
 #if defined(STARFOX_SDL_GPU_EFFECTS)
     try {
-        if(vertices==impl_->transformed || poses==impl_->transformed)
+        if(vertices==impl_->transformed || (poses && poses==impl_->transformed))
             throw std::runtime_error("Native transform input aliases output");
-        impl_->initialize(static_cast<SDL_GPUDevice*>(device));
+        impl_->initialize_stage(static_cast<SDL_GPUDevice*>(device),inlined?Impl::Stage::transform_inline:Impl::Stage::transform);
         if(impl_->transform_capacity<count) {
             SDL_GPUBufferCreateInfo info{SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ
                 |SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE,count*32,0};
@@ -738,12 +783,18 @@ void* GpuProjection::enqueue_transformed(void* device,void* command,void* vertic
         }
         auto* cmd=static_cast<SDL_GPUCommandBuffer*>(command);
         const Uint32 settings[]{count,pose_count,0,0};
-        SDL_PushGPUComputeUniformData(cmd,0,settings,sizeof(settings));
+        if(inlined) {
+            struct {Uint32 settings[4];NativeTransformPose pose;} constants{};
+            static_assert(sizeof(constants)==96);
+            std::copy(std::begin(settings),std::end(settings),constants.settings);
+            constants.pose=inline_poses.front();
+            SDL_PushGPUComputeUniformData(cmd,0,&constants,sizeof(constants));
+        } else SDL_PushGPUComputeUniformData(cmd,0,settings,sizeof(settings));
         SDL_GPUStorageBufferReadWriteBinding binding{};binding.buffer=impl_->transformed;binding.cycle=true;
         auto* pass=SDL_BeginGPUComputePass(cmd,nullptr,0,&binding,1);Impl::require(pass);
-        SDL_BindGPUComputePipeline(pass,impl_->transform_pipeline);
+        SDL_BindGPUComputePipeline(pass,inlined?impl_->transform_inline_pipeline:impl_->transform_pipeline);
         SDL_GPUBuffer* inputs[]{static_cast<SDL_GPUBuffer*>(vertices),static_cast<SDL_GPUBuffer*>(poses)};
-        SDL_BindGPUComputeStorageBuffers(pass,0,inputs,2);
+        SDL_BindGPUComputeStorageBuffers(pass,0,inputs,inlined?1:2);
         SDL_DispatchGPUCompute(pass,(count+63)/64,1,1);SDL_EndGPUComputePass(pass);
         auto* output=enqueue(device,command,impl_->transformed,count);
         if(output && camera_points) *camera_points=impl_->transformed;
@@ -766,7 +817,7 @@ void* GpuProjection::enqueue(void* device,void* command,void* input,std::uint32_
 #if defined(STARFOX_SDL_GPU_EFFECTS)
     try {
         if(input==impl_->output || input==impl_->visibility_output) throw std::runtime_error("Native projection input aliases output");
-        impl_->initialize(static_cast<SDL_GPUDevice*>(device));
+        impl_->initialize_stage(static_cast<SDL_GPUDevice*>(device),Impl::Stage::projection);
         if(impl_->capacity<count) {
             SDL_GPUBufferCreateInfo info{SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ
                 |SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE,count*16,0};
@@ -806,12 +857,13 @@ void* GpuProjection::enqueue_visibility_impl(void* command,void* faces,std::uint
 #if defined(STARFOX_SDL_GPU_EFFECTS)
     try {
         auto* points=continuous?impl_->transformed:impl_->output;
-        auto* pipeline=continuous?impl_->continuous_visibility_pipeline:impl_->visibility_pipeline;
         const auto point_count=continuous?impl_->continuous_count:impl_->point_count;
-        if(!point_count || !points || !pipeline)
+        if(!point_count || !points)
             throw std::runtime_error("Native visibility requires projected points");
         if(faces==points || faces==impl_->visibility_output)
             throw std::runtime_error("Native visibility indices alias scratch data");
+        impl_->initialize_stage(impl_->device,continuous?Impl::Stage::continuous_visibility:Impl::Stage::visibility);
+        auto* pipeline=continuous?impl_->continuous_visibility_pipeline:impl_->visibility_pipeline;
         if(impl_->visibility_capacity<count) {
             SDL_GPUBufferCreateInfo info{SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ
                 |SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE,count*4,0};

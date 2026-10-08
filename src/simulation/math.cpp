@@ -1,4 +1,5 @@
 #include "starfox/simulation/math.hpp"
+#include "starfox/compat/bit_cast.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -24,7 +25,7 @@ std::uint32_t unique_rom_symbol(
 
 std::int16_t wrap16(std::int64_t value) noexcept {
     const auto bits = static_cast<std::uint16_t>(static_cast<std::uint64_t>(value));
-    return std::bit_cast<std::int16_t>(bits);
+    return starfox::bit_cast<std::int16_t>(bits);
 }
 
 std::int16_t add16(std::int16_t left, std::int16_t right) noexcept {
@@ -153,7 +154,7 @@ MatrixQ15 multiply_presentation_matrix_q15(
                     std::int32_t(left[row * 3U + k]) * right[k * 3U + column], 15);
             }
             result[row * 3U + column] = static_cast<std::int16_t>(
-                std::clamp(value, -32'768, 32'767));
+                std::clamp<std::int32_t>(value, -32'768, 32'767));
         }
     }
     return result;

@@ -6,13 +6,24 @@
 #include <stdexcept>
 #if defined(STARFOX_SDL_GPU_EFFECTS)
 #include <SDL3/SDL.h>
+#include "starfox/render/gpu_preparation.hpp"
+#include "starfox/render/gpu_retirement.hpp"
 #include <SDL3/SDL_gpu.h>
 #include "shaders/generated/raster_portable.hpp"
 #include "shaders/generated/raster_bins.hpp"
+#include "shaders/generated/raster_occupied_portable.hpp"
+#include "shaders/generated/raster_bins_occupied.hpp"
+#include "shaders/generated/raster_row_tile_portable.hpp"
+#include "shaders/generated/raster_pixel_portable.hpp"
+#include "shaders/generated/raster_single_face_portable.hpp"
+#include "shaders/generated/raster_mask_tile_portable.hpp"
+#include "shaders/generated/raster_bins_mask.hpp"
 #endif
 namespace starfox::render {
 void replay_raster_commands(const RasterCommands& batch,Framebuffer& frame,SurfaceBuffer* surfaces,bool clear_target) {
     frame.record_to(nullptr);
+    if(frame.draw_scale()>1 && std::any_of(batch.commands.begin(),batch.commands.end(),[](const auto& c){return (c.textured==0 && c.tag==0 && c.dither) || (c.textured==5 && c.colour_base);} ))
+        frame.enable_dither_pairs(true);
     if(clear_target) {frame.clear();if(surfaces) surfaces->clear();}
     for(const auto& c:batch.commands) {
         for(int y=std::max(0,c.top);y<std::min(int(batch.height()),c.bottom);++y)
@@ -32,6 +43,7 @@ void replay_raster_commands(const RasterCommands& batch,Framebuffer& frame,Surfa
                 const auto dither_scale=int(std::max(1U,c.reserved0));
                 auto colour=c.dither && (((x/dither_scale)^(y/dither_scale))&1)?c.odd:c.even;
                 auto pixel_tag=c.tag;
+                unsigned material_pair=0;
                 if(c.textured==8) {
                     if(c.du<=0 || c.texture_offset>batch.texels.size() || batch.texels.size()-c.texture_offset<640) continue;
                     const int px=c.dv?((x-c.u)*6+2)/(7*c.du):(x-c.u)/c.du,py=(y-c.v)/c.du;
@@ -69,7 +81,12 @@ void replay_raster_commands(const RasterCommands& batch,Framebuffer& frame,Surfa
                     const auto ix=sx*c.du+((x%c.dv*2+1)*c.du)/(c.dv*2);
                     const auto iy=sy*c.du+((y%c.dv*2+1)*c.du)/(c.dv*2);
                     const auto at=std::size_t(iy)*c.u_mask+ix;
-                    colour=batch.texels[c.texture_offset+at];if(!colour) continue;
+                    if(c.colour_base) {
+                        const auto offset=std::size_t(c.colour_base-1);
+                        if(offset>batch.texels.size() || size>(batch.texels.size()-offset)/2) continue;
+                        material_pair=batch.texels[offset+at*2]|(unsigned(batch.texels[offset+at*2+1])<<8);
+                    }
+                    colour=batch.texels[c.texture_offset+at];if(!colour && !(material_pair&256)) continue;
                     if(c.dither) pixel_tag=batch.texels[c.reserved1+at];
                 } else if(c.textured==4) {
                     if(c.du<=0 || c.dv<=0 || c.texture_offset>batch.texels.size()
@@ -105,6 +122,10 @@ void replay_raster_commands(const RasterCommands& batch,Framebuffer& frame,Surfa
                     if(c.textured==2 && (c.reserved0&256)) colour=std::uint8_t(c.reserved0);
                 }
                 frame.set_stored(x,y,std::uint8_t(colour),PixelLayer(pixel_tag));
+                if(pixel_tag==0 && (material_pair&256))
+                    frame.set_dither_alternate(std::size_t(y)*frame.stored_width()+x,std::uint8_t(material_pair));
+                if(c.textured==0 && pixel_tag==0 && c.dither && c.even!=c.odd)
+                    frame.set_dither_alternate(std::size_t(y)*frame.stored_width()+x,std::uint8_t(colour==c.even?c.odd:c.even));
                 if(surfaces && c.has_surface) surfaces->set(x,y,
                     {c.surface[0],c.surface[1],c.surface[2],c.surface[3]},std::uint8_t(colour));
             }
@@ -114,7 +135,19 @@ void replay_raster_commands(const RasterCommands& batch,Framebuffer& frame,Surfa
 namespace { void require_raster(bool value) {if(!value) throw std::runtime_error(SDL_GetError());} }
 struct GpuRaster::Impl {
     SDL_GPUDevice* device{};SDL_GPUComputePipeline* pipeline{},*bins_pipeline{};
+    SDL_GPUComputePipeline *occupied_pipeline{},*occupied_bins_pipeline{};
+    SDL_GPUComputePipeline* row_tile_pipeline{};
+    SDL_GPUComputePipeline *mask_tile_pipeline{},*mask_bins_pipeline{};
+    bool last_mask_tile{},mask_tile_reported{};
+    bool row_tile_reported{};
+    bool last_row_tile{};
+    SDL_GPUComputePipeline* pixel_pipeline{};
+    bool pixel_reported{},last_pixel{},last_single_face{},single_face_reported{};
+    SDL_GPUComputePipeline* single_face_pipeline{};
     SDL_GPUBuffer* buffers[7]{};Uint32 sizes[7]{};
+    SDL_GPUBuffer *occupied_tiles{},*dispatch_args{};
+    Uint32 occupied_bytes{},last_occupied_capacity{};
+    bool occupied_reported{};
     SDL_GPUTransferBuffer *upload{},*download{};Uint32 upload_size{},download_size{};
     SDL_GPUCommandBuffer* command{};SDL_GPUFence* fence{};
     std::vector<SDL_GPUFence*> retired_fences;
@@ -124,14 +157,23 @@ struct GpuRaster::Impl {
     ~Impl() {
         if(!device) return;
         if(command) SDL_CancelGPUCommandBuffer(command);
-        if(fence) {SDL_WaitForGPUFences(device,true,&fence,1);SDL_ReleaseGPUFence(device,fence);}
-        if(!retired_fences.empty()) SDL_WaitForGPUFences(device,true,retired_fences.data(),Uint32(retired_fences.size()));
+        if(fence) {wait_gpu_retirement(device,true,&fence,1);SDL_ReleaseGPUFence(device,fence);}
+        if(!retired_fences.empty()) wait_gpu_retirement(device,true,retired_fences.data(),Uint32(retired_fences.size()));
         for(auto* retired:retired_fences) SDL_ReleaseGPUFence(device,retired);
         for(auto* b:buffers) if(b) SDL_ReleaseGPUBuffer(device,b);
+        if(occupied_tiles) SDL_ReleaseGPUBuffer(device,occupied_tiles);
+        if(dispatch_args) SDL_ReleaseGPUBuffer(device,dispatch_args);
         if(upload) SDL_ReleaseGPUTransferBuffer(device,upload);
         if(download) SDL_ReleaseGPUTransferBuffer(device,download);
         if(pipeline) SDL_ReleaseGPUComputePipeline(device,pipeline);
         if(bins_pipeline) SDL_ReleaseGPUComputePipeline(device,bins_pipeline);
+        if(occupied_pipeline) SDL_ReleaseGPUComputePipeline(device,occupied_pipeline);
+        if(occupied_bins_pipeline) SDL_ReleaseGPUComputePipeline(device,occupied_bins_pipeline);
+        if(row_tile_pipeline) SDL_ReleaseGPUComputePipeline(device,row_tile_pipeline);
+        if(mask_tile_pipeline) SDL_ReleaseGPUComputePipeline(device,mask_tile_pipeline);
+        if(mask_bins_pipeline) SDL_ReleaseGPUComputePipeline(device,mask_bins_pipeline);
+        if(pixel_pipeline) SDL_ReleaseGPUComputePipeline(device,pixel_pipeline);
+        if(single_face_pipeline) SDL_ReleaseGPUComputePipeline(device,single_face_pipeline);
         if(owns_device) SDL_DestroyGPUDevice(device);
     }
     void finish() {
@@ -179,7 +221,7 @@ struct GpuRaster::Impl {
         } else throw std::runtime_error("Native raster requires Vulkan, Metal or D3D12");
         info.num_readonly_storage_buffers=8;info.num_readwrite_storage_buffers=3;
         info.num_uniform_buffers=1;info.threadcount_x=64;info.threadcount_y=info.threadcount_z=1;
-        pipeline=SDL_CreateGPUComputePipeline(device,&info);require_raster(pipeline);
+        pipeline=create_gpu_compute_pipeline(device,&info);require_raster(pipeline);
         if(gpu_binning || SDL_getenv("STARFOX_TEST_GPU_BINS")) initialize_bins();
         status=std::string("GPU native scanlines: ")+SDL_GetGPUDeviceDriver(device);
     }
@@ -198,7 +240,110 @@ struct GpuRaster::Impl {
         }
         info.num_readonly_storage_buffers=1;info.num_readwrite_storage_buffers=2;
         info.num_uniform_buffers=1;info.threadcount_x=64;info.threadcount_y=info.threadcount_z=1;
-        bins_pipeline=SDL_CreateGPUComputePipeline(device,&info);require_raster(bins_pipeline);
+        bins_pipeline=create_gpu_compute_pipeline(device,&info);require_raster(bins_pipeline);
+    }
+    void initialize_row_tile() {
+        if(row_tile_pipeline) return;
+        SDL_GPUComputePipelineCreateInfo info{};
+        if(SDL_GetGPUShaderFormats(device)&SDL_GPU_SHADERFORMAT_SPIRV) {
+            info.format=SDL_GPU_SHADERFORMAT_SPIRV;info.entrypoint="main";
+            info.code=raster_row_tile_shader::spirv;info.code_size=sizeof(raster_row_tile_shader::spirv);
+        } else if(SDL_GetGPUShaderFormats(device)&SDL_GPU_SHADERFORMAT_MSL) {
+            info.format=SDL_GPU_SHADERFORMAT_MSL;info.entrypoint="main0";
+            info.code=reinterpret_cast<const Uint8*>(raster_row_tile_shader::metal);info.code_size=sizeof(raster_row_tile_shader::metal)-1;
+        } else {
+            info.format=SDL_GPU_SHADERFORMAT_DXIL;info.entrypoint="main";
+            info.code=raster_row_tile_shader::dxil;info.code_size=sizeof(raster_row_tile_shader::dxil);
+        }
+        info.num_readonly_storage_buffers=8;info.num_readwrite_storage_buffers=3;
+        info.num_uniform_buffers=1;info.threadcount_x=64;info.threadcount_y=info.threadcount_z=1;
+        row_tile_pipeline=create_gpu_compute_pipeline(device,&info);require_raster(row_tile_pipeline);
+    }
+    void initialize_mask_tile() {
+        const auto make=[&](SDL_GPUComputePipeline*& pipeline,const auto& spirv,const auto& dxil,
+            const auto& metal,unsigned reads,unsigned writes) {
+            if(pipeline) return;
+            SDL_GPUComputePipelineCreateInfo info{};
+            if(SDL_GetGPUShaderFormats(device)&SDL_GPU_SHADERFORMAT_SPIRV) {
+                info.format=SDL_GPU_SHADERFORMAT_SPIRV;info.entrypoint="main";
+                info.code=spirv;info.code_size=sizeof(spirv);
+            } else if(SDL_GetGPUShaderFormats(device)&SDL_GPU_SHADERFORMAT_MSL) {
+                info.format=SDL_GPU_SHADERFORMAT_MSL;info.entrypoint="main0";
+                info.code=reinterpret_cast<const Uint8*>(metal);info.code_size=sizeof(metal)-1;
+            } else {
+                info.format=SDL_GPU_SHADERFORMAT_DXIL;info.entrypoint="main";
+                info.code=dxil;info.code_size=sizeof(dxil);
+            }
+            info.num_readonly_storage_buffers=reads;info.num_readwrite_storage_buffers=writes;
+            info.num_uniform_buffers=1;info.threadcount_x=64;info.threadcount_y=info.threadcount_z=1;
+            pipeline=create_gpu_compute_pipeline(device,&info);require_raster(pipeline);
+        };
+        make(mask_tile_pipeline,raster_mask_tile_shader::spirv,raster_mask_tile_shader::dxil,raster_mask_tile_shader::metal,8,3);
+        make(mask_bins_pipeline,raster_bins_mask_shader::spirv,raster_bins_mask_shader::dxil,raster_bins_mask_shader::metal,1,2);
+    }
+    void initialize_pixel() {
+        if(pixel_pipeline) return;
+        SDL_GPUComputePipelineCreateInfo info{};
+        if(SDL_GetGPUShaderFormats(device)&SDL_GPU_SHADERFORMAT_SPIRV) {
+            info.format=SDL_GPU_SHADERFORMAT_SPIRV;info.entrypoint="main";
+            info.code=raster_pixel_shader::spirv;info.code_size=sizeof(raster_pixel_shader::spirv);
+        } else if(SDL_GetGPUShaderFormats(device)&SDL_GPU_SHADERFORMAT_MSL) {
+            info.format=SDL_GPU_SHADERFORMAT_MSL;info.entrypoint="main0";
+            info.code=reinterpret_cast<const Uint8*>(raster_pixel_shader::metal);info.code_size=sizeof(raster_pixel_shader::metal)-1;
+        } else {
+            info.format=SDL_GPU_SHADERFORMAT_DXIL;info.entrypoint="main";
+            info.code=raster_pixel_shader::dxil;info.code_size=sizeof(raster_pixel_shader::dxil);
+        }
+        info.num_readonly_storage_buffers=5;info.num_readwrite_storage_buffers=1;
+        info.num_uniform_buffers=1;info.threadcount_x=64;info.threadcount_y=info.threadcount_z=1;
+        pixel_pipeline=create_gpu_compute_pipeline(device,&info);require_raster(pixel_pipeline);
+    }
+    void initialize_single_face() {
+        if(single_face_pipeline) return;
+        SDL_GPUComputePipelineCreateInfo info{};
+        if(SDL_GetGPUShaderFormats(device)&SDL_GPU_SHADERFORMAT_SPIRV) {
+            info.format=SDL_GPU_SHADERFORMAT_SPIRV;info.entrypoint="main";
+            info.code=raster_single_face_shader::spirv;info.code_size=sizeof(raster_single_face_shader::spirv);
+        } else if(SDL_GetGPUShaderFormats(device)&SDL_GPU_SHADERFORMAT_MSL) {
+            info.format=SDL_GPU_SHADERFORMAT_MSL;info.entrypoint="main0";
+            info.code=reinterpret_cast<const Uint8*>(raster_single_face_shader::metal);info.code_size=sizeof(raster_single_face_shader::metal)-1;
+        } else {
+            info.format=SDL_GPU_SHADERFORMAT_DXIL;info.entrypoint="main";
+            info.code=raster_single_face_shader::dxil;info.code_size=sizeof(raster_single_face_shader::dxil);
+        }
+        // Keep the existing storage layout, receiver/depth outputs and sample
+        // mapping. Only the compile-time candidate count changes.
+        info.num_readonly_storage_buffers=8;info.num_readwrite_storage_buffers=3;
+        info.num_uniform_buffers=1;info.threadcount_x=64;info.threadcount_y=info.threadcount_z=1;
+        single_face_pipeline=create_gpu_compute_pipeline(device,&info);require_raster(single_face_pipeline);
+    }
+    // Experimental shaders/resources stay completely out of the ordinary
+    // pipeline. No clear, indirect binding, extra UAV or tile allocation there.
+    void initialize_occupied() {
+        if(!dispatch_args) {
+            SDL_GPUBufferCreateInfo args{SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE
+                |SDL_GPU_BUFFERUSAGE_INDIRECT,16,0};
+            dispatch_args=SDL_CreateGPUBuffer(device,&args);require_raster(dispatch_args);
+        }
+        const auto create=[&](const Uint8* spirv,std::size_t spirv_bytes,const Uint8* dxil,std::size_t dxil_bytes,
+            const char* metal,std::size_t metal_bytes,Uint32 readonly) {
+            SDL_GPUComputePipelineCreateInfo info{};
+            if(SDL_GetGPUShaderFormats(device)&SDL_GPU_SHADERFORMAT_SPIRV) {
+                info.format=SDL_GPU_SHADERFORMAT_SPIRV;info.code=spirv;info.code_size=spirv_bytes;info.entrypoint="main";
+            } else if(SDL_GetGPUShaderFormats(device)&SDL_GPU_SHADERFORMAT_MSL) {
+                info.format=SDL_GPU_SHADERFORMAT_MSL;info.code=reinterpret_cast<const Uint8*>(metal);
+                info.code_size=metal_bytes;info.entrypoint="main0";
+            } else {
+                info.format=SDL_GPU_SHADERFORMAT_DXIL;info.code=dxil;info.code_size=dxil_bytes;info.entrypoint="main";
+            }
+            info.num_readonly_storage_buffers=readonly;info.num_readwrite_storage_buffers=3;
+            info.num_uniform_buffers=1;info.threadcount_x=64;info.threadcount_y=info.threadcount_z=1;
+            auto* result=create_gpu_compute_pipeline(device,&info);require_raster(result);return result;
+        };
+        if(!occupied_pipeline) occupied_pipeline=create(raster_occupied_shader::spirv,sizeof(raster_occupied_shader::spirv),
+            raster_occupied_shader::dxil,sizeof(raster_occupied_shader::dxil),raster_occupied_shader::metal,sizeof(raster_occupied_shader::metal)-1,8);
+        if(!occupied_bins_pipeline) occupied_bins_pipeline=create(raster_bins_occupied_shader::spirv,sizeof(raster_bins_occupied_shader::spirv),
+            raster_bins_occupied_shader::dxil,sizeof(raster_bins_occupied_shader::dxil),raster_bins_occupied_shader::metal,sizeof(raster_bins_occupied_shader::metal)-1,1);
     }
     void buffer(unsigned i,Uint32 bytes) {
         bytes=std::max(16U,(bytes+3)&~3U);
@@ -216,7 +361,8 @@ struct GpuRaster::Impl {
         SDL_GPUTransferBufferCreateInfo info{usage,bytes,0};
         target=SDL_CreateGPUTransferBuffer(device,&info);require_raster(target);capacity=bytes;
     }
-    void render(RasterCommands& batch,Framebuffer* frame,SurfaceBuffer* surfaces,bool keep_surfaces,bool gpu_binning=false,SDL_GPUCommandBuffer* borrowed=nullptr,bool coverage=false,std::array<std::uint32_t,2> raster_size={},std::array<float,2> jitter={}) {
+    void render(RasterCommands& batch,Framebuffer* frame,SurfaceBuffer* surfaces,bool keep_surfaces,bool gpu_binning=false,SDL_GPUCommandBuffer* borrowed=nullptr,bool coverage=false,std::array<std::uint32_t,2> raster_size={},std::array<float,2> jitter={},bool prepared_row_bins=false) {
+        last_occupied_capacity=0;last_row_tile=last_pixel=last_single_face=last_mask_tile=false;
         if(!valid_raster_jitter(jitter)) throw std::runtime_error("Invalid raster jitter");
         if(borrowed && (fence || command || !retired_fences.empty())) throw std::runtime_error("Finish submitted raster work before borrowing a command buffer");
         if(!borrowed) {if(frame || SDL_getenv("STARFOX_TEST_SERIAL_RASTER")) finish();else retire_submission();}
@@ -242,6 +388,10 @@ struct GpuRaster::Impl {
             }
             if((tiles+references)>UINT32_MAX/4 || batch.commands.size()>(UINT32_MAX-63)/8)
                 throw std::runtime_error("GPU raster bin capacity exceeded");
+        } else if(prepared_row_bins) {
+            if(batch.rows.size()!=tiles+1 || batch.rows.front()!=0
+                || batch.rows.back()!=batch.indices.size())
+                throw std::runtime_error("Missing prepared raster row bins");
         } else batch.bin_rows();
         const void* data[]{batch.commands.data(),batch.rows.data(),batch.indices.data(),batch.texels.data()};
         const std::size_t bytes[]{batch.commands.size()*sizeof(RasterCommand),gpu_bins?0:batch.rows.size()*4,
@@ -321,10 +471,13 @@ struct GpuRaster::Impl {
         const auto* normals=reinterpret_cast<const float*>(reinterpret_cast<const Uint8*>(packed)+pixel_bytes);
         if(surfaces) surfaces->clear();
         auto& pixels=frame.pixels();auto& tags=frame.layer_tags();
+        if(frame.draw_scale()>1) frame.enable_dither_pairs(true);
+        frame.clear_dither_pairs();
         for(unsigned y=0;y<height;++y) for(unsigned x=0;x<width;++x) {
             const auto i=std::size_t(y)*width+x;
             pixels[i]=std::uint8_t(packed[i]);
-            if(frame.layer_tags_enabled()) tags[i]=std::uint8_t(packed[i]>>8);
+            if(packed[i]&0x80000000U) frame.set_dither_alternate(i,std::uint8_t(packed[i]>>8));
+            if(frame.layer_tags_enabled()) tags[i]=gpu_pixel_layer(packed[i]);
             if(surfaces && (packed[i]&(1U<<24))) surfaces->set(x,y,
                 {normals[i*4],normals[i*4+1],normals[i*4+2],normals[i*4+3]},std::uint8_t(packed[i]>>16));
         }
@@ -390,13 +543,33 @@ bool GpuRaster::render_resident(void* device,RasterCommands& batch,bool surfaces
     (void)device;(void)batch;(void)surfaces;(void)gpu_binning;return false;
 #endif
 }
-GpuRasterOutput GpuRaster::enqueue_commands(void* device,void* command,RasterCommands& batch,bool surfaces,bool gpu_binning,std::array<std::uint32_t,2> raster_size,std::array<float,2> jitter) {
+bool GpuRaster::output_aliases(const GpuRasterOutput& input) const noexcept {
 #if defined(STARFOX_SDL_GPU_EFFECTS)
+    if(!impl_ || input.device!=impl_->device) return false;
+    const auto matches=[&](void* buffer) {
+        return buffer && (buffer==impl_->buffers[4] || buffer==impl_->buffers[5] || buffer==impl_->buffers[6]);
+    };
+    return matches(input.pixels) || matches(input.surfaces) || matches(input.geometry_depth);
+#else
+    (void)input;return false;
+#endif
+}
+GpuRasterDispatchInfo GpuRaster::dispatch_info() const noexcept {
+#if defined(STARFOX_SDL_GPU_EFFECTS)
+    if(impl_ && impl_->last_occupied_capacity)
+        return {impl_->device,impl_->dispatch_args,impl_->occupied_tiles,impl_->last_occupied_capacity};
+    return {nullptr,nullptr,nullptr,0,impl_ && impl_->last_row_tile,impl_ && impl_->last_pixel,impl_ && impl_->last_single_face,impl_ && impl_->last_mask_tile};
+#endif
+    return {};
+}
+GpuRasterOutput GpuRaster::enqueue_commands(void* device,void* command,RasterCommands& batch,bool surfaces,bool gpu_binning,std::array<std::uint32_t,2> raster_size,std::array<float,2> jitter,bool prepared_row_bins) {
+#if defined(STARFOX_SDL_GPU_EFFECTS)
+    if(impl_) {impl_->last_occupied_capacity=0;impl_->last_row_tile=impl_->last_pixel=impl_->last_single_face=impl_->last_mask_tile=false;}
     if(!device || !command) return {};
     if(!impl_ || impl_->device!=device) impl_=std::make_unique<Impl>();
     try {
         if(!impl_->device) impl_->initialize(static_cast<SDL_GPUDevice*>(device),gpu_binning);
-        impl_->render(batch,nullptr,nullptr,surfaces,gpu_binning,static_cast<SDL_GPUCommandBuffer*>(command),true,raster_size,jitter);
+        impl_->render(batch,nullptr,nullptr,surfaces,gpu_binning,static_cast<SDL_GPUCommandBuffer*>(command),true,raster_size,jitter,prepared_row_bins);
         impl_->status="Raster commands enqueued on caller command buffer";
         return {device,impl_->buffers[4],surfaces?impl_->buffers[5]:nullptr,impl_->width,impl_->height,impl_->generation};
     }catch(const std::exception& error){
@@ -417,11 +590,13 @@ GpuRasterOutput GpuRaster::resident_output() const {
 GpuRasterOutput GpuRaster::enqueue_row_spans(void* device,void* command,void* spans,
     std::uint32_t polygon_count,std::uint32_t width,std::uint32_t height,bool surfaces,void* texels,bool pixel_coverage,
     const GpuRasterOutput* background,bool wave_rows,std::int16_t wave_offset,std::uint32_t wave_frame,std::uint32_t texel_bytes,
-    const GpuGeometryDepthInput* geometry_depth,std::array<std::uint32_t,2> raster_size,std::array<float,2> jitter) {
+    const GpuGeometryDepthInput* geometry_depth,std::array<std::uint32_t,2> raster_size,std::array<float,2> jitter,std::uint32_t painter_flags,bool in_place_background) {
 #if defined(STARFOX_SDL_GPU_EFFECTS)
+    if(impl_) {impl_->last_occupied_capacity=0;impl_->last_row_tile=impl_->last_pixel=impl_->last_single_face=impl_->last_mask_tile=false;}
     if(!device || !command || (!spans && polygon_count!=0)) return {};
     if(!impl_ || impl_->device!=device) impl_=std::make_unique<Impl>();
     try {
+        if(painter_flags&~3U) throw std::runtime_error("Invalid GPU raster painter policy");
         const bool custom=raster_size[0] || raster_size[1];
         if(!valid_raster_jitter(jitter) || (jitter!=std::array<float,2>{} && (background || (geometry_depth && !geometry_depth->screen_aligned))))
             throw std::runtime_error("Invalid row-span jitter");
@@ -439,15 +614,37 @@ GpuRasterOutput GpuRaster::enqueue_row_spans(void* device,void* command,void* sp
         const auto aliases_output=[&](void* input) {
             return input && (input==impl_->buffers[4] || input==impl_->buffers[5] || input==impl_->buffers[6]);
         };
+        const auto aliases_scratch=[&](void* input) {
+            return input && (input==impl_->occupied_tiles || input==impl_->dispatch_args
+                || input==impl_->buffers[1] || input==impl_->buffers[2]);
+        };
+        if(aliases_scratch(spans) || aliases_scratch(texels)
+            || (geometry_depth && aliases_scratch(geometry_depth->planes))
+            || (background && (aliases_scratch(background->pixels)
+                || aliases_scratch(background->surfaces) || aliases_scratch(background->geometry_depth))))
+            throw std::runtime_error("GPU row spans alias binning scratch");
+        const bool in_place=in_place_background && background && background->row_span_canonical
+            && pixel_coverage && !custom && jitter==std::array<float,2>{}
+            && (!surfaces || background->surfaces) && (!geometry_depth || background->geometry_depth);
         if(background && (!background->pixels || background->device!=device
             || background->width!=width || background->height!=height
-            || aliases_output(background->pixels) || aliases_output(background->surfaces)
-            || aliases_output(background->geometry_depth)))
+            || (!in_place && (aliases_output(background->pixels) || aliases_output(background->surfaces)
+            || aliases_output(background->geometry_depth)))))
             throw std::runtime_error("Invalid or aliased GPU raster background");
         if(background && background->motion)
             throw std::runtime_error("Motion-bearing backgrounds require GpuScene composition");
         if(aliases_output(spans) || aliases_output(texels))
             throw std::runtime_error("GPU row spans alias raster output");
+        const auto aliases_target=[&](void* input) {
+            return in_place && input && (input==background->pixels || input==background->surfaces
+                || input==background->geometry_depth);
+        };
+        if(aliases_target(spans) || aliases_target(texels)
+            || (geometry_depth && aliases_target(geometry_depth->planes))
+            || (in_place && (background->pixels==background->surfaces
+                || background->pixels==background->geometry_depth
+                || (background->surfaces && background->surfaces==background->geometry_depth))))
+            throw std::runtime_error("Aliased sparse row-span target");
         if(geometry_depth && (!geometry_depth->planes || !geometry_depth->count
             || aliases_output(geometry_depth->planes)
             || !std::isfinite(geometry_depth->focal_x) || geometry_depth->focal_x<=0
@@ -456,34 +653,84 @@ GpuRasterOutput GpuRaster::enqueue_row_spans(void* device,void* command,void* sp
             throw std::runtime_error("Invalid GPU geometry depth input");
         impl_->resident_valid=false;
         const bool output_surfaces=surfaces || (background && background->surfaces);
-        impl_->buffer(4,Uint32(pixels*4));impl_->buffer(5,output_surfaces?Uint32(pixels*16):0);
+        if(!in_place) impl_->buffer(4,Uint32(pixels*4));
+        impl_->buffer(5,!in_place && output_surfaces?Uint32(pixels*16):16);
         const bool output_depth=geometry_depth || (background && background->geometry_depth);
-        impl_->buffer(6,output_depth?Uint32(pixels*4):16);
+        impl_->buffer(6,!in_place && output_depth?Uint32(pixels*4):16);
         auto* cmd=static_cast<SDL_GPUCommandBuffer*>(command);
         const auto tiles=std::uint64_t((width+63)/64)*height;
-        const auto list_bytes=tiles*(std::uint64_t(polygon_count)+1)*4;
-        const bool tiled=spans && polygon_count && !wave_rows && list_bytes<=64U*1024*1024
+        auto list_bytes=tiles*(std::uint64_t(polygon_count)+1)*4;
+        // Exact-image validation passed, but paired integrated-GPU SBS timings
+        // regress. Keep the shared-memory kernel diagnostic-only until there
+        // is a repeatable benefit across adapters; default quality is unchanged.
+        const bool row_tile=SDL_getenv("STARFOX_TEST_ROW_TILE_RASTER")
+            && spans && polygon_count && polygon_count<=64 && !wave_rows
+            && !custom && jitter==std::array<float,2>{}
+            && !SDL_getenv("STARFOX_TEST_DISABLE_ROW_TILE_RASTER")
+            && !SDL_getenv("STARFOX_TEST_OCCUPIED_TILES")
             && !SDL_getenv("STARFOX_TEST_DISABLE_TILED_SPANS");
+        if(row_tile) impl_->initialize_row_tile();
+        // Experimental compile-time one-candidate row walk. The generic
+        // direct loop regressed on Intel; normal gameplay still uses bins.
+        // Do not enable this until paired timing establishes an actual gain.
+        // Wave rows still use their two-candidate lookup.
+        const bool single_face=!row_tile && polygon_count==1 && !wave_rows
+            && SDL_getenv("STARFOX_TEST_SINGLE_FACE_RASTER")
+            && !SDL_getenv("STARFOX_TEST_SINGLE_FACE_TILED_SPANS")
+            && !SDL_getenv("STARFOX_TEST_OCCUPIED_TILES");
+        if(single_face) impl_->initialize_single_face();
+        const bool mask_tile=!row_tile && !single_face && spans && polygon_count && polygon_count<=64 && !wave_rows
+            && SDL_getenv("STARFOX_TEST_MASK_TILE_RASTER") && !SDL_getenv("STARFOX_TEST_DISABLE_MASK_TILE_RASTER")
+            && !SDL_getenv("STARFOX_TEST_OCCUPIED_TILES") && !SDL_getenv("STARFOX_TEST_DISABLE_TILED_SPANS")
+            && tiles*8<=64U*1024*1024;
+        if(mask_tile) {list_bytes=tiles*8;impl_->initialize_mask_tile();}
+        const bool tiled=!row_tile && !single_face && spans && polygon_count && !wave_rows && list_bytes<=64U*1024*1024
+            && !SDL_getenv("STARFOX_TEST_DISABLE_TILED_SPANS");
+        // Paired timing has not shown a repeatable win. Keep this GPU-only
+        // experiment opt-in; standard gameplay retains its original kernels.
+        const bool occupied=in_place && tiled && SDL_getenv("STARFOX_TEST_OCCUPIED_TILES")
+            && !SDL_getenv("STARFOX_TEST_DISABLE_OCCUPIED_TILES");
+        // Exact specialization, but paired integrated/dedicated timing has not
+        // shown a repeatable frame-time win. Keep it diagnostic-only. Never
+        // discard requested outputs or metadata inherited from the background.
+        const bool pixel_only=SDL_getenv("STARFOX_TEST_PIXEL_ONLY_RASTER")
+            && !row_tile && !occupied && !single_face && !mask_tile && !output_surfaces && !output_depth
+            && !SDL_getenv("STARFOX_TEST_GENERIC_RASTER");
+        if(pixel_only) impl_->initialize_pixel();
         if(tiled) {
             impl_->initialize_bins();impl_->buffer(1,4);impl_->buffer(2,Uint32(list_bytes));
-            const Uint32 bin_settings[]{width,height,polygon_count,6};
-            SDL_PushGPUComputeUniformData(cmd,0,bin_settings,sizeof(bin_settings));
-            SDL_GPUStorageBufferReadWriteBinding bindings[2]{};
-            bindings[0].buffer=impl_->buffers[1];bindings[1].buffer=impl_->buffers[2];
+            if(occupied) impl_->initialize_occupied();
+            if(occupied && impl_->occupied_bytes<(tiles+1)*4) {
+                SDL_GPUBufferCreateInfo info{SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ
+                    |SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE,Uint32((tiles+1)*4),0};
+                auto* replacement=SDL_CreateGPUBuffer(impl_->device,&info);require_raster(replacement);
+                if(impl_->occupied_tiles) SDL_ReleaseGPUBuffer(impl_->device,impl_->occupied_tiles);
+                impl_->occupied_tiles=replacement;impl_->occupied_bytes=info.size;
+            }
+            SDL_GPUStorageBufferReadWriteBinding bindings[3]{};
+            bindings[0].buffer=occupied?impl_->occupied_tiles:impl_->buffers[1];
+            bindings[1].buffer=impl_->buffers[2];bindings[2].buffer=impl_->dispatch_args;
             // Scratch bins are consumed by the immediately following pass.
             // Queue ordering permits reuse; cycling here retains one large
             // bin allocation for every terrain patch in a submitted frame.
-            bindings[0].cycle=bindings[1].cycle=false;
-            auto* bin_pass=SDL_BeginGPUComputePass(cmd,nullptr,0,bindings,2);require_raster(bin_pass);
-            SDL_BindGPUComputePipeline(bin_pass,impl_->bins_pipeline);
-            auto* input=static_cast<SDL_GPUBuffer*>(spans);SDL_BindGPUComputeStorageBuffers(bin_pass,0,&input,1);
-            SDL_DispatchGPUCompute(bin_pass,(Uint32(tiles)+63)/64,1,1);SDL_EndGPUComputePass(bin_pass);
+            const auto bin_stage=[&](Uint32 stage,Uint32 groups) {
+                const Uint32 bin_settings[]{width,height,polygon_count,stage};
+                SDL_PushGPUComputeUniformData(cmd,0,bin_settings,sizeof(bin_settings));
+                auto* bin_pass=SDL_BeginGPUComputePass(cmd,nullptr,0,bindings,occupied?3:2);require_raster(bin_pass);
+                SDL_BindGPUComputePipeline(bin_pass,mask_tile?impl_->mask_bins_pipeline:occupied?impl_->occupied_bins_pipeline:impl_->bins_pipeline);
+                auto* input=static_cast<SDL_GPUBuffer*>(spans);SDL_BindGPUComputeStorageBuffers(bin_pass,0,&input,1);
+                SDL_DispatchGPUCompute(bin_pass,groups,1,1);SDL_EndGPUComputePass(bin_pass);
+            };
+            // Reset precedes the binning/argument generation pass. Native
+            // queue barriers expose both outputs to indirect rasterization.
+            if(occupied) bin_stage(8,1);
+            bin_stage(occupied?7:6,(Uint32(tiles)+63)/64);
         }
         const Uint32 settings[]{width,height,output_surfaces?1U:0U,0x80000000U|(pixel_coverage?0x40000000U:0U)|polygon_count,
             background?1U:0U,background && background->surfaces?1U:0U,surfaces?1U:0U,
             wave_rows?(1U|(std::uint32_t(std::uint16_t(wave_offset))<<1U)|((wave_frame&15U)<<17U)):(tiled?0x80000000U:0U),
-            texels?texel_bytes:0U,custom?outputWidth:0,custom?outputHeight:0,0,
-            output_depth?1U:0U,geometry_depth?geometry_depth->count:0U,background && background->geometry_depth?1U:0U,0,
+            texels?texel_bytes:0U,custom?outputWidth:0,custom?outputHeight:0,painter_flags,
+            output_depth?1U:0U,geometry_depth?geometry_depth->count:0U,background && background->geometry_depth?1U:0U,(in_place?1U:0U)|(occupied?2U:0U),
             std::bit_cast<Uint32>(geometry_depth?geometry_depth->focal_x:1.f),
             std::bit_cast<Uint32>(geometry_depth?geometry_depth->focal_y:1.f),
             std::bit_cast<Uint32>(geometry_depth?geometry_depth->center_x:0.f),
@@ -491,27 +738,56 @@ GpuRasterOutput GpuRaster::enqueue_row_spans(void* device,void* command,void* sp
             std::bit_cast<Uint32>(jitter[0]),std::bit_cast<Uint32>(jitter[1]),0,0};
         SDL_PushGPUComputeUniformData(cmd,0,settings,sizeof(settings));
         SDL_GPUStorageBufferReadWriteBinding outputs[3]{};
-        outputs[0].buffer=impl_->buffers[4];outputs[1].buffer=impl_->buffers[5];
-        outputs[2].buffer=impl_->buffers[6];
+        outputs[0].buffer=in_place?static_cast<SDL_GPUBuffer*>(background->pixels):impl_->buffers[4];
+        outputs[1].buffer=in_place && background->surfaces?static_cast<SDL_GPUBuffer*>(background->surfaces):impl_->buffers[5];
+        outputs[2].buffer=in_place && background->geometry_depth?static_cast<SDL_GPUBuffer*>(background->geometry_depth):impl_->buffers[6];
         // Fused draws alternate two non-aliasing renderers. The previous
         // contents have already been consumed before this ordered write.
         outputs[0].cycle=outputs[1].cycle=outputs[2].cycle=background==nullptr;
-        auto* pass=SDL_BeginGPUComputePass(cmd,nullptr,0,outputs,3);require_raster(pass);
-        SDL_BindGPUComputePipeline(pass,impl_->pipeline);
-        // Bins are unused for row spans. For solid-only input, texels also
-        // bind an existing read-only buffer rather than an empty placeholder.
+        auto* pass=SDL_BeginGPUComputePass(cmd,nullptr,0,outputs,pixel_only?1:3);require_raster(pass);
+        SDL_BindGPUComputePipeline(pass,mask_tile?impl_->mask_tile_pipeline:single_face?impl_->single_face_pipeline:pixel_only?impl_->pixel_pipeline:row_tile?impl_->row_tile_pipeline:occupied?impl_->occupied_pipeline:impl_->pipeline);
+        // Row spans optionally consume the compact occupied-tile list. For
+        // solid-only input, texels bind an existing read-only buffer.
         if(!spans) impl_->buffer(0,4);
         auto* source=spans?static_cast<SDL_GPUBuffer*>(spans):impl_->buffers[0];
-        SDL_GPUBuffer* inputs[]{source,source,tiled?impl_->buffers[2]:source,texels?static_cast<SDL_GPUBuffer*>(texels):source,
-            background?static_cast<SDL_GPUBuffer*>(background->pixels):source,
-            background && background->surfaces?static_cast<SDL_GPUBuffer*>(background->surfaces):source,
+        SDL_GPUBuffer* inputs[]{source,occupied?impl_->occupied_tiles:source,tiled?impl_->buffers[2]:source,texels?static_cast<SDL_GPUBuffer*>(texels):source,
+            background && !in_place?static_cast<SDL_GPUBuffer*>(background->pixels):source,
+            background && background->surfaces && !in_place?static_cast<SDL_GPUBuffer*>(background->surfaces):source,
             geometry_depth?static_cast<SDL_GPUBuffer*>(geometry_depth->planes):source,
-            background && background->geometry_depth?static_cast<SDL_GPUBuffer*>(background->geometry_depth):source};
-        SDL_BindGPUComputeStorageBuffers(pass,0,inputs,8);
-        SDL_DispatchGPUCompute(pass,(outputWidth+63)/64,outputHeight,1);SDL_EndGPUComputePass(pass);
+            background && background->geometry_depth && !in_place?static_cast<SDL_GPUBuffer*>(background->geometry_depth):source};
+        SDL_BindGPUComputeStorageBuffers(pass,0,inputs,pixel_only?5:8);
+        if(occupied) SDL_DispatchGPUComputeIndirect(pass,impl_->dispatch_args,0);
+        else SDL_DispatchGPUCompute(pass,(outputWidth+63)/64,outputHeight,1);
+        SDL_EndGPUComputePass(pass);
+        if(occupied) {
+            impl_->last_occupied_capacity=Uint32(tiles);
+            if(!impl_->occupied_reported && SDL_getenv("STARFOX_TRACE_GPU")) {
+                SDL_Log("raster-occupied-tiles: indirect native pass");impl_->occupied_reported=true;
+            }
+        }
+        if(row_tile && !impl_->row_tile_reported && SDL_getenv("STARFOX_TRACE_GPU")) {
+            SDL_Log("raster-row-tile: shared native painter pass (no bin dispatch)");impl_->row_tile_reported=true;
+        }
+        impl_->last_row_tile=row_tile;
+        impl_->last_mask_tile=mask_tile;
+        if(mask_tile && !impl_->mask_tile_reported && SDL_getenv("STARFOX_TEST_MASK_TILE_RESULT")) {
+            SDL_Log("raster-mask-tile: compact ordered masks");impl_->mask_tile_reported=true;
+        }
+        impl_->last_pixel=pixel_only;
+        impl_->last_single_face=single_face;
+        if(polygon_count==1 && !wave_rows && !row_tile && !impl_->single_face_reported
+            && SDL_getenv("STARFOX_TEST_SINGLE_FACE_RESULT")) {
+            SDL_Log("raster-single-face: %s row painter",single_face?"direct":"binned");
+            impl_->single_face_reported=true;
+        }
+        if(pixel_only && !impl_->pixel_reported && SDL_getenv("STARFOX_TRACE_GPU")) {
+            SDL_Log("raster-pixel-only: native colour painter (no receiver/depth outputs)");impl_->pixel_reported=true;
+        }
         impl_->status="GPU-generated row spans rasterized resident";
-        return {device,impl_->buffers[4],output_surfaces?impl_->buffers[5]:nullptr,outputWidth,outputHeight,++impl_->generation,
-            output_depth?impl_->buffers[6]:nullptr};
+        GpuRasterOutput result{device,outputs[0].buffer,output_surfaces?outputs[1].buffer:nullptr,outputWidth,outputHeight,++impl_->generation,
+            output_depth?outputs[2].buffer:nullptr};
+        result.row_span_canonical=pixel_coverage && !custom && jitter==std::array<float,2>{};
+        return result;
     }catch(const std::exception& error){impl_->status=error.what();return {};}
 #endif
     return {};

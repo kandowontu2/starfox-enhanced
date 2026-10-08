@@ -19,13 +19,27 @@ void main(uint3 id:SV_DispatchThreadID,uint lane:SV_GroupIndex,uint3 group:SV_Gr
         if(id.x>=tile_count) return;
         uint y=id.x/tiles_x,x=(id.x%tiles_x)*64;
         uint base=id.x*(command_count+1),count=0;
+#if defined(STARFOX_MASK_TILE_BINS)
+        uint2 mask=0;
+#endif
         for(uint polygon=0;polygon<command_count;++polygon) {
             uint index=polygon*height+y;
             Command c=commands[index];
-            if(c.left<c.right && c.right>int(x) && c.left<int(min(x+64,width)))
+            if(c.left<c.right && c.right>int(x) && c.left<int(min(x+64,width))) {
+#if defined(STARFOX_MASK_TILE_BINS)
+                if(polygon<32) mask.x|=1u<<polygon;
+                else mask.y|=1u<<(polygon-32);
+#else
                 indices[base+1+count++]=index;
+#endif
+            }
         }
-        indices[base]=count;return;
+#if defined(STARFOX_MASK_TILE_BINS)
+        indices[id.x*2]=mask.x;indices[id.x*2+1]=mask.y;
+#else
+        indices[base]=count;
+#endif
+        return;
     }
     if(stage==0) {if(id.x<=tile_count) rows[id.x]=0;return;}
     if(stage==2) {

@@ -1,4 +1,5 @@
 #include "starfox/app/runtime_input.hpp"
+#include "starfox/app/atomic_file.hpp"
 
 #include "starfox/input/buttons.hpp"
 #include "starfox/render/effect_types.hpp"
@@ -127,7 +128,10 @@ constexpr std::string_view kPregameTag{"SFE_PREGAME_V"};
 // no TWO_D_FILTER key, so the missing-key check would fail the whole load and
 // silently reset every setting. Take the next number and default TWO_D_FILTER
 // for anything older.
-constexpr int kPregameRevision = 13;
+// 14 adds explicit GPU backend and the separate DLSS 4.5 preference. Older
+// files retain AUTO and DLSS 4.5 OFF without resetting unrelated settings.
+// 15 adds optional native Leia SR; earlier files default it OFF.
+constexpr int kPregameRevision = 15;
 
 std::filesystem::path portable_directory;
 #if defined(__APPLE__) && !defined(SDL_PLATFORM_IOS)
@@ -241,10 +245,10 @@ constexpr std::array<std::string_view, 5> kHudElementNames{
     "LIVES", "SHIELD", "BOMBS_BOOST", "COMMS", "BOSS_HEALTH"};
 constexpr std::array<std::string_view, 5> kLegacyHudProfileNames{
     "4_3", "16_9", "16_10", "21_9", "32_9"};
-constexpr std::array<std::string_view, 10> kHudProfileNames{
+constexpr std::array<std::string_view, 12> kHudProfileNames{
     "ORIGINAL_4_3", "ORIGINAL_16_9", "ORIGINAL_16_10", "ORIGINAL_21_9",
-    "ORIGINAL_32_9", "EX_4_3", "EX_16_9", "EX_16_10", "EX_21_9",
-    "EX_32_9"};
+    "ORIGINAL_32_9", "ORIGINAL_FIT_SCREEN", "EX_4_3", "EX_16_9", "EX_16_10", "EX_21_9",
+    "EX_32_9", "EX_FIT_SCREEN"};
 
 void add_keyboard_button(
     input::ButtonMask& result,
@@ -415,9 +419,16 @@ std::vector<SDL_Gamepad*> open_player_gamepads(std::size_t maximum) noexcept {
     std::stable_sort(ordered.begin(), ordered.end(), [maximum](auto left, auto right) {
         // Steam owns the player's layout and system-button chords. If it
         // exposes a virtual controller, do not accidentally choose a raw Deck
-        // device enumerated first. Explicit multiplayer ordering stays intact.
-        if(maximum==1U && steam_input_device(left)!=steam_input_device(right))
-            return steam_input_device(left);
+        // device enumerated first. Without Steam's virtual device, the built-in
+        // Deck controls also outrank an indexed generic pad in single-player.
+        // Explicit multiplayer ordering stays intact.
+        if(maximum==1U) {
+            const auto rank=[](SDL_JoystickID id) {
+                return steam_input_device(id)?2:native_deck_device(id)?1:0;
+            };
+            const auto left_rank=rank(left),right_rank=rank(right);
+            if(left_rank!=right_rank) return left_rank>right_rank;
+        }
         const auto left_player = SDL_GetGamepadPlayerIndexForID(left);
         const auto right_player = SDL_GetGamepadPlayerIndexForID(right);
         if (left_player >= 0 || right_player >= 0) {
@@ -807,7 +818,7 @@ bool load_pregame_settings(
             found[1] = std::find(valid.begin(), valid.end(), value) != valid.end();
         } else if (name == "DISPLAY_MODE") {
             loaded.display_mode = static_cast<std::uint8_t>(value);
-            found[2] = value >= 0 && value <= 4;
+            found[2] = value >= 0 && value <= 5;
         } else if (name == "GOD_MODE") {
             loaded.god_mode = value != 0;
             found[3] = value == 0 || value == 1;
@@ -846,6 +857,15 @@ bool load_pregame_settings(
         } else if (name == "INFINITE_BOMBS" || name == "INFINITE_BOOST" || name == "INFINITE_LIVES") {
             if (value < 0 || value > 1) return false;
             (name == "INFINITE_BOMBS" ? loaded.infinite_bombs : name == "INFINITE_LIVES" ? loaded.infinite_lives : loaded.infinite_boost) = value != 0;
+        } else if (name == "AA_TYPE") {
+            if(value<0 || value>6) return false;
+            loaded.aa_type=static_cast<std::uint8_t>(value);
+        } else if (name == "INTEGER_SCALING") {
+            if(value<0 || value>1) return false;
+            loaded.integer_scaling=value!=0;
+        } else if (name == "FULLSCREEN") {
+            if(value<0 || value>1) return false;
+            loaded.fullscreen=value!=0;
         } else if (name == "PLANET_SELECT_CHEAT") {
             if(value<0 || value>1) return false;
             loaded.planet_select_cheat=value!=0;
@@ -853,8 +873,20 @@ bool load_pregame_settings(
             if (value < 0 || value > 2) return false;
             loaded.default_laser = static_cast<std::uint8_t>(value);
         } else if (name == "STEREO_OUTPUT") {
-            if (value < 0 || value > 2) return false;
+            if (value < 0 || value > 9) return false;
             loaded.stereo_output = static_cast<std::uint8_t>(value);
+        } else if(name=="LEIA_SR") {
+            if(value<0 || value>1) return false;
+            loaded.leia_sr=value!=0;
+        } else if(name=="STEREO_SEPARATION") {
+            if(value<1 || value>512) return false;
+            loaded.stereo_separation=static_cast<std::uint16_t>(value);
+        } else if(name=="STEREO_CROSSHAIR_DEPTH") {
+            if(value<0 || value>65535 || (value>0 && value<16)) return false;
+            loaded.stereo_crosshair_depth=static_cast<std::uint16_t>(value);
+        } else if(name=="STEREO_CONVERGENCE") {
+            if(value<16 || value>65535) return false;
+            loaded.stereo_convergence=static_cast<std::uint16_t>(value);
         } else if (name == "SELECTED_LEVEL") {
             if (value != 0 && (value < 11 || value > 79 || value % 10 == 0)) return false;
             loaded.selected_level = static_cast<std::uint8_t>(value);
@@ -870,6 +902,9 @@ bool load_pregame_settings(
         } else if (name == "RAY_TRACING") {
             if (value < 0 || value > 1) return false;
             loaded.ray_tracing = value != 0;
+        } else if (name == "RAY_TRACING_QUALITY") {
+            if(value<1 || value>3) return false;
+            loaded.ray_tracing_quality=static_cast<std::uint8_t>(value);
         } else if (name == "SOFTWARE_SHADOWS") {
             if (value < 0 || value > 1) return false;
             loaded.enhanced_shadows = value != 0;
@@ -911,9 +946,52 @@ bool load_pregame_settings(
         } else if (name == "WORLD_EFFECT_INTENSITY") {
             if (value < 0 || value > 100) return false;
             loaded.world_effect_intensity = static_cast<std::uint8_t>(value);
+        } else if(name=="MOTION_BLUR") {
+            if(value<0 || value>3) return false;
+            loaded.motion_blur=static_cast<std::uint8_t>(value);
+        } else if(name=="VOLUMETRIC_FOG") {
+            if(value<0 || value>3) return false;
+            loaded.volumetric_fog=static_cast<std::uint8_t>(value);
+        } else if(name=="CAMERA_RESPONSE") {
+            if(value<0 || value>63) return false;
+            loaded.camera_response=static_cast<std::uint8_t>(value);
+        } else if(name=="SHADOW_SOFTNESS") {
+            if(value<0 || value>3) return false;
+            loaded.shadow_softness=static_cast<std::uint8_t>(value);
+        } else if(name=="WATER_CAUSTICS") {
+            if(value<0 || value>3) return false;
+            loaded.water_caustics=static_cast<std::uint8_t>(value);
+        } else if(name=="ADAPTIVE_EXPOSURE") {
+            if(value<0 || value>3) return false;
+            loaded.adaptive_exposure=static_cast<std::uint8_t>(value);
+        } else if(name=="PHOSPHOR_PERSISTENCE") {
+            if(value<0 || value>3) return false;
+            loaded.phosphor_persistence=static_cast<std::uint8_t>(value);
+        } else if(name=="PARTICLE_ENHANCEMENTS") {
+            if(value<0 || value>15) return false;
+            loaded.particle_enhancements=static_cast<std::uint8_t>(value);
+        } else if(name=="DEPTH_ENHANCEMENTS") {
+            if(value<0 || value>15) return false;
+            loaded.depth_enhancements=static_cast<std::uint8_t>(value);
+        } else if(name=="SCENE_ENHANCEMENTS") {
+            if(value<0 || value>255) return false;
+            loaded.scene_enhancements=static_cast<std::uint8_t>(value);
+        } else if(name=="GLOBAL_ENHANCEMENTS") {
+            if(value>0x03ffffffU) return false;
+            loaded.global_enhancements=static_cast<std::uint32_t>(value);
+        } else if(name=="WORLD_DISTORTION" || name=="MODEL_SPECIAL_FX" || name=="WORLD_SPECIAL_FX") {
+            const unsigned i=name=="WORLD_DISTORTION"?0:name=="MODEL_SPECIAL_FX"?1:2;
+            if(value<0 || !(i==0?render::valid_manipulation(value) && !render::persistence_mode(static_cast<render::Effect>(value)):render::valid_special_fx(value))) return false;
+            loaded.extra_effects[i]=static_cast<std::uint8_t>(value);
         } else if (name == "VSYNC") {
             loaded.vsync = value != 0;
             found[11] = value == 0 || value == 1;
+        } else if (name == "DLSS45_MODE") {
+            if(value<0 || value>4) return false;
+            loaded.dlss45_mode=static_cast<std::uint8_t>(value);
+        } else if (name == "RENDERER_BACKEND") {
+            if(value<0 || value>5) return false;
+            loaded.renderer_backend=static_cast<std::uint8_t>(value);
         } else if (name == "RENDERER_MODE") {
             loaded.renderer_mode = static_cast<std::uint8_t>(value);
             found[16] = value >= 0 && value <= 1;
@@ -956,13 +1034,14 @@ bool load_pregame_settings(
         // The original ON setting used what is now the medium FXAA kernel.
         loaded.anti_aliasing = 2U;
     }
-    // Versions through V9 offered wasteful 5x-10x modes. Preserve those
-    // users' intent at the new supported maximum instead of rejecting their
-    // otherwise valid settings file.
-    loaded.render_scale = std::min<std::uint8_t>(loaded.render_scale, 3U);
+    // Preserve explicit 7x-10x configuration overrides; the menu stops at 6x.
+    // Device safety limits are applied by GameSimulation::set_render_scale.
     if (revision < 12) {
         loaded.two_d_filter = loaded.enhanced_graphics ? 1U : 0U;
     }
+    if(render::manipulation(static_cast<render::Effect>(loaded.world_effect))) {if(!render::persistence_mode(static_cast<render::Effect>(loaded.world_effect))) loaded.extra_effects[0]=loaded.world_effect;loaded.world_effect=0;}
+    if(render::special_fx(static_cast<render::Effect>(loaded.effect))) {loaded.extra_effects[1]=loaded.effect;loaded.effect=0;}
+    if(render::special_fx(static_cast<render::Effect>(loaded.world_effect))) {loaded.extra_effects[2]=loaded.world_effect;loaded.world_effect=0;}
     if(render::manipulation(static_cast<render::Effect>(loaded.effect))) {
         if(!loaded.manipulation) {
             loaded.manipulation=loaded.effect;
@@ -974,18 +1053,21 @@ bool load_pregame_settings(
         if(!loaded.material) loaded.material=loaded.effect;
         loaded.effect=0;
     }
+    // These select alternate temporal models for one DLSS viewport, not two
+    // simultaneous passes. Reject an ambiguous file without replacing settings.
+    if(loaded.dlss_mode && loaded.dlss45_mode) return false;
     settings = loaded;
     return true;
 }
 
 bool save_pregame_settings(
     const std::filesystem::path& path,
-    const PregameSettings& settings) noexcept {
+    const PregameSettings& settings) noexcept try {
     if (path.empty() || settings.timing_mode > 1U
-        || settings.display_mode > 4U || settings.crosshair_colour > 7U
+        || settings.display_mode > 5U || settings.crosshair_colour > 7U || settings.aa_type > 6U
         || settings.anti_aliasing > 3U || settings.rtx_lighting > 3U
         || settings.two_d_filter > 5U || settings.effect >= render::effect_count
-        || settings.effect_intensity > 100U || settings.renderer_mode > 1U
+        || settings.effect_intensity > 100U || settings.renderer_mode > 1U || settings.renderer_backend>5U
         || !render::valid_manipulation(settings.manipulation) || settings.manipulation_intensity>100
         || !render::valid_material(settings.material)
         || !render::valid_environment(settings.environment)
@@ -993,26 +1075,29 @@ bool save_pregame_settings(
         || settings.wireframe_thickness < 1U || settings.wireframe_thickness > 4U
         || settings.chromatic_aberration > 3U
         || settings.hdr_effect > 3U
-        || settings.dlss_mode > 4U
+        || settings.dlss_mode > 4U || settings.dlss45_mode>4U || (settings.dlss_mode && settings.dlss45_mode)
         || settings.fsr1_mode > 4U
         || settings.reflective_surfaces > 3U
+        || settings.ray_tracing_quality<1 || settings.ray_tracing_quality>3
+        || settings.global_enhancements>0x03ffffffU || settings.depth_enhancements>15 || settings.particle_enhancements>15 || settings.phosphor_persistence>3 || settings.adaptive_exposure>3 || settings.water_caustics>3 || settings.shadow_softness>3 || settings.camera_response>63 || settings.volumetric_fog>3 || settings.motion_blur>3
+        || !render::valid_manipulation(settings.extra_effects[0])
+        || render::persistence_mode(static_cast<render::Effect>(settings.extra_effects[0]))
+        || !render::valid_special_fx(settings.extra_effects[1]) || !render::valid_special_fx(settings.extra_effects[2])
         || settings.default_laser > 2U
-        || settings.stereo_output > 2U
+        || settings.stereo_output > 9U
+        || settings.stereo_separation<1 || settings.stereo_separation>512 || settings.stereo_convergence<16
+        || (settings.stereo_crosshair_depth && settings.stereo_crosshair_depth<16)
         || (settings.selected_level != 0U && (settings.selected_level < 11U
             || settings.selected_level > 79U || settings.selected_level % 10U == 0U))
         || settings.language > 5U || settings.experience > 1U || settings.music_volume > 100U
-        || settings.sfx_volume > 100U || settings.render_scale > 3U || settings.model_smoothing > 3U) {
+        || settings.sfx_volume > 100U || settings.render_scale > 9U || settings.model_smoothing > 3U) {
         return false;
     }
     constexpr std::array<std::uint16_t, 8> valid_fps{
         20U, 30U, 60U, 90U, 120U, 240U, 360U, 480U};
     if (std::find(valid_fps.begin(), valid_fps.end(),
             settings.presentation_fps) == valid_fps.end()) return false;
-    std::error_code error;
-    std::filesystem::create_directories(path.parent_path(), error);
-    if (error) return false;
-    std::ofstream output{path, std::ios::trunc};
-    if (!output) return false;
+    std::ostringstream output;
     output << kPregameTag << kPregameRevision << '\n'
            << "EXPERIENCE " << static_cast<unsigned>(settings.experience) << '\n'
            << "TIMING_MODE " << static_cast<unsigned>(settings.timing_mode) << '\n'
@@ -1042,6 +1127,20 @@ bool save_pregame_settings(
            << "ENVIRONMENT_5 " << unsigned(settings.environment[5]) << '\n'
            << "MANIPULATION_INTENSITY " << unsigned(settings.manipulation_intensity) << '\n'
            << "WORLD_EFFECTS " << static_cast<unsigned>(settings.world_effect) << '\n'
+           << "WORLD_DISTORTION " << unsigned(settings.extra_effects[0]) << '\n'
+           << "MODEL_SPECIAL_FX " << unsigned(settings.extra_effects[1]) << '\n'
+           << "WORLD_SPECIAL_FX " << unsigned(settings.extra_effects[2]) << '\n'
+           << "GLOBAL_ENHANCEMENTS " << settings.global_enhancements << '\n'
+           << "SCENE_ENHANCEMENTS " << unsigned(settings.scene_enhancements) << '\n'
+           << "DEPTH_ENHANCEMENTS " << unsigned(settings.depth_enhancements) << '\n'
+           << "PARTICLE_ENHANCEMENTS " << unsigned(settings.particle_enhancements) << '\n'
+           << "PHOSPHOR_PERSISTENCE " << unsigned(settings.phosphor_persistence) << '\n'
+           << "ADAPTIVE_EXPOSURE " << unsigned(settings.adaptive_exposure) << '\n'
+           << "WATER_CAUSTICS " << unsigned(settings.water_caustics) << '\n'
+           << "SHADOW_SOFTNESS " << unsigned(settings.shadow_softness) << '\n'
+           << "CAMERA_RESPONSE " << unsigned(settings.camera_response) << '\n'
+           << "VOLUMETRIC_FOG " << unsigned(settings.volumetric_fog) << '\n'
+           << "MOTION_BLUR " << unsigned(settings.motion_blur) << '\n'
            << "WORLD_EFFECT_INTENSITY " << static_cast<unsigned>(settings.world_effect_intensity) << '\n'
            << "BLOOM " << static_cast<unsigned>(settings.bloom) << '\n'
            << "BLOOM_2D " << static_cast<unsigned>(settings.bloom_2d) << '\n'
@@ -1050,6 +1149,7 @@ bool save_pregame_settings(
            << "CHROMATIC_ABERRATION " << static_cast<unsigned>(settings.chromatic_aberration) << '\n'
            << "HDR_EFFECT " << static_cast<unsigned>(settings.hdr_effect) << '\n'
            << "RAY_TRACING " << static_cast<unsigned>(settings.ray_tracing) << '\n'
+           << "RAY_TRACING_QUALITY " << static_cast<unsigned>(settings.ray_tracing_quality) << '\n'
            << "SOFTWARE_SHADOWS " << static_cast<unsigned>(settings.enhanced_shadows) << '\n'
            << "DLSS_MODE " << static_cast<unsigned>(settings.dlss_mode) << '\n'
            << "FSR1_MODE " << static_cast<unsigned>(settings.fsr1_mode) << '\n'
@@ -1057,13 +1157,22 @@ bool save_pregame_settings(
            << "INFINITE_BOMBS " << static_cast<unsigned>(settings.infinite_bombs) << '\n'
            << "INFINITE_LIVES " << static_cast<unsigned>(settings.infinite_lives) << '\n'
            << "PLANET_SELECT_CHEAT " << unsigned(settings.planet_select_cheat) << '\n'
+           << "FULLSCREEN " << unsigned(settings.fullscreen) << '\n'
+           << "AA_TYPE " << unsigned(settings.aa_type) << '\n'
+           << "INTEGER_SCALING " << settings.integer_scaling << '\n'
            << "INFINITE_BOOST " << static_cast<unsigned>(settings.infinite_boost) << '\n'
            << "DEFAULT_LASER " << static_cast<unsigned>(settings.default_laser) << '\n'
            << "SELECTED_LEVEL " << static_cast<unsigned>(settings.selected_level) << '\n'
            << "STEREO_OUTPUT " << static_cast<unsigned>(settings.stereo_output) << '\n'
+           << "LEIA_SR " << unsigned(settings.leia_sr) << '\n'
+           << "STEREO_SEPARATION " << settings.stereo_separation << '\n'
+           << "STEREO_CONVERGENCE " << settings.stereo_convergence << '\n'
+           << "STEREO_CROSSHAIR_DEPTH " << settings.stereo_crosshair_depth << '\n'
            << "VSYNC " << static_cast<unsigned>(settings.vsync) << '\n'
            << "RENDERER_MODE "
            << static_cast<unsigned>(settings.renderer_mode) << '\n'
+           << "RENDERER_BACKEND " << unsigned(settings.renderer_backend) << '\n'
+           << "DLSS45_MODE " << unsigned(settings.dlss45_mode) << '\n'
            << "MSU1_MUSIC "
            << static_cast<unsigned>(settings.msu1_music) << '\n'
            << "RUMBLE " << static_cast<unsigned>(settings.rumble) << '\n'
@@ -1079,7 +1188,12 @@ bool save_pregame_settings(
            << static_cast<unsigned>(settings.on_screen_controls) << '\n'
            << "SWAP_FACE_BUTTONS "
            << static_cast<unsigned>(settings.swap_face_buttons) << '\n';
-    return static_cast<bool>(output);
+    if (!output) return false;
+    const auto bytes = output.str();
+    AtomicFile file{path};
+    return file.write(bytes) && file.commit();
+} catch (...) {
+    return false;
 }
 
 std::filesystem::path starfox_ex_save_ram_path() {
@@ -1146,6 +1260,9 @@ bool load_hud_layout(
     auto loaded = render::HudLayoutProfiles{};
     std::array<std::array<bool, kHudElementNames.size()>,
         kHudProfileNames.size()> found{};
+    // Older files have no Fit profile. Start it independently at defaults.
+    found[5].fill(true);
+    found[11].fill(true);
     if (missing_boss_health) {
         for (auto& profile : found) {
             profile[static_cast<std::size_t>(

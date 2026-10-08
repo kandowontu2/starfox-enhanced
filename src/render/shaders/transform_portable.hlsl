@@ -1,9 +1,16 @@
 struct Pose { int4 row0; int4 row1; int4 row2; int4 translation; int4 vanish; };
 struct SourcePoint { int4 coordinate; int4 vanish; };
 [[vk::binding(0,0)]] StructuredBuffer<int4> vertices : register(t0,space0);
+#ifndef SF_INLINE_MODEL_POSES
 [[vk::binding(1,0)]] StructuredBuffer<Pose> poses : register(t1,space0);
+#endif
 [[vk::binding(0,1)]] RWStructuredBuffer<SourcePoint> transformed : register(u0,space1);
-[[vk::binding(0,2)]] cbuffer Settings : register(b0,space2) { uint count; uint poseCount; uint2 padding; };
+[[vk::binding(0,2)]] cbuffer Settings : register(b0,space2) {
+    uint count; uint poseCount; uint2 padding;
+#ifdef SF_INLINE_MODEL_POSES
+    Pose poses[1];
+#endif
+};
 int word(int value) { return (value << 16) >> 16; }
 int q15(int a,int b) { return word((word(a)*word(b)) >> 15); }
 [numthreads(64,1,1)]

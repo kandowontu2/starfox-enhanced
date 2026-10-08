@@ -66,6 +66,10 @@ competition cartridges, Star Fox 2 and unknown revisions are not supported.
 Build success does not guarantee identical behavior on every device.
 See the [release notes](https://github.com/kandowontu/starfox-enhanced/blob/main/docs/RELEASE-0.0.8.md) for verification limits.
 
+An [original 3DS / 3DS XL port](platform/3ds/README.md) is in development,
+with a lower-screen cockpit HUD and slider-controlled stereo planned.
+The current frontend diagnostic is **not a playable game package**.
+
 **Android upgrades:** 0.0.6 uses a permanent signing key. Older APKs used
 temporary keys, so upgrading from those builds requires a one-time reinstall.
 **Back up saves and settings before uninstalling.** Later public builds will

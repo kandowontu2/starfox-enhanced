@@ -62,6 +62,7 @@ XrResult XRAPI_PTR end_frame(XrSession,const XrFrameEndInfo* info) {
     return XR_SUCCESS;
 }
 XrResult XRAPI_PTR views(XrSession,const XrViewLocateInfo* info,XrViewState* state,uint32_t capacity,uint32_t* count,XrView* out) {
+    require(!info->next && !state->next,"ordinary headset path received a display-specific rig");
     require(info->displayTime==fake.predicted_time && info->space==handle<XrSpace>(3) && capacity==2,"view location ignored predicted time/local space");
     fake.calls.push_back(6);if(fake.fail_locate) return XR_ERROR_RUNTIME_FAILURE;
     *count=2;state->viewStateFlags=fake.tracked?XR_VIEW_STATE_ORIENTATION_VALID_BIT|XR_VIEW_STATE_POSITION_VALID_BIT:0;

@@ -1,7 +1,9 @@
 param([ValidateSet('ORIGINAL','EX')][string]$Experience='ORIGINAL',
     [string]$OutputDirectory='tmp/runtime-options-proof',
+    [string]$Binary='build/current/starfox_pc.exe',
     [ValidateSet('SOFTWARE','GPU')][string]$Renderer='GPU',
     [ValidateSet('direct3d12','vulkan')][string]$GpuDriver='direct3d12',
+    [ValidateRange(0,4)][int]$Dlss=0,[ValidateRange(0,4)][int]$Dlss45=0,
     [switch]$Cheats,[switch]$PresentPacing)
 $ErrorActionPreference='Stop'
 $proofPath=[IO.Path]::GetFullPath($OutputDirectory)
@@ -21,8 +23,19 @@ $settings=@{
 foreach($name in @('ENHANCED','SEPARATED_MODELS','ANTI_ALIASING','2D_FILTER',
     'RTX_LIGHTING','BLOOM','BLOOM_2D','EFFECT','WORLD_EFFECT','MODEL_SMOOTHING',
     'HDR_EFFECT','CHROMATIC_ABERRATION','SOFTWARE_SHADOWS','REFLECTIVE_SURFACES',
-    'DLSS_SELECTION','FSR1_SELECTION','NEURAL_SELECTION','STEREO_OUTPUT','LANGUAGE')) {
+    'DLSS_SELECTION','FSR1_SELECTION','STEREO_OUTPUT','LANGUAGE')) {
     $settings["STARFOX_TEST_$name"]='0'
+}
+if($Dlss -or $Dlss45) {
+    if($Renderer -ne 'GPU' -or $GpuDriver -ne 'direct3d12' -or $Cheats) {
+        throw 'DLSS preview transitions require GPU/D3D12 and the ordinary F1 sequence'
+    }
+    $settings.STARFOX_TEST_DLSS_SELECTION="$Dlss"
+    $settings.STARFOX_TEST_DLSS45_SELECTION="$Dlss45"
+    $settings.STARFOX_TEST_PREROLL_TICKS='1000'
+    $settings.STARFOX_TRACE_GPU='1'
+    $settings.STARFOX_TEST_CAMERA_RESPONSE='0'
+    $settings.STARFOX_TEST_ADAPTIVE_EXPOSURE='0'
 }
 $previous=@{}
 if($PresentPacing) {
@@ -48,7 +61,7 @@ try {
     $arguments=if($Experience -eq 'EX') {
         'tmp/runtime-inputs/starfox-ex/SFES.SFC assets/symbols/starfox-ex.txt LEVEL1_1'
     } else {'upstream-ultrastarfox/SF.SFC upstream-ultrastarfox/SYMBOLS.TXT LEVEL1_1'}
-    $process=Start-Process -FilePath build/current/starfox_pc.exe -ArgumentList $arguments -WindowStyle Hidden -PassThru -RedirectStandardError "$proofPath/runtime.log"
+    $process=Start-Process -FilePath $Binary -ArgumentList $arguments -WindowStyle Hidden -PassThru -RedirectStandardError "$proofPath/runtime.log"
     $processHandle=$process.Handle
     if(-not $process.WaitForExit(30000)) {throw "Runtime-options check still running (PID $($process.Id)); inspect it before retrying"}
     if($process.ExitCode -ne 0) {throw "Runtime failed; see $proofPath/runtime.log"}
@@ -64,6 +77,28 @@ try {
     $expectedExperience=if($Experience -eq 'EX'){'1'}else{'0'}
     if(@($events | Where-Object {$_.Groups[2].Value -ne $expectedExperience}).Count -ne 0) {
         throw "Runtime menu did not retain requested experience $Experience"
+    }
+    if($Dlss -or $Dlss45) {
+        $frozen=$false;$resumeReset=$false;$previewFrames=0;$beforeMenu=0;$afterMenu=0;$sawMenu=$false
+        foreach($line in ($log -split "`n")) {
+            if($line -match '^runtime-options open=(\d)') {
+                $frozen=$Matches[1] -eq '1';$sawMenu=$true
+                if(!$frozen){$resumeReset=$true}
+            } elseif($line -match '^dlss-preview:') {
+                if(!$frozen -or $line -notmatch 'reused reconstructed frame=') {throw 'Unexpected retained preview outside frozen menu'}
+                $previewFrames++
+            } elseif($line -match '^dlss-gameplay: evaluated') {
+                if($frozen) {$previewFrames++;continue}
+                if($resumeReset -and $line -notmatch 'reset=1') {throw 'Resuming DLSS did not reset preview history'}
+                $resumeReset=$false
+                if($sawMenu){$afterMenu++}else{$beforeMenu++}
+            }
+        }
+        if(!$beforeMenu -or !$afterMenu -or !$previewFrames -or $resumeReset -or
+            $log -match 'dlss-gameplay: failed|dlss-fallback:') {
+            throw 'DLSS/reconstructed-preview/resumed-DLSS transition incomplete'
+        }
+        Write-Output "DLSS transition verified: gameplay=$beforeMenu reconstructed-preview=$previewFrames resumed-gameplay=$afterMenu"
     }
     if($Cheats) {Write-Output "F1 and submenu input sequence completed; visually inspect runtime-cheats.bmp: $proofPath"}
     else {Write-Output "Verified real F1 open/resume/reopen events: $proofPath"}

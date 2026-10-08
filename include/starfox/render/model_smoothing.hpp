@@ -10,11 +10,13 @@ namespace starfox::render {
 inline void smooth_models(std::uint8_t level, const Framebuffer& frame,
     std::vector<std::uint8_t>& rgba, std::vector<std::uint8_t>& scratch,
     RowWorkers* workers = nullptr) {
-    if (level == 0U || level > 3U || !frame.layer_tags_enabled()
+    if (level == 0U || level > 7U || !frame.layer_tags_enabled()
         || rgba.size() != frame.pixels().size()*4U || rgba.empty()) return;
     scratch=rgba;
     const auto width=frame.stored_width(), height=frame.stored_height();
     const auto step=frame.draw_scale();
+    const bool resolve_dither=(level&4U)!=0 && step>1;
+    level &= 3U;
     const auto model=[&](std::size_t i) {
         const auto tag=frame.layer_tags()[i];
         return tag==std::uint8_t(PixelLayer::three_d)
@@ -24,6 +26,25 @@ inline void smooth_models(std::uint8_t level, const Framebuffer& frame,
         for(unsigned y=first;y<last;++y) for(unsigned x=0;x<width;++x) {
             const auto i=std::size_t(y)*width+x;
             if(!model(i)) continue;
+            bool resolved=false;
+            if(resolve_dither && frame.layer_tags()[i]==std::uint8_t(PixelLayer::three_d)) {
+                const auto same=[&](std::size_t a,std::size_t b) {
+                    return frame.layer_tags()[a]==std::uint8_t(PixelLayer::three_d)
+                        && frame.layer_tags()[b]==std::uint8_t(PixelLayer::three_d)
+                        && scratch[a*4]==scratch[b*4] && scratch[a*4+1]==scratch[b*4+1]
+                        && scratch[a*4+2]==scratch[b*4+2];
+                };
+                for(const auto spacing:{1U,step}) {
+                    if(x<spacing || y<spacing || x+spacing>=width || y+spacing>=height) continue;
+                    const auto l=i-spacing,r=i+spacing,u=i-std::size_t(spacing)*width,d=i+std::size_t(spacing)*width;
+                    if(!same(i,l) && same(l,r) && same(l,u) && same(l,d) && same(i,u-spacing) && same(i,d+spacing)) {
+                        for(unsigned c=0;c<3;++c) rgba[i*4+c]=(unsigned(scratch[i*4+c])+scratch[l*4+c]+1)/2;
+                        resolved=true;break;
+                    }
+                }
+            }
+            if(resolved) continue;
+            if(!level) continue;
             const std::array neighbours{
                 std::size_t(y)*width+(x>=step?x-step:0U),
                 std::size_t(y)*width+std::min(x+step,width-1U),

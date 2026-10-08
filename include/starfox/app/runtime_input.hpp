@@ -180,7 +180,7 @@ struct PregameSettings {
     bool infinite_boost{};
     std::uint8_t default_laser{};
     std::uint8_t selected_level{};
-    std::uint8_t stereo_output{}; // 0=OFF, 1=HALF SBS, 2=FULL SBS.
+    std::uint8_t stereo_output{}; // OFF, HALF/FULL SBS, HALF/FULL TOP-BOTTOM.
     bool infinite_lives{};
     // Requested quality, independent of hardware/runtime availability.
     // 0=OFF, 1=QUALITY, 2=BALANCED, 3=PERFORMANCE, 4=DLAA.
@@ -192,6 +192,27 @@ struct PregameSettings {
     std::uint8_t material{};
     std::array<std::uint8_t,6> environment{};
     bool planet_select_cheat{};
+    bool fullscreen{true};
+    std::uint8_t aa_type{};
+    bool integer_scaling{};
+    std::uint8_t ray_tracing_quality{2};
+    std::array<std::uint8_t,3> extra_effects{};
+    std::uint32_t global_enhancements{};
+    std::uint8_t scene_enhancements{};
+    std::uint8_t depth_enhancements{};
+    std::uint8_t particle_enhancements{};
+    std::uint8_t phosphor_persistence{};
+    std::uint8_t adaptive_exposure{};
+    std::uint8_t water_caustics{};
+    std::uint8_t shadow_softness{2};
+    std::uint8_t camera_response{};
+    std::uint8_t volumetric_fog{};
+    std::uint16_t stereo_separation{16},stereo_convergence{1024};
+    std::uint16_t stereo_crosshair_depth{}; // 0 keeps the cartridge reticle at screen depth.
+    std::uint8_t motion_blur{}; // OFF/LOW/MEDIUM/HIGH, resident GPU velocity exposure.
+    std::uint8_t renderer_backend{}; // AUTO/Vulkan/D3D12/D3D11/Metal/GLES; host-only preference.
+    std::uint8_t dlss45_mode{}; // Separate from standard DLSS; OFF/QUALITY/BALANCED/PERFORMANCE/DLAA.
+    bool leia_sr{}; // Native desktop display preference, independent of hardware availability.
 
     [[nodiscard]] bool operator==(const PregameSettings&) const = default;
 };

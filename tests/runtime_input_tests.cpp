@@ -1,8 +1,17 @@
 #include "starfox/app/runtime_input.hpp"
+#include "starfox/app/atomic_file.hpp"
+#include "starfox/app/android_renderer_window.hpp"
+#include "starfox/app/presentation_capture.hpp"
+#include "starfox/app/gpu_launch_guard.hpp"
+#include "starfox/app/plain_ui_pixels.hpp"
 #include "starfox/app/touch_overlay.hpp"
 #include "starfox/input/buttons.hpp"
 #include "starfox/render/effect_types.hpp"
 #include "starfox/render/display_aspect.hpp"
+#include "starfox/render/renderer_backend.hpp"
+#include "starfox/render/dlss_preview_history.hpp"
+#include "starfox/render/dlss_menu_status.hpp"
+#include "starfox/render/reflection_menu_status.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -29,8 +38,160 @@ void require(bool condition, const char* message) {
 
 } // namespace
 
-int main() {
+#include "atomic_file_checks.inc"
+#include "android_renderer_window_checks.inc"
+
+int main(int argc, char** argv) {
+    if (argc == 3 && std::string_view{argv[1]} == "--atomic-write-interruption") {
+        const std::filesystem::path root{argv[2]};
+        if (!std::filesystem::is_directory(root)) return 2;
+        starfox::app::AtomicFile pending{root / "pregame.cfg"};
+        if (!pending.write("SFE_PREGAME_V14\nRENDERER_MODE ")) return 3;
+        // Parent stops this owned process after observing a live transaction.
+        { std::ofstream ready{root / "ready"}; ready << "temporary write live\n";
+          ready.close(); if (!ready) return 4; }
+        for (;;) SDL_Delay(25);
+    }
+    if (argc == 3 && std::string_view{argv[1]} == "--atomic-recover-settings") {
+        const std::filesystem::path path = std::filesystem::path{argv[2]} / "pregame.cfg";
+        starfox::app::PregameSettings settings;
+        if (!starfox::app::load_pregame_settings(path, settings)) return 5;
+        settings.renderer_mode = 1;
+        return !starfox::app::save_pregame_settings(path, settings);
+    }
+    check_atomic_files();
+    check_android_renderer_window();
+    {
+        starfox::app::PlainUiPixels cache;
+        std::array<std::uint8_t,4> pixels{0,1,2,255};
+        std::array<starfox::render::Rgba8,3> palette{{{3,4,5,0},{11,12,13,255},{21,22,23,10}}};
+        require(cache.update(2,2,pixels,palette),"First plain menu image was not expanded");
+        const std::array<std::uint8_t,16> expected{3,4,5,255,11,12,13,255,21,22,23,255,0,0,0,255};
+        require(std::equal(cache.rgba().begin(),cache.rgba().end(),expected.begin()),"Plain UI colours/opacity changed");
+        require(!cache.update(2,2,pixels,palette),"Unchanged plain menu expanded again");
+        palette[0].a=255;
+        require(!cache.update(2,2,pixels,palette),"Ignored host alpha invalidated plain menu");
+        palette[1].r=31;
+        require(cache.update(2,2,pixels,palette) && cache.rgba()[4]==31,"Changed palette left stale menu colours");
+        pixels[0]=1;
+        require(cache.update(2,2,pixels,palette) && cache.rgba()[0]==31,"Changed glyph left stale menu pixels");
+        require(cache.update(4,1,pixels,palette),"Same-count menu resize retained wrong extent");
+        require(!cache.update(4,1,pixels,palette),"Resized menu was not retained");
+        cache.invalidate();
+        require(cache.update(4,1,pixels,palette),"Renderer recreation did not invalidate menu pixels");
+        bool rejected=false;
+        try {cache.update(3,1,pixels,palette);} catch(const std::invalid_argument&) {rejected=true;}
+        require(rejected && !cache.update(4,1,pixels,palette),"Malformed extent corrupted retained menu");
+        require(cache.update(4,1,pixels,{}),"Missing palette retained stale colours");
+        require(cache.rgba()[0]==0 && cache.rgba()[3]==255,"Missing palette did not produce opaque black");
+    }
+    using starfox::render::dlss_menu_status;
+    require(dlss_menu_status(0,false,true,false,false,false,false)=="OFF","Disabled DLSS shows a failure");
+    for(unsigned mode=1;mode<=4;++mode) {
+        require(dlss_menu_status(mode,false,false,false,true,false)=="GPU REQUIRED",
+            "Software recovery hides the DLSS renderer prerequisite");
+        require(dlss_menu_status(mode,true,true,true,true,true)=="MONO ONLY","Stereo DLSS prerequisite missing");
+        require(dlss_menu_status(mode,true,false,false,true,false)=="DX12 REQUIRED",
+            "Vulkan is misreported as unsupported DLSS hardware");
+        require(dlss_menu_status(mode,true,false,true,false,false)=="NO RUNTIME","Missing runtime not identified");
+        require(dlss_menu_status(mode,true,false,true,true,false)=="UNSUPPORTED","Unsupported adapter accepted");
+        require(dlss_menu_status(mode,true,false,true,true,true,false)=="4.5 MISSING","Missing model ABI not identified");
+        require(dlss_menu_status(mode,true,false,true,true,true)==std::array<std::string_view,4>{
+            "QUALITY","BALANCED","PERFORMANCE","DLAA"}[mode-1],"Usable DLSS selection mislabeled");
+    }
+    require(dlss_menu_status(5,true,false,true,true,true)=="UNAVAILABLE","Invalid DLSS mode accepted");
+    for(unsigned mode=0;mode<=3;++mode) {
+        const auto label=std::array<std::string_view,4>{"OFF","LOW","MEDIUM","HIGH"}[mode];
+        for(bool ray_on:{false,true}) for(bool hardware:{false,true}) {
+            require(starfox::render::reflection_menu_status(mode,true,hardware,ray_on)==label,
+                "Software reflections incorrectly require hardware or RT");
+            require(starfox::render::reflection_menu_status(mode,false,hardware,ray_on)==
+                (!hardware?"NEEDS HW RT":!ray_on?"RT OFF":label),
+                "GPU reflection prerequisite mislabeled");
+        }
+    }
+    require(starfox::render::reflection_menu_status(4,true,false,false)=="UNAVAILABLE",
+        "Invalid reflection quality accepted");
+    {
+        starfox::render::DlssPreviewHistory preview;
+        for(unsigned frame=1;frame<=preview.sample_count;++frame) {
+            require(!preview.reusable(true,false,7),"DLSS preview reused an incomplete sampling cycle");
+            const auto jitter=preview.jitter(true,frame,7);
+            require(jitter==starfox::render::temporal_jitter(frame),"DLSS preview did not sample its reconstruction");
+            preview.evaluated(true,frame==1,7,jitter);
+        }
+        const auto held=preview.jitter(true,32,7);
+        require(preview.reusable(true,false,7),"Complete DLSS preview did not retain its neural output");
+        for(unsigned frame=33;frame<=128;++frame)
+            require(preview.jitter(true,frame,7)==held,"Retained DLSS preview continued changing its raster phase");
+        require(!preview.reusable(false,false,7) && !preview.reusable(true,true,7)
+            && !preview.reusable(true,false,8),"DLSS preview reused across gameplay/reset/settings change");
+        require(preview.jitter(false,33,7)==starfox::render::temporal_jitter(33),"DLSS preview froze gameplay jitter");
+        preview.evaluated(true,true,7,{.25F,.125F});
+        require(preview.samples()==1 && !preview.reusable(true,false,7),"SDK reset reused a stale frozen reconstruction");
+        preview.evaluated(false,false,7,{});
+        require(preview.samples()==0,"Gameplay retained frozen preview history");
+        preview.reset();
+        require(!preview.reusable(true,false,0),"Empty epoch-zero preview was published");
+    }
     using starfox::app::steam_virtual_gamepad_ids;
+    {
+        using starfox::app::presentation_capture_frame;
+        require(!presentation_capture_frame(0),"capture frame zero must be rejected");
+        for(std::uint64_t frame=1;frame<=128;++frame) {
+            require(presentation_capture_frame(frame,1,128,4)==((frame-1)%4==0),
+                "default sparse capture phases changed");
+            require(presentation_capture_frame(frame,65,96,1)==(frame>=65 && frame<=96),
+                "bounded consecutive capture missed a jitter phase");
+        }
+        require(!presentation_capture_frame(65,96,65),"reversed capture window accepted");
+        require(!presentation_capture_frame(65,0,96),"zero capture start accepted");
+        require(presentation_capture_frame(66,65,96,0),"zero interval must safely mean every frame");
+        require(presentation_capture_frame(UINT64_MAX,UINT64_MAX,UINT64_MAX),
+            "capture boundary arithmetic overflowed");
+    }
+    {
+        const auto root=std::filesystem::temp_directory_path()/
+            ("sfe-gpu-guard-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        std::filesystem::create_directory(root);
+        const auto config=root/"pregame.cfg";
+        {std::ofstream asset{root/"keep.bin"};asset<<"user asset";}
+        {starfox::app::GpuLaunchGuard guard{config,"pending"};
+            require(!guard.needs_safe_start() && guard.arm() && guard.armed(),"GPU guard did not arm");}
+        {starfox::app::GpuLaunchGuard guard{config,"pending"};
+            require(guard.needs_safe_start(),"GPU guard destructor erased interrupted-session evidence");
+            guard.disarm();require(!guard.needs_safe_start(),"completed GPU shutdown did not clear marker");}
+        {starfox::app::GpuLaunchGuard guard{config,"pending",true,"policy"};
+            require(guard.needs_safe_start(),"first Android policy must start safely");
+            guard.record_policy();require(!guard.needs_safe_start(),"Android policy was not recorded");
+            require(guard.arm(),"Android guard did not arm");}
+        {starfox::app::GpuLaunchGuard disabled{config,"pending",false};
+            require(!disabled.needs_safe_start() && disabled.arm(),"disabled test guard affected startup");
+            disabled.disarm();require(std::filesystem::exists(root/"pending"),"disabled guard removed session marker");}
+        {starfox::app::GpuLaunchGuard blocked{root/"keep.bin"/"pregame.cfg","pending"};
+            require(!blocked.arm(),"guard reported success when journal could not be written");}
+        std::filesystem::remove(root/"pending");
+        std::filesystem::create_directory(root/"pending");
+        {starfox::app::GpuLaunchGuard blocked{config,"pending",true,"policy"};
+            require(blocked.needs_safe_start() && !blocked.arm() && !blocked.armed(),
+                "blocked journal must reject GPU entry even with an existing policy");
+            blocked.disarm();
+            require(std::filesystem::is_directory(root/"pending") && blocked.needs_safe_start(),
+                "Software recovery removed an unrelated journal-path directory");}
+        std::filesystem::remove(root/"pending");
+        {starfox::app::GpuLaunchGuard retry{config,"pending",true,"policy"};
+            require(!retry.needs_safe_start() && retry.arm(),"GPU could not retry after storage recovered");
+            retry.disarm();require(!retry.armed() && !retry.needs_safe_start(),"successful Software switch retained marker");}
+        require(std::filesystem::exists(root/"keep.bin"),"GPU recovery deleted user assets");
+        for(const auto* filename:{"pending","policy","keep.bin"}) std::filesystem::remove(root/filename);
+        require(std::filesystem::remove(root),"guard test directory cleanup failed");
+        const auto choices=starfox::render::renderer_backend_choices();
+        for(unsigned i=0;i<choices.size();++i) {
+            require(starfox::render::renderer_backend_supported(choices[i]),"offered GPU backend unsupported");
+            require(starfox::render::cycle_renderer_backend(choices[i],false)==choices[(i+1)%choices.size()],"backend forward cycle");
+            require(starfox::render::cycle_renderer_backend(choices[i],true)==choices[(i+choices.size()-1)%choices.size()],"backend reverse cycle");
+        }
+    }
     {
         using starfox::app::TouchOverlayLayout;
         const auto layout=TouchOverlayLayout::make(852,393,{59,0,793,393});
@@ -171,6 +332,10 @@ int main() {
     }
     require(starfox::render::device_fitted_width(224,2400,1080,256,800)==498,
         "mobile canvas did not fill the display aspect");
+    require(starfox::render::device_fitted_width(224,1280,800,256,800)==358
+        && starfox::render::device_fitted_width(224,1920,1080,256,800)==398
+        && starfox::render::device_fitted_width(224,1024,768,256,800)==299,
+        "fit canvas did not follow desktop and handheld window sizes");
     require(starfox::render::device_fitted_width(224,0,1080,256,800)==256
         && starfox::render::device_fitted_width(224,8000,1080,256,800)==800,
         "mobile canvas did not handle missing or extreme dimensions");
@@ -273,6 +438,27 @@ int main() {
             && starfox::app::handheld_menu_layout_identity("Moorechip", "Retroid Pocket Flip")
             && !starfox::app::handheld_menu_layout_identity("Dell", "Latitude"),
             "handheld menu device identity was misclassified");
+    {
+        auto generic_description=description;
+        generic_description.vendor_id=0x045eU;generic_description.product_id=0x028eU;
+        generic_description.name="Indexed generic controller fixture";
+        const auto generic_id=SDL_AttachVirtualJoystick(&generic_description);
+        require(generic_id!=0,"generic player-order fixture could not attach");
+        auto* generic=SDL_OpenGamepad(generic_id);
+        require(generic && SDL_SetGamepadPlayerIndex(generic,0) && SDL_SetGamepadPlayerIndex(gamepad,1),
+            "indexed player-order fixture could not configure");
+        auto* preferred=starfox::app::open_preferred_gamepad();
+        require(preferred && SDL_GetGamepadID(preferred)==identifier,
+            "indexed generic pad displaced built-in Deck single-player controls");
+        SDL_CloseGamepad(preferred);
+        auto players=starfox::app::open_player_gamepads();
+        require(players.size()==2 && SDL_GetGamepadID(players[0])==generic_id
+            && SDL_GetGamepadID(players[1])==identifier,"single-player Deck priority changed multiplayer order");
+        for(auto* player:players) SDL_CloseGamepad(player);
+        SDL_CloseGamepad(generic);
+        require(SDL_DetachVirtualJoystick(generic_id) && SDL_SetGamepadPlayerIndex(gamepad,-1),
+            "player-order fixture could not restore virtual devices");
+    }
     for (const auto* virtual_name : {"Steam Input compatibility fixture",
                                     "Steam Deck Virtual Controller",
                                     "Steam Virtual Gamepad - Steam Deck"}) {
@@ -635,14 +821,58 @@ int main() {
         / "starfox-enhanced-pregame-test.cfg";
     require(starfox::app::PregameSettings{}.timing_mode == 1U,
             "new pre-game settings did not default to Original pace");
-    const starfox::app::PregameSettings saved_pregame{
-        1U, 90U, 3U, true, true,
+    require(starfox::app::PregameSettings{}.fullscreen,
+            "new settings must default to fullscreen");
+    starfox::app::PregameSettings saved_pregame{
+        1U, 90U, 5U, true, true,
         3U, true, false, true, 2U, true, 1U, true, false, 5U, 1U, 70U, 30U,
         3U, false, true, 7U, 60U, 6U, 40U};
+    saved_pregame.fullscreen = false;
+    saved_pregame.aa_type = 6;
+    saved_pregame.integer_scaling = true;
     require(starfox::app::save_pregame_settings(
                 pregame_test_path, saved_pregame),
             "pre-game settings could not be saved");
     auto loaded_pregame = starfox::app::PregameSettings{};
+    for(unsigned backend=0;backend<6;++backend) {
+        auto settings=saved_pregame;settings.renderer_backend=backend;
+        require(starfox::app::save_pregame_settings(pregame_test_path,settings)
+            && starfox::app::load_pregame_settings(pregame_test_path,loaded_pregame)
+            && loaded_pregame==settings,"GPU backend preference did not round trip");
+    }
+    for(unsigned mode=0;mode<5;++mode) {
+        auto settings=saved_pregame;settings.dlss45_mode=mode;
+        require(starfox::app::save_pregame_settings(pregame_test_path,settings)
+            && starfox::app::load_pregame_settings(pregame_test_path,loaded_pregame)
+            && loaded_pregame==settings,"separate DLSS 4.5 preference did not round trip");
+    }
+    {
+        require(starfox::app::save_pregame_settings(pregame_test_path,saved_pregame),"old DLSS config fixture");
+        std::ifstream current{pregame_test_path};std::string old,line;
+        while(std::getline(current,line)) {
+            if(line.starts_with("DLSS45_MODE ") || line.starts_with("RENDERER_BACKEND ")) continue;
+            old+=(line.starts_with("SFE_PREGAME_V")?"SFE_PREGAME_V13":line)+"\n";
+        }
+        current.close();{std::ofstream out{pregame_test_path,std::ios::trunc};out<<old;}
+        require(starfox::app::load_pregame_settings(pregame_test_path,loaded_pregame)
+            && loaded_pregame==saved_pregame,"legacy file reset unrelated settings or enabled new DLSS model");
+    }
+    {
+        auto invalid=saved_pregame;invalid.dlss45_mode=5;
+        require(!starfox::app::save_pregame_settings(pregame_test_path,invalid),"invalid DLSS 4.5 saved");
+        invalid=saved_pregame;invalid.dlss_mode=1;invalid.dlss45_mode=2;
+        require(!starfox::app::save_pregame_settings(pregame_test_path,invalid),"simultaneous DLSS models saved");
+        invalid=saved_pregame;invalid.renderer_backend=6;
+        require(!starfox::app::save_pregame_settings(pregame_test_path,invalid),"invalid GPU backend saved");
+    }
+    for(const auto* invalid:{"DLSS45_MODE 5","DLSS45_MODE -1","RENDERER_BACKEND 6","RENDERER_BACKEND -1","DLSS_MODE 1\nDLSS45_MODE 1"}) {
+        require(starfox::app::save_pregame_settings(pregame_test_path,saved_pregame),"DLSS/backend validation fixture");
+        {std::ofstream out{pregame_test_path,std::ios::app};out<<invalid<<'\n';}
+        auto unchanged=saved_pregame;
+        require(!starfox::app::load_pregame_settings(pregame_test_path,unchanged)
+            && unchanged==saved_pregame,"invalid DLSS/backend config partially replaced preferences");
+    }
+    require(starfox::app::save_pregame_settings(pregame_test_path,saved_pregame),"settings fixture restoration");
     require(starfox::app::load_pregame_settings(
                 pregame_test_path, loaded_pregame)
                 && loaded_pregame == saved_pregame,
@@ -689,14 +919,55 @@ int main() {
             && loaded_pregame == saved_pregame && loaded_pregame.stereo_output == 0,
             "pre-stereo settings did not default to OFF");
     }
-    for (std::uint8_t mode = 0; mode < 3; ++mode) {
+    for(const auto separation:{1U,16U,128U,512U}) for(const auto convergence:{16U,1024U,65535U}) {
+        auto settings=saved_pregame;
+        settings.stereo_separation=static_cast<std::uint16_t>(separation);
+        settings.stereo_convergence=static_cast<std::uint16_t>(convergence);
+        require(starfox::app::save_pregame_settings(pregame_test_path,settings)
+            && starfox::app::load_pregame_settings(pregame_test_path,loaded_pregame)
+            && loaded_pregame==settings,"stereo rig did not round-trip");
+    }
+    for(const auto entry:{"STEREO_SEPARATION 0", "STEREO_SEPARATION 513", "STEREO_CONVERGENCE 15", "STEREO_CONVERGENCE 65536"}) {
+        require(starfox::app::save_pregame_settings(pregame_test_path,saved_pregame),"stereo rig fixture");
+        {std::ofstream bad{pregame_test_path,std::ios::app};bad<<entry<<'\n';}
+        auto unchanged=saved_pregame;
+        require(!starfox::app::load_pregame_settings(pregame_test_path,unchanged)
+            && unchanged==saved_pregame,"invalid stereo rig accepted");
+    }
+    for (const auto depth : {0,16,2048,4096,65535}) {
+        auto settings=saved_pregame;settings.stereo_crosshair_depth=std::uint16_t(depth);
+        require(starfox::app::save_pregame_settings(pregame_test_path,settings)
+            && starfox::app::load_pregame_settings(pregame_test_path,loaded_pregame)
+            && loaded_pregame.stereo_crosshair_depth==depth,"reticle depth did not round trip");
+    }
+    for(const auto depth:{-1,1,15,65536}) {
+        require(starfox::app::save_pregame_settings(pregame_test_path,saved_pregame),"reticle validation fixture failed");
+        {std::ofstream bad{pregame_test_path,std::ios::app};bad<<"STEREO_CROSSHAIR_DEPTH "<<depth<<'\n';}
+        auto unchanged=saved_pregame;
+        require(!starfox::app::load_pregame_settings(pregame_test_path,unchanged) && unchanged==saved_pregame,
+            "invalid reticle depth accepted or mutated settings");
+    }
+    for (std::uint8_t mode = 0; mode < 10; ++mode) {
         auto settings = saved_pregame;
         settings.stereo_output = mode;
         require(starfox::app::save_pregame_settings(pregame_test_path, settings)
             && starfox::app::load_pregame_settings(pregame_test_path, loaded_pregame)
             && loaded_pregame == settings, "stereo output did not round-trip");
     }
-    for (const int invalid : {-1, 3, 256}) {
+    for(bool enabled:{false,true}) {
+        auto settings=saved_pregame;settings.leia_sr=enabled;
+        require(starfox::app::save_pregame_settings(pregame_test_path,settings)
+            && starfox::app::load_pregame_settings(pregame_test_path,loaded_pregame)
+            && loaded_pregame==settings,"native Leia preference did not round-trip");
+    }
+    for(int invalid:{-1,2,256}) {
+        require(starfox::app::save_pregame_settings(pregame_test_path,saved_pregame),"Leia validation fixture failed");
+        {std::ofstream bad{pregame_test_path,std::ios::app};bad<<"LEIA_SR "<<invalid<<'\n';}
+        auto unchanged=saved_pregame;
+        require(!starfox::app::load_pregame_settings(pregame_test_path,unchanged) && unchanged==saved_pregame,
+            "invalid native Leia preference accepted or mutated settings");
+    }
+    for (const int invalid : {-1, 10, 256}) {
         require(starfox::app::save_pregame_settings(pregame_test_path, saved_pregame),
             "could not write stereo validation fixture");
         std::ofstream bad{pregame_test_path, std::ios::app};
@@ -708,7 +979,7 @@ int main() {
     }
     {
         auto settings = saved_pregame;
-        settings.stereo_output = 3;
+        settings.stereo_output = 10;
         require(!starfox::app::save_pregame_settings(pregame_test_path, settings),
             "invalid stereo output saved");
     }
@@ -781,7 +1052,36 @@ int main() {
         require(!starfox::app::save_pregame_settings(pregame_test_path,invalid_reflection),
             "invalid reflection intensity saved");
         auto settings=saved_pregame;
+        settings.global_enhancements=0x02aaaaaaU;
+        settings.scene_enhancements=0xaa;
+        settings.depth_enhancements=15;
+        settings.particle_enhancements=15;
+        settings.phosphor_persistence=3;
+        settings.adaptive_exposure=2;
+        settings.water_caustics=3;
+        settings.shadow_softness=3;
+        settings.camera_response=57;
+        settings.volumetric_fog=3;
+        settings.motion_blur=3;
+        auto invalid_blur=settings;invalid_blur.motion_blur=4;
+        require(!starfox::app::save_pregame_settings(pregame_test_path,invalid_blur),"invalid motion blur saved");
+        auto invalid_fog=settings;invalid_fog.volumetric_fog=4;
+        require(!starfox::app::save_pregame_settings(pregame_test_path,invalid_fog),"invalid volumetric fog saved");
+        auto invalid_camera=settings;invalid_camera.camera_response=64;
+        require(!starfox::app::save_pregame_settings(pregame_test_path,invalid_camera),"invalid camera response accepted");
+        auto invalid_softness=settings;invalid_softness.shadow_softness=4;
+        require(!starfox::app::save_pregame_settings(pregame_test_path,invalid_softness),"invalid shadow softness saved");
+        auto invalid_caustics=settings;invalid_caustics.water_caustics=4;
+        require(!starfox::app::save_pregame_settings(pregame_test_path,invalid_caustics),
+            "invalid water caustics quality saved");
         settings.ray_tracing=ray_tracing;
+        for(std::uint8_t quality=1;quality<=3;++quality) {
+            settings.ray_tracing_quality=quality;
+            settings.motion_blur=quality;
+            require(starfox::app::save_pregame_settings(pregame_test_path,settings)
+                && starfox::app::load_pregame_settings(pregame_test_path,loaded_pregame)
+                && loaded_pregame==settings,"ray quality config round trip failed");
+        }
         require(starfox::app::save_pregame_settings(pregame_test_path,settings),
             "could not write shadow migration fixture");
         std::ofstream legacy{pregame_test_path,std::ios::app};
@@ -797,6 +1097,20 @@ int main() {
         settings.language = 6;
         require(!starfox::app::save_pregame_settings(pregame_test_path, settings),
             "invalid language setting was saved");
+    }
+    for (std::uint8_t scale = 0; scale < 10; ++scale) {
+        auto settings = saved_pregame;
+        settings.render_scale = scale;
+        require(starfox::app::save_pregame_settings(pregame_test_path, settings)
+            && starfox::app::load_pregame_settings(pregame_test_path, loaded_pregame)
+            && loaded_pregame.render_scale == scale,
+            "render scale configuration override did not round trip");
+    }
+    {
+        auto settings = saved_pregame;
+        settings.render_scale = 10;
+        require(!starfox::app::save_pregame_settings(pregame_test_path, settings),
+            "out-of-range render scale saved");
     }
     for (std::uint8_t style = 0; style < starfox::render::effect_count; ++style) {
         auto settings = saved_pregame;
@@ -815,6 +1129,9 @@ int main() {
         if(starfox::render::material(static_cast<starfox::render::Effect>(style))) {
             settings.effect=0;settings.material=style;
         }
+        if(starfox::render::special_fx(static_cast<starfox::render::Effect>(style))) {settings.effect=0;settings.extra_effects[1]=style;}
+        if(starfox::render::manipulation(static_cast<starfox::render::Effect>(settings.world_effect))) {if(!starfox::render::persistence_mode(static_cast<starfox::render::Effect>(settings.world_effect))) settings.extra_effects[0]=settings.world_effect;settings.world_effect=0;}
+        if(starfox::render::special_fx(static_cast<starfox::render::Effect>(settings.world_effect))) {settings.extra_effects[2]=settings.world_effect;settings.world_effect=0;}
         require(loaded_pregame==settings,"model/world styles or legacy manipulation migration failed");
         settings.effect=1;settings.manipulation=unsigned(starfox::render::Effect::checker_fold);
         settings.manipulation_intensity=60;
@@ -933,9 +1250,11 @@ int main() {
     loaded_layouts = {};
     require(starfox::app::load_hud_layout(layout_test_path, loaded_layouts)
                 && loaded_layouts[0][starfox::render::HudElement::lives].x == 1
-                && loaded_layouts[5][starfox::render::HudElement::lives].x == 1
+                && loaded_layouts[6][starfox::render::HudElement::lives].x == 1
+                && loaded_layouts[5][starfox::render::HudElement::lives].x == 0
+                && loaded_layouts[11][starfox::render::HudElement::lives].x == 0
                 && loaded_layouts[4][starfox::render::HudElement::comms].x == 5
-                && loaded_layouts[9][starfox::render::HudElement::comms].x == 5,
+                && loaded_layouts[10][starfox::render::HudElement::comms].x == 5,
             "legacy HUD layouts were not migrated into both experiences");
     std::error_code layout_remove_error;
     std::filesystem::remove(layout_test_path, layout_remove_error);

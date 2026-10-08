@@ -1,6 +1,10 @@
 // Two compute passes. Only the compact camera/matrix/start words are uploaded.
 // Output uses the same row-list ABI as the independent CPU reference.
+#if defined(STARFOX_SDL_CONNECTED_GRID)
+RWStructuredBuffer<uint> grid_output : register(u0,space1);
+#else
 [[vk::binding(1,0)]] RWStructuredBuffer<uint> grid_output;
+#endif
 static const uint grid_lists=384+225*15;
 static const uint grid_points=grid_lists+192*675;
 int grid_word(int value) {return (value<<16)>>16;}

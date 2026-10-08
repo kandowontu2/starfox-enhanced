@@ -1,8 +1,10 @@
 #pragma once
 #include "starfox/vr/draw_packet.hpp"
+#include <vulkan/vulkan.h>
 #include <memory>
 
 namespace starfox::vr {
+class VulkanPipelineCache;
 // Immutable GPU geometry with replaceable model transforms. Keep alive until
 // both eyes' fences complete. Successful
 // replacement/close also requires completed GPU use; failed initialization

@@ -95,6 +95,27 @@ int starfox_dlss_release_viewport_v1(void* module,uint32_t viewport,char* error,
         check(api<PFun_slFreeResources>(active,"slFreeResources")(sl::kFeatureDLSS,sl::ViewportHandle{viewport}),"Release DLSS viewport");
     },error,capacity);
 }
+int starfox_dlss_finish_frame_v1(void* module,char* error,uint32_t capacity) {
+    return guarded([&] {
+        require_active(module);check(bound.Get()!=nullptr,"Bind device before SDK frame-end");
+        // Streamline 2.14.1 exports these hooks from sl.common through its
+        // normal feature-function gateway. Their signatures and nullptr-safe
+        // swapchain handling are defined in commonEntry/commonInterface.cpp.
+        // Only the common plugin is requested: no DLSS-G/DXGI presentation,
+        // replacement swapchain, private symbol or second SDK is involved.
+        using Before=HRESULT(IDXGISwapChain*,UINT,UINT,bool&);
+        using After=HRESULT(UINT);
+        void *before{},*after{};
+        auto get=api<PFun_slGetFeatureFunction>(active,"slGetFeatureFunction");
+        check(get(sl::kFeatureCommon,"slHookPresent",before),"SDK common before-present hook");
+        check(get(sl::kFeatureCommon,"slHookAfterPresent",after),"SDK common after-present hook");
+        check(before && after,"SDK frame-end hooks unavailable");
+        bool skip=false;
+        check(SUCCEEDED(reinterpret_cast<Before*>(before)(nullptr,0,0,skip)) && !skip,
+            "SDK common before-present failed");
+        check(SUCCEEDED(reinterpret_cast<After*>(after)(0)),"SDK common after-present failed");
+    },error,capacity);
+}
 int starfox_dlss_close_v1(void* module,char* error,uint32_t capacity) {
     return guarded([&] {require_active(module);
         check(swapchains.empty(),"Restore DLSS swapchains before shutdown");

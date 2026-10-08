@@ -9,7 +9,7 @@ constexpr std::uint32_t presentation_width(std::uint32_t width,
     return height && std::uint64_t(width)*224U==std::uint64_t(height)*256U
         ? static_cast<std::uint32_t>((std::uint64_t(height)*4U+1U)/3U) : width;
 }
-// A mobile widescreen canvas should contain the whole display rather than
+// A fitted canvas should contain the whole window or display rather than
 // letterbox a desktop preset. Keep the source raster height and grow only its
 // horizontal field of view; round to the nearest source pixel.
 constexpr std::uint32_t device_fitted_width(std::uint32_t raster_height,

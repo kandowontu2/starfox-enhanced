@@ -76,7 +76,7 @@ void ScaledTextRenderer::draw_unicode(std::u32string_view text,
             } else if (latin.base != U' ') {
                 const auto index = rom_->read8(game_font_translation_ + latin.base - 32U);
                 draw_cartridge_glyph(*rom_,game_font_glyphs_+index*24U,target,x,y,advance,ink);
-                const auto centre = x + std::max(1, (advance - 1) / 2);
+                const auto centre = x + std::max<std::int32_t>(1, (advance - 1) / 2);
                 switch (latin.accent) {
                 case U'\u0301': target.set(centre + 1,y - 2,ink); target.set(centre,y - 1,ink); break;
                 case U'\u0300': target.set(centre - 1,y - 2,ink); target.set(centre,y - 1,ink); break;

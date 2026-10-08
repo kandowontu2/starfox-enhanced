@@ -45,16 +45,18 @@ class Framebuffer {
 public:
     Framebuffer(std::uint32_t width, std::uint32_t height,
         std::uint32_t draw_scale = 1U)
-        : stored_width_(width * std::max(1U, draw_scale)),
-          stored_height_(height * std::max(1U, draw_scale)),
-          draw_scale_(std::max(1U, draw_scale)),
+        : stored_width_(width * std::max<std::uint32_t>(1, draw_scale)),
+          stored_height_(height * std::max<std::uint32_t>(1, draw_scale)),
+          draw_scale_(std::max<std::uint32_t>(1, draw_scale)),
           pixels_(static_cast<std::size_t>(stored_width_) * stored_height_) {}
 
     [[nodiscard]] std::uint32_t width() const noexcept {
-        return stored_width_ / draw_scale_;
+        // Native raster passes use 1x. ARM11 has no integer divide, and these
+        // bounds are consulted by every ordinary pixel write.
+        return draw_scale_ == 1U ? stored_width_ : stored_width_ / draw_scale_;
     }
     [[nodiscard]] std::uint32_t height() const noexcept {
-        return stored_height_ / draw_scale_;
+        return draw_scale_ == 1U ? stored_height_ : stored_height_ / draw_scale_;
     }
     [[nodiscard]] std::uint32_t stored_width() const noexcept {
         return stored_width_;
@@ -75,6 +77,27 @@ public:
     // detect black or same-colour foreground writes.
     void mark_written(std::size_t first,std::size_t count=1) noexcept {
         if(track_coverage_) std::fill_n(coverage_.begin()+first,count,std::uint8_t{1});
+        if(!dither_pairs_.empty()) std::fill_n(dither_pairs_.begin()+first,count,std::uint16_t{0});
+    }
+    // Optional source-material provenance for software upscale presentation.
+    // Ordinary writes erase it; a flat-face writer annotates after its write.
+    // Keeping allocation explicit avoids any extra storage at native 1x.
+    void enable_dither_pairs(bool enabled) {
+        if(enabled) {if(dither_pairs_.empty()) dither_pairs_.assign(pixels_.size(),0);}
+        else {std::vector<std::uint16_t>{}.swap(dither_pairs_);}
+    }
+    [[nodiscard]] std::span<const std::uint16_t> dither_pairs() const noexcept {return dither_pairs_;}
+    void clear_dither_pairs() noexcept {std::fill(dither_pairs_.begin(),dither_pairs_.end(),std::uint16_t{0});}
+    void set_dither_alternate(std::size_t index,std::uint8_t alternate) noexcept {
+        if(index<dither_pairs_.size()) dither_pairs_[index]=0x100U|alternate;
+    }
+    void annotate_dither(std::int32_t x,std::int32_t y,std::uint8_t even,std::uint8_t odd) noexcept {
+        if(dither_pairs_.empty() || layer_override_!=0 || even==odd || x<0 || y<0
+            || std::uint32_t(x)>=width() || std::uint32_t(y)>=height()) return;
+        for(unsigned row=0;row<draw_scale_;++row) for(unsigned column=0;column<draw_scale_;++column) {
+            const auto i=std::size_t(std::uint32_t(y)*draw_scale_+row)*stored_width_+std::uint32_t(x)*draw_scale_+column;
+            set_dither_alternate(i,pixels_[i]==even?odd:even);
+        }
     }
     // Repartitions the same storage between source-raster and stored extents.
     void set_draw_scale(std::uint32_t draw_scale) noexcept {
@@ -132,6 +155,7 @@ public:
         pixels_.assign(
             static_cast<std::size_t>(stored_width_) * stored_height_, 0U);
         if(track_coverage_) coverage_.assign(pixels_.size(),1);
+        if(!dither_pairs_.empty()) dither_pairs_.assign(pixels_.size(),0);
         if (layer_tags_enabled_) {
             tags_.assign(pixels_.size(),
                 static_cast<std::uint8_t>(PixelLayer::three_d));
@@ -223,10 +247,83 @@ public:
         }
     }
 
+    // A borrowed, bounded native PPU row. Callers iterate inside its width and
+    // must not resize/reconfigure the framebuffer while the view is alive.
+    // Unlike decoded tile ink, set() writes opaque index zero too. The fast
+    // contract includes coverage and ownership; other callers retain set().
+    struct NativeIndexedRow {
+        std::span<std::uint8_t> pixels, coverage, tags;
+        std::uint8_t tag{};
+        explicit operator bool() const noexcept { return !pixels.empty(); }
+        void set(std::size_t x, std::uint8_t colour) const noexcept {
+            pixels[x] = colour; coverage[x] = 1; tags[x] = tag;
+        }
+    };
+    [[nodiscard]] NativeIndexedRow native_indexed_row(std::uint32_t y) noexcept {
+        if (commands_ || draw_scale_ != 1U || !track_coverage_
+            || !layer_tags_enabled_ || !dither_pairs_.empty() || y >= stored_height_)
+            return {};
+        const auto offset = std::size_t(y) * stored_width_;
+        return {std::span(pixels_).subspan(offset, stored_width_),
+            std::span(coverage_).subspan(offset, stored_width_),
+            std::span(tags_).subspan(offset, stored_width_), write_tag(PixelLayer::two_d)};
+    }
+
+    // An already decoded cartridge tile row: ink zero is transparent, but a
+    // nonzero index whose CGRAM colour is black remains an ordinary write.
+    // Clip once and retain the same ordered point commands/scaled writes as
+    // set(). Native PPU rasters have coverage + tags and no dither metadata.
+    void set_indexed_row(std::int32_t x, std::int32_t y,
+        std::span<const std::uint8_t> colours) noexcept {
+        if (y < 0 || std::uint32_t(y) >= height() || colours.empty()) return;
+        const auto first = std::max<std::int64_t>(0, -std::int64_t(x));
+        const auto last = std::min<std::int64_t>(colours.size(), std::int64_t(width()) - x);
+        if (first >= last) return;
+        const auto begin_x = std::int32_t(std::int64_t(x) + first);
+        const auto count = std::size_t(last - first);
+        const auto* source = colours.data() + first;
+        if (!commands_ && draw_scale_ == 1U && track_coverage_
+            && layer_tags_enabled_ && dither_pairs_.empty()) {
+            const auto offset = std::size_t(y) * stored_width_ + unsigned(begin_x);
+            auto* destination = pixels_.data() + offset;
+            auto* coverage = coverage_.data() + offset;
+            auto* tags = tags_.data() + offset;
+            const auto tag = write_tag(PixelLayer::two_d);
+            for (std::size_t i = 0; i < count; ++i) if (source[i] != 0U) {
+                destination[i] = source[i]; coverage[i] = 1; tags[i] = tag;
+            }
+            return;
+        }
+        for (std::size_t i = 0; i < count; ++i) if (source[i] != 0U)
+            set(begin_x + std::int32_t(i), y, source[i]);
+    }
+
     [[nodiscard]] std::uint8_t get(std::uint32_t x, std::uint32_t y) const noexcept {
         return pixels_[
             static_cast<std::size_t>(y * draw_scale_) * stored_width_
             + x * draw_scale_];
+    }
+
+    // A repeated opaque indexed write, including index zero. Unlike tile ink,
+    // zero here closes the tunnel wall and must mark coverage and clear dither.
+    // Recording/scaled callers keep the exact sequence of ordinary point writes.
+    void set_solid_indexed_row(std::int32_t x, std::int32_t y,
+        std::uint32_t count, std::uint8_t colour) noexcept {
+        if (y < 0 || std::uint32_t(y) >= height() || !count) return;
+        const auto first = std::max<std::int64_t>(0, -std::int64_t(x));
+        const auto last = std::min<std::int64_t>(count, std::int64_t(width()) - x);
+        if (first >= last) return;
+        const auto begin_x = std::int32_t(std::int64_t(x) + first);
+        const auto length = std::size_t(last - first);
+        if (!commands_ && draw_scale_ == 1U) {
+            const auto offset = std::size_t(y) * stored_width_ + unsigned(begin_x);
+            std::fill_n(pixels_.begin() + offset, length, colour);
+            mark_written(offset, length);
+            if (layer_tags_enabled_)
+                std::fill_n(tags_.begin() + offset, length, write_tag(PixelLayer::two_d));
+            return;
+        }
+        for (std::size_t i = 0; i < length; ++i) set(begin_x + std::int32_t(i), y, colour);
     }
 
     // Stored writes come from layer compositing, where the tag belongs to the
@@ -255,6 +352,7 @@ public:
     // a restored frame filters exactly like the frame it was captured from.
     void copy_pixels_from(const Framebuffer& source) {
         pixels_ = source.pixels_;
+        dither_pairs_=source.dither_pairs_;
         if(track_coverage_) coverage_.assign(pixels_.size(),1);
         if (!layer_tags_enabled_) return;
         if (source.layer_tags_enabled_ && source.tags_.size() == pixels_.size()) {
@@ -282,6 +380,7 @@ private:
     std::uint32_t draw_scale_{1U};
     std::vector<std::uint8_t> pixels_;
     std::vector<std::uint8_t> tags_;
+    std::vector<std::uint16_t> dither_pairs_;
     bool layer_tags_enabled_{false};
     std::int8_t layer_override_{-1};
     RasterCommands* commands_{};
@@ -328,7 +427,7 @@ struct LayerCompositeSettings {
 };
 
 void composite_transparent_layer(const Framebuffer& source,
-    Framebuffer& destination, const LayerCompositeSettings& settings) noexcept;
+    Framebuffer& destination, const LayerCompositeSettings& settings);
 
 void write_bmp(const Framebuffer& framebuffer, const std::filesystem::path& path);
 void write_bmp(

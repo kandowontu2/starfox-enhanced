@@ -57,8 +57,23 @@ cbuffer Settings : register(b0) {
     float4 scrollFraction;
     float4 groundGradientFar;
     float4 groundGradientNear;
+#if defined(STARFOX_SDL_GPU)
+};
+// SDL Vulkan binds at most 4096 bytes per uniform block. Keep scene data in
+// a second block instead of silently reading zero beyond that descriptor.
+cbuffer SceneSettings : register(b1, space2) {
+#endif
+    float4 sceneCamera;
+    float4 sceneData[144];
+    uint4 depthModes;
+    float4 depthCamera;
 };
 #include "environment_material.hlsli"
+#define FX_MIN min
+#define FX_MAX max
+#include "../../../include/starfox/render/special_fx.inc"
+#undef FX_MIN
+#undef FX_MAX
 #if defined(STARFOX_SDL_GPU)
 uint backdropWord(uint address) {return setupPixels.Load(address);}
 #else
@@ -113,6 +128,24 @@ bool art(uint2 p) { uint t=tag(p); return t==1 || t==2 || t==4; }
 // texels (especially CRT scanlines) untouched, just like HUD and backdrop art.
 bool aaEligible(uint2 p) { uint t=tag(p); return t==0 || t==3 || t==5; }
 uint4 colour(uint2 p) { return uint4(inputImage.Load(int3(p,0))*255+.5); }
+// The physical ground ray owns only these visible source pixels. Share this
+// exact classifier between the reference resolve and its environment fusion;
+// unclassified lava, protected artwork and model-ray markers must not drift.
+bool groundRayReceiver(uint2 p) {
+    uint layer=tag(p);
+    if(layer!=2 && layer!=5) return false;
+    uint i=indexOf(p);
+    uint index=reserved==1?(indexedPixels.Load(i*4)&255u):(indexedPixels.Load(i&~3u)>>((i&3u)*8))&255u;
+    uint kind=layer==5?uint(environmentPlane.y):environmentClasses[index/4][index%4];
+    if(environmentModes.x==10 && layer==2 && (kind==0 || kind==6)
+        && environmentPlane.y>=1 && environmentPlane.y<=5) {
+        float x=(float(p.x)+.5)/float(scale)-float(width)/float(scale)*.5;
+        float y=(float(p.y)+.5)/float(scale);
+        if(y>=environmentMotion.x+environmentPlane.x*x) kind=uint(environmentPlane.y);
+    }
+    return kind>=1 && kind<=5 && ((environmentModes.x>=6 && environmentModes.x<=8)
+        || environmentModes.x==10 || (environmentModes.x==1 && kind==5));
+}
 uint luminance(uint4 c) { return (c.r*77+c.g*150+c.b*29)/256; }
 uint2 bounded(int2 p) { return uint2(clamp(p,int2(0,0),int2(width-1,height-1))); }
 uint4 manipulationSample(int2 at,uint2 original) {
@@ -120,6 +153,25 @@ uint4 manipulationSample(int2 at,uint2 original) {
     return tag(n)==1 || world(n)!=world(original)?colour(original):colour(n);
 }
 static const int bayer[16]={0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5};
+float globalSample(float x,float y,uint channel,uint2 original) {
+    float2 at=clamp(float2(x,y),0.f,float2(width-1,height-1));
+    uint2 a=uint2(at);float2 f=at-float2(a);float value=0;
+    [unroll] for(uint dy=0;dy<2;++dy) [unroll] for(uint dx=0;dx<2;++dx) {
+        uint2 n=min(a+uint2(dx,dy),uint2(width-1,height-1));
+        if(tag(n)==1) n=original;
+        value+=float(colour(n)[channel])*(dx?f.x:1-f.x)*(dy?f.y:1-f.y);
+    }
+    return value/255.f;
+}
+float globalChannel(float x,float y,float w,float h,float step,float seconds,uint packed,uint channel) {
+#define G_MIN min
+#define G_MAX max
+#define G_SAMPLE(a,b) globalSample(a,b,channel,uint2(x,y))
+#include "../../../include/starfox/render/global_enhancements.inc"
+#undef G_SAMPLE
+#undef G_MIN
+#undef G_MAX
+}
 bool surfaceAt(int2 p,out float4 sample) {
     sample=0;
     int2 local=p-int2(surfaceX,surfaceY);
@@ -134,6 +186,67 @@ bool surfaceAt(int2 p,out float4 sample) {
     uint palette=(indexedPixels.Load(i & ~3u)>>((i & 3u)*8)) & 255u;
     if((flags & 0xff00)==0 || (flags & 255)!=palette) return false;
     sample=asfloat(surfaces.Load4(base)); return true;
+}
+float depthSurface(float x,float y,uint field) {
+    int2 p=int2(x,y);float4 s;
+    if(any(p<0) || p.x>=int(width) || p.y>=int(height) || tag(uint2(p))==1 || !surfaceAt(p,s)) return 0;
+    return s[field];
+}
+float depthAmbient(float x,float y) {
+    uint modes=depthModes.x;
+#define D_MIN min
+#define D_MAX max
+#define D_SURFACE(a,b,c) depthSurface(a,b,c)
+#define D_CAMERA(i) depthCamera[i]
+#define D_LOOP [loop]
+#include "../../../include/starfox/render/ambient_occlusion.inc"
+#undef D_LOOP
+#undef D_CAMERA
+#undef D_SURFACE
+#undef D_MIN
+#undef D_MAX
+}
+float depthChannel(float x,float y,uint channel,float ambient) {
+    uint modes=depthModes.x;
+#define D_MIN min
+#define D_MAX max
+#define D_COLOUR(a,b) globalSample(a,b,channel,uint2(x,y))
+#define D_SURFACE(a,b,c) depthSurface(a,b,c)
+#define D_CAMERA(i) depthCamera[i]
+#include "../../../include/starfox/render/depth_enhancements.inc"
+#undef D_CAMERA
+#undef D_SURFACE
+#undef D_COLOUR
+#undef D_MIN
+#undef D_MAX
+}
+float sceneSample(float x,float y,uint channel,uint2 original) {
+    return globalSample(x,y,channel,original);
+}
+float sceneHeatSample(float x,float y,uint channel,uint2 original,float focus,float range,float plume) {
+    float2 at=clamp(float2(x,y),0.f,float2(width-1,height-1));uint2 base=uint2(at);float2 f=frac(at);
+    float result=0;
+    for(uint dy=0;dy<2;++dy) for(uint dx=0;dx<2;++dx) {
+        uint2 n=min(base+uint2(dx,dy),uint2(width-1,height-1));float4 s;
+        if(tag(n)==1 || (range>0 && surfaceAt(int2(n),s) && (s.w+8<plume || abs(s.w-focus)<range))) n=original;
+        result+=float(colour(n)[channel])/255.f*(dx?f.x:1-f.x)*(dy?f.y:1-f.y);
+    }
+    return result;
+}
+float sceneChannel(float x,float y,uint channel,float depth,float normal_x,float normal_y,float normal_z) {
+#define S_MIN min
+#define S_MAX max
+#define S_SAMPLE(a,b) sceneSample(a,b,channel,uint2(x,y))
+#define S_HEAT_SAMPLE(a,b,f,r,z) sceneHeatSample(a,b,channel,uint2(x,y),f,r,z)
+#define S_DATA(i,j) sceneData[i][j]
+#define S_CAMERA(i) sceneCamera[i]
+#include "../../../include/starfox/render/scene_enhancements.inc"
+#undef S_CAMERA
+#undef S_DATA
+#undef S_SAMPLE
+#undef S_HEAT_SAMPLE
+#undef S_MIN
+#undef S_MAX
 }
 uint4 sourceCell(int2 p) {
     p=clamp(p,int2(0,0),int2(width/scale-1,height/scale-1));
@@ -177,10 +290,72 @@ uint4 filterSample(uint2 p,uint factor) {
     return uint4(uint3(clamp(value+.5,0,255)),uint(alpha+.5));
 }
 
+#if defined(STARFOX_SDL_GPU)
+groupshared uint exposureHistogram[64];
+float exposureLinear(float v) {return v<=.04045?v/12.92:pow((v+.055)/1.055,2.4);}
+float exposureEncoded(float v) {return v<=.0031308?v*12.92:1.055*pow(v,1./2.4)-.055;}
+#endif
 [numthreads(8,8,1)]
-void main(uint3 id : SV_DispatchThreadID) {
+void main(uint3 id : SV_DispatchThreadID,uint3 group : SV_GroupID,uint lane : SV_GroupIndex) {
     uint2 p=id.xy;
 #if defined(STARFOX_SDL_GPU)
+    // 32x32-pixel tiles, 64-bin local histograms. Every scene pixel is metered
+    // exactly once. Only tile histograms and a one-pixel state remain on GPU.
+    if(stage==36) {
+        exposureHistogram[lane]=0;
+        GroupMemoryBarrierWithGroupSync();
+        for(uint y=0;y<4;++y) for(uint x=0;x<4;++x) {
+            uint2 at=group.xy*32+uint2(lane%8,lane/8)+uint2(x,y)*8;
+            if(at.x>=width || at.y>=height || tag(at)==1) continue;
+            float4 c=inputImage.Load(int3(at,0));
+            if(c.a==0) continue;
+            float luminance=dot(float3(exposureLinear(c.r),exposureLinear(c.g),exposureLinear(c.b)),float3(.2126,.7152,.0722));
+            if(luminance<1./1024) continue;
+            uint bin=uint(clamp(int((log2(luminance)+10)*6.4),0,63));
+            InterlockedAdd(exposureHistogram[bin],1);
+        }
+        GroupMemoryBarrierWithGroupSync();
+        bloomOutput[uint2(lane,group.y*((width+31)/32)+group.x)]=float4(exposureHistogram[lane],0,0,0);
+        return;
+    }
+    if(stage==37) {
+        uint total=0,tiles=((width+31)/32)*((height+31)/32);
+        for(uint tile=0;tile<tiles;++tile) total+=uint(bloomInput.Load(int3(lane,tile,0)).r);
+        exposureHistogram[lane]=total;
+        GroupMemoryBarrierWithGroupSync();
+        if(lane==0) {
+            uint samples=0;
+            for(uint b=0;b<64;++b) samples+=exposureHistogram[b];
+            uint trim=samples/20,cumulative=0,accepted=0;float sum=0;
+            for(uint b=0;b<64;++b) {
+                uint end=cumulative+exposureHistogram[b];
+                uint first=max(cumulative,trim),last=min(end,samples-trim);
+                if(last>first) {accepted+=last-first;sum+=float(last-first)*(-10+(float(b)+.5)/6.4);}
+                cumulative=end;
+            }
+            float limit=.5*float(pad1);
+            float target=accepted!=0?clamp(log2(.18)-sum/accepted,-limit,limit):0;
+            float stops=0;
+            if(chromatic==0) {
+                stops=bloomCore.Load(int3(0,0,0)).r;
+                float tau=target<stops?.25:.8;
+                stops+=(target-stops)*(1-exp(-asfloat(pad0)/tau));
+            }
+            bloomOutput[uint2(0,0)]=float4(stops,0,0,0);
+        }
+        return;
+    }
+    if(stage==38) {
+        if(p.x>=width || p.y>=height) return;
+        float4 c=inputImage.Load(int3(p,0));
+        float stops=bloomInput.Load(int3(0,0,0)).r;
+        if(tag(p)!=1 && c.a!=0 && stops!=0) {
+            float gain=exp2(stops);
+            c.rgb=float3(exposureEncoded(min(1,exposureLinear(c.r)*gain)),
+                exposureEncoded(min(1,exposureLinear(c.g)*gain)),exposureEncoded(min(1,exposureLinear(c.b)*gain)));
+        }
+        outputImage[p]=c;return;
+    }
     if(stage==28) {
         if(p.x>=width/scale || p.y>=height/scale) return;
         uint i=uint(pad0)+p.y*(width/scale)+p.x;
@@ -233,7 +408,87 @@ void main(uint3 id : SV_DispatchThreadID) {
     }
     if(p.x>=width || p.y>=height) return;
     uint4 c=colour(p), result=c;
-    if(stage==31) {
+    if(stage==40) {
+        if(tag(p)!=1 && c.a!=0) {
+            float4 fog=asfloat(shadowMask.Load4(indexOf(p)*16));
+            [unroll] for(uint ch=0;ch<3;++ch) {
+                float v=float(c[ch])/255;
+                float radiance=v<=.04045?v/12.92:pow((v+.055)/1.055,2.4);
+                radiance=saturate(radiance*fog.a+fog[ch]);
+                float encoded=radiance<=.0031308?radiance*12.92:1.055*pow(radiance,1/2.4)-.055;
+                result[ch]=uint(saturate(encoded)*255+.5);
+            }
+        }
+    } else if(stage==39) {
+        float2 center=environmentMotion.xy,focal=environmentMotion.zw;
+        float3 ray=float3((float2(p)-center)/(focal*environmentPlane.x),1);
+        float3 rotated=float3(dot(backdropProjection.xyz,ray),dot(backdropKeep0.xyz,ray),dot(backdropKeep1.xyz,ray));
+        float2 source=clamp(center+focal*rotated.xy/rotated.z,0,float2(width-1,height-1));
+        uint2 a=uint2(source),b=min(a+1,uint2(width-1,height-1));
+        float2 weight=source-float2(a);
+        result=uint4(lerp(lerp(float4(colour(a)),float4(colour(uint2(b.x,a.y))),weight.x),
+            lerp(float4(colour(uint2(a.x,b.y))),float4(colour(b)),weight.x),weight.y)+.5);
+    } else if(stage==35) {
+        if(tag(p)!=1) {
+            float ambient=depthAmbient(float(p.x),float(p.y));
+            [unroll] for(uint ch=0;ch<3;++ch) result[ch]=uint(depthChannel(float(p.x),float(p.y),ch,ambient)*255.f+.5f);
+        }
+    } else if(stage==34) {
+        if(tag(p)!=1) {
+            float4 surface;bool valid=surfaceAt(int2(p),surface);
+            [unroll] for(uint ch=0;ch<3;++ch) result[ch]=uint(sceneChannel(float(p.x),float(p.y),ch,valid?surface.w:0,surface.x,surface.y,surface.z)*255.f+.5f);
+        }
+    } else if(stage==33) {
+        if(tag(p)!=1) {
+            [unroll] for(uint ch=0;ch<3;++ch) result[ch]=uint(globalChannel(float(p.x),float(p.y),float(width),float(height),float(scale),asfloat(pad1),uint(pad0),ch)*255.f+.5f);
+        }
+    } else if(stage==41) {
+        // inputImage is stage 31's completed scenery, including enhanced sky,
+        // palette fades and fractional scrolling. The immutable source makes
+        // this resolve independent of workgroup order and nonrecursive.
+        uint index=paletteIndex(p);
+        uint kind=environmentClasses[index/4][index%4];
+        bool receiver=tag(p)==2 && kind>=1 && kind<=5
+            && ((environmentModes.x>=6 && environmentModes.x<=8)
+                || (environmentModes.x==1 && kind==5));
+        float x=(float(p.x)+.5)/float(scale)-float(width)/float(scale)*.5;
+        float y=(float(p.y)+.5)/float(scale);
+        float d=y-environmentMotion.x-environmentPlane.x*x;
+        if(receiver && d>0) {
+            float offset=(environmentModes.x>=7?2.f:1.55f)*d/(1+environmentPlane.x*environmentPlane.x);
+            float sx=clamp(float(p.x)+offset*environmentPlane.x*float(scale)+(environmentModes.x>=7?0:sin(y*.12f+environmentMotion.w)*(2*float(scale))),0.f,float(width-1));
+            float sy=clamp((y-offset)*float(scale)-.5f,0.f,float(height-1));
+            uint x0=uint(sx),y0=uint(sy);float fx=sx-x0,fy=sy-y0;
+            float3 reflected=0;float weight=0;
+            for(uint dy=0;dy<2;++dy) for(uint dx=0;dx<2;++dx) {
+                uint2 at=uint2(min(x0+dx,width-1),min(y0+dy,height-1));
+                if(tag(at)==1) continue;
+                float w=(dx!=0?fx:1-fx)*(dy!=0?fy:1-fy);weight+=w;
+                reflected+=float3(colour(at).rgb)*w;
+            }
+            if(weight>0) {
+                float amount=environmentModes.x>=7?.8f:.15f+.20f*clamp(1-d/200.f,0.f,1.f);
+                float3 tint=environmentModes.x==8?float3(1,.875f,.58f):float3(1,1,1);
+                // Do not amplify an almost-zero non-HUD tap at a protected
+                // edge. Its original bilinear coverage smoothly attenuates
+                // the reflection and removes the division from this pass.
+                result.rgb=uint3(float3(c.rgb)*(1-amount*weight)+reflected*tint*amount+.5);
+            }
+        }
+    } else if(stage==31) {
+        if(pad3!=0 && groundRayReceiver(p)) {
+            int sy=int(p.y)-shadowY;
+            if(p.x<shadowWidth && sy>=0 && sy<int(shadowHeight)) {
+                uint traced=shadowMask.Load((uint(sy)*shadowWidth+p.x)*4);
+                if((traced>>24)==254u) {
+                    // The separate physical resolve uses alpha=255 here.
+                    // Keep source alpha/protected ink and avoid both the
+                    // disposable procedural shade and a full-image resolve.
+                    result.rgb=uint3(traced&255u,(traced>>8)&255u,(traced>>16)&255u);
+                    outputImage[p]=float4(result)/255;return;
+                }
+            }
+        }
         if(tag(p)==2 && any(scrollFraction.xy!=0)) {
             float2 at=clamp(float2(p)+scrollFraction.xy*float(scale),0.f,float2(width-1,height-1));
             uint2 a=uint2(at);float2 f=frac(at);float3 sum=0;
@@ -292,36 +547,17 @@ void main(uint3 id : SV_DispatchThreadID) {
             uint4 modes=environmentModes;
             float3 upgraded=environmentColour(base,kind,x,y,modes,environmentMotion,
                 environmentPlane.x,environmentPlane.w);
-            bool water=kind<=5 && ((environmentModes.x>=6 && environmentModes.x<=8) || (environmentModes.x==1 && kind==5));
-            float d=y-environmentMotion.x-environmentPlane.x*x;
-            if(water && overlayFilter!=0 && d>0) {
-                float offset=(environmentModes.x>=7?2.f:1.55f)*d/(1+environmentPlane.x*environmentPlane.x);
-                float sx=clamp(float(p.x)+offset*environmentPlane.x*float(scale)+(environmentModes.x>=7?0:sin(y*.12f+environmentMotion.w)*(2*float(scale))),0.f,float(width-1));
-                float sy=clamp((y-offset)*float(scale)-.5f,0.f,float(height-1));
-                uint x0=uint(sx),y0=uint(sy);float fx=sx-x0,fy=sy-y0;
-                float3 reflected=0;float weight=0;
-                for(uint dy=0;dy<2;++dy) for(uint dx=0;dx<2;++dx) {
-                    uint2 at=uint2(min(x0+dx,width-1),min(y0+dy,height-1));
-                    if(tag(at)==1) continue;
-                    float w=(dx!=0?fx:1-fx)*(dy!=0?fy:1-fy);weight+=w;
-                    reflected+=float3(colour(at).rgb)*w;
-                }
-                if(weight>0) {
-                    float amount=environmentModes.x>=7?.8f:.15f+.20f*clamp(1-d/200.f,0.f,1.f);
-                    float3 tint=environmentModes.x==8?float3(1,.875f,.58f):float3(1,1,1);
-                    upgraded=upgraded*(1-amount)+(reflected/weight)*tint*amount;
-                }
-            }
             result.rgb=uint3(upgraded+.5);
         }
         if(tag(p)==2 && (kind!=7 || backdropProjection.w==8) && environmentModes.z!=0 && surfaceWidth>0 && surfaceHeight>0) {
-            float x=(float(p.x)+.5)/float(scale)-float(width)/float(scale)*.5;
+            float screenX=(float(p.x)+.5)/float(scale)-float(width)/float(scale)*.5;
+            float x=screenX+scrollFraction.z;
             float y=(float(p.y)+.5)/float(scale);
             float2 uv=backdropMotion(backdropCoordinates(x,y,environmentMotion.x,environmentPlane.x,environmentPlane.z,backdropProjection,backdropKeep0,backdropKeep1),environmentModes.w,environmentMotion.w);
             bool cityMoon=backdropProjection.w==8 && uv.y>=2;
             bool landscape=backdropProjection.w==0 || backdropProjection.w==6 || backdropProjection.w==8;
             bool skyOwned=cityMoon || (kind!=7 && (!landscape || kind==6
-                || (kind==0 && y<environmentMotion.x+environmentPlane.x*x)));
+                || (kind==0 && y<environmentMotion.x+environmentPlane.x*screenX)));
             float4 coverageProjection=backdropProjection;
             if(backdropProjection.w==0 && kind==6) coverageProjection.w=1;
             if(skyOwned && ((backdropProjection.w==6 && kind==6) || backdropCovers(x,y,environmentMotion.x,environmentPlane.x,
@@ -358,7 +594,9 @@ void main(uint3 id : SV_DispatchThreadID) {
         }
     } else if(stage==32) {
         bool scenery=world(p),models=(chromatic&1u)!=0,selected=scenery?(chromatic&2u)!=0:models;
-        float3 memory=(chromatic&4u)!=0?float3(0,0,0):bloomInput.Load(int3(p,0)).rgb*asfloat(pad0);
+        float decay=asfloat(pad0);
+        float3 channelDecay=(chromatic&8u)!=0?float3(decay*decay,decay,decay*decay*decay):float3(decay,decay,decay);
+        float3 memory=(chromatic&4u)!=0?float3(0,0,0):bloomInput.Load(int3(p,0)).rgb*channelDecay;
         if(tag(p)==1 || (!scenery && !models)) memory=0;
         else {
             memory=max(selected?float3(c.rgb):float3(0,0,0),memory);
@@ -526,39 +764,11 @@ void main(uint3 id : SV_DispatchThreadID) {
     } else if(stage==30) {
         int sy=int(p.y)-shadowY;float4 surface=0;
         bool receiver=false;
-        if(pad1!=0 && (tag(p)==2 || tag(p)==5)) {
-            uint i=indexOf(p);
-            uint index=reserved==1?(indexedPixels.Load(i*4)&255u):(indexedPixels.Load(i&~3u)>>((i&3u)*8))&255u;
-            uint kind=tag(p)==5?uint(environmentPlane.y):environmentClasses[index/4][index%4];
-            // Stage 31 already classifies the lava floor by its sloped
-            // horizon when cartridge inks are unclassified. Match that same
-            // ownership here or the ray-generated liquid is never composited.
-            if(environmentModes.x==10 && tag(p)==2 && (kind==0 || kind==6)
-                && environmentPlane.y>=1 && environmentPlane.y<=5) {
-                float x=(float(p.x)+.5)/float(scale)-float(width)/float(scale)*.5;
-                float y=(float(p.y)+.5)/float(scale);
-                if(y>=environmentMotion.x+environmentPlane.x*x) kind=uint(environmentPlane.y);
-            }
-            receiver=kind>=1 && kind<=5 && ((environmentModes.x>=6 && environmentModes.x<=8)
-                || environmentModes.x==10 || (environmentModes.x==1 && kind==5));
-        } else if(pad1==0) receiver=model(p) && surfaceAt(int2(p),surface);
+        if(pad1!=0) receiver=groundRayReceiver(p);
+        else receiver=model(p) && surfaceAt(int2(p),surface);
         if(receiver && p.x<shadowWidth && sy>=0 && sy<int(shadowHeight)) {
             uint packed=shadowMask.Load((uint(sy)*shadowWidth+p.x)*4);
             uint marker=packed>>24;
-            if(pad1!=0 && environmentModes.x==10 && marker==253) {
-                float2 slope=float2(packed&255u,(packed>>8)&255u)/255.f*2.f-1.f;
-                int2 at=clamp(int2(p)+int2(round(slope*8.f*float(scale))),
-                    int2(0,0),int2(width-1,height-1));
-                float x=(float(at.x)+.5f)/float(scale)-float(width)/float(scale)*.5f;
-                float y=(float(at.y)+.5f)/float(scale);
-                if((tag(uint2(at))!=2 && tag(uint2(at))!=5)
-                    || y<environmentMotion.x+environmentPlane.x*x) at=int2(p);
-                float heat=float((packed>>16)&255u)/255.f;
-                float3 molten=float3(colour(uint2(at)).rgb)*(.70f+.48f*heat);
-                float crest=saturate((heat-.70f)*3.f);
-                result.rgb=uint3(clamp(molten+crest*float3(26,14,1),0.f,255.f)+.5f);
-                outputImage[p]=float4(result)/255.f;return;
-            }
             uint alpha=pad1!=0?(marker==254?255:0):(marker==255?uint(pad0)*255/100:0);
             // Plain rock/ship surfaces are dielectrics: face-on reflections
             // are weak, unlike a selected mirror/metal material. Preserve
@@ -650,17 +860,42 @@ void main(uint3 id : SV_DispatchThreadID) {
             result[channel]=uint(lerp(lerp(v[0],v[1],f.x),lerp(v[2],v[3],f.x),f.y)+.5);
         }
     } else if(stage==3 && model(p) && smoothing>0) {
+        uint strength=smoothing&3;
+        if((smoothing&4)!=0 && scale>1 && tag(p)==0) for(uint attempt=0;attempt<2;++attempt) {
+            uint spacing=attempt==0?1:scale;
+            if(p.x<spacing || p.y<spacing || p.x+spacing>=width || p.y+spacing>=height) continue;
+            uint2 l=p-uint2(spacing,0),r=p+uint2(spacing,0),u=p-uint2(0,spacing),d=p+uint2(0,spacing);
+            uint2 ul=p-uint2(spacing,spacing),dr=p+uint2(spacing,spacing);
+            uint3 opposite=colour(l).rgb;
+            if(any(c.rgb!=opposite) && tag(l)==0 && tag(r)==0 && tag(u)==0 && tag(d)==0 && tag(ul)==0 && tag(dr)==0
+                && all(opposite==colour(r).rgb) && all(opposite==colour(u).rgb) && all(opposite==colour(d).rgb)
+                && all(c.rgb==colour(ul).rgb) && all(c.rgb==colour(dr).rgb)) {
+                result.rgb=(c.rgb+opposite+1)/2;outputImage[p]=float4(result)/255;return;
+            }
+        }
         int2 offsets[4]={int2(-int(scale),0),int2(scale,0),int2(0,-int(scale)),int2(0,scale)};
         uint3 total=0; uint count=0;
         for(uint n=0;n<4;++n) {
             uint2 neighbour=bounded(int2(p)+offsets[n]);
             if(model(neighbour)) { total+=colour(neighbour).rgb; ++count; }
         }
-        if(count>0) result.rgb=(c.rgb*(4-smoothing)+(total+count/2)/count*smoothing+2)/4;
+        if(count>0 && strength>0) result.rgb=(c.rgb*(4-strength)+(total+count/2)/count*strength+2)/4;
     } else if(stage==4 && tag(p)!=1) {
         bool background=world(p);
         uint effect=background?worldEffect:modelEffect;
         uint intensity=min(background?worldIntensity:modelIntensity,100u);
+        if(effect>=84 && effect<=91) {
+            uint2 r=min(p+uint2(scale,0),uint2(width-1,height-1)),d=min(p+uint2(0,scale),uint2(width-1,height-1));
+            float edge=(tag(p)!=tag(r) || tag(p)!=tag(d) || abs(int(luminance(c))-int(luminance(colour(r))))>28)?1.f:0.f;
+            SpecialFxSample fx=special_fx_sample(effect,float(p.x)/scale,float(p.y)/scale,float(width)/(2*scale),float(height)/(2*scale),asfloat(pad1),edge);
+            float2 at=clamp(float2(p)+float2(fx.dx,fx.dy)*scale,float2(0,0),float2(width-1,height-1));
+            int2 base=int2(at);float2 f=frac(at);float3 sample=0;
+            for(int y=0;y<2;++y) for(int x=0;x<2;++x)
+                sample+=float3(manipulationSample(base+int2(x,y),p).rgb)*(x?f.x:1-f.x)*(y?f.y:1-f.y);
+            uint3 value=uint3(clamp(sample*fx.keep+255.f*float3(fx.r,fx.g,fx.b)*fx.gain,0.f,255.f)+.5f);
+            result.rgb=(c.rgb*(100-intensity)+value*intensity+50)/100;
+            outputImage[p]=float4(result)/255;return;
+        }
         if((effect>=43 && effect<=45) || (effect>=48 && effect<=53) || (effect>=58 && effect<=60)) {
             uint order[8]={0,1,2,3,4,5,6,7};
             int block=int(p.x/(scale*8)*scale*8);
@@ -878,6 +1113,14 @@ void main(uint3 id : SV_DispatchThreadID) {
             }
         }
         result.rgb=(c.rgb*(100-intensity)+uint3(value)*intensity+50)/100;
+    } else if(stage==5 && aa/4==3 && aaEligible(p)) {
+        uint3 sum=0;uint count=0;
+        uint2 origin=p/scale*scale;
+        for(uint y=0;y<scale;++y) for(uint x=0;x<scale;++x) {
+            uint2 n=origin+uint2(x,y);
+            if(n.x<width && n.y<height && aaEligible(n)) {sum+=colour(n).rgb;++count;}
+        }
+        if(count) result.rgb=sum/count;
     } else if(stage==5 && aa>0 && aaEligible(p) && p.x>0 && p.y>0 && p.x+1<width && p.y+1<height) {
         uint4 left=aaEligible(p-uint2(1,0))?colour(p-uint2(1,0)):c;
         uint4 right=aaEligible(p+uint2(1,0))?colour(p+uint2(1,0)):c;
@@ -885,8 +1128,12 @@ void main(uint3 id : SV_DispatchThreadID) {
         uint4 down=aaEligible(p+uint2(0,1))?colour(p+uint2(0,1)):c;
         int l=luminance(left),r=luminance(right),u=luminance(up),d=luminance(down),v=luminance(c);
         uint low=min(v,min(min(l,r),min(u,d))),high=max(v,max(max(l,r),max(u,d)));
-        uint floor=aa==1?20:aa==3?6:12, divisor=aa==1?6:aa==3?12:8,weight=aa==1?6:aa==3?1:2;
-        if(high-low>=max(floor,high/divisor)) result.rgb=(c.rgb*weight+(abs(l-r)>=abs(u-d)?up.rgb+down.rgb:left.rgb+right.rgb))/(weight+2);
+        uint quality=aa%4,type=aa/4;
+        uint floor=quality==1?20:quality==3?6:12, divisor=quality==1?6:quality==3?12:8,weight=quality==1?6:quality==3?1:2;
+        bool vertical=type==1?abs(u+d-2*v)<abs(l+r-2*v):abs(l-r)>=abs(u-d);
+        if(high-low>=max(floor,high/divisor)) result.rgb=type==2
+            ?(c.rgb*weight+left.rgb+right.rgb+up.rgb+down.rgb)/(weight+4)
+            :(c.rgb*weight+(vertical?up.rgb+down.rgb:left.rgb+right.rgb))/(weight+2);
     }
     outputImage[p]=float4(result)/255;
 }

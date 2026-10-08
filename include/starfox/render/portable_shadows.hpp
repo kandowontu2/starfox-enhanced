@@ -15,7 +15,9 @@ public:
     PortableShadows();
     ~PortableShadows();
     bool render(const Scene&, Camera, Vec3, std::optional<ReceiverPlane>, std::vector<std::uint8_t>&);
-    bool render_resident(void* device, const Scene&, Camera, Vec3, std::optional<ReceiverPlane>);
+    // Underlay mode ignores models as primary receivers, but retains every
+    // model as a shadow caster onto the plane. A missing plane produces no mask.
+    bool render_resident(void* device, const Scene&, Camera, Vec3, std::optional<ReceiverPlane>, bool ground_only = false);
     GpuShadowOutput output() const;
     bool readback(std::vector<std::uint8_t>&);
     void release_device() noexcept;

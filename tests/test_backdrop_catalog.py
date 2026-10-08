@@ -15,7 +15,7 @@ class BackdropCatalogTests(unittest.TestCase):
         self.expected = {200 + i: path for i, path in enumerate(self.paths)}
 
     def test_unique_complete_assets(self):
-        self.assertEqual(len(self.paths), 37)
+        self.assertEqual(len(self.paths), 38)
         self.assertEqual(len(set(self.paths)), len(self.paths))
         for path in self.paths:
             self.assertTrue((ROOT / path).is_file(), path)
@@ -28,9 +28,17 @@ class BackdropCatalogTests(unittest.TestCase):
 
     def test_portable_resources_match(self):
         source = (ROOT / 'CMakeLists.txt').read_text()
-        pairs = re.findall(r'--resource "(2\d\d)=\$\{CMAKE_CURRENT_SOURCE_DIR\}/([^"]+)"', source)
-        self.assertEqual(len(pairs), len(self.paths))
-        self.assertEqual({int(key): path for key, path in pairs}, self.expected)
+        # Portable dispatch arguments and split translation units must come
+        # from the same catalogue, not independent manually capped ID lists.
+        self.assertRegex(source, r'starfox_enhanced_backdrop_resources\(\s*'
+                         r'STARFOX_EMBED_BACKDROP_ARGS\s+STARFOX_EMBED_BACKDROP_FILES\)')
+        self.assertIn('${STARFOX_EMBED_BACKDROP_ARGS}', source)
+        self.assertIn('${STARFOX_EMBED_BACKDROP_FILES}', source)
+        self.assertNotRegex(source, r'--resource "2\d\d=')
+        self.assertRegex(source, r'list\(LENGTH STARFOX_EMBED_BACKDROP_FILES '
+                         r'STARFOX_EMBED_BACKDROP_COUNT\)')
+        self.assertIn('"199 + ${STARFOX_EMBED_BACKDROP_COUNT}"', source)
+        self.assertIn('foreach(resource_id RANGE 200 ${STARFOX_EMBED_BACKDROP_LAST_ID})', source)
 
     def test_vr_cmake_resources_match(self):
         with tempfile.TemporaryDirectory() as directory:

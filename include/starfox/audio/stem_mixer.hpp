@@ -20,7 +20,7 @@ inline void mix_stems(std::span<const int16_t> music,std::span<const int16_t> ef
 inline void render_mixed_tick(Spc700Audio& spc,Msu1Audio& msu,
     std::span<const simulation::ApuPortWrite> apu,std::span<const simulation::MsuRegisterWrite> writes,
     uint8_t music_volume,uint8_t effects_volume,std::vector<int16_t>& output) {
-    static_cast<void>(spc.render_logic_tick(apu));
+    spc.render_stems_logic_tick(apu);
     msu.process_register_writes(writes);
     const auto music=msu.enabled() && !msu.resume_native_music()
         ? msu.render(Spc700Audio::stereo_frames_per_logic_tick,Spc700Audio::sample_rate)

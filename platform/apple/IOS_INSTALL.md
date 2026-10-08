@@ -1,9 +1,11 @@
 # iOS alpha package
 
-This archive contains an unsigned arm64 device application. It intentionally
+The `.ipa` contains an unsigned arm64 device application, with
+`Payload/StarFoxEnhanced.app` at the archive root. It intentionally
 contains no retail ROM. Before installing it on an iPhone or iPad, sign the
 application with your own Apple development identity or through your preferred
-sideloading tool.
+sideloading tool such as Sideloadly. Select the `.ipa` directly; do not extract
+it or rename the old outer-folder `.zip` to `.ipa`.
 
 On first launch, the system file picker accepts either a `Starfox-Assets.BIN`
 prepared on a PC or an unmodified supported Star Fox/Starwing ROM. The selected

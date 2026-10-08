@@ -1,5 +1,5 @@
-# Build a private copy of the pinned LGPL SPC sources. The only extension is
-# explicit filter-history and output-carry access; preserve upstream files
+# Build a private copy of the pinned LGPL SPC sources. Extensions expose
+# filter history, output carry and side-effect-free state/input-port access; preserve upstream files
 # and license headers. These extensions require no pointer serialization.
 set(STARFOX_SPC_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/generated/snes_spc")
 file(MAKE_DIRECTORY "${STARFOX_SPC_SOURCE}")
@@ -58,6 +58,24 @@ if(anchor_position EQUAL -1)
 endif()
 string(REPLACE "${core_anchor}" [=[
     int sample_count() const;
+    // Upstream copy_state also loads SMP registers while saving. Preserve the
+    // live CPU-input ports/timers/ROM RAM so inspecting or saving a timeline
+    // cannot alter its next instruction. Heap storage avoids a ~66 KiB ARM
+    // stack temporary; nothing here is persisted as native object bytes.
+    void copy_state_preserving_machine(unsigned char** io, void (*copy)(unsigned char**, void*, size_t)) {
+        struct Restore {
+            SNES_SPC& owner;
+            state_t* saved;
+            ~Restore() { owner.m = *saved; delete saved; }
+        } restore = {*this, new state_t(m)};
+        copy_state(io, copy);
+    }
+    void save_cpu_input_ports(unsigned char out[4]) const {
+        for (int i = 0; i < 4; ++i) out[i] = m.smp_regs[1][r_cpuio0+i];
+    }
+    void load_cpu_input_ports(const unsigned char in[4]) {
+        for (int i = 0; i < 4; ++i) m.smp_regs[1][r_cpuio0+i] = in[i];
+    }
     // Star Fox Enhanced extension. Call only between end_frame/set_output.
     void save_output_carry(int& clocks, int& count, sample_t* samples) const {
         clocks = m.extra_clocks;

@@ -50,6 +50,20 @@
 #include <algorithm>
 #include <cmath>
 #include <charconv>
+#if defined(__ANDROID__) || defined(__linux__)
+#include <sys/resource.h>
+#include <unistd.h>
+#elif defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <psapi.h>
+#include <bit>
+#endif
 namespace {
 auto load_vr_backdrop(unsigned resource,std::string_view path) {
 #if defined(STARFOX_VR_BUNDLE_ASSETS)
@@ -513,6 +527,11 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
             loader.get_instance_proc_addr()(device.binding().instance,"vkGetPhysicalDeviceProperties"));
         if(!get_properties) {std::cerr<<"Missing physical device limits query\n";return 8;}
         get_properties(device.binding().physicalDevice,&physical_properties);
+        std::cout<<"VR Vulkan device: "<<physical_properties.deviceName
+            <<" vendor_id="<<physical_properties.vendorID<<" device_id="<<physical_properties.deviceID
+            <<" driver_version_raw="<<physical_properties.driverVersion<<" api_version_raw="<<physical_properties.apiVersion
+            <<" max_allocations="<<physical_properties.limits.maxMemoryAllocationCount
+            <<" memory_heaps="<<properties.memoryHeapCount<<'\n';
         if(!shader_cache.initialize(device.binding().device,get_device,physical_properties,
             host.cartridge_save_path.empty()?std::filesystem::path{}:host.cartridge_save_path.parent_path()/"shader-cache"))
             std::cerr<<"Optional Vulkan pipeline cache unavailable; compiling normally\n";
@@ -1224,6 +1243,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                     const auto profile_end=std::chrono::steady_clock::now();
                     if(profile_end-last_profile>=std::chrono::seconds(1)) {
                         const auto completion=draw.take_completion_timing();
+                        const auto cache=live->models.cache_stats();
                         const auto ms=[](auto a,auto b) {return std::chrono::duration<double,std::milli>(b-a).count();};
                         std::cout<<"VR CPU frame ms: logic="<<ms(profile_start,profile_logic)
                             <<" models="<<ms(profile_logic,profile_models)<<" upload="<<ms(profile_models,profile_upload)
@@ -1233,7 +1253,37 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                             <<" submit_to_fence_avg_ms="<<(completion.eyes?completion.total_ms/completion.eyes:0.)
                             <<" submit_to_fence_max_ms="<<completion.maximum_ms
                             <<" command_submit_avg_ms="<<(completion.submissions?completion.submit_ms/completion.submissions:0.)
-                            <<" pending_fence_polls="<<completion.pending_polls<<'\n';
+                            <<" pending_fence_polls="<<completion.pending_polls
+                            <<" total_ticks="<<live->logic_ticks<<" bg="<<snapshot->background_id
+                            <<" epoch="<<snapshot->scene_epoch<<" objects="<<snapshot->objects.size()
+                            <<" extended="<<snapshot->meters.extended<<" enhanced_sky="<<startup.enhanced_sky
+                            <<" ray_tracing="<<startup.ray_tracing
+                            <<" ray_active="<<startup.ray_tracing_enabled()
+                            <<" decoded_shapes="<<cache.shapes<<" cache_entries="<<cache.entries
+                            <<" cached_vertices="<<cache.vertices<<" cached_texels="<<cache.texels;
+#if defined(__ANDROID__) || defined(__linux__)
+                        // Observe at the existing one-second diagnostic cadence,
+                        // never per eye or source tick. No gameplay allocation cap.
+                        std::ifstream memory("/proc/self/statm");
+                        std::uint64_t total_pages{},resident_pages{};
+                        const auto page_bytes=::sysconf(_SC_PAGESIZE);
+                        if(page_bytes>0 && (memory>>total_pages>>resident_pages))
+                            std::cout<<" rss_kib="<<resident_pages*std::uint64_t(page_bytes)/1024;
+                        struct rusage usage{};
+                        if(::getrusage(RUSAGE_SELF,&usage)==0) std::cout<<" peak_rss_kib="<<usage.ru_maxrss;
+#elif defined(_WIN32)
+                        // Optional Windows 7+ query; no PSAPI DLL dependency or
+                        // new resource cap. Resolve once, sample once per second.
+                        using QueryMemory=BOOL(WINAPI*)(HANDLE,PPROCESS_MEMORY_COUNTERS,DWORD);
+                        static const auto query=std::bit_cast<QueryMemory>(
+                            GetProcAddress(GetModuleHandleW(L"kernel32.dll"),"K32GetProcessMemoryInfo"));
+                        PROCESS_MEMORY_COUNTERS_EX memory{};memory.cb=sizeof(memory);
+                        if(query && query(GetCurrentProcess(),reinterpret_cast<PPROCESS_MEMORY_COUNTERS>(&memory),sizeof(memory)))
+                            std::cout<<" working_set_kib="<<memory.WorkingSetSize/1024
+                                <<" peak_working_set_kib="<<memory.PeakWorkingSetSize/1024
+                                <<" private_commit_kib="<<memory.PrivateUsage/1024;
+#endif
+                        std::cout<<'\n';
                         last_profile=profile_end;
                     }
                     }

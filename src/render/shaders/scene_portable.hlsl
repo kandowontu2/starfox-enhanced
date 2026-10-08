@@ -1,3 +1,5 @@
+#include "native_pixel.hlsli"
+#include "rigid_motion.hlsli"
 [[vk::binding(0,0)]] StructuredBuffer<uint> frontPixels : register(t0,space0);
 [[vk::binding(1,0)]] StructuredBuffer<float4> frontSurfaces : register(t1,space0);
 [[vk::binding(2,0)]] StructuredBuffer<uint> backPixels : register(t2,space0);
@@ -18,10 +20,15 @@
     uint sourceScale,destinationScale,referenceWidth,referenceHeight;
     int offsetX,offsetY,clipLeft,clipTop;
     int clipRight,clipBottom,mosaicX,mosaicY;
-    uint mosaicStep,wantSurfaces,unused1,unused2;
+    uint mosaicStep,wantSurfaces,inlineMotion,dispatchRowStride;
+    uint inlineWidth,inlineHeight,inlineReset,inlineReserved;
+    float4 inlineCurrentProjection,inlinePreviousProjection;
+    float4 inlinePreviousRow0,inlinePreviousRow1,inlinePreviousRow2;
+    float inlineJitterX,inlineJitterY,inlinePreviousNear,inlinePadding;
 };
 [numthreads(64,1,1)]
 void main(uint3 id:SV_DispatchThreadID) {
+    id.x+=id.y*dispatchRowStride;
     if(id.x>=count) return;
     uint front=0,back=0;
     if(motionPadding!=0) {
@@ -37,13 +44,15 @@ void main(uint3 id:SV_DispatchThreadID) {
             uint2 sub=((at%destinationScale*2+1)*sourceScale)/(destinationScale*2);
             uint2 sampleAt=uint2(snapped)*sourceScale+sub;
             front=frontPixels[sampleAt.y*sourceWidth+sampleAt.x];
-            // Layer-composite transparency is palette zero, not write coverage.
-            front=(front&255u)!=0?(front&0xffffu)|0x04000000u:0;
+            // At higher scales a marked zero is one half of an opaque material
+            // pair. Preserve it for the colour resolve; keep native transparency.
+            bool materialPair=sourceScale>1 && destinationScale>1 && (front&0x80000000u)!=0;
+            front=((front&255u)!=0 || materialPair)?(front&0x8000ffffu)|0x04000000u:0;
         }
     } else front=frontPixels[id.x];
     // World billboards deliberately keep their 2D effects/filter tag. That
     // styling classification must not turn explosions into protected HUD.
-    if((padding&1u)!=0 && ((front>>8)&255u)==1u) front|=0x10000000u;
+    if((padding&1u)!=0 && nativeTag(front)==1u) front|=0x10000000u;
     if(hasBack!=0) back=backPixels[id.x];
     // Colour and metadata have independent painter ownership. A later line
     // can paint black without erasing an earlier model's surface sample.
@@ -57,7 +66,7 @@ void main(uint3 id:SV_DispatchThreadID) {
     if((padding&2u)!=0 && (front&0x04000000u)!=0) {
         metadata=0;normal=float4(0,0,1,0);
     }
-    pixels[id.x]=(colour&0x1c00ffffU)|metadata;
+    pixels[id.x]=(colour&0x9c00ffffU)|metadata;
     if(wantSurfaces!=0) surfaces[id.x]=normal;
     if(wantDepth!=0) {
         // Unlike effects metadata, geometry belongs to the visible colour.
@@ -72,7 +81,10 @@ void main(uint3 id:SV_DispatchThreadID) {
     if(wantMotion!=0) {
         float4 value=0;
         if((front&0x04000000U)!=0) {
-            if(hasFrontMotion!=0) value=frontMotion[id.x];
+            if(inlineMotion!=0) value=rigidSurfaceMotion(id.x,inlineWidth,inlineReset,frontDepth[id.x],
+                inlineCurrentProjection,inlinePreviousProjection,inlinePreviousRow0,inlinePreviousRow1,
+                inlinePreviousRow2,float2(inlineJitterX,inlineJitterY),inlinePreviousNear);
+            else if(hasFrontMotion!=0) value=frontMotion[id.x];
         } else if(hasBackMotion!=0) value=backMotion[id.x];
         motion[id.x]=value;
     }

@@ -1,10 +1,9 @@
 #pragma once
 #include "starfox/vr/vulkan_source_storage.hpp"
+#include "starfox/vr/scene_types.hpp"
 #include <array>
 #include <memory>
 namespace starfox::vr {
-inline constexpr uint32_t gpu_connected_grid_flag=512U|4194304U;
-inline constexpr uint32_t connected_grid_output_words=384+225*15+192*675+225*4;
 // Shared pipelines; frame-local descriptors/storage. Finish prior GPU use
 // before destruction. record() runs outside a render pass, no allocation/wait.
 class VulkanConnectedGridPipeline {

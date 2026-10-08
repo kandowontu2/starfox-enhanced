@@ -1,15 +1,49 @@
 #include "starfox/vr/game_scene.hpp"
+#include "starfox/compat/bit_cast.hpp"
 #include "starfox/render/grid_projection.hpp"
 #include <bit>
 #include <limits>
 #include <stdexcept>
 
 namespace starfox::vr {
+std::array<std::optional<SourceCorridor>,source_corridor_count> source_corridors(const assets::SymbolMap& symbols) {
+    // BGS/PSTRATS use LTUNNEL for both Gekkou states: BG_5_2Z's entry
+    // continues into BG_5_2A through WASHENT3. The scripted entry camera can
+    // be outside these bounds; native_corridor_scene handles that separately.
+    struct Definition {const char* name;const char* prefix;std::uint8_t walls{15};};
+    constexpr std::array<Definition,source_corridor_count> definitions{{
+        {"BG_1_1I","LTUNNEL_"},{"BG_1_3B","MTUNNEL_"},{"BG_2_3C","STUNNEL_"},
+        {"BG_1_6B","LTUNNEL_"},{"BG_1_7A","LTUNNEL_"},{"BG_2_6B","LTUNNEL_"},
+        {"BG_2_6C","LTUNNEL_"},{"BG_3_4C","LTUNNEL_"},
+        {"BG_5_2A","LTUNNEL_"},{"BG_5_2Z","LTUNNEL_"},
+        {"BG_2_6A","COLONY_",14}}};
+    std::array<std::optional<SourceCorridor>,source_corridor_count> result{};
+    const auto& lists=symbols.find("BGLISTS");
+    if(lists.empty()) return result;
+    for(std::size_t i=0;i<definitions.size();++i) {
+        const auto [name,prefix,walls]=definitions[i];const auto& value=symbols.find(name);
+        if(value.empty() || (value.front()&0xff0000U)!=(lists.front()&0xff0000U)
+            || value.front()<=lists.front()) continue;
+        std::array<int16_t,4> bounds{};bool complete=true;
+        constexpr std::array suffixes{"MINX","MAXX","MINY","MAXY"};
+        for(std::size_t axis=0;axis<bounds.size();++axis) {
+            const auto& constant=symbols.find(std::string(prefix)+suffixes[axis]);
+            if(constant.empty()) {complete=false;break;}
+            bounds[axis]=starfox::bit_cast<int16_t>(uint16_t(constant.front()));
+        }
+        if(!complete) continue; // Do not invent dimensions for other source revisions.
+        if(bounds[0]>=bounds[1] || bounds[2]>=bounds[3])
+            throw std::runtime_error("Invalid authored corridor dimensions");
+        result[i]=SourceCorridor{static_cast<uint16_t>(value.front()-lists.front()),
+            {bounds[0],bounds[1],bounds[2],bounds[3],walls}};
+    }
+    return result;
+}
 GameSceneHistory::GameSceneHistory(const simulation::GameSimulation& game,
-    const assets::RomImage& rom,const assets::SymbolMap& symbols)
-    :game_(game),rom_(rom),trig_(simulation::TrigTables::load(rom,symbols)) {
+    const assets::RomImage& rom,const assets::SymbolMap& symbols,SceneCameraPolicy camera_policy)
+    :game_(game),rom_(rom),trig_(simulation::TrigTables::load(rom,symbols)),camera_policy_(camera_policy) {
     constexpr std::array names{"VIEWPOSX","VIEWPOSY","VIEWPOSZ",
-        "VIEWROTXW","VIEWROTYW","VIEWROTZW","VIEWFLOATY","GAMEFRAME","PLAYERFLYMODE","SHADOWHEIGHT","BG2SCROLL","PVIEWPOSY"};
+        "VIEWROTXW","VIEWROTYW","VIEWROTZW","VIEWFLOATY","GAMEFRAME","PLAYERFLYMODE","SHADOWHEIGHT","BG2SCROLL","PVIEWPOSY","C_TYPE"};
     for(size_t i=0;i<names.size();++i) {
         bool found=false;
         for(const auto address:symbols.find(names[i])) {
@@ -17,13 +51,20 @@ GameSceneHistory::GameSceneHistory(const simulation::GameSimulation& game,
                 addresses_[i]=address;found=true;break;
             }
         }
-        if(!found) throw std::runtime_error(std::string("Missing scene RAM symbol: ")+names[i]);
+        if(!found && std::string_view(names[i])!="C_TYPE") throw std::runtime_error(std::string("Missing scene RAM symbol: ")+names[i]);
     }
     constexpr std::array tracking_names{"PLAYERONPLANET_STRAT","PLAYERINSPACE_STRAT"};
     for(size_t i=0;i<tracking_names.size();++i) {
         const auto& entries=symbols.find(tracking_names[i]);
         if(!entries.empty()) tracking_strategies_[i]=entries.front();
     }
+    constexpr std::array cockpit_names{"COCKPIT_ISTRAT","COCKPIT_STRAT","COCKPITOUT_ISTRAT","COCKPITOUT_STRAT"};
+    for(size_t i=0;i<cockpit_names.size();++i) {
+        const auto& entries=symbols.find(cockpit_names[i]);
+        if(!entries.empty()) cockpit_strategies_[i]=entries.front();
+    }
+    const auto& cockpit=symbols.find("COCKPIT");
+    if(!cockpit.empty()) cockpit_shape_=static_cast<uint16_t>(cockpit.front());
     constexpr std::array model_names{"M_VANISHX","M_VANISHY","M_DEPTHTABLE","M_DEPTHSTAB",
         "M_WIREMODE","M_WOBBLEMODE","M_WABBLEMODE","M_CELMODE","M_SINEOFFSET","M_COLORWARP","M_PROJPNTS"};
     for(size_t i=0;i<model_names.size();++i) {
@@ -83,6 +124,11 @@ GameSceneHistory::GameSceneHistory(const simulation::GameSimulation& game,
     }
     constexpr std::array landscape_names{"BG_1_1C","BG_TRAINING","BG_2_3A","BG_1_6A","BG_3_7A","BG_3_3A","BG_3_5","BG_3_1C","BG_1_4","BG_7_1","BG_7_2","BG_7_3","BG_7_4","BG_5_4","BG_5_1","BG_6_1","BG_6_5","BG_6_2","BG_6_4","BG_5_5","BG_7_5","BG_6_6","BG_5_2","BG_1_14","BG_1_7B"};
     const auto& water=symbols.find("BG_2_3B");
+    const auto corridors=source_corridors(symbols);
+    for(size_t i=0;i<corridors.size();++i) if(corridors[i]) {
+        corridor_backgrounds_[i]=corridors[i]->background;
+        corridor_bounds_[i]=corridors[i]->bounds;
+    }
     const auto& colony=symbols.find("BG_2_6A");
     if(!colony.empty() && !background_lists.empty()
         && (colony.front()&0xff0000U)==(background_lists.front()&0xff0000U))
@@ -129,23 +175,30 @@ GameSceneHistory::GameSceneHistory(const simulation::GameSimulation& game,
             && (entry.front()&0xff0000U)==(background_lists.front()&0xff0000U))
             unique_backgrounds_[i]=static_cast<uint16_t>(entry.front()-background_lists.front());
     }
-    capture();previous_=current_;
+    capture();older_=previous_=current_;
 }
 
+bool GameSceneHistory::is_final_vortex_sky(uint16_t background,unsigned mode) const noexcept {
+    return (mode==1 || mode==2)
+        && std::any_of(final_vortex_backgrounds_.begin(),final_vortex_backgrounds_.end(),
+            [background](uint16_t id){return id && background==id;});
+}
 void GameSceneHistory::capture() {
     if(current_ && current_->revision==std::numeric_limits<uint64_t>::max())
         throw std::overflow_error("VR scene revision exhausted");
     auto next=std::make_shared<GameSceneSnapshot>();
     next->revision=current_?current_->revision+1:0;
+    next->scene_epoch=game_.scene_revision();
     const auto word=[&](size_t index) {return game_.map().peek_ram_word(addresses_[index]).value();};
-    next->camera={std::bit_cast<int16_t>(word(0)),std::bit_cast<int16_t>(word(1)),
-        std::bit_cast<int16_t>(word(2)),word(3),word(4),word(5)};
+    next->camera={starfox::bit_cast<int16_t>(word(0)),starfox::bit_cast<int16_t>(word(1)),
+        starfox::bit_cast<int16_t>(word(2)),word(3),word(4),word(5)};
     next->view_matrix=simulation::rotation_matrix_q15(trig_,
-        std::bit_cast<int16_t>(word(3)),std::bit_cast<int16_t>(word(4)),std::bit_cast<int16_t>(word(5)));
-    next->view_float_y=std::bit_cast<int16_t>(word(6));
-    next->background_vertical_scroll=std::bit_cast<int16_t>(word(10));
+        starfox::bit_cast<int16_t>(word(3)),starfox::bit_cast<int16_t>(word(4)),starfox::bit_cast<int16_t>(word(5)));
+    next->view_float_y=starfox::bit_cast<int16_t>(word(6));
+    if(addresses_[12]) next->control_type=game_.map().peek_ram_byte(addresses_[12]).value()&3U;
+    next->background_vertical_scroll=starfox::bit_cast<int16_t>(word(10));
     next->shadows_enabled=(game_.map().peek_ram_byte(addresses_[8]).value()&8U)!=0;
-    next->shadow_height=std::bit_cast<int16_t>(word(9));
+    next->shadow_height=starfox::bit_cast<int16_t>(word(9));
     next->game_frame=game_.map().peek_ram_byte(addresses_[7]).value()&0x7fU;
     next->flow=game_.flow_state();next->player=game_.player();
     next->background_colour_subtract=game_.game_over_background_subtract();
@@ -154,15 +207,14 @@ void GameSceneHistory::capture() {
     next->colour_table_override=game_.model_colour_table_override();
     next->meters=game_.peek_meter_state();
     auto presentation_ppu=std::make_shared<simulation::SnesPpuState>(game_.map().ppu_state());
-    // The authored final room switches to the Mode-2 abstract/vortex sky while
+    // The authored final room switches to a Mode-1/2 abstract/vortex sky while
     // INATUNNEL can remain set. Its background is not corridor geometry: only
     // presentation drops the tunnel mask, leaving native gameplay untouched.
-    const bool final_vortex_sky=presentation_ppu->background_mode==2
-        && std::any_of(final_vortex_backgrounds_.begin(),final_vortex_backgrounds_.end(),
-            [&](uint16_t id){return id && game_.map().background()==id;});
+    const bool final_vortex_sky=is_final_vortex_sky(game_.map().background(),presentation_ppu->background_mode);
     if(final_vortex_sky) presentation_ppu->tunnel_scene=false;
     // The colony cross-section is authored with WATER, not INATUNNEL=1.
-    // In VR it is still an enclosed center-window scene, unlike open Titania water.
+    // Retain VR's center-window raster policy; native consoles use the explicit
+    // three-wall source metadata without changing this raw WATER PPU flag.
     if(presentation_ppu->background_mode==1 && colony_background_
         && game_.map().background()==colony_background_) presentation_ppu->tunnel_scene=true;
     // Presentation-only reticle palette; never mutate source CGRAM. Preserve
@@ -185,6 +237,11 @@ void GameSceneHistory::capture() {
         presentation_ppu->cgram[207]=pack_colour(tint[0],tint[1],tint[2]);
     next->ppu=std::move(presentation_ppu);
     next->background_id=game_.map().background();
+    // Resolve geometry by source identity, not the previous logic phase's
+    // raster flag. Native receiver selection still checks the fresh video PPU.
+    for(size_t i=0;i<corridor_backgrounds_.size();++i)
+        if(corridor_backgrounds_[i] && next->background_id==corridor_backgrounds_[i])
+            next->background_corridor=corridor_bounds_[i];
     next->wipe=game_.window_wipe_state();
     if(next->ppu->background_mode==2) for(size_t i=0;i<unique_backgrounds_.size();++i)
         if(unique_backgrounds_[i]!=0 && game_.map().background()==unique_backgrounds_[i])
@@ -334,7 +391,7 @@ void GameSceneHistory::capture() {
         && ex_title_intro_background_!=0
         && game_.map().background()==ex_title_intro_background_;
     next->dust_points=game_.dust().points();
-    next->dots_mode=std::bit_cast<int8_t>(game_.map().peek_ram_byte(dust_addresses_[0]).value());
+    next->dots_mode=starfox::bit_cast<int8_t>(game_.map().peek_ram_byte(dust_addresses_[0]).value());
     if(next->meters.extended) {
         if(dust_addresses_[1] && game_.map().peek_ram_word(dust_addresses_[1]).value()!=0)
             next->dust_point_count=simulation::kMaximumDustPoints;
@@ -349,14 +406,30 @@ void GameSceneHistory::capture() {
             || next->flow==simulation::GameFlowState::intro
             || next->flow==simulation::GameFlowState::stage_results);
     next->model_palette=game_.palette_words();next->cgram=next->ppu->cgram;
+    if(game_.objects().is_active(next->player)) {
+        const auto& player=game_.objects().at(next->player);
+        render::ObjectPresentationSnapshot reference;
+        reference.transform={player.world_x,player.world_y,player.world_z,
+            uint16_t(player.rotation_x<<8U),uint16_t(player.rotation_y<<8U),uint16_t(player.rotation_z<<8U)};
+        reference.rotation_matrix=simulation::transpose_q15(simulation::rotation_matrix_q15(trig_,
+            simulation::wrap16(-int32_t(reference.transform.pitch)),
+            simulation::wrap16(-int32_t(reference.transform.yaw)),
+            simulation::wrap16(-int32_t(reference.transform.roll))));
+        reference.strategy_address=player.strategy_address;reference.shape=player.shape;
+        reference.type=player.type;reference.generation=game_.objects().generation(next->player);
+        next->pilot_reference=reference;
+        next->pilot_tracking=player.strategy_address && (player.strategy_address==tracking_strategies_[0]
+            || player.strategy_address==tracking_strategies_[1]);
+    }
     next->transforms=render::capture_object_snapshots(game_.objects(),trig_);
     if(const auto player=next->transforms.find(next->player);player!=next->transforms.end()) {
         const auto strategy=player->second.strategy_address;
-        if(strategy && (strategy==tracking_strategies_[0] || strategy==tracking_strategies_[1])) {
+        if(camera_policy_==SceneCameraPolicy::headset_tracking && strategy
+            && (strategy==tracking_strategies_[0] || strategy==tracking_strategies_[1])) {
             // Normal source flight follows only a fraction of player Y.
             // Remove that deliberate screen drift from the shared VR camera,
             // preserving shake, camera orbit and every scripted strategy.
-            const int correction=int(player->second.transform.y)-std::bit_cast<int16_t>(word(11));
+            const int correction=int(player->second.transform.y)-starfox::bit_cast<int16_t>(word(11));
             next->camera.y=simulation::wrap16(int(next->camera.y)+correction);
             if(next->background_landscape) next->landscape_grid_height=next->camera.y;
         }
@@ -364,12 +437,12 @@ void GameSceneHistory::capture() {
     const auto model_word=[&](size_t i) {return model_addresses_[i]?game_.map().peek_ram_word(model_addresses_[i]).value():uint16_t{};};
     const auto model_byte=[&](size_t i) {return model_addresses_[i]?game_.map().peek_ram_byte(model_addresses_[i]).value():uint8_t{};};
     render::RenderPose common;
-    common.vanish_x=std::bit_cast<int16_t>(model_word(0));common.vanish_y=std::bit_cast<int16_t>(model_word(1));
+    common.vanish_x=starfox::bit_cast<int16_t>(model_word(0));common.vanish_y=starfox::bit_cast<int16_t>(model_word(1));
     next->source_vanishing_point={static_cast<int16_t>(common.vanish_x),static_cast<int16_t>(common.vanish_y)};
     common.scale=next->model_scale;
     common.wireframe_mode=model_byte(4);common.wobble_mode=model_byte(5);
     common.wave_mode=model_byte(6)!=0;common.cel_mode=model_byte(7)!=0;
-    common.wave_offset=std::bit_cast<int16_t>(model_word(8));common.colour_warp=model_word(9)!=0;
+    common.wave_offset=starfox::bit_cast<int16_t>(model_word(8));common.colour_warp=model_word(9)!=0;
     if(model_addresses_[10]) common.projected_points_address=static_cast<uint16_t>(model_addresses_[10]);
     const auto thresholds=model_word(2),colours=model_word(3);
     next->objects.reserve(game_.draw_order().size());
@@ -378,6 +451,14 @@ void GameSceneHistory::capture() {
         const auto pose=next->transforms.find(handle);
         if(pose==next->transforms.end()) continue; // Source invisible flag.
         const auto& object=game_.objects().at(handle);
+        // EX's manual first-person view can spawn a separate animated cockpit
+        // object even though its player ship is already invisible. Do not put
+        // that flat shell in either headset eye or a reflected/ray model pass.
+        // Keep the cartridge object, strategies, camera and all console views.
+        if(camera_policy_==SceneCameraPolicy::headset_tracking && next->meters.extended
+            && ((cockpit_shape_ && object.shape==cockpit_shape_)
+                || std::any_of(cockpit_strategies_.begin(),cockpit_strategies_.end(),
+                    [&](uint32_t strategy){return strategy && object.strategy_address==strategy;}))) continue;
         auto source=common;
         const auto& transform=pose->second.transform;
         const double x=simulation::wrap16(int64_t(transform.x)-next->camera.x);
@@ -418,6 +499,6 @@ void GameSceneHistory::capture() {
         }
         grid_history.finish(frame,endpoint);
     }
-    previous_=current_;current_=std::move(next);grid_line_history_=grid_history;
+    older_=previous_;previous_=current_;current_=std::move(next);grid_line_history_=grid_history;
 }
 }

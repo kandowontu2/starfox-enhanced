@@ -28,7 +28,11 @@ public:
     void* enqueue(void* device,void* command,void* points,void* corners,
         void* polygons,void* visibility,const NativeClipSettings& settings,bool continuous=false,
         void* projection_params=nullptr,std::uint32_t projection_count=0,
-        void* point_residuals=nullptr,std::uint32_t residual_count=0);
+        void* point_residuals=nullptr,std::uint32_t residual_count=0,
+        std::uint32_t verified_source_corners=0);
+    // A nonzero source-corner bound must be derived from every uploaded
+    // descriptor, not a model name or GPU-only topology guess. Zero keeps the
+    // generic path. Optional small-face specialization preserves the output ABI.
     // Optional continuous projection residuals (32 bytes/point). Retains screen
     // tails through clipping; count must cover every referenced point. Format 2
     // retains raw binary64 screen coordinates (see ContinuousProjectedPoint).
@@ -57,6 +61,8 @@ public:
     // Native solid/affine texture fill. Reads last clipped output; materials
     // is one RasterCommand template per polygon. Output has polygon_count *
     // (height * render_scale) RasterCommands in painter order, including empty rows.
+    // Empty rows have all four bounds zero; their other fields are unspecified.
+    // Check coverage bounds before consuming any material/geometry payload.
     // Lines use source major-axis stepping, scaled thickness and dither, and
     // do not replace surface metadata. Repeated-row EX modes require masks.
     // Optional BSP order: indices/results are GpuBsp's resident outputs. first,
@@ -73,7 +79,9 @@ public:
     void* enqueue_spans(void* command,void* materials,bool winding_independent=false,std::uint32_t render_scale=1,
         const GpuSpanOrder* order=nullptr,std::uint32_t line_thickness=1,
         void* source_texels=nullptr,std::uint32_t source_texel_bytes=0,void** masked_texels=nullptr,
-        std::array<std::uint32_t,2> raster_size={},bool reuse_span_scratch=false);
+        // MSAA adds only the selected 2/4/8 sample bitplanes after each native mask.
+        // Off/default leaves the original storage and native raster unchanged.
+        std::array<std::uint32_t,2> raster_size={},bool reuse_span_scratch=false,unsigned msaa_samples=0);
     void release_device() noexcept;
     const std::string& status() const noexcept;
 private:

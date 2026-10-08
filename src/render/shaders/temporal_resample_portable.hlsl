@@ -9,13 +9,21 @@ cbuffer Settings : register(b0,space2) {uint sourceWidth,sourceHeight,targetWidt
 void main(uint3 id:SV_DispatchThreadID) {
     if(id.x>=targetWidth || id.y>=targetHeight) return;
     float2 ratio=float2(sourceWidth,sourceHeight)/float2(targetWidth,targetHeight);
-    float2 lo=float2(id.xy)*ratio,hi=float2(id.xy+1)*ratio;
-    uint2 first=uint2(floor(lo)),last=min(uint2(ceil(hi)),uint2(sourceWidth,sourceHeight));
+    // Determine the footprint exactly. FP32 reciprocal/edge rounding can add
+    // a zero-area neighbor, even when source and target widths are equal.
+    // Such a neighbor must not donate depth or physical motion. Dimensions are
+    // bounded to 8192, so these integer products cannot overflow uint32.
+    uint2 sourceSize=uint2(sourceWidth,sourceHeight),targetSize=uint2(targetWidth,targetHeight);
+    uint2 lo=id.xy*sourceSize,hi=(id.xy+1)*sourceSize;
+    uint2 first=lo/targetSize,last=(hi+targetSize-1)/targetSize;
     float4 color=0;float weight=0,closest=2;float2 motion=asfloat(0xff7fffffu);
     // Area-filter color; depth and motion must come from the same nearest
     // visible sample, never average across foreground/background boundaries.
     for(uint y=first.y;y<last.y;++y) for(uint x=first.x;x<last.x;++x) {
-        float w=max(0,min(hi.x,x+1.0)-max(lo.x,float(x)))*max(0,min(hi.y,y+1.0)-max(lo.y,float(y)));
+        uint wx=min(hi.x,(x+1)*targetWidth)-max(lo.x,x*targetWidth);
+        uint wy=min(hi.y,(y+1)*targetHeight)-max(lo.y,y*targetHeight);
+        // Common target-size divisors cancel when normalizing the color sum.
+        float w=float(wx)*float(wy);
         color+=sourceColor.Load(int3(x,y,0))*w;weight+=w;
         float z=sourceDepth.Load(int3(x,y,0));
         if(z<closest) {closest=z;motion=sourceMotion.Load(int3(x,y,0));}

@@ -1,12 +1,15 @@
 #include "starfox/render/gpu_background.hpp"
+#include "starfox/render/gpu_image_extent.hpp"
 #include "starfox/render/temporal_jitter.hpp"
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cmath>
 #include <cstring>
 #include <stdexcept>
 #if defined(STARFOX_SDL_GPU_EFFECTS)
 #include <SDL3/SDL.h>
+#include "starfox/render/gpu_preparation.hpp"
 #include "shaders/generated/background_portable.hpp"
 #include "shaders/generated/background2_portable.hpp"
 #endif
@@ -41,7 +44,7 @@ struct GpuBackground::Impl {
         info.entrypoint=(spv||dxil)?"main":"main0";
         info.num_readonly_storage_buffers=info.num_readwrite_storage_buffers=info.num_uniform_buffers=1;
         info.threadcount_x=info.threadcount_y=8;info.threadcount_z=1;
-        pipeline=SDL_CreateGPUComputePipeline(device,&info);require(pipeline);
+        pipeline=create_gpu_compute_pipeline(device,&info);require(pipeline);
         SDL_GPUBufferCreateInfo mem{SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ,70400,0};
         memory=SDL_CreateGPUBuffer(device,&mem);require(memory);
         SDL_GPUTransferBufferCreateInfo transfer{SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,70400,0};
@@ -58,7 +61,7 @@ struct GpuBackground::Impl {
         info.entrypoint=(spv||dxil)?"main":"main0";
         info.num_readonly_storage_buffers=info.num_uniform_buffers=1;info.num_readwrite_storage_buffers=2;
         info.threadcount_x=64;info.threadcount_y=info.threadcount_z=1;
-        if(!bg2_pipeline) {bg2_pipeline=SDL_CreateGPUComputePipeline(device,&info);require(bg2_pipeline);}
+        if(!bg2_pipeline) {bg2_pipeline=create_gpu_compute_pipeline(device,&info);require(bg2_pipeline);}
         SDL_GPUBufferCreateInfo aux{SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ|SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE,64,0};
         if(!prepared) {prepared=SDL_CreateGPUBuffer(device,&aux);require(prepared);}
     }
@@ -77,7 +80,8 @@ GpuRasterOutput GpuBackground::enqueue(void* device,void* command,const simulati
     const bool custom=s.logical_viewport[0] || s.logical_viewport[1];
     const auto logical_width=custom?s.logical_viewport[0]:width/(scale?scale:1);
     const auto logical_height=custom?s.logical_viewport[1]:height/(scale?scale:1);
-    if(!valid_raster_jitter(s.raster_jitter) || !device || !command || !width || !height || width>4096 || height>4096 || !scale || scale>4
+    if(!valid_raster_jitter(s.raster_jitter) || !std::isfinite(s.stereo_sky_source_x) || std::abs(s.stereo_sky_source_x)>65536
+        || !device || !command || !bounded_gpu_image_extent(width,height) || !scale || scale>10
         || (!custom && (width%scale || height%scale)) || !logical_width || !logical_height || logical_width>4096 || logical_height>4096 || s.layer<1 || s.layer>3
         || unsigned(s.priority)>2 || unsigned(s.tag)>4 || s.horizontal_origin < -65536 || s.horizontal_origin>65536
         || s.scroll_x < -1000000 || s.scroll_x>1000000 || s.scroll_y < -1000000 || s.scroll_y>1000000 || s.unique_regions.size()>64) {
@@ -132,7 +136,7 @@ GpuRasterOutput GpuBackground::enqueue(void* device,void* command,const simulati
                 int(s.tag),(ppu.main_screen&2)?1:0,s.transparent_cgram_black?1:0,int(flags),
                 std::bit_cast<std::int32_t>(s.single_occurrence_top_rows),int(s.unique_regions.size()),ppu.bg2_scroll_x,ppu.bg2_scroll_y,
                 int(s.terrain_source_rows[0]),int(s.terrain_source_rows[1]),int(logical_width),int(logical_height),
-                std::bit_cast<std::int32_t>(s.raster_jitter[0]),std::bit_cast<std::int32_t>(s.raster_jitter[1]),int(s.sky_source_min),0};
+                std::bit_cast<std::int32_t>(s.raster_jitter[0]),std::bit_cast<std::int32_t>(s.raster_jitter[1]),int(s.sky_source_min),std::bit_cast<std::int32_t>(s.stereo_sky_source_x)};
             for(unsigned phase=0;phase<2;++phase) {
                 data[3]=int(phase);SDL_PushGPUComputeUniformData(cmd,0,data.data(),sizeof(data));
                 SDL_GPUStorageBufferReadWriteBinding outputs[2]{};

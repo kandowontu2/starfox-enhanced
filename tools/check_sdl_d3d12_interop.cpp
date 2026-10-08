@@ -7,6 +7,7 @@
 #include <d3d12.h>
 #include <wrl/client.h>
 #include <array>
+#include <algorithm>
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
@@ -79,6 +80,47 @@ static void check_texture_bridge(SDL_GPUDevice* device, ID3D12Device* native, SD
     }
     std::cout << "Native texture/compute bridges: 9 exact RGBA/R32/RG32 round trips, native commands, and invalid-input checks passed\n";
 }
+static void check_timestamp_bridge(SDL_GPUDevice* device,SDL_PropertiesID props) {
+    const auto* timing=static_cast<const StarfoxSdlD3D12TimestampsV1*>(SDL_GetPointerProperty(
+        props,STARFOX_SDL_D3D12_TIMESTAMPS,nullptr));
+    require(timing && timing->version==1,"Timestamp bridge unavailable");
+    std::uint64_t frequency{};
+    require(!timing->create(device,0,&frequency) && !timing->create(device,4097,&frequency)
+        && !timing->create(device,8,nullptr),"Invalid timestamp allocation accepted");
+    auto* context=timing->create(device,8,&frequency);
+    require(context && frequency,"Timestamp allocation/frequency failed");
+    unsigned resolved=0;
+    // A cancelled list must not consume/reuse a submitted slot or resolve an
+    // unwritten index. Next lists rewrite all queried indices before resolve.
+    auto* cancelled=SDL_AcquireGPUCommandBuffer(device);require(cancelled,SDL_GetError());
+    require(timing->write(cancelled,context,0),"Cancelled timestamp write failed");
+    require(!timing->write(cancelled,context,8) && !timing->write(nullptr,context,0)
+        && !timing->resolve(cancelled,context,7,2) && !timing->resolve(cancelled,context,0,0),
+        "Invalid timestamp command/range accepted");
+    SDL_CancelGPUCommandBuffer(cancelled);
+    for(unsigned trial=0;trial<16;++trial) {
+        std::array<SDL_GPUFence*,2> fences{};
+        for(unsigned pair=0;pair<2;++pair) {
+            auto* command=SDL_AcquireGPUCommandBuffer(device);require(command,SDL_GetError());
+            for(unsigned q=0;q<4;++q) require(timing->write(command,context,pair*4+q),"Timestamp write failed");
+            require(timing->resolve(command,context,pair*4,4),"Timestamp resolve failed");
+            fences[pair]=SDL_SubmitGPUCommandBufferAndAcquireFence(command);require(fences[pair],SDL_GetError());
+        }
+        require(SDL_WaitForGPUFences(device,true,fences.data(),2),SDL_GetError());
+        for(unsigned pair=0;pair<2;++pair) {
+            std::array<std::uint64_t,4> ticks{};
+            require(timing->read(context,pair*4,4,ticks.data()),"Fence-retired timestamp read failed");
+            require(ticks[1]>=ticks[0] && ticks[2]>=ticks[1] && ticks[3]>=ticks[2],"Timestamp query indices mixed or unordered");
+            require(ticks[3]-ticks[0]==(ticks[1]-ticks[0])+(ticks[2]-ticks[1])+(ticks[3]-ticks[2]),"Timestamp phases do not sum to command time");
+            SDL_ReleaseGPUFence(device,fences[pair]);++resolved;
+        }
+    }
+    std::uint64_t tick{};
+    require(!timing->read(context,8,1,&tick) && !timing->read(context,7,2,&tick)
+        && !timing->read(context,0,1,nullptr),"Invalid timestamp read accepted");
+    timing->destroy(context);
+    std::cout<<"D3D12 timestamp bridge: "<<resolved<<" retired query sets, cancellation/reuse and invalid ranges passed; frequency="<<frequency<<"\n";
+}
 int main() {
     using namespace starfox::render::shadows;
     SDL_GPUDevice* device{};SDL_GPUBuffer* buffer{};SDL_GPUTransferBuffer* download{};
@@ -88,6 +130,7 @@ int main() {
         device=SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_DXIL,true,"direct3d12");
         require(device,SDL_GetError());
         const auto props=SDL_GetGPUDeviceProperties(device);
+        check_timestamp_bridge(device,props);
         auto* native=static_cast<ID3D12Device*>(SDL_GetPointerProperty(props,STARFOX_SDL_D3D12_DEVICE,nullptr));
         auto* bridge=static_cast<const StarfoxSdlD3D12BridgeV2*>(SDL_GetPointerProperty(props,STARFOX_SDL_D3D12_BRIDGE,nullptr));
         require(native && bridge && bridge->version==2 && bridge->wait_fence,"Pinned native SDL bridge is unavailable");
@@ -101,7 +144,24 @@ int main() {
         std::array<std::uint8_t,8> identity{};std::memcpy(identity.data(),&luid,8);
         DxrShadows producer(identity);
         SdlDxrShadows owned;
+        require(!producer.working_image_bytes() && !owned.working_image_bytes(),
+            "Unused ray metadata query allocated or invented output images");
         require(producer.available(),producer.status().c_str());
+        {
+            Scene casters;casters.add({{-12,-12,20},{12,-12,20},{0,12,20}});casters.build();
+            const ReceiverPlane plane{{0,0,40},{0,0,1}};
+            std::vector<std::uint8_t> actual,expected;
+            const Camera camera{37,23,30,18.5,11.5,26};
+            render_mask(casters,camera,{0,0,-1},plane,expected,nullptr,true,true);
+            require(owned.render_resident(device,casters,camera,{0,0,-1},plane,nullptr,true),owned.status().c_str());
+            require(owned.readback(actual) && actual==expected,"SDL DXR underlay lost plane shadows");
+            require(!owned.render_resident(device,casters,camera,{0,0,-1},{},nullptr,true)
+                && !owned.output().buffer,"SDL DXR underlay retained stale no-plane output");
+            require(owned.render_resident(device,casters,camera,{0,0,-1},plane,nullptr,true)
+                && owned.readback(actual) && actual==expected,"SDL DXR underlay failed recovery");
+            std::cout<<"SDL DXR ground-only receiver transfer and invalidation passed\n";
+        }
+        std::uint64_t owned_native_capacity=1024; // 40-byte rows x 23, aligned to 256 above.
         for(unsigned frame=0;frame<12;++frame) {
             const unsigned width=frame%3==0?133:frame%3==1?400:129,height=frame%3==1?224:79;
             Scene scene;
@@ -136,6 +196,14 @@ int main() {
             require(SDL_WaitForGPUFences(device,true,&fence,1),SDL_GetError());SDL_ReleaseGPUFence(device,fence);
             std::vector<std::uint8_t> reference;
             require(producer.readback_resident(reference),producer.status().c_str());
+            D3D12_RESOURCE_DESC retained{};
+#if defined(__MINGW32__)
+            static_cast<ID3D12Resource*>(output.resource)->GetDesc(&retained);
+#else
+            retained=static_cast<ID3D12Resource*>(output.resource)->GetDesc();
+#endif
+            require(producer.working_image_bytes()==retained.Width*2,
+                "Native image accounting omitted aligned/grown output or diagnostic readback");
             auto* pixels=static_cast<const std::uint8_t*>(SDL_MapGPUTransferBuffer(device,download,false));require(pixels,SDL_GetError());
             bool equal=true;unsigned shaded=0;
             for(unsigned y=0;y<height;++y) for(unsigned xpixel=0;xpixel<width;++xpixel) {
@@ -162,14 +230,23 @@ int main() {
             effects.release_device();
             if(!owned.render_resident(device,scene,camera,{-1,-1,-1},ReceiverPlane{{0,25,0},{0,1,0}}))
                 throw std::runtime_error("Owned frame "+std::to_string(frame)+": "+owned.status());
+            owned_native_capacity=std::max(owned_native_capacity,(std::uint64_t(bytes)+255)&~std::uint64_t(255));
+            // All adjacent cases change the SDL copy extent, retiring its old
+            // optional download while retaining the producer's grown output.
+            require(owned.working_image_bytes()==owned_native_capacity+bytes,
+                "SDL image accounting omitted native capacity or double-counted an imported alias");
             std::vector<std::uint8_t> owned_mask;
             // Consume before any diagnostic readback: a CPU wait here would
             // conceal a missing producer -> SDL queue dependency.
             settings.resident_shadow=owned.output();actual.assign(expected.size(),200);
             require(effects.apply(device,frame_buffer,actual,settings) && actual==expected,"Owned mask effects mismatch");
             require(owned.readback(owned_mask) && owned_mask==reference,"Owned native mask differs after reuse/resize");
+            require(owned.working_image_bytes()==owned_native_capacity+2*bytes,
+                "SDL image accounting omitted the optional diagnostic download");
             if(frame==5) {
                 owned.release_device();
+                owned_native_capacity=0;
+                require(!owned.working_image_bytes(),"Released native/SDL image storage remained charged");
                 require(!owned.output().buffer && SDL_GetGPUShaderFormats(device),"Owner release destroyed borrowed device or retained output");
                 require(!owned.readback(owned_mask) && owned_mask.empty(),"Released mask remained readable");
             }
@@ -177,6 +254,8 @@ int main() {
                 auto invalid_camera=camera;invalid_camera.width=0;
                 require(!owned.render_resident(device,scene,invalid_camera,{-1,-1,-1},std::nullopt)
                     && !owned.output().buffer,"Invalid render retained an owned mask");
+                owned_native_capacity=0;
+                require(!owned.working_image_bytes(),"Failed legacy ray owner retained charged image storage");
             }
             effects.release_device();
             SDL_ReleaseGPUTransferBuffer(device,download);download=nullptr;

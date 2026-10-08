@@ -21,7 +21,10 @@ struct TemporalGroundInputs {
 };
 // Convert resident linear camera Z / float4(pixel motion,Z,valid) buffers into
 // projected R32 depth, RG32 motion and 1x1 R32 exposure. Unknown correspondence
-// is encoded as -FLT_MAX, never fabricated valid zero motion. No submission or
+// is encoded as -FLT_MAX, never fabricated valid zero motion. A caller may
+// explicitly identify a frozen source scene (the setup preview): then every
+// source sample has known zero physical motion, including 2D artwork.
+// No submission or
 // CPU readback; call between passes and retain this object through completion.
 // Motion may be null on reset; that branch never reads the motion buffer.
 class GpuTemporalInputs {
@@ -31,11 +34,15 @@ public:
         const GpuTemporalTextures&,std::uint32_t width,std::uint32_t height);
     GpuTemporalTextures enqueue(void* device,void* command,void* camera_depth,void* motion,
         std::uint32_t width,std::uint32_t height,float near_plane,float far_plane,bool reset,
-        const TemporalGroundInputs* ground=nullptr);
-    // Restore exact HUD and non-terrain tilemap artwork after neural
-    // evaluation. This is output protection, not pre-evaluation HUD exclusion.
+        const TemporalGroundInputs* ground=nullptr,bool frozen_scene=false);
+    // Restore exact HUD, non-terrain tilemap artwork and world OAM sprites
+    // after neural evaluation. This is output protection, not pre-evaluation
+    // HUD exclusion. Camera underlays disable protect_hud but retain artwork.
+    // DLSS can leave a two-pixel model-edge guard reconstructed instead of
+    // clipping the stable edge with this frame's jittered native silhouette.
     void* restore_hud(void* device,void* command,void* original_rgba,void* reconstructed_rgba,
-        void* packed_pixels,std::uint32_t width,std::uint32_t height,bool preserve_artwork=true);
+        void* packed_pixels,std::uint32_t width,std::uint32_t height,bool preserve_artwork=true,bool protect_hud=true,
+        bool reconstruct_edges=false);
     void release_device() noexcept;
     const std::string& status() const;
 private:

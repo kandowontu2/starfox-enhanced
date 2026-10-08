@@ -1,6 +1,7 @@
 #include "starfox/audio/spc700_audio.hpp"
 #include "starfox/state/archive.hpp"
 #include "starfox/state/container.hpp"
+#include "starfox/platform/nintendo_3ds/frame_profile.hpp"
 
 #include <spc.h>
 #include <SPC_Filter.h>
@@ -110,7 +111,7 @@ struct Spc700Audio::Impl {
     void save(state::Writer& writer) const {
         CoreStateCopy core;
         auto* context = reinterpret_cast<unsigned char*>(&core);
-        spc_copy_state(spc, &context, CoreStateCopy::copy);
+        spc->copy_state_preserving_machine(&context, CoreStateCopy::copy);
         std::array<int, 8> history{};
         static_assert(sizeof(int) == sizeof(std::int32_t));
         filter->save_history(history.data());
@@ -258,20 +259,24 @@ struct Spc700Audio::Impl {
         }
     }
 
-    std::vector<std::int16_t> render(
+    void render(
+        std::vector<std::int16_t>& output,
         std::span<const simulation::ApuPortWrite> writes,
         bool split_upload_restarts = false,
         std::size_t* rendered_frames = nullptr,
         CommandStream command_stream = CommandStream::music) {
-        std::vector<std::int16_t> output(
-            Spc700Audio::stereo_frames_per_logic_tick * 2U, 0);
+        output.resize(Spc700Audio::stereo_frames_per_logic_tick * 2U);
+        std::fill(output.begin(), output.end(), 0);
         if (loaded) {
             spc_set_output(spc, output.data(), static_cast<int>(output.size()));
         }
         int last_clock = 0;
         auto finish_frame = [&] {
             if (!loaded) return;
-            spc_end_frame(spc, kClocksPerLogicTick);
+            {
+                STARFOX_3DS_FRAME_PHASE(spc_emulate);
+                spc_end_frame(spc, kClocksPerLogicTick);
+            }
             if (rendered_frames != nullptr) ++*rendered_frames;
             // A later upload calls spc_load_spc and replaces the output
             // buffer. Clear this completed bank's samples now; startup audio
@@ -313,7 +318,10 @@ struct Spc700Audio::Impl {
                 const auto clock = std::clamp(
                     static_cast<int>(write.clock_offset), last_clock,
                     kClocksPerLogicTick);
-                spc_write_port(spc, clock, write.port, write.value);
+                {
+                    STARFOX_3DS_FRAME_PHASE(spc_emulate);
+                    spc_write_port(spc, clock, write.port, write.value);
+                }
                 last_clock = clock;
             }
             if (!was_loaded && loaded) {
@@ -325,16 +333,21 @@ struct Spc700Audio::Impl {
             }
         }
 
-        if (!loaded) return output;
-        spc_end_frame(spc, kClocksPerLogicTick);
+        if (!loaded) return;
+        {
+            STARFOX_3DS_FRAME_PHASE(spc_emulate);
+            spc_end_frame(spc, kClocksPerLogicTick);
+        }
         if (rendered_frames != nullptr) ++*rendered_frames;
         const auto generated = std::clamp(spc_sample_count(spc), 0,
                                           static_cast<int>(output.size()));
         if (generated < static_cast<int>(output.size())) {
             std::fill(output.begin() + generated, output.end(), 0);
         }
-        spc_filter_run(filter, output.data(), static_cast<int>(output.size()));
-        return output;
+        {
+            STARFOX_3DS_FRAME_PHASE(spc_filter);
+            spc_filter_run(filter, output.data(), static_cast<int>(output.size()));
+        }
     }
 };
 
@@ -350,6 +363,13 @@ std::vector<std::uint8_t> Spc700Audio::save_state() const {
     music_impl_->save(writer);
     effects_impl_->save(writer);
     writer(last_music_samples_, last_effect_samples_);
+    // Optional trailing extension preserves the actual CPU->SMP input ports.
+    // The pinned core's old format merges them with SMP output registers.
+    // Older states without this extension retain their original load behavior.
+    std::array<std::uint8_t,4> music_inputs{},effects_inputs{};
+    music_impl_->spc->save_cpu_input_ports(music_inputs.data());
+    effects_impl_->spc->save_cpu_input_ports(effects_inputs.data());
+    writer(music_inputs,effects_inputs);
     return state::pack(0x53504301U, 0U, writer.bytes());
 }
 
@@ -359,6 +379,11 @@ void Spc700Audio::load_state(std::span<const std::uint8_t> bytes) {
     restored.music_impl_->load(reader);
     restored.effects_impl_->load(reader);
     reader(restored.last_music_samples_, restored.last_effect_samples_);
+    if(!reader.empty()) {
+        std::array<std::uint8_t,4> music_inputs{},effects_inputs{};reader(music_inputs,effects_inputs);
+        restored.music_impl_->spc->load_cpu_input_ports(music_inputs.data());
+        restored.effects_impl_->spc->load_cpu_input_ports(effects_inputs.data());
+    }
     reader.finish();
     const auto samples = restored.last_music_samples_.size();
     if (samples != restored.last_effect_samples_.size()
@@ -367,15 +392,26 @@ void Spc700Audio::load_state(std::span<const std::uint8_t> bytes) {
     *this = std::move(restored);
 }
 
-std::vector<std::int16_t> Spc700Audio::render_logic_tick(
+void Spc700Audio::render_stems_logic_tick(
     std::span<const simulation::ApuPortWrite> writes) {
-    last_music_samples_ = music_impl_->render(
-        writes, false, nullptr, Impl::CommandStream::music);
-    last_effect_samples_ = effects_impl_->render(
-        writes, false, nullptr, Impl::CommandStream::effects);
+    {
+        STARFOX_3DS_FRAME_PHASE(music);
+        music_impl_->render(last_music_samples_,
+            writes, false, nullptr, Impl::CommandStream::music);
+    }
+    {
+        STARFOX_3DS_FRAME_PHASE(effects);
+        effects_impl_->render(last_effect_samples_,
+            writes, false, nullptr, Impl::CommandStream::effects);
+    }
     if (last_music_samples_.size() != last_effect_samples_.size()) {
         throw std::runtime_error{"SPC music/effect stem size mismatch"};
     }
+}
+
+std::vector<std::int16_t> Spc700Audio::render_logic_tick(
+    std::span<const simulation::ApuPortWrite> writes) {
+    render_stems_logic_tick(writes);
     auto mixed = last_music_samples_;
     for (std::size_t index = 0; index < mixed.size(); ++index) {
         const auto sample = static_cast<std::int32_t>(last_music_samples_[index])
@@ -392,10 +428,10 @@ std::size_t Spc700Audio::prime_upload_sequence(
     std::span<const simulation::ApuPortWrite> writes) {
     std::size_t music_frames{};
     std::size_t effect_frames{};
-    static_cast<void>(music_impl_->render(
-        writes, true, &music_frames, Impl::CommandStream::music));
-    static_cast<void>(effects_impl_->render(
-        writes, true, &effect_frames, Impl::CommandStream::effects));
+    music_impl_->render(last_music_samples_,
+        writes, true, &music_frames, Impl::CommandStream::music);
+    effects_impl_->render(last_effect_samples_,
+        writes, true, &effect_frames, Impl::CommandStream::effects);
     if (music_frames != effect_frames) {
         throw std::runtime_error{"SPC music/effect upload cadence mismatch"};
     }

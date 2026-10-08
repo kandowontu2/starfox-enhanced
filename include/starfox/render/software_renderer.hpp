@@ -3,6 +3,7 @@
 #include "starfox/assets/shape.hpp"
 #include "starfox/assets/rom.hpp"
 #include "starfox/render/framebuffer.hpp"
+#include "starfox/render/face_material.hpp"
 #include "starfox/simulation/math.hpp"
 
 #include <cstdint>
@@ -232,10 +233,41 @@ struct RenderDiagnostics {
     std::vector<PolygonRenderDiagnostics> polygons;
 };
 
+enum class ShapePrimitiveKind { polygon, line, sprite };
+struct ShapePrimitiveVertex {
+    // Source camera coordinates: X-right, Y-down, Z-forward. These are NOT
+    // screen pixels; a native renderer projects them independently per eye.
+    std::array<double,3> camera{};
+    std::array<double,2> uv{}; // Source texels, with scrolling already applied.
+};
+struct ShapePrimitive {
+    ShapePrimitiveKind kind{ShapePrimitiveKind::polygon};
+    std::vector<ShapePrimitiveVertex> vertices;
+    FaceMaterial material;
+    // Sprites retain a camera-space centre plus their source-projected size.
+    // The native consumer expands an eye-facing quad, not a screen-depth decal.
+    double sprite_half_extent{};
+    bool simple_sprite{};
+};
+struct PreparedShapePrimitives {
+    RenderPose pose;
+    std::uint8_t colour_index_base{};
+    double focal_length{};
+    std::vector<ShapePrimitive> primitives;
+    // Material texture pointers are borrowed from Shape. Keep the selected
+    // decoded Shape alive through conversion/upload. Dither pairs and EX span
+    // flags are retained; consumers must implement them, never flatten/drop them.
+};
+
 class SoftwareRenderer {
 public:
     explicit SoftwareRenderer(RenderSettings settings = {});
     void collect_shadow_casters(const assets::Shape&,const RenderPose&,shadows::Scene&) const;
+    // Shared source transform/material/BSP/explosion preparation, without
+    // scan conversion or a source-viewport crop. In particular, geometry just
+    // outside the mono viewport remains available to either stereo eye.
+    [[nodiscard]] PreparedShapePrimitives prepare_primitives(
+        const assets::Shape&,const RenderPose&) const;
 
     void draw(
         const assets::Shape& shape,
@@ -259,7 +291,8 @@ public:
 
 private:
     void draw_impl(const assets::Shape&,const RenderPose&,Framebuffer&,bool,
-        SurfaceBuffer*,shadows::Scene*,RenderDiagnostics*,bool shadow_only) const;
+        SurfaceBuffer*,shadows::Scene*,RenderDiagnostics*,bool shadow_only,
+        PreparedShapePrimitives* primitives=nullptr) const;
     RenderSettings settings_;
 };
 

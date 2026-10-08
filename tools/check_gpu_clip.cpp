@@ -2,6 +2,7 @@
 #include "starfox/render/gpu_projection.hpp"
 #include "starfox/render/gpu_raster.hpp"
 #include "starfox/render/raster_commands.hpp"
+#include "starfox/render/span_clear_policy.hpp"
 #include "starfox/render/software_renderer.hpp"
 #include <SDL3/SDL.h>
 #include <array>
@@ -11,6 +12,10 @@
 #include <iostream>
 #include <stdexcept>
 #include <vector>
+#include <cstdlib>
+#include <optional>
+#include <limits>
+#include <tuple>
 namespace {
 using V=std::array<int,4>;
 int word(int v){return std::bit_cast<std::int16_t>(std::uint16_t(v));}
@@ -69,9 +74,45 @@ std::vector<Fractional> fractional_reference(std::vector<Fractional> input,int w
     return input;
 }
 }
-int main()try {
+#include "check_span_clear_reuse.inc"
+#include "check_span_clear_dispatch.inc"
+#include "check_cooperative_span_dispatch.inc"
+#include "check_projection_cache_clip.inc"
+#include "check_clip_preparation.inc"
+int main(int argc,char** argv)try {
     Resources r;require(SDL_Init(SDL_INIT_VIDEO));
-    r.device=SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV|SDL_GPU_SHADERFORMAT_MSL|SDL_GPU_SHADERFORMAT_DXIL,true,nullptr);require(r.device);
+    const auto properties=SDL_CreateProperties();require(properties!=0);
+    SDL_SetBooleanProperty(properties,SDL_PROP_GPU_DEVICE_CREATE_SHADERS_SPIRV_BOOLEAN,true);
+    SDL_SetBooleanProperty(properties,SDL_PROP_GPU_DEVICE_CREATE_SHADERS_DXIL_BOOLEAN,true);
+    SDL_SetBooleanProperty(properties,SDL_PROP_GPU_DEVICE_CREATE_SHADERS_MSL_BOOLEAN,true);
+    SDL_SetBooleanProperty(properties,SDL_PROP_GPU_DEVICE_CREATE_DEBUGMODE_BOOLEAN,true);
+    SDL_SetBooleanProperty(properties,SDL_PROP_GPU_DEVICE_CREATE_PREFERLOWPOWER_BOOLEAN,std::getenv("STARFOX_TEST_LOW_POWER_GPU")!=nullptr);
+    r.device=SDL_CreateGPUDeviceWithProperties(properties);SDL_DestroyProperties(properties);require(r.device);
+    std::cout<<"GPU adapter: "<<SDL_GetStringProperty(SDL_GetGPUDeviceProperties(r.device),SDL_PROP_GPU_DEVICE_NAME_STRING,"unknown")
+        <<" driver="<<SDL_GetGPUDeviceDriver(r.device)<<std::endl;
+    check_clip_preparation(r.device);check_clip_preparation(r.device,true);
+    if(argc==2 && std::string(argv[1])=="--preparation") return 0;
+    if(argc==2 && std::string(argv[1])=="--span-clear-reuse") {
+        check_span_clear_reuse(r.device);check_span_clear_dispatch(r.device);return 0;
+    }
+    if(argc==2 && std::string(argv[1])=="--colour-spans") {
+        check_span_clear_reuse(r.device,true);return 0;
+    }
+    if(argc==2 && std::string(argv[1])=="--cooperative-spans") {
+        check_span_clear_reuse(r.device,false,true);return 0;
+    }
+    if(argc==2 && std::string(argv[1])=="--cooperative-dispatch") {
+        check_cooperative_span_dispatch(r.device);return 0;
+    }
+    if(argc==2 && std::string(argv[1])=="--projection-cache") {check_projection_cache_clip(r.device);return 0;}
+    if(argc==2 && std::string(argv[1])=="--radix16") {check_projection_cache_clip(r.device,true);return 0;}
+    if(argc==2 && std::string(argv[1])=="--interior") {check_projection_cache_clip(r.device,false,true);return 0;}
+    const bool small=argc==2 && std::string(argv[1])=="--small-clip";
+    if(argc!=1 && !small) throw std::runtime_error("usage: starfox_gpu_clip_check [--preparation|--span-clear-reuse|--colour-spans|--cooperative-spans|--cooperative-dispatch|--small-clip|--projection-cache|--radix16|--interior]");
+    if(small && (!std::getenv("STARFOX_TEST_SMALL_CLIP") || std::getenv("STARFOX_TEST_FULL_CLIP")))
+        throw std::runtime_error("Small-clip oracle requires the opt-in and no full-clip override");
+    if(small && !(SDL_GetGPUShaderFormats(r.device)&SDL_GPU_SHADERFORMAT_SPIRV))
+        throw std::runtime_error("Small clipping is restricted to Vulkan after D3D12 reflected-water device loss");
     starfox::render::GpuClip clip;
     starfox::render::GpuProjection projection;
     starfox::render::GpuRaster raster;
@@ -81,7 +122,7 @@ int main()try {
     std::uint32_t random=71893;
     const auto next=[&](){random=random*1664525U+1013904223U;return word(int(random&65535));};
     for(unsigned i=0;i<n;++i) {
-        const unsigned count=3+i%30;polygons.push_back({int(corners.size()),int(count),int(i),0});
+        const unsigned count=small?4:3+i%30;polygons.push_back({int(corners.size()),int(count),int(i),0});
         for(unsigned j=0;j<count;++j) {
             V v{next(),next(),next(),next()};
             if(i%2) {v[0]%=600;v[1]%=400;}
@@ -100,6 +141,7 @@ int main()try {
     polygons[4][2]=int(n);
     source[31]={{-50,-10,0,0},{8,120,0,7},{290,135,7,7},{150,8,7,0}};
     source[32]={{10,10,0,0},{10,100,0,0},{100,100,0,0},{100,10,0,0},{10,10,0,0}};
+    if(small) source[32].pop_back();
     for(unsigned i:{31U,32U}) for(unsigned j=0;j<source[i].size();++j) {
         const auto index=unsigned(polygons[i][0])+j;const auto& v=source[i][j];
         points[index]={v[0],v[1],256,1};corners[index]={int(index),v[2],v[3],0};
@@ -162,7 +204,7 @@ int main()try {
             if(!visible){SDL_CancelGPUCommandBuffer(command);throw std::runtime_error(projection.status());}
         }
         starfox::render::NativeClipSettings settings{count,Uint32(points.size()),Uint32(corners.size()),n,dimensions[0],dimensions[1]};
-        auto* output=static_cast<SDL_GPUBuffer*>(clip.enqueue(r.device,command,projected,r.buffers[1],r.buffers[2],visible,settings));
+        auto* output=static_cast<SDL_GPUBuffer*>(clip.enqueue(r.device,command,projected,r.buffers[1],r.buffers[2],visible,settings,false,nullptr,0,nullptr,0,small?4U:0U));
         if(!output){SDL_CancelGPUCommandBuffer(command);throw std::runtime_error(clip.status());}
         SDL_GPUBuffer* spans=nullptr;
         starfox::render::GpuRasterOutput rasterized;
@@ -303,7 +345,7 @@ int main()try {
         command=SDL_AcquireGPUCommandBuffer(r.device);require(command);
         starfox::render::NativeClipSettings settings{count,Uint32(points.size()),Uint32(corners.size()),n,dimensions[0],dimensions[1]};
         auto* output=static_cast<SDL_GPUBuffer*>(clip.enqueue(r.device,command,r.buffers[4],r.buffers[1],r.buffers[2],r.buffers[3],settings,true,
-            near_enabled?r.buffers[0]:nullptr,near_enabled?n:0));
+            near_enabled?r.buffers[0]:nullptr,near_enabled?n:0,nullptr,0,small?4U:0U));
         if(!output){SDL_CancelGPUCommandBuffer(command);throw std::runtime_error(clip.status());}
         if(clip.enqueue_spans(command,r.buffers[6],false,0)) {
             SDL_CancelGPUCommandBuffer(command);throw std::runtime_error("Span emitter accepted zero render scale");
@@ -489,7 +531,7 @@ int main()try {
         }
         SDL_EndGPUCopyPass(copy);
         const starfox::render::NativeClipSettings settings{1,3,3,1,224,192};
-        auto* output=static_cast<SDL_GPUBuffer*>(clip.enqueue(r.device,command,r.buffers[4],r.buffers[1],r.buffers[2],r.buffers[3],settings,true,(variant==5 || variant>=10)?r.buffers[5]:nullptr,(variant==5 || variant>=10)?1:0,variant==10?nullptr:r.buffers[0],variant==10?0:(variant==4?2:3)));
+        auto* output=static_cast<SDL_GPUBuffer*>(clip.enqueue(r.device,command,r.buffers[4],r.buffers[1],r.buffers[2],r.buffers[3],settings,true,(variant==5 || variant>=10)?r.buffers[5]:nullptr,(variant==5 || variant>=10)?1:0,variant==10?nullptr:r.buffers[0],variant==10?0:(variant==4?2:3),small?4U:0U));
         require(output);copy=SDL_BeginGPUCopyPass(command);require(copy);
         SDL_GPUBufferRegion from{output,0,129*16};SDL_GPUTransferBufferLocation to{r.download,0};
         SDL_DownloadFromGPUBuffer(copy,&from,&to);SDL_EndGPUCopyPass(copy);
@@ -558,7 +600,7 @@ int main()try {
         auto* projected=static_cast<SDL_GPUBuffer*>(projection.enqueue(r.device,command,r.buffers[4],3));
         if(!projected){SDL_CancelGPUCommandBuffer(command);throw std::runtime_error(projection.status());}
         starfox::render::NativeClipSettings settings{1,3,3,1,224,192};
-        if(!clip.enqueue(r.device,command,projected,r.buffers[1],r.buffers[2],r.buffers[3],settings,false,r.buffers[4],3)) {
+        if(!clip.enqueue(r.device,command,projected,r.buffers[1],r.buffers[2],r.buffers[3],settings,false,r.buffers[4],3,nullptr,0,small?4U:0U)) {
             SDL_CancelGPUCommandBuffer(command);throw std::runtime_error(clip.status());
         }
         auto* spans=clip.enqueue_spans(command,r.buffers[6]);

@@ -3,8 +3,11 @@
 #include "starfox/render/gpu_clip.hpp"
 #include "starfox/render/gpu_raster.hpp"
 #include "starfox/render/packed_bsp.hpp"
+#include "starfox/render/packed_projection.hpp"
 #include "starfox/assets/shape_decoder.hpp"
 #include <array>
+#include <bit>
+#include <cmath>
 #include <cstring>
 #include <functional>
 #include <iostream>
@@ -18,9 +21,20 @@ struct Node {Four links,batch;};
 void require(bool value,std::source_location where=std::source_location::current()) {
     if(!value) throw std::runtime_error("BSP check line "+std::to_string(where.line())+": "+SDL_GetError());
 }
+#include "check_projected_bsp.inc"
+#include "check_small_model_stage.inc"
 int main(int argc,char** argv)try {
     require(SDL_Init(SDL_INIT_VIDEO));
-    auto* device=SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV|SDL_GPU_SHADERFORMAT_MSL|SDL_GPU_SHADERFORMAT_DXIL,true,nullptr);require(device);
+    const auto properties=SDL_CreateProperties();require(properties!=0);
+    SDL_SetBooleanProperty(properties,SDL_PROP_GPU_DEVICE_CREATE_SHADERS_SPIRV_BOOLEAN,true);
+    SDL_SetBooleanProperty(properties,SDL_PROP_GPU_DEVICE_CREATE_SHADERS_MSL_BOOLEAN,true);
+    SDL_SetBooleanProperty(properties,SDL_PROP_GPU_DEVICE_CREATE_SHADERS_DXIL_BOOLEAN,true);
+    SDL_SetBooleanProperty(properties,SDL_PROP_GPU_DEVICE_CREATE_DEBUGMODE_BOOLEAN,true);
+    SDL_SetBooleanProperty(properties,SDL_PROP_GPU_DEVICE_CREATE_PREFERLOWPOWER_BOOLEAN,SDL_getenv("STARFOX_TEST_LOW_POWER_GPU")!=nullptr);
+    auto* device=SDL_CreateGPUDeviceWithProperties(properties);SDL_DestroyProperties(properties);require(device);
+    std::cout<<"BSP GPU adapter: "<<SDL_GetGPUDeviceDriver(device)<<" / "<<SDL_GetStringProperty(SDL_GetGPUDeviceProperties(device),SDL_PROP_GPU_DEVICE_NAME_STRING,"unknown")<<'\n';
+    check_projected_bsp(device);
+    check_small_model_stage(device);
     starfox::render::GpuBsp bsp;
     require(!bsp.enqueue(nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,{}).order);
     std::vector<Node> nodes;std::vector<U> visibility,faces;std::vector<Four> trees;

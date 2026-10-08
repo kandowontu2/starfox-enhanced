@@ -22,12 +22,13 @@ public:
     [[nodiscard]] bool available(void* sdl_device) const noexcept;
     bool render_shadows(void* sdl_device, const Scene& scene,
         const render::GpuScene::RayGeometryOutput* resident_geometry,
-        Camera camera, Vec3 light, std::optional<ReceiverPlane> ground);
+        Camera camera, Vec3 light, std::optional<ReceiverPlane> ground,bool ground_only=false);
     bool render_reflections(void* sdl_device,
         const render::GpuScene::RayGeometryOutput& resident_geometry,
         Camera camera, std::span<const std::uint32_t,256> palette,
         std::uint32_t environment, std::uint8_t quality, float roughness,
-        std::uint32_t metallic, std::optional<ReceiverPlane> ground);
+        std::uint32_t metallic, std::optional<ReceiverPlane> ground,
+        const RayWater* water=nullptr,const GpuBackgroundDraw* background=nullptr,bool ground_only=false);
     [[nodiscard]] GpuShadowOutput shadow_output() const noexcept;
     [[nodiscard]] GpuReflectionOutput reflection_output() const noexcept;
     [[nodiscard]] const std::string& status() const noexcept;

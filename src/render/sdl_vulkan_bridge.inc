@@ -186,8 +186,90 @@ static bool Starfox_Vulkan_RayCopyRange(void *command, void *source, uint64_t so
 static const StarfoxSdlVulkanRayBridgeV3 starfox_vulkan_ray_bridge = {
     3, Starfox_Vulkan_RayCommand, Starfox_Vulkan_RayPrepareWrite,
     Starfox_Vulkan_RayFinishWrite, Starfox_Vulkan_RayCopyRange};
+static VkQueue Starfox_Vulkan_XrQueue(void *device)
+{
+    if (!device || SDL_strcmp(SDL_GetGPUDeviceDriver((SDL_GPUDevice *)device), "vulkan") != 0) {
+        SDL_SetError("Invalid Vulkan XR device"); return VK_NULL_HANDLE;
+    }
+    return ((VulkanRenderer *)((SDL_GPUDevice *)device)->driverData)->unifiedQueue;
+}
+static bool Starfox_Vulkan_WithXrQueue(void *device, StarfoxVulkanQueueCallback callback, void *user)
+{
+    VulkanRenderer *renderer;
+    bool result;
+    if (!callback || !Starfox_Vulkan_XrQueue(device)) return SDL_SetError("Invalid Vulkan XR queue callback");
+    renderer = (VulkanRenderer *)((SDL_GPUDevice *)device)->driverData;
+    SDL_LockMutex(renderer->submitLock);
+    result = callback(user, renderer->unifiedQueue);
+    SDL_UnlockMutex(renderer->submitLock);
+    return result;
+}
+static bool Starfox_Vulkan_CopyXrColor(void *command, void *texture, VkImage image,
+                                     VkFormat format, uint32_t width, uint32_t height, bool importing)
+{
+    VulkanCommandBuffer *cmd = (VulkanCommandBuffer *)command;
+    VulkanTextureContainer *container = (VulkanTextureContainer *)texture;
+    VulkanTextureSubresource *sub;
+    VulkanRenderer *renderer;
+    VkImageMemoryBarrier barrier = {0};
+    VkImageCopy copy = {0};
+    if (!cmd || !container || !container->activeTexture || !image || !width || !height ||
+        container->header.info.type != SDL_GPU_TEXTURETYPE_2D ||
+        container->header.info.width != width || container->header.info.height != height ||
+        container->header.info.layer_count_or_depth != 1 || container->header.info.num_levels != 1 ||
+        container->header.info.sample_count != SDL_GPU_SAMPLECOUNT_1 ||
+        SDLToVK_TextureFormat[container->header.info.format] != format ||
+        container->activeTexture->aspectFlags != VK_IMAGE_ASPECT_COLOR_BIT ||
+        container->activeTexture->image == image)
+        return SDL_SetError("XR copy requires matching single-mip 2D color textures");
+    renderer = cmd->renderer;
+    SDL_LockRWLockForReading(renderer->defragLock);
+    sub = importing ? VULKAN_INTERNAL_PrepareTextureSubresourceForWrite(renderer, cmd, container, 0, 0, true,
+                           VULKAN_TEXTURE_USAGE_MODE_COPY_DESTINATION)
+                    : VULKAN_INTERNAL_FetchTextureSubresource(container, 0, 0);
+    if (!importing) VULKAN_INTERNAL_TextureSubresourceTransitionFromDefaultUsage(renderer, cmd,
+        VULKAN_TEXTURE_USAGE_MODE_COPY_SOURCE, sub);
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.image = image;
+    barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.levelCount = barrier.subresourceRange.layerCount = 1;
+    barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    barrier.dstAccessMask = importing ? VK_ACCESS_TRANSFER_READ_BIT : VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    barrier.newLayout = importing ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL : VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    renderer->vkCmdPipelineBarrier(cmd->commandBuffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 0, NULL, 1, &barrier);
+    copy.srcSubresource.aspectMask = copy.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    copy.srcSubresource.layerCount = copy.dstSubresource.layerCount = 1;
+    copy.extent.width = width; copy.extent.height = height; copy.extent.depth = 1;
+    renderer->vkCmdCopyImage(cmd->commandBuffer,
+        importing ? image : sub->parent->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        importing ? sub->parent->image : image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+    barrier.srcAccessMask = barrier.dstAccessMask;
+    barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    barrier.oldLayout = barrier.newLayout;
+    barrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    renderer->vkCmdPipelineBarrier(cmd->commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, NULL, 0, NULL, 1, &barrier);
+    VULKAN_INTERNAL_TextureSubresourceTransitionToDefaultUsage(renderer, cmd,
+        importing ? VULKAN_TEXTURE_USAGE_MODE_COPY_DESTINATION : VULKAN_TEXTURE_USAGE_MODE_COPY_SOURCE, sub);
+    VULKAN_INTERNAL_TrackTexture(cmd, sub->parent);
+    SDL_UnlockRWLock(renderer->defragLock);
+    return true;
+}
+static bool Starfox_Vulkan_ExportXrColor(void *command, void *texture, VkImage image,
+                                      VkFormat format, uint32_t width, uint32_t height)
+{ return Starfox_Vulkan_CopyXrColor(command, texture, image, format, width, height, false); }
+static bool Starfox_Vulkan_ImportXrColor(void *command, VkImage image, VkFormat format,
+                                      uint32_t width, uint32_t height, void *texture)
+{ return Starfox_Vulkan_CopyXrColor(command, texture, image, format, width, height, true); }
+static const StarfoxSdlVulkanXrBridgeV1 starfox_vulkan_xr_bridge = {
+    1, Starfox_Vulkan_XrQueue, Starfox_Vulkan_WithXrQueue,
+    Starfox_Vulkan_ExportXrColor, Starfox_Vulkan_ImportXrColor};
 static void Starfox_Vulkan_PublishBridge(VulkanRenderer *renderer)
 {
+    Starfox_Vulkan_CreateSubmitTimings(renderer);
     StarfoxSdlVulkanBridgeV2 *bridge = SDL_calloc(1, sizeof(*bridge));
     if (!bridge) return;
     bridge->version = 2;
@@ -203,4 +285,5 @@ static void Starfox_Vulkan_PublishBridge(VulkanRenderer *renderer)
                                      bridge, Starfox_Vulkan_DestroyBridge, NULL);
     SDL_SetPointerProperty(renderer->props, STARFOX_SDL_VULKAN_GEOMETRY_BRIDGE, (void *)&starfox_vulkan_geometry_bridge);
     SDL_SetPointerProperty(renderer->props, STARFOX_SDL_VULKAN_RAY_BRIDGE, (void *)&starfox_vulkan_ray_bridge);
+    SDL_SetPointerProperty(renderer->props, STARFOX_SDL_VULKAN_XR_BRIDGE, (void *)&starfox_vulkan_xr_bridge);
 }

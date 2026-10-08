@@ -5,9 +5,12 @@
 #include <set>
 #include <stdexcept>
 #include <string_view>
+#include <cstring>
 using namespace starfox;
 void require(bool value){if(!value) throw std::runtime_error("Packed faces assertion failed");}
+#include "prepared_faces_checks.inc"
 int main(int argc,char** argv)try {
+    check_prepared_faces();
     {
         render::PackedFaces faces;
         faces.polygons={{0,3,0,0},{3,3,0,0}};
@@ -177,6 +180,28 @@ int main(int argc,char** argv)try {
             if(seen.insert(address).second && decoder.looks_like_shape_header(address)) {
                 const auto model=decoder.decode(address,name);const auto graph=render::pack_bsp(model);
                 const auto data=render::pack_faces(model,graph,{},{});++models;
+                const render::PreparedBspSource prepared_graph(model,false);
+                const render::PreparedFacesSource prepared(model,prepared_graph,{},{});
+                require(prepared.faces().corners==data.corners && prepared.faces().polygons==data.polygons
+                    && prepared.faces().texels==data.texels && prepared.faces().primitives==data.primitives
+                    && prepared.faces().polygon_only==data.polygon_only && prepared.faces().materials.size()==data.materials.size());
+                require(data.materials.empty() || std::memcmp(prepared.faces().materials.data(),data.materials.data(),data.materials.size()*sizeof(render::RasterCommand))==0);
+                const render::PreparedRayTopology ray_topology(prepared,true);
+                std::vector<std::array<std::uint32_t,4>> expected_rays,expected_materials;
+                std::uint32_t source_corner=0;
+                for(std::size_t face=0;face<graph.faces.size();++face) {
+                    const auto& original=graph.faces[face];
+                    if(!original.sprite && original.vertex_indices.size()>=3)
+                        for(std::uint32_t c=1;c+1<original.vertex_indices.size();++c) {
+                            expected_rays.push_back({original.vertex_indices[0],original.vertex_indices[c],original.vertex_indices[c+1],std::uint32_t(face)});
+                            expected_materials.push_back({source_corner,source_corner+c,source_corner+c+1,std::uint32_t(face)});
+                        }
+                    source_corner+=std::uint32_t(original.vertex_indices.size());
+                }
+                require(ray_topology.triangles().size()==expected_rays.size()
+                    && std::equal(expected_rays.begin(),expected_rays.end(),ray_topology.triangles().begin()));
+                require(ray_topology.material_topology().size()==expected_materials.size()
+                    && std::equal(expected_materials.begin(),expected_materials.end(),ray_topology.material_topology().begin()));
                 if(list_sprites) for(size_t face=0;face<data.primitives.size();++face)
                     if(data.primitives[face]==render::PackedPrimitive::sprite) {
                         const auto& material=data.materials[face];

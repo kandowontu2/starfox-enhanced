@@ -15,7 +15,8 @@ spec.loader.exec_module(module)
 
 
 class AndroidPackageTest(unittest.TestCase):
-    def fixture(self, root, extra=None, omit='', machine=183, payload=None, duplicate=False):
+    def fixture(self, root, extra=None, omit='', machine=183, payload=None,
+                duplicate=False, native_suffix=b''):
         header = bytearray(64)
         header[:6] = b'\x7fELF\x02\x01'
         struct.pack_into('<HH', header, 16, 3, machine)
@@ -25,6 +26,7 @@ class AndroidPackageTest(unittest.TestCase):
         for library in ('main', 'SDL3', 'c++_shared'):
             entries[f'lib/arm64-v8a/lib{library}.so'] = bytes(header)
         entries['lib/arm64-v8a/libmain.so'] += backdrop.read_bytes() if payload is None else payload
+        entries['lib/arm64-v8a/libmain.so'] += native_suffix
         if extra:
             entries[extra] = b'forbidden'
         entries.pop(omit, None)
@@ -73,6 +75,33 @@ class AndroidPackageTest(unittest.TestCase):
                 with self.subTest(content=content), self.assertRaises(ValueError):
                     module.source_backdrops(root)
 
+    def test_shared_source_declarations(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            assets = root / 'assets/enhanced-backdrops'
+            assets.mkdir(parents=True)
+            (assets / 'current.bmp').write_bytes(b'BM-current')
+            (assets / 'obsolete.bmp').write_bytes(b'BM-obsolete')
+            source = root / 'CMakeLists.txt'
+            source.write_text('starfox_enhanced_backdrop_resources(\n'
+                              'STARFOX_EMBED_BACKDROP_ARGS STARFOX_EMBED_BACKDROP_FILES)\n')
+            header = root / 'include/starfox/render/enhanced_backdrop_library.hpp'
+            header.parent.mkdir(parents=True)
+            declaration = 'EnhancedBackdropAsset{"assets/enhanced-backdrops/current.bmp", 1}\n'
+            header.write_text(declaration)
+            self.assertEqual(module.source_backdrops(root), [(assets / 'current.bmp').resolve()])
+            for content in ('', declaration * 2, declaration.replace('current.bmp', 'missing.bmp'),
+                            declaration.replace('current.bmp', '../outside.bmp'),
+                            declaration.replace('current.bmp', 'current.png')):
+                header.write_text(content)
+                with self.subTest(content=content), self.assertRaises(ValueError):
+                    module.source_backdrops(root)
+            header.write_text(declaration)
+            with source.open('a') as output:
+                output.write('--resource "200=${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/current.bmp"\n')
+            with self.assertRaises(ValueError):
+                module.source_backdrops(root)
+
     def test_split_embedded_backdrop(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -90,6 +119,22 @@ class AndroidPackageTest(unittest.TestCase):
             backdrops[0].write_bytes(backdrop_bytes)
             with self.assertRaises(ValueError):
                 module.check(missing_path, backdrops)
+
+    def test_native_build_markers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            markers = ['EGL window released before Vulkan claim', 'transition \u2013 \u2713']
+            path, backdrops = self.fixture(root, native_suffix='\0'.join(markers).encode('utf-8'))
+            self.assertEqual(module.check(path, backdrops, markers), 1)
+            for required in ([''], ['missing'], [markers[0], 'missing'],
+                             [markers[0].lower()]):
+                with self.subTest(required=required), self.assertRaises(ValueError):
+                    module.check(path, backdrops, required)
+            stale, backdrops = self.fixture(root)
+            with zipfile.ZipFile(stale, 'a') as apk:
+                apk.writestr('assets/stale-build.log', markers[0].encode('utf-8'))
+            with self.assertRaises(ValueError):
+                module.check(stale, backdrops, [markers[0]])
 
 
 if __name__ == '__main__':

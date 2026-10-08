@@ -33,9 +33,26 @@ ios)
     exit 2
     ;;
 esac
+metal_sdk=macosx
+if [[ "${platform}" == "ios" ]]; then metal_sdk=iphoneos; fi
+python3 "${source_root}/tools/check_metal_rt_shaders.py" --sdk "${metal_sdk}"
 cmake --build "${build_root}" --config Release --target starfox_pc
 
 if [[ "${platform}" == "macos" ]]; then
+    cmake --build "${build_root}" --config Release --target starfox_native_metal_check
+    # A hosted Mac may lack ray intersections. Treat that ONLY as a reported
+    # skip, never a runtime pass; real shader/image failures fail this job.
+    set +e
+    "${build_root}/Release/starfox_native_metal_check" \
+        "${build_root}/generated/native-metal-check/reflection.metal" \
+        "${build_root}/generated/native-metal-check/shadow.metal"
+    native_metal_exit=$?
+    set -e
+    if [[ ${native_metal_exit} -eq 2 ]]; then
+        echo "::warning::Native Metal runtime check skipped: no capable GPU (not runtime acceptance)."
+    elif [[ ${native_metal_exit} -ne 0 ]]; then
+        exit "${native_metal_exit}"
+    fi
     cmake --build "${build_root}" --config Release --target starfox_asset_builder
     cmake --build "${build_root}" --config Release --target starfox_core_tests
     ctest --test-dir "${build_root}" -C Release \

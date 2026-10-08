@@ -1,5 +1,19 @@
 # VR development status
 
+## Release 0.0.8 delayed-crash investigation (October 4)
+
+The tester's roughly one-minute VR exit is tracked in
+[VR-CRASH-INVESTIGATION.md](VR-CRASH-INVESTIGATION.md). Their correction places
+Quest 3/PCVR testing via PC, so the APK is only a separately identified reference,
+not the sole failing-build baseline. Development Quest and PCVR now retain
+bounded session logs and live scene/memory/cache diagnostics. Both development
+builds, Quest payload validation, seventeen VR host suites and repeated Windows
+log-rotation/failure checks pass; no device reproduction or crash fix is claimed.
+EX headset presentation now
+omits the separate native cockpit shell without changing the cartridge camera
+or console views. Build and regression results belong to the investigation
+checkpoint, not to the already published APK.
+
 ## Current native Linux PCVR regression (September 23)
 
 Rebuilt the current shared worktree in the existing Ubuntu x86-64 OpenXR/Vulkan

@@ -3,6 +3,12 @@
 // first corner, corner count, visibility index, reserved. Result per polygon:
 // header int4(count,status,0,0), followed by up to 128 int4(x,y,u,v).
 // Status 1 is invalid input, 2 capacity exceeded. Caller must not render either.
+#ifndef STARFOX_CLIP_SOURCE_CORNERS
+#define STARFOX_CLIP_SOURCE_CORNERS 32
+#endif
+#ifndef STARFOX_CLIP_CAPACITY
+#define STARFOX_CLIP_CAPACITY 128
+#endif
 [[vk::binding(0,0)]] StructuredBuffer<int4> points : register(t0,space0);
 [[vk::binding(1,0)]] StructuredBuffer<uint4> corners : register(t1,space0);
 [[vk::binding(2,0)]] StructuredBuffer<uint4> polygons : register(t2,space0);
@@ -55,7 +61,7 @@ void main(uint3 id:SV_DispatchThreadID) {
     clipped[base]=0;
     uint4 descriptor=polygons[id.x];
     if(descriptor.z>=visibilityCount || descriptor.x>cornerCount
-        || descriptor.y>cornerCount-descriptor.x || descriptor.y>32U) {
+        || descriptor.y>cornerCount-descriptor.x || descriptor.y>STARFOX_CLIP_SOURCE_CORNERS) {
         clipped[base]=int4(0,1,0,0);return;
     }
     bool isLine=(descriptor.w&2U)!=0 && descriptor.y==2;
@@ -67,7 +73,7 @@ void main(uint3 id:SV_DispatchThreadID) {
         return;
     }
     if(visibility[descriptor.z]==0 || (descriptor.y<3 && !isLine)) return;
-    int4 work[128],scratch[128];uint size=descriptor.y;bool behind=false;uint frontCount=0;
+    int4 work[STARFOX_CLIP_CAPACITY],scratch[STARFOX_CLIP_CAPACITY];uint size=descriptor.y;bool behind=false;uint frontCount=0;
     for(uint i=0;i<size;++i) {
         uint4 corner=corners[descriptor.x+i];
         if(corner.x>=pointCount) {clipped[base]=int4(0,1,0,0);return;}
@@ -78,7 +84,7 @@ void main(uint3 id:SV_DispatchThreadID) {
     }
     if(behind) {
         if((descriptor.w&1U)!=0 || frontCount==0) return;
-        int3 camera[32];int2 vanish=0;
+        int3 camera[STARFOX_CLIP_SOURCE_CORNERS];int2 vanish=0;
         for(uint i=0;i<size;++i) {
             uint index=corners[descriptor.x+i].x;
             if(index>=cameraCount) {clipped[base]=int4(0,3,0,0);return;}
@@ -145,11 +151,11 @@ void main(uint3 id:SV_DispatchThreadID) {
                 for(uint component=0;component<4;++component)
                     intersection[component]=component==axis?boundary:source_value(
                         anchor[component],outside[component],anchor[axis],outside[axis],boundary);
-                if(nextSize>=128) {clipped[base]=int4(0,2,0,0);return;}
+                if(nextSize>=STARFOX_CLIP_CAPACITY) {clipped[base]=int4(0,2,0,0);return;}
                 scratch[nextSize++]=intersection;
             }
             if(inside) {
-                if(nextSize>=128) {clipped[base]=int4(0,2,0,0);return;}
+                if(nextSize>=STARFOX_CLIP_CAPACITY) {clipped[base]=int4(0,2,0,0);return;}
                 scratch[nextSize++]=current;
             }
             previous=current;previousInside=inside;

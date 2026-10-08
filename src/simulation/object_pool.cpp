@@ -1,4 +1,5 @@
 #include "starfox/simulation/object_pool.hpp"
+#include "starfox/simulation/object_record.hpp"
 #include "starfox/state/archive.hpp"
 
 #include <algorithm>
@@ -196,6 +197,7 @@ void ObjectPool::restore_lists(
         throw std::invalid_argument{"restored object lists do not cover every slot"};
     }
     std::array<bool, kMaximumObjects + 1> seen{};
+    std::array<bool, kMaximumObjects + 1> active_slots{};
     const auto validate = [this, &seen](const std::vector<ObjectHandle>& list) {
         for (const auto handle : list) {
             if (handle == 0 || handle > capacity_ || seen[handle]) {
@@ -206,10 +208,11 @@ void ObjectPool::restore_lists(
     };
     validate(active);
     validate(free);
+    for (const auto handle : active) active_slots[handle] = true;
 
     for (ObjectHandle handle = 1; handle <= capacity_; ++handle) {
         const auto was_active = slots_[handle].active;
-        const auto will_be_active = std::find(active.begin(), active.end(), handle) != active.end();
+        const auto will_be_active = active_slots[handle];
         if (!was_active && will_be_active) generations_[handle] = ++next_generation_;
         if (was_active && !will_be_active) {
             slots_[handle].object = {};
@@ -230,6 +233,21 @@ void ObjectPool::restore_lists(
     first_active_ = active.empty() ? 0 : active.front();
     first_free_ = free.empty() ? 0 : free.front();
     active_count_ = active.size();
+}
+
+void ObjectPool::read_base_record(
+    ObjectHandle handle, std::span<std::uint8_t> bytes) const {
+    object_record::encode_base(at(handle), layout_, bytes);
+}
+
+void ObjectPool::write_base_record(
+    ObjectHandle handle, std::span<const std::uint8_t> bytes) {
+    object_record::decode_base(at(handle), layout_, bytes);
+}
+
+void ObjectPool::write_extended_record(
+    ObjectHandle handle, std::span<const std::uint8_t> bytes) {
+    object_record::decode_extended(at(handle), layout_, bytes);
 }
 
 std::uint8_t ObjectPool::read_base_byte(

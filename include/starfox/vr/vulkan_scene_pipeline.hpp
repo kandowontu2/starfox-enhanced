@@ -1,42 +1,13 @@
 #pragma once
 #include "starfox/vr/eye_camera.hpp"
+#include "starfox/vr/scene_types.hpp"
 #include <vulkan/vulkan.h>
 #include <string>
 #include <cstdint>
 namespace starfox::vr {
 class VulkanPipelineCache;
-struct SceneVertex {
-    bool operator==(const SceneVertex&) const = default;
-    float position[3];float color[4];
-    float odd_color[4]{};
-    std::uint32_t dither_scale{}; // 0: solid; otherwise logical pixel size.
-    float visibility_a[3]{},visibility_b[3]{},visibility_c[3]{};
-    // 0 disabled, 1 visibility; 2 explosion: visibility triples = source
-    // rotation rows, group_a translation, group_b normal, group_c count/units/Q15.
-    std::uint32_t visibility_enabled{};
-    float group_a[3]{},group_b[3]{},group_c[3]{};
-    std::uint32_t group_enabled{};
-    float uv[2]{};
-    std::uint32_t texture[4]{}; // offset, u mask, v mask, flags (enabled, sRGB).
-    // Flag 1073741824: R8 shadow coverage, four-byte row alignment; y/z
-    // hold width-1/height-1 (not wrap masks). RGB comes from vertex color and
-    // coverage modulates its alpha. x is the storage-buffer word offset.
-    float billboard[2]{}; // Eye-facing offset in model units; texture flag 4.
-    // Span flag 65536: uv holds source XY projection numerators, billboard[0]
-    // holds source depth (zero means legacy divisor 1). Interpolate then divide
-    // so source coverage stays attached to a tilted face in either eye.
-    // Flag 131072 selects the span header through resident lookup metadata:
-    // texture[0] = metadata word offset, texture[1] = ordered occurrence slot.
-    // Positions and source numerators remain explicitly supplied by the caller.
-    // Combined flag 262144 fetches a transformed polygon corner instead:
-    // texture[2] = corner index; billboard[1] = source units per world unit.
-    // Combined flag 524288 instead constructs a coverage quad on the source
-    // face plane; texture[2] selects one of four expanded projected corners.
-};
 // Flat-color triangle/line pass. Input positions are right-handed world coordinates
 // in the same units as EyeCamera. Caller owns vertex buffers and GPU lifetime.
-enum class SceneTopology {triangles,lines};
-enum class SceneBlend {opaque,add,subtract,half_add,half_subtract,shadow,alpha};
 class VulkanScenePipeline {
 public:
     ~VulkanScenePipeline();

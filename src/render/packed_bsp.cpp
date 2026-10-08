@@ -4,6 +4,18 @@
 #include <stdexcept>
 #include <unordered_map>
 namespace starfox::render {
+PreparedBspSource::PreparedBspSource(const assets::Shape& shape,bool explosion)
+    :source_(&shape),explosion_(explosion),graph_(pack_bsp(shape,explosion)) {
+    normals_.reserve(graph_.faces.size());
+    for(const auto& face:graph_.faces) normals_.push_back({face.normal.x,face.normal.y,face.normal.z,0});
+}
+std::uint64_t PreparedBspSource::storage_bytes() const noexcept {
+    std::uint64_t bytes=graph_.nodes.capacity()*sizeof(PackedBspNode)
+        +graph_.faces.capacity()*sizeof(assets::Face)+graph_.face_ids.capacity()*sizeof(std::uint32_t)
+        +normals_.capacity()*sizeof(normals_[0]);
+    for(const auto& face:graph_.faces) bytes+=face.vertex_indices.capacity();
+    return bytes;
+}
 PackedBsp pack_bsp(const assets::Shape& shape,bool explosion) {
     PackedBsp packed;
     const auto append=[&](const std::vector<assets::Face>& faces) {

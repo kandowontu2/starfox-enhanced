@@ -5,6 +5,46 @@
 #include <numbers>
 #include <stdexcept>
 namespace starfox::render {
+PreparedProjectionSource::PreparedProjectionSource(const assets::Shape& shape,const RenderPose& pose,
+    const RenderSettings& settings):source_(&shape),frame_(shape.frames.empty()?0:pose.animation_frame%shape.frames.size()),
+    scale_(pose.scale) {
+    auto packed=pack_projection(shape,pose,settings);continuous_mode_=packed.continuous;
+    native_=std::move(packed.native_vertices);continuous_=std::move(packed.continuous_vertices);
+    visibility_=std::move(packed.visibility_faces);
+    const auto& points=shape.frames.empty()?shape.vertices:shape.frames[frame_].vertices;
+    const auto& words=shape.frames.empty()?shape.word_coordinates:shape.frames[frame_].word_coordinates;
+    for(std::size_t i=0;i<points.size();++i) byte_coordinates_=byte_coordinates_ || i>=words.size() || !words[i];
+}
+bool PreparedProjectionSource::matches(const assets::Shape& shape,const RenderPose& pose,
+    const RenderSettings& settings) const noexcept {
+    return source_==&shape && frame_==(shape.frames.empty()?0:pose.animation_frame%shape.frames.size())
+        && continuous_mode_==(settings.render_scale>1 || pose.continuous_geometry)
+        && (continuous_mode_ || !byte_coordinates_ || scale_==pose.scale);
+}
+std::uint64_t PreparedProjectionSource::storage_bytes() const noexcept {
+    return native_.capacity()*sizeof(NativeTransformVertex)
+        +continuous_.capacity()*sizeof(ContinuousTransformVertex)
+        +visibility_.capacity()*sizeof(visibility_[0]);
+}
+std::span<const NativeTransformVertex> PackedProjection::native_input() const noexcept {
+    return source?source->native_input():std::span<const NativeTransformVertex>(native_vertices);
+}
+std::span<const ContinuousTransformVertex> PackedProjection::continuous_input() const noexcept {
+    return source?source->continuous_input():std::span<const ContinuousTransformVertex>(continuous_vertices);
+}
+std::span<const std::array<std::uint32_t,4>> PackedProjection::visibility_input() const noexcept {
+    return source?source->visibility_input():std::span<const std::array<std::uint32_t,4>>(visibility_faces);
+}
+void PackedProjection::own_source() {
+    if(!source) return;
+    const auto n=source->native_input();const auto c=source->continuous_input();
+    const auto v=source->visibility_input();
+    std::vector<NativeTransformVertex> native(n.begin(),n.end());
+    std::vector<ContinuousTransformVertex> continuous(c.begin(),c.end());
+    std::vector<std::array<std::uint32_t,4>> visibility(v.begin(),v.end());
+    native_vertices=std::move(native);continuous_vertices=std::move(continuous);
+    visibility_faces=std::move(visibility);source=nullptr;
+}
 std::array<std::vector<std::uint32_t>,2> pack_axis_groups(
     const assets::Shape& shape,std::uint32_t animation_frame) {
     const auto& vertices=shape.frames.empty()?shape.vertices
@@ -43,12 +83,12 @@ bool collinear(const assets::Vec3i& a,const assets::Vec3i& b,const assets::Vec3i
 std::optional<GpuProjection::MotionSurfaceSettings> pack_motion_surface(
     const PackedProjection& current,const PackedProjection& previous,
     std::uint32_t width,std::uint32_t height,std::uint32_t scale) {
-    if(!current.continuous || !previous.continuous || !scale || scale>4 || !width || !height
-        || current.continuous_vertices.empty()
-        || current.continuous_vertices.size()!=previous.continuous_vertices.size()) return {};
+    const auto current_vertices=current.continuous_input(),previous_vertices=previous.continuous_input();
+    if(!current.continuous || !previous.continuous || !scale || scale>10 || !width || !height
+        || current_vertices.empty() || current_vertices.size()!=previous_vertices.size()) return {};
     bool used[2]{};
-    for(std::size_t i=0;i<current.continuous_vertices.size();++i) {
-        const auto& a=current.continuous_vertices[i];const auto& b=previous.continuous_vertices[i];
+    for(std::size_t i=0;i<current_vertices.size();++i) {
+        const auto& a=current_vertices[i];const auto& b=previous_vertices[i];
         if(a.pose>1 || a.pose!=b.pose || a.x!=b.x || a.y!=b.y || a.z!=b.z) return {};
         used[a.pose]=true;
     }
@@ -102,20 +142,24 @@ std::optional<GpuProjection::MotionSurfaceSettings> pack_motion_surface(
     }
     return result;
 }
-PackedProjection pack_projection(const assets::Shape& shape,const RenderPose& pose,const RenderSettings& settings) {
+PackedProjection pack_projection(const assets::Shape& shape,const RenderPose& pose,const RenderSettings& settings,
+    const PreparedProjectionSource* source) {
     PackedProjection result;
     result.continuous=settings.render_scale>1 || pose.continuous_geometry;
     if(!result.continuous && (!pose.use_rotation_matrix || pose.subpixel_projection || settings.focal_length!=256.0))
         throw std::runtime_error("GPU projection combination requires another projection/visibility path");
+    if(source && !source->matches(shape,pose,settings))
+        throw std::runtime_error("Prepared projection belongs to a different source/frame/policy");
+    result.source=source;
     const auto& vertices=shape.frames.empty()?shape.vertices:shape.frames[pose.animation_frame%shape.frames.size()].vertices;
     const auto& words=shape.frames.empty()?shape.word_coordinates:shape.frames[pose.animation_frame%shape.frames.size()].word_coordinates;
-    bool byte_coordinates=false;
-    for(std::size_t i=0;i<vertices.size();++i) byte_coordinates=byte_coordinates || i>=words.size() || !words[i];
+    bool byte_coordinates=source && source->byte_coordinates();
+    if(!source) for(std::size_t i=0;i<vertices.size();++i) byte_coordinates=byte_coordinates || i>=words.size() || !words[i];
     if(byte_coordinates && shape.header.shift>=32) throw std::runtime_error("Invalid GPU shape scale shift");
     const double factor=byte_coordinates?pose.scale*static_cast<double>(std::uint32_t{1}<<shape.header.shift):1.0;
     static_cast<void>(finite_float(factor));
     if(vertices.size()>4U*1024*1024) throw std::runtime_error("GPU projection vertex limit exceeded");
-    for(const auto& visibility:shape.visibilities) {
+    if(!source) for(const auto& visibility:shape.visibilities) {
         std::uint32_t flags=0;
         if(result.continuous && visibility.a<vertices.size() && visibility.b<vertices.size() && visibility.c<vertices.size()) {
             const auto word=[&](std::size_t index){return index<words.size() && words[index];};
@@ -124,7 +168,7 @@ PackedProjection pack_projection(const assets::Shape& shape,const RenderPose& po
         }
         result.visibility_faces.push_back({visibility.a,visibility.b,visibility.c,flags});
     }
-    result.visibility_faces.push_back({UINT32_MAX,UINT32_MAX,UINT32_MAX,1});
+    if(!source) result.visibility_faces.push_back({UINT32_MAX,UINT32_MAX,UINT32_MAX,1});
     if(!result.continuous) {
         auto& p=result.native_pose;
         for(unsigned i=0;i<3;++i) {
@@ -132,8 +176,8 @@ PackedProjection pack_projection(const assets::Shape& shape,const RenderPose& po
         }
         p.translation[0]=rounded_word(pose.x);p.translation[1]=rounded_word(pose.y);p.translation[2]=rounded_word(pose.z);
         p.vanish[0]=rounded_word(pose.vanish_x);p.vanish[1]=rounded_word(pose.vanish_y);
-        result.native_vertices.reserve(vertices.size());
-        for(std::size_t i=0;i<vertices.size();++i) {
+        if(!source) result.native_vertices.reserve(vertices.size());
+        if(!source) for(std::size_t i=0;i<vertices.size();++i) {
             const auto& v=vertices[i];const double scale=i<words.size() && words[i]?1.0:factor;
             result.native_vertices.push_back({rounded_word(v.x*scale),rounded_word(v.y*scale),rounded_word(v.z*scale),0});
         }
@@ -180,7 +224,7 @@ PackedProjection pack_projection(const assets::Shape& shape,const RenderPose& po
             low.vanish[c]=finite_float(tail-double(low.translation[c]));
         }
     }
-    result.continuous_vertices.reserve(vertices.size());
+    if(!source) result.continuous_vertices.reserve(vertices.size());
     if(!pose.use_rotation_matrix) {
         auto& high=result.euler_operands[0];auto& low=result.euler_operands[1];
         for(unsigned c=0;c<3;++c) {
@@ -193,7 +237,7 @@ PackedProjection pack_projection(const assets::Shape& shape,const RenderPose& po
         high.row2[0]=finite_float(factor);low.row2[0]=finite_float(factor-double(high.row2[0]));
         high.row2[1]=1.f; // Word coordinates bypass header/object scaling.
     }
-    for(std::size_t i=0;i<vertices.size();++i) {
+    if(!source) for(std::size_t i=0;i<vertices.size();++i) {
         const auto& v=vertices[i];result.continuous_vertices.push_back({finite_float(v.x),finite_float(v.y),finite_float(v.z),i<words.size() && words[i]?1U:0U});
     }
     return result;

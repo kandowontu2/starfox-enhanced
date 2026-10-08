@@ -136,32 +136,37 @@ SF_UINT sf_to_float_bits(Sf64 a) {
     if(exponent>=255)return sign|0x7f800000U;
     return sign|(SF_UINT(exponent)<<23)|(value&0x7fffffU);
 }
+Sf64 sf_u32_product(SF_UINT a,SF_UINT b) {
+    // Exact 32x32 -> 64 using only uint32. Neither cross-term addition can
+    // overflow: (65535*65535)+65535 <= UINT32_MAX. This same code runs in
+    // host tests, SPIR-V, DXIL and Metal, without a 64-bit shader capability.
+    SF_UINT low=(a&65535U)*(b&65535U);
+    SF_UINT cross=(a>>16)*(b&65535U)+(low>>16);
+    SF_UINT carry=cross>>16;
+    SF_UINT middle=(a&65535U)*(b>>16)+(cross&65535U);
+    return sf_make((middle<<16)|(low&65535U),
+        (a>>16)*(b>>16)+carry+(middle>>16));
+}
 SF_NOINLINE Sf64 sf_mul(Sf64 a,Sf64 b) {
     if(!sf_valid(a) || !sf_valid(b))return sf_invalid();
     SF_UINT sign=(a.hi^b.hi)&0x80000000U;
     if(sf_zero(a) || sf_zero(b))return sf_make(0,sign);
-    SF_UINT x[4],y[4],product[8];
-    x[0]=a.lo&65535U;x[1]=a.lo>>16;x[2]=a.hi&65535U;x[3]=((a.hi>>16)&15U)|16U;
-    y[0]=b.lo&65535U;y[1]=b.lo>>16;y[2]=b.hi&65535U;y[3]=((b.hi>>16)&15U)|16U;
-    SF_LOOP for(int i=0;i<8;++i)product[i]=0;
-    // Base-65536 multiplication: each intermediate is at most UINT32_MAX.
-    SF_LOOP for(int i=0;i<4;++i) {
-        SF_UINT carry=0;
-        SF_LOOP for(int j=0;j<4;++j) {
-            SF_UINT value=x[i]*y[j]+product[i+j]+carry;
-            product[i+j]=value&65535U;carry=value>>16;
-        }
-        product[i+4]=carry;
-    }
-    int top=(product[6]&512U)!=0 ? 105 : 104;
+    // Multiply the two 53-bit significands into four 32-bit limbs. Cross
+    // terms fit in 54 bits; the upper pair fits in 42. Explicit carries keep
+    // every product bit, without indexed arrays or bit-extraction loops.
+    SF_UINT x=(a.hi&0xfffffU)|0x100000U,y=(b.hi&0xfffffU)|0x100000U;
+    Sf64 low=sf_u32_product(a.lo,b.lo);
+    Sf64 middle=sf_uadd(sf_u32_product(a.lo,y),sf_u32_product(x,b.lo));
+    middle=sf_uadd(middle,sf_make(low.hi,0));
+    Sf64 upper=sf_uadd(sf_u32_product(x,y),sf_make(middle.hi,0));
+    int top=(upper.hi&512U)!=0 ? 105 : 104;
     int exponent=int((a.hi>>20)&2047U)+int((b.hi>>20)&2047U)-1023+(top-104);
-    Sf64 rounded=sf_make(0,0);
-    SF_LOOP for(int bit=top;bit>=top-55;--bit) {
-        rounded=sf_left(rounded,1);
-        rounded.lo|=(product[bit/16]>>(bit%16))&1U;
-    }
-    SF_LOOP for(int bit=0;bit<top-55;++bit)
-        if(((product[bit/16]>>(bit%16))&1U)!=0)rounded.lo|=1U;
+    // Keep the leading 56 bits, then jam ALL discarded bits into sticky.
+    // top-55 is 49 or 50, so the shift within the second limb is 17 or 18.
+    SF_UINT shift=SF_UINT(top-87);
+    Sf64 rounded=sf_make((middle.lo>>shift)|(upper.lo<<(32U-shift)),
+        (upper.lo>>shift)|(upper.hi<<(32U-shift)));
+    if(low.lo!=0 || (middle.lo<<(32U-shift))!=0)rounded.lo|=1U;
     SF_UINT tail=rounded.lo&7U;
     Sf64 mantissa=sf_right(rounded,3);
     if(tail>4U || (tail==4U && (mantissa.lo&1U)!=0))mantissa=sf_uadd(mantissa,sf_make(1,0));

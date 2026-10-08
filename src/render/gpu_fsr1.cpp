@@ -5,6 +5,7 @@
 #include <stdexcept>
 #if defined(STARFOX_SDL_GPU_EFFECTS)
 #include <SDL3/SDL.h>
+#include "starfox/render/gpu_preparation.hpp"
 #include "shaders/generated/fsr1_portable.hpp"
 #endif
 
@@ -17,11 +18,14 @@ struct GpuFsr1::Impl {
     SDL_GPUComputePipeline* pipeline{};
     SDL_GPUSampler* sampler{};
     SDL_GPUTexture* images[2]{};
+    SDL_GPUTexture* world_rgba8{};
     Fsr1Extent size{};
     static void require(bool ok) {if(!ok) throw std::runtime_error(SDL_GetError());}
     void release() noexcept {
         hud.release_device();
         if(device) {
+            if(world_rgba8) SDL_ReleaseGPUTexture(device,world_rgba8);
+            world_rgba8=nullptr;
             for(auto*& image:images) {if(image) SDL_ReleaseGPUTexture(device,image);image=nullptr;}
             if(sampler) SDL_ReleaseGPUSampler(device,sampler);
             if(pipeline) SDL_ReleaseGPUComputePipeline(device,pipeline);
@@ -54,7 +58,7 @@ struct GpuFsr1::Impl {
             else throw std::runtime_error("FSR1 shader format unsupported");
             p.num_samplers=1;p.num_readwrite_storage_textures=1;p.num_uniform_buffers=1;
             p.threadcount_x=8;p.threadcount_y=8;p.threadcount_z=1;
-            pipeline=SDL_CreateGPUComputePipeline(device,&p);require(pipeline);
+            pipeline=create_gpu_compute_pipeline(device,&p);require(pipeline);
             SDL_GPUSamplerCreateInfo s{};
             s.min_filter=s.mag_filter=SDL_GPU_FILTER_LINEAR;
             s.address_mode_u=s.address_mode_v=s.address_mode_w=SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
@@ -77,6 +81,8 @@ struct GpuFsr1::Impl {
             }
         }
         for(unsigned i=0;i<2;++i) {if(images[i]) SDL_ReleaseGPUTexture(device,images[i]);images[i]=replacement[i];}
+        if(world_rgba8) SDL_ReleaseGPUTexture(device,world_rgba8);
+        world_rgba8=nullptr;
         size=extent;
     }
 #endif
@@ -84,7 +90,8 @@ struct GpuFsr1::Impl {
 GpuFsr1::GpuFsr1():impl_(std::make_unique<Impl>()) {}
 GpuFsr1::~GpuFsr1()=default;
 GpuCompositeOutput GpuFsr1::enqueue_composite(void* command,const GpuCompositeOutput& scene,
-    const GpuCompositeOutput& original,float sharpness) {
+    const GpuCompositeOutput& original,float sharpness,void** world_texture) {
+    if(world_texture) *world_texture=nullptr;
     if(!scene.device || scene.device!=original.device || !original.rgba || !original.packed) {
         impl_->status="Invalid FSR1 composition inputs";return {};
     }
@@ -94,16 +101,40 @@ GpuCompositeOutput GpuFsr1::enqueue_composite(void* command,const GpuCompositeOu
     auto* result=impl_->hud.restore_hud(scene.device,command,original.rgba,upscaled,
         original.packed,original.width,original.height,false);
     if(!result) {impl_->status=impl_->hud.status();return {};}
+    if(world_texture) {
+#if defined(STARFOX_SDL_GPU_EFFECTS)
+        if(!impl_->world_rgba8) {
+            SDL_GPUTextureCreateInfo t{};
+            t.type=SDL_GPU_TEXTURETYPE_2D;t.format=SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+            t.usage=SDL_GPU_TEXTUREUSAGE_SAMPLER|SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
+            t.width=original.width;t.height=original.height;t.layer_count_or_depth=t.num_levels=1;
+            impl_->world_rgba8=SDL_CreateGPUTexture(impl_->device,&t);
+            if(!impl_->world_rgba8) {impl_->status=SDL_GetError();return {};}
+        }
+        SDL_GPUBlitInfo blit{};
+        blit.source={static_cast<SDL_GPUTexture*>(upscaled),0,0,0,0,original.width,original.height};
+        blit.destination={impl_->world_rgba8,0,0,0,0,original.width,original.height};
+        blit.load_op=SDL_GPU_LOADOP_DONT_CARE;blit.filter=SDL_GPU_FILTER_NEAREST;
+        SDL_BlitGPUTexture(static_cast<SDL_GPUCommandBuffer*>(command),&blit);
+        *world_texture=impl_->world_rgba8;
+#endif
+    }
     auto output=original;output.rgba=result;return output;
 }
 const std::string& GpuFsr1::status() const noexcept {return impl_->status;}
+void GpuFsr1::release_world_output() noexcept {
+#if defined(STARFOX_SDL_GPU_EFFECTS)
+    if(impl_->device && impl_->world_rgba8) SDL_ReleaseGPUTexture(impl_->device,impl_->world_rgba8);
+    impl_->world_rgba8=nullptr;
+#endif
+}
 void GpuFsr1::release_device() noexcept {
 #if defined(STARFOX_SDL_GPU_EFFECTS)
     impl_->release();
 #endif
 }
 void* GpuFsr1::enqueue(void* device,void* command,void* input,Fsr1Extent source,
-    Fsr1Extent output,float sharpness) {
+    Fsr1Extent output,float sharpness,bool input_srgb) {
 #if defined(STARFOX_SDL_GPU_EFFECTS)
     try {
         if(!device || !command || !input || !source.width || !source.height ||
@@ -117,7 +148,7 @@ void* GpuFsr1::enqueue(void* device,void* command,void* input,Fsr1Extent source,
         auto* cmd=static_cast<SDL_GPUCommandBuffer*>(command);
         for(unsigned stage=0;stage<2;++stage) {
             Parameters p{stage?output.width:source.width,stage?output.height:source.height,
-                output.width,output.height,stage,sharpness,{}};
+                output.width,output.height,stage,sharpness,{input_srgb?1U:0U,0}};
             SDL_PushGPUComputeUniformData(cmd,0,&p,sizeof(p));
             SDL_GPUStorageTextureReadWriteBinding target{};
             target.texture=impl_->images[stage];target.cycle=true;
@@ -133,7 +164,7 @@ void* GpuFsr1::enqueue(void* device,void* command,void* input,Fsr1Extent source,
         return impl_->images[1];
     } catch(const std::exception& e) {impl_->status=e.what();return nullptr;}
 #else
-    (void)device;(void)command;(void)input;(void)source;(void)output;(void)sharpness;
+    (void)device;(void)command;(void)input;(void)source;(void)output;(void)sharpness;(void)input_srgb;
     impl_->status="FSR1 requires SDL GPU";return nullptr;
 #endif
 }

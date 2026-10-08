@@ -6,6 +6,13 @@
 
 namespace starfox::render {
 
+// UWP does not expose the desktop SDL vendor property. Xbox uses FSR,
+// regardless of that missing identity; actual GPU availability is checked
+// separately before dispatch. Never change the reported adapter identity.
+constexpr bool prefer_fsr1(std::uint32_t vendor,bool uwp) noexcept {
+    return uwp || vendor==0x1002U;
+}
+
 // Separate from DLSS: its fourth active mode is DLAA, not FSR Performance.
 enum class Fsr1Mode : std::uint8_t {
     off, ultra_quality, quality, balanced, performance

@@ -20,7 +20,7 @@ public:
     // Session/device outlive this object. Caller must finish GPU work before
     // close/destruction. Preference values use the selected graphics API.
     bool initialize(XrSession,std::span<const XrViewConfigurationView>,
-        std::span<const int64_t> preferred_formats);
+        std::span<const int64_t> preferred_formats,XrSwapchainUsageFlags additional_usage=0);
     void close() noexcept;
     bool start_frame(const StereoFrame&,XrSpace);
     // Timeout preserves the acquired image; retry waits rather than acquiring

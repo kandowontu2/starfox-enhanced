@@ -62,6 +62,7 @@ target_sources(starfox_vr_core PRIVATE src/vr/shape_batch.cpp src/render/face_ma
 target_compile_features(starfox_vr_core PUBLIC cxx_std_20)
 target_link_libraries(starfox_vr_core PUBLIC OpenXR::openxr_loader Vulkan::Headers PRIVATE ${CMAKE_DL_LIBS})
 add_library(starfox_vr_game STATIC src/vr/game_frame_driver.cpp src/vr/game_scene.cpp src/vr/draw_packet.cpp src/vr/vulkan_draw_packets.cpp src/vr/source_models.cpp)
+target_sources(starfox_vr_game PRIVATE src/vr/scene_packet_validation.cpp)
 target_sources(starfox_vr_game PRIVATE src/vr/scene_interpolation.cpp)
 target_sources(starfox_vr_game PRIVATE src/vr/source_span_model.cpp)
 target_sources(starfox_vr_game PRIVATE src/vr/vulkan_source_bindings.cpp)

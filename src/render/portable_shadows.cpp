@@ -1,6 +1,7 @@
 #include "starfox/render/portable_shadows.hpp"
 #if defined(STARFOX_SDL_GPU_EFFECTS)
 #include <SDL3/SDL.h>
+#include "starfox/render/gpu_preparation.hpp"
 #include <SDL3/SDL_gpu.h>
 #include "shaders/generated/shadow_portable.hpp"
 #include <cstring>
@@ -11,8 +12,8 @@ namespace starfox::render::shadows {
 namespace {
 void require(bool value) { if(!value) throw std::runtime_error(SDL_GetError()); }
 struct Float4 { float x{},y{},z{},w{}; };
-struct Parameters { Float4 camera,options,ground_point,ground_normal,lights[8]; };
-static_assert(sizeof(Parameters)==192);
+struct Parameters { Float4 camera,options,ground_point,ground_normal,lights[16]; };
+static_assert(sizeof(Parameters)==320);
 static_assert(sizeof(Scene::GpuNode)==48 && sizeof(Scene::GpuTriangle)==48);
 }
 struct PortableShadows::Impl {
@@ -84,7 +85,7 @@ struct PortableShadows::Impl {
         else throw std::runtime_error("Portable shadows require a supported native shader format");
         info.num_readonly_storage_buffers=2;info.num_readwrite_storage_buffers=1;
         info.num_uniform_buffers=1;info.threadcount_x=info.threadcount_y=8;info.threadcount_z=1;
-        pipeline=SDL_CreateGPUComputePipeline(device,&info);require(pipeline);
+        pipeline=create_gpu_compute_pipeline(device,&info);require(pipeline);
         status=std::string("GPU compute shadows: ")+SDL_GetGPUDeviceDriver(device);
         status+=" (";status+=SDL_GetStringProperty(SDL_GetGPUDeviceProperties(device),
             SDL_PROP_GPU_DEVICE_NAME_STRING,"unknown device");status+=")";
@@ -94,7 +95,7 @@ struct PortableShadows::Impl {
         if(buffers[index]) SDL_ReleaseGPUBuffer(device,buffers[index]);
         buffers[index]=nullptr;
         SDL_GPUBufferCreateInfo info{SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ
-            |(index==2?SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE:0U),bytes,0};
+            |(index==2?SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE|SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ:0U),bytes,0};
         buffers[index]=SDL_CreateGPUBuffer(device,&info);require(buffers[index]);capacities[index]=bytes;
     }
     void transfer(SDL_GPUTransferBuffer*& target,Uint32& capacity,Uint32 bytes,SDL_GPUTransferBufferUsage usage) {
@@ -105,11 +106,11 @@ struct PortableShadows::Impl {
         target=SDL_CreateGPUTransferBuffer(device,&info);require(target);capacity=bytes;
     }
     void render(const Scene& scene,Camera camera,Vec3 light,std::optional<ReceiverPlane> ground,
-        std::vector<std::uint8_t>* mask) {
+        std::vector<std::uint8_t>* mask, bool ground_only = false) {
         finish();valid=false;
         const auto pixels=std::size_t(camera.width)*camera.height;
         const auto length=std::sqrt(dot(light,light));
-        if(!pixels || !scene.triangle_count()) {if(mask) mask->assign(pixels,0);return;}
+        if(!pixels || !scene.triangle_count() || (ground_only && !ground)) {if(mask) mask->assign(pixels,0);return;}
         if(camera.width>16384 || camera.height>16384 || pixels>UINT32_MAX/4
             || camera.focal_length<=0 || !std::isfinite(length) || length<=1e-10
             || camera.vertical_focal_length()<=0 || !std::isfinite(camera.vertical_focal_length())
@@ -126,7 +127,7 @@ struct PortableShadows::Impl {
         SDL_UnmapGPUTransferBuffer(device,upload);
         Parameters p{};
         p.camera={float(camera.width),float(camera.height),float(camera.focal_length),float(camera.center_x)};
-        p.options={float(camera.center_y),ground?1.F:0.F,float(camera.vertical_focal_length()),0};
+        p.options={float(camera.center_y),ground?1.F:0.F,float(camera.vertical_focal_length()),ground_only?1.F:0.F};
         if(ground) {
             p.ground_point={float(ground->point.x),float(ground->point.y),float(ground->point.z),0};
             p.ground_normal={float(ground->normal.x),float(ground->normal.y),float(ground->normal.z),0};
@@ -135,12 +136,14 @@ struct PortableShadows::Impl {
         const auto reference=std::abs(light.y)<.9?Vec3{0,1,0}:Vec3{1,0,0};
         auto tangent=cross(light,reference);tangent=tangent*(1/std::sqrt(dot(tangent,tangent)));
         const auto bitangent=cross(light,tangent);
-        for(unsigned i=0;i<8;++i) {
-            const auto radius=.015*std::sqrt((i+.5)/8),angle=i*2.399963229728653;
+        const auto samples=camera.shadow_samples();
+        for(unsigned i=0;i<samples;++i) {
+            const auto radius=camera.shadow_angular_radius()*std::sqrt((i+.5)/samples),angle=i*2.399963229728653;
             auto direction=light+tangent*(radius*std::cos(angle))+bitangent*(radius*std::sin(angle));
             direction=direction*(1/std::sqrt(dot(direction,direction)));
             p.lights[i]={float(direction.x),float(direction.y),float(direction.z),0};
         }
+        p.lights[0].w=float(samples);
         command=SDL_AcquireGPUCommandBuffer(device);require(command);
         auto* copy=SDL_BeginGPUCopyPass(command);require(copy);
         for(unsigned i=0;i<2;++i) {
@@ -210,20 +213,20 @@ bool PortableShadows::render(const Scene& scene,Camera camera,Vec3 light,
 #endif
 }
 bool PortableShadows::render_resident(void* device,const Scene& scene,Camera camera,Vec3 light,
-    std::optional<ReceiverPlane> ground) {
+    std::optional<ReceiverPlane> ground, bool ground_only) {
 #if defined(STARFOX_SDL_GPU_EFFECTS)
     if(!device) return false;
     if(!impl_ || impl_->device!=device) impl_=std::make_unique<Impl>();
     if(impl_->failed) return false;
     try {
         if(!impl_->device) impl_->initialize(static_cast<SDL_GPUDevice*>(device));
-        impl_->render(scene,camera,light,ground,nullptr);return impl_->valid;
+        impl_->render(scene,camera,light,ground,nullptr,ground_only);return impl_->valid;
     } catch(const std::exception& error) {
         if(impl_->command) {SDL_CancelGPUCommandBuffer(impl_->command);impl_->command=nullptr;}
         impl_->valid=false;impl_->failed=true;impl_->status=error.what();return false;
     }
 #else
-    (void)device;(void)scene;(void)camera;(void)light;(void)ground;return false;
+    (void)device;(void)scene;(void)camera;(void)light;(void)ground;(void)ground_only;return false;
 #endif
 }
 GpuShadowOutput PortableShadows::output() const {

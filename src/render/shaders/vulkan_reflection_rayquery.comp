@@ -1,7 +1,20 @@
 #version 460
 #extension GL_EXT_ray_query : require
+#extension GL_GOOGLE_include_directive : require
+#include "../../../include/starfox/render/lava_surface.inc"
+#include "../../../include/starfox/render/water_transmission.inc"
+#include "../../../include/starfox/render/water_caustics.inc"
 
 layout(local_size_x = 64) in;
+// Ordinary reflections compile out the calibrated-water register/query paths.
+// The native owner creates the specialized water pipeline only when requested.
+layout(constant_id = 0) const bool NATIVE_WATER = false;
+// On-demand native planar/lava variant; ordinary/legacy reflections do not
+// carry the calibrated surface lighting registers and visibility queries.
+layout(constant_id = 1) const bool NATIVE_SURFACE = false;
+// Native material/colour transport is independent of ground type. Keep the
+// legacy palette path byte-compatible, with no eight-lobe work unless native.
+layout(constant_id = 2) const bool NATIVE_MODEL = false;
 layout(set = 0, binding = 0) uniform accelerationStructureEXT scene;
 layout(set = 0, binding = 1, std430) buffer Output { uint pixels[]; } output_image;
 layout(set = 0, binding = 2, std140) uniform Parameters {
@@ -16,6 +29,22 @@ layout(set = 0, binding = 2, std140) uniform Parameters {
     uvec4 enhanced_size, enhanced_modes;
     vec4 enhanced_motion, enhanced_plane, enhanced_projection, enhanced_palette;
     vec4 enhanced_keep0, enhanced_keep1;
+    uvec4 material_info; // Encoding0 indexed/2 native RGBA, resident payload bytes.
+    vec4 source_colour; // Live native authored colour, W enables calibrated water.
+    uvec4 liquid_layers; // Word offsets world/surface, flags(world=1,surface=2), words.
+    vec4 primary_range; // Near/far +Z camera depths; never secondary ray limits.
+    uvec4 cube_info; // Relative word offset, face size, encoding, enabled.
+    vec4 cube_row0,cube_row1,cube_row2;
+#ifdef STARFOX_VULKAN_REFLECTION_HISTORY
+    uvec4 history_info; // Relative previous vertex/index words, accepted extent.
+    vec4 history_projection,history_clip;
+#ifdef STARFOX_VULKAN_GROUND_HISTORY
+    vec4 previous_ground_point,previous_ground_normal;
+#endif
+#ifdef STARFOX_VULKAN_LIQUID_HISTORY
+    vec4 previous_liquid[8]; // Canonical accepted frame; shared with the motion pass.
+#endif
+#endif
 } p;
 layout(set = 0, binding = 3, std430) readonly buffer Vertices { vec4 vertex[]; } vertices;
 struct RayMaterial {
@@ -23,13 +52,18 @@ struct RayMaterial {
     uint textured, dither, even_colour, odd_colour, colour_base, face;
     uint offset, u_mask, v_mask, reserved;
 };
-layout(set = 0, binding = 4, std430) readonly buffer Materials { RayMaterial material[]; } materials;
+layout(set = 0, binding = 4, std430) readonly buffer Materials { uint word[]; } materials;
 layout(set = 0, binding = 5, std430) readonly buffer Palette { uint colour[]; } palette;
 layout(set = 0, binding = 6, std430) readonly buffer Texels { uint word[]; } texels;
 layout(set = 0, binding = 7, std430) readonly buffer Backdrop { uint pixel[]; } backdrop;
 layout(set = 0, binding = 8, std430) readonly buffer EnhancedBackdrop {
     uint pixel[];
 } enhanced_backdrop;
+#include "vulkan_indexed_materials.glsl"
+#include "generated/vulkan_material_colour.glsl"
+#define STARFOX_NATIVE_MATERIAL_COLOUR
+#include "vulkan_native_materials.glsl"
+#include "generated/vulkan_liquid_optics.glsl"
 
 float hash(uint n) {
     n = (n ^ 61u) ^ (n >> 16u);
@@ -47,22 +81,65 @@ uint rgba(vec3 value, uint marker) {
     uvec3 c = uvec3(round(clamp(value, 0.0, 1.0) * 255.0));
     return c.x | (c.y << 8u) | (c.z << 16u) | (marker << 24u);
 }
+vec3 reflection_authored_linear(vec3 value) {
+    if(p.material_info.z==2u)return calibrated_decode_srgb(value);
+    return p.material_info.z==1u?value:value*value;
+}
+vec3 reflection_linear(uint packed) {return reflection_authored_linear(rgb(packed));}
+uint reflection_pack_linear(vec3 value,uint marker) {
+    value=clamp(value,0.0,1.0);
+    if(p.material_info.z==2u)value=calibrated_encode_srgb(value);
+    else if(p.material_info.z==0u)value=sqrt(value);
+    return rgba(value,marker);
+}
+// Compensated plane depth near the horizon. Evaluate camera divisions only
+// AFTER summing the full plane equation: ordinary float division loses the
+// cancellation in an affine banked view. No shaderFloat64/Int64 capability.
+vec2 liquid_sum(vec2 a,vec2 b) {
+    precise float sum=a.x+b.x;
+    precise float virtual_b=sum-a.x;
+    precise float error=(a.x-(sum-virtual_b))+(b.x-virtual_b)+a.y+b.y;
+    precise float high=sum+error;
+    return vec2(high,error-(high-sum));
+}
+vec2 liquid_product(vec2 a,vec2 b) {
+    precise float high=a.x*b.x;
+    precise float error=fma(a.x,b.x,-high)+a.x*b.y+a.y*b.x;
+    return liquid_sum(vec2(high,0.0),vec2(error,0.0));
+}
+float native_ground_depth(uvec2 pixel) {
+    vec2 fx=vec2(p.camera.x,0.0),fy=vec2(p.camera.y,0.0);
+    vec2 focal=liquid_product(fx,fy);
+    vec2 x=liquid_sum(vec2(float(pixel.x)+.5,0.0),vec2(-p.camera.z,0.0));
+    vec2 y=liquid_sum(vec2(float(pixel.y)+.5,0.0),vec2(-p.camera.w,0.0));
+    vec2 denominator=liquid_sum(liquid_product(liquid_product(x,fy),vec2(p.ground_normal.x,0.0)),
+        liquid_product(liquid_product(y,fx),vec2(p.ground_normal.y,0.0)));
+    denominator=liquid_sum(denominator,liquid_product(focal,vec2(p.ground_normal.z,0.0)));
+    vec2 numerator=liquid_sum(liquid_product(vec2(p.ground_point.x,0.0),vec2(p.ground_normal.x,0.0)),
+        liquid_product(vec2(p.ground_point.y,0.0),vec2(p.ground_normal.y,0.0)));
+    numerator=liquid_product(liquid_sum(numerator,liquid_product(vec2(p.ground_point.z,0.0),vec2(p.ground_normal.z,0.0))),focal);
+    if(abs(denominator.x)<1e-10)return 0.0;
+    precise float quotient=numerator.x/denominator.x;
+    vec2 residual=liquid_sum(numerator,-liquid_product(denominator,vec2(quotient,0.0)));
+    return quotient+(residual.x+residual.y)/denominator.x;
+}
+uint material_sample(uint primitive, vec2 barycentric, uvec2 pixel, bool coverage_only) {
+    uint count=uint(vertices.vertex.length())/3u;
+    if(p.material_info.x==2u)return native_material_sample(primitive,barycentric,pixel,count,p.material_info.y,coverage_only);
+    if(p.material_info.x!=0u || primitive>=count || count>0x03ffffffu
+        || count*16u>uint(materials.word.length()))return 0u;
+    uint index=indexed_source_index(load_ray_material(primitive),barycentric,pixel,uint(p.settings.z));
+    if (index > 255u) return 0u;
+    // Candidate traversal needs binary coverage, not colour. The literal true
+    // wrapper specializes this path without a palette fetch for every candidate.
+    if (coverage_only) return 0xff000000u;
+    return palette.colour[index] | 0xff000000u;
+}
 uint material_colour(uint primitive, vec2 barycentric, uvec2 pixel) {
-    RayMaterial m = materials.material[primitive];
-    if (m.reserved != 0u || m.textured > 1u) return p.environment.x;
-    uint index = m.dither != 0u && ((pixel.x + pixel.y) & 1u) != 0u
-        ? m.odd_colour : m.even_colour;
-    if (m.textured != 0u) {
-        vec2 uv = m.uv0 * (1.0 - barycentric.x - barycentric.y)
-            + m.uv1 * barycentric.x + m.uv2 * barycentric.y;
-        uvec2 tile = uvec2(ivec2(floor(uv))) & uvec2(m.u_mask, m.v_mask);
-        uint at = m.offset + tile.y * (m.u_mask + 1u) + tile.x;
-        if (at < uint(p.settings.z)) {
-            uint texel = (texels.word[at >> 2u] >> ((at & 3u) * 8u)) & 255u;
-            index = (texel + m.colour_base) & 255u;
-        }
-    }
-    return palette.colour[index & 255u];
+    return material_sample(primitive,barycentric,pixel,false);
+}
+bool material_visible(uint primitive, vec2 barycentric, uvec2 pixel) {
+    return material_sample(primitive,barycentric,pixel,true)!=0u;
 }
 vec3 enhanced_texel(uint x, uint y) {
     uint value=enhanced_backdrop.pixel[y*p.enhanced_size.x+x];
@@ -107,7 +184,47 @@ bool enhanced_sky_at(float sample_x,float sample_y,out uint colour) {
     colour=rgba(sky,255u);
     return true;
 }
+// Same +X,-X,+Y,-Y,+Z,-Z face convention and edge-tap reprojection as
+// shadow_dxr.hlsl. Native cube bytes follow materials in the resident buffer.
+void cube_coordinates(vec3 direction,out uint face,out vec2 uv) {
+    vec3 a=abs(direction);
+    if(a.x>=a.y && a.x>=a.z) {
+        face=direction.x>=0.0?0u:1u;uv=vec2(direction.x>=0.0?-direction.z:direction.z,-direction.y)/a.x;
+    } else if(a.y>=a.z) {
+        face=direction.y>=0.0?2u:3u;uv=vec2(direction.x,direction.y>=0.0?direction.z:-direction.z)/a.y;
+    } else {
+        face=direction.z>=0.0?4u:5u;uv=vec2(direction.z>=0.0?direction.x:-direction.x,-direction.y)/a.z;
+    }
+}
+vec3 cube_tap(uint face,ivec2 pixel) {
+    uint size=p.cube_info.y;
+    if(any(lessThan(pixel,ivec2(0))) || any(greaterThanEqual(pixel,ivec2(size)))) {
+        vec2 uv=(vec2(pixel)+.5)/float(size)*2.0-1.0;
+        vec3 direction;
+        if(face==0u)direction=vec3(1,-uv.y,-uv.x);
+        else if(face==1u)direction=vec3(-1,-uv.y,uv.x);
+        else if(face==2u)direction=vec3(uv.x,1,uv.y);
+        else if(face==3u)direction=vec3(uv.x,-1,-uv.y);
+        else if(face==4u)direction=vec3(uv.x,-uv.y,1);
+        else direction=vec3(-uv.x,-uv.y,-1);
+        cube_coordinates(direction,face,uv);pixel=ivec2(floor((uv*.5+.5)*float(size)));
+    }
+    pixel=clamp(pixel,ivec2(0),ivec2(size)-1);
+    uint at=p.cube_info.x+face*size*size+uint(pixel.y)*size+uint(pixel.x);
+    if(at>=uint(materials.word.length()))return vec3(0.0);
+    vec3 colour=rgb(materials.word[at]);
+    return p.cube_info.z==2u?calibrated_decode_srgb(colour):colour;
+}
+uint reflected_cube(vec3 direction) {
+    direction=vec3(dot(direction,p.cube_row0.xyz),dot(direction,p.cube_row1.xyz),dot(direction,p.cube_row2.xyz));
+    uint face;vec2 uv;cube_coordinates(direction,face,uv);
+    vec2 at=(uv*.5+.5)*float(p.cube_info.y)-.5;ivec2 lo=ivec2(floor(at));vec2 f=fract(at);
+    vec3 colour=mix(mix(cube_tap(face,lo),cube_tap(face,lo+ivec2(1,0)),f.x),
+        mix(cube_tap(face,lo+ivec2(0,1)),cube_tap(face,lo+ivec2(1,1)),f.x),f.y);
+    return reflection_pack_linear(colour,255u);
+}
 uint sample_backdrop(float sample_x, float sample_y) {
+    if(p.cube_info.w!=0u)return reflected_cube(vec3((sample_x-128.0)/256.0,(sample_y-112.0)/256.0,1.0));
     uint enhanced_colour;
     if(enhanced_sky_at(sample_x,sample_y,enhanced_colour))
         return enhanced_colour;
@@ -119,6 +236,7 @@ uint sample_backdrop(float sample_x, float sample_y) {
         ? palette.colour[source & 255u] : p.environment.x;
 }
 uint reflected_backdrop(vec3 direction) {
+    if(p.cube_info.w!=0u)return reflected_cube(direction);
     return sample_backdrop(128.0 + atan(direction.x, direction.z) * 256.0,
         112.0 + atan(direction.y, length(direction.xz)) * 256.0);
 }
@@ -131,68 +249,486 @@ vec3 world_to_view(vec3 value) {
     return vec3(dot(p.water_row0.xyz, value), dot(p.water_row1.xyz, value),
                 dot(p.water_row2.xyz, value));
 }
+struct SecondaryLava {
+    vec3 hit,normal,radiance;
+    float share,bias;
+};
+SecondaryLava secondary_lava(vec3 origin,vec3 direction,float distance) {
+    SecondaryLava result;
+    result.hit=origin+direction*distance;
+    vec3 position=view_to_world(result.hit)+vec3(p.water_row0.w,p.water_row1.w,p.water_row2.w);
+    // The image footprint is eye-to-surface, not the last mirror-hop length.
+    float footprint=length(result.hit)/max(p.camera.x,1.0)
+        /max(abs(dot(direction,p.ground_normal.xyz)),.04);
+    LavaSample liquid=lava_surface(position.x,position.z,p.water_settings.x,footprint);
+    vec3 travel=view_to_world(direction);
+    float shift=clamp(-liquid.height/max(travel.y,.12),-distance*.2,distance*.2);
+    position+=travel*shift;result.hit+=direction*shift;
+    liquid=lava_surface(position.x,position.z,p.water_settings.x,footprint);
+    result.normal=normalize(world_to_view(vec3(liquid.dx,-1,liquid.dz)));
+    if(dot(result.normal,direction)>0.0) result.normal=-result.normal;
+    vec3 viewer=view_to_world(-direction);
+    LavaColour colour=lava_shade(liquid,viewer.x,viewer.y,viewer.z);
+    vec3 molten=vec3(colour.r,colour.g,colour.b)*p.water_settings.z;
+    // Native surfaces carry negotiated linear/sRGB colour, not the legacy
+    // gamma-squared palette approximation. Decode emission exactly once.
+    result.radiance=reflection_authored_linear(molten);
+    result.share=(.035+.40*pow(1.0-clamp(dot(-direction,result.normal),0.0,1.0),5.0))
+        *p.water_settings.y*(.3+.7*liquid.crust);
+    result.bias=max(.05,distance*1e-5);
+    return result;
+}
+uint reflected_accumulated(uint terminal,vec3 throughput,vec3 accumulated) {
+    return reflection_pack_linear(accumulated+throughput*reflection_linear(terminal),255u);
+}
+struct NativeWaterSample {
+    vec3 hit,normal,radiance,specular;
+    float fresnel,bias;
+};
+NativeWaterSample native_water_sample(vec3 origin,vec3 direction,float distance,uvec2 pixel);
+vec3 conductor_f0(uint source,uint metallic) {
+    return metallic==2u?vec3(1.0,.766,.336):metallic==3u?vec3(.955,.638,.538):reflection_linear(source);
+}
+#ifdef STARFOX_VULKAN_REFLECTION_HISTORY
+#include "vulkan_reflection_model_records.glsl"
+#endif
+uint trace_mirrors(vec3 origin,vec3 direction,uvec2 pixel,float minimum,bool escaping_source_ground) {
+#ifdef STARFOX_VULKAN_REFLECTION_HISTORY
+    if(HISTORY_MODEL_RECORDS!=0u)history_current_path=history_path_empty();
+#endif
+    uint flags=uint(p.water_settings.w);
+    vec3 throughput=vec3(1.0),accumulated=vec3(0.0);
+    for(uint bounce=0u;bounce<4u;++bounce) {
+        rayQueryEXT query;
+        rayQueryInitializeEXT(query,scene,gl_RayFlagsNoOpaqueEXT,0xff,origin,minimum,direction,65536.0);
+        while(rayQueryProceedEXT(query)) {
+            if(rayQueryGetIntersectionTypeEXT(query,false)==gl_RayQueryCandidateIntersectionTriangleEXT
+                && material_visible(rayQueryGetIntersectionPrimitiveIndexEXT(query,false),
+                    rayQueryGetIntersectionBarycentricsEXT(query,false),pixel))
+                rayQueryConfirmIntersectionEXT(query);
+        }
+        bool model=rayQueryGetIntersectionTypeEXT(query,true)==gl_RayQueryCommittedIntersectionTriangleEXT;
+        float distance=model?rayQueryGetIntersectionTEXT(query,true):65536.0;
+        float denominator=dot(direction,p.ground_normal.xyz);
+        float ground_t=abs(denominator)>.000001?dot(p.ground_point.xyz-origin,p.ground_normal.xyz)/denominator:-1.0;
+        bool floor_hit=p.settings.y>.5 && ground_t>minimum && ground_t<distance
+            && !(escaping_source_ground && bounce==0u && denominator>0.0);
+        vec3 normal;
+        if(floor_hit) {
+            distance=ground_t;
+            vec3 hit=origin+direction*distance;
+            if(NATIVE_WATER && (flags&15u)==0u) {
+                NativeWaterSample water=native_water_sample(origin,direction,distance,pixel);
+                accumulated+=throughput*(water.radiance*(1.0-water.fresnel)+water.specular);
+                throughput*=water.fresnel;
+                if(all(lessThan(throughput,vec3(1e-5))))return reflection_pack_linear(accumulated,255u);
+                origin=water.hit+water.normal*water.bias;direction=reflect(direction,water.normal);minimum=water.bias;
+                continue;
+            }
+            if((flags&15u)==3u) {
+                SecondaryLava lava=secondary_lava(origin,direction,distance);
+                accumulated+=throughput*lava.radiance;throughput*=lava.share;
+                if(all(lessThan(throughput,vec3(1e-5))))
+                    return reflection_pack_linear(accumulated,255u);
+                origin=lava.hit+lava.normal*lava.bias;
+                direction=reflect(direction,lava.normal);minimum=lava.bias;
+                continue;
+            }
+            if((flags&15u)!=1u && (flags&15u)!=2u) {
+                uint colour=hit.z>1.0?sample_backdrop(128.0+256.0*hit.x/hit.z,112.0+256.0*hit.y/hit.z):reflected_backdrop(hit);
+                return reflected_accumulated(colour,throughput,accumulated);
+            }
+#ifdef STARFOX_VULKAN_REFLECTION_HISTORY
+            if(HISTORY_MODEL_RECORDS==3u)history_current_path.mirrors[bounce]=0xfffffffeu;
+#endif
+            normal=normalize(p.ground_normal.xyz);
+            if(dot(normal,direction)>0.0) normal=-normal;
+            if((flags&15u)==2u) {
+                float grazing=pow(1.0-clamp(dot(-direction,normal),0.0,1.0),5.0);
+                vec3 f0=vec3(1.0,.766,.336);
+                throughput*=f0+(1.0-f0)*grazing;
+            }
+        } else if(model) {
+            uint primitive=rayQueryGetIntersectionPrimitiveIndexEXT(query,true);
+            bool model_transport=NATIVE_MODEL && p.material_info.w!=0u;
+            if((flags&16u)==0u && !model_transport) {
+#ifdef STARFOX_VULKAN_REFLECTION_HISTORY
+                if(HISTORY_MODEL_RECORDS!=0u) {
+                    vec2 bary=rayQueryGetIntersectionBarycentricsEXT(query,true);uint source=material_colour(primitive,bary,pixel);
+                    history_record_terminal(1u,bounce,primitive,vec3(bary,0),source,throughput);
+                    return reflected_accumulated(source,throughput,accumulated);
+                }
+#endif
+                return reflected_accumulated(material_colour(primitive,rayQueryGetIntersectionBarycentricsEXT(query,true),pixel),throughput,accumulated);
+            }
+#ifdef STARFOX_VULKAN_REFLECTION_HISTORY
+            if(HISTORY_MODEL_RECORDS!=0u)history_current_path.mirrors[bounce]=primitive;
+#endif
+            uint first=primitive*3u;
+            normal=normalize(cross(vertices.vertex[first+1u].xyz-vertices.vertex[first].xyz,
+                vertices.vertex[first+2u].xyz-vertices.vertex[first].xyz));
+            if(dot(normal,direction)>0.0)normal=-normal;
+            if(model_transport && p.dimensions.w!=0u) {
+                vec3 f0=conductor_f0(material_colour(primitive,rayQueryGetIntersectionBarycentricsEXT(query,true),pixel),p.dimensions.w);
+                float grazing=pow(1.0-clamp(dot(-direction,normal),0.0,1.0),5.0);
+                throughput*=f0+(1.0-f0)*grazing;
+            }
+        } else {
+#ifdef STARFOX_VULKAN_REFLECTION_HISTORY
+            if(HISTORY_MODEL_RECORDS!=0u) {
+                uint source=reflected_backdrop(direction);history_record_terminal(2u,bounce,0xffffffffu,direction,source,throughput);
+                return reflected_accumulated(source,throughput,accumulated);
+            }
+#endif
+            return reflected_accumulated(reflected_backdrop(direction),throughput,accumulated);
+        }
+        if(dot(normal,direction)>0.0) normal=-normal;
+        minimum=max(.05,distance*1e-5);
+        origin+=direction*distance+normal*minimum;
+        direction=reflect(direction,normal);
+    }
+#ifdef STARFOX_VULKAN_REFLECTION_HISTORY
+    if(HISTORY_MODEL_RECORDS!=0u) {
+        uint source=reflected_backdrop(direction);history_record_terminal(3u,4u,0xffffffffu,direction,source,throughput);
+        return reflected_accumulated(source,throughput,accumulated);
+    }
+#endif
+    return reflected_accumulated(reflected_backdrop(direction),throughput,accumulated);
+}
+uint shade_native_model(uvec2 pixel,vec3 incoming,vec3 point,vec3 normal,float distance,uint primitive,vec2 bary) {
+    float bias=max(.01,distance*1e-5);
+    vec3 origin=point+normal*bias,central=reflect(incoming,normal);
+    if(p.settings.x==0.0 && p.dimensions.w==0u)
+        return trace_mirrors(origin,central,pixel,bias,false);
+    vec3 tangent=normalize(cross(central,abs(central.y)<.95?vec3(0,1,0):vec3(1,0,0)));
+    vec3 bitangent=cross(central,tangent),sum=vec3(0.0);
+    const vec2 taps[8]=vec2[8](vec2(.5,0),vec2(-.5,0),vec2(0,.5),vec2(0,-.5),
+        vec2(.612,.612),vec2(-.612,.612),vec2(.612,-.612),vec2(-.612,-.612));
+    uint samples=p.settings.x>0.0?8u:1u;
+    for(uint sample_index=0u;sample_index<samples;++sample_index) {
+        vec3 direction=normalize(central+p.settings.x*p.settings.x*(tangent*taps[sample_index].x+bitangent*taps[sample_index].y));
+        if(dot(direction,normal)<=0.0)direction=central;
+        sum+=reflection_linear(trace_mirrors(origin,direction,pixel,bias,false));
+    }
+    vec3 radiance=sum/float(samples);
+    if(p.dimensions.w!=0u) {
+        vec3 f0=conductor_f0(material_colour(primitive,bary,pixel),p.dimensions.w);
+        float grazing=pow(1.0-clamp(dot(-incoming,normal),0.0,1.0),5.0);
+        radiance*=f0+(1.0-f0)*grazing;
+    }
+    return reflection_pack_linear(radiance,255u);
+}
+bool caustic_blocked(vec3 origin,vec3 direction,float maximum,float bias,uvec2 pixel) {
+    rayQueryEXT query;
+    rayQueryInitializeEXT(query,scene,gl_RayFlagsNoOpaqueEXT|gl_RayFlagsTerminateOnFirstHitEXT,
+        0xff,origin,bias,direction,maximum);
+    while(rayQueryProceedEXT(query)) {
+        if(rayQueryGetIntersectionTypeEXT(query,false)==gl_RayQueryCandidateIntersectionTriangleEXT
+            && material_visible(rayQueryGetIntersectionPrimitiveIndexEXT(query,false),
+                rayQueryGetIntersectionBarycentricsEXT(query,false),pixel))
+            rayQueryConfirmIntersectionEXT(query);
+    }
+    return rayQueryGetIntersectionTypeEXT(query,true)==gl_RayQueryCommittedIntersectionTriangleEXT;
+}
+NativeWaterSample native_water_sample(vec3 origin,vec3 direction,float distance,uvec2 pixel) {
+    mat3 rotation=transpose(mat3(p.water_row0.xyz,p.water_row1.xyz,p.water_row2.xyz));
+    mat3 forward=transpose(mat3(cross(p.water_row1.xyz,p.water_row2.xyz),
+        cross(p.water_row2.xyz,p.water_row0.xyz),cross(p.water_row0.xyz,p.water_row1.xyz)))
+        /dot(p.water_row0.xyz,cross(p.water_row1.xyz,p.water_row2.xyz));
+    vec3 offset=vec3(p.water_row0.w,p.water_row1.w,p.water_row2.w);
+    NativeWaterSample result;result.hit=origin+direction*distance;
+    float footprint=length(result.hit)/max(p.camera.x,1.0)/max(abs(dot(direction,p.ground_normal.xyz)),.04);
+    LiquidOpticalSample optical=liquid_optical_sample(result.hit,direction,distance,footprint,rotation,offset,p.water_settings.x,0u);
+    result.hit=optical.hit;result.normal=optical.normal;vec3 position=optical.position;
+    result.bias=max(.05,distance*1e-5);
+    vec3 light=normalize(forward*vec3(-1.0));
+    float visibility=caustic_blocked(result.hit+result.normal*result.bias,light,65536.0,result.bias,pixel)?0.0:1.0;
+    vec3 authored=p.source_colour.xyz;
+    if(p.material_info.z==2u)authored=calibrated_decode_srgb(authored);
+    vec3 base=dot(authored,vec3(.3,.59,.11))*vec3(.20,.58,.85);
+    result.radiance=base*(.65+.35*visibility*max(0.0,dot(result.normal,light)));
+    vec3 transmitted=refract(direction,result.normal,optical.entering?.75:1.0/.75);
+    bool total_internal=dot(transmitted,transmitted)<1e-10;
+    if(!total_internal) {
+        vec3 through=result.hit-result.normal*result.bias;
+        vec3 world_origin=through*rotation+offset,world_direction=transmitted*rotation;
+        float bottom=world_direction.y>0.0?(position.y+640.0-world_origin.y)/world_direction.y:65536.0;
+        rayQueryEXT submerged;
+        rayQueryInitializeEXT(submerged,scene,gl_RayFlagsNoOpaqueEXT,0xff,through,result.bias,
+            transmitted,min(65536.0,max(result.bias,bottom)));
+        while(rayQueryProceedEXT(submerged)) {
+            if(rayQueryGetIntersectionTypeEXT(submerged,false)==gl_RayQueryCandidateIntersectionTriangleEXT
+                && material_visible(rayQueryGetIntersectionPrimitiveIndexEXT(submerged,false),
+                    rayQueryGetIntersectionBarycentricsEXT(submerged,false),pixel))rayQueryConfirmIntersectionEXT(submerged);
+        }
+        bool found=rayQueryGetIntersectionTypeEXT(submerged,true)==gl_RayQueryCommittedIntersectionTriangleEXT;
+        float travel=found?rayQueryGetIntersectionTEXT(submerged,true):bottom;
+        if(found || (bottom>result.bias && bottom<65536.0)) {
+            uint primitive=found?rayQueryGetIntersectionPrimitiveIndexEXT(submerged,true):0u;
+            vec3 receiver=found?reflection_linear(material_colour(primitive,rayQueryGetIntersectionBarycentricsEXT(submerged,true),pixel))
+                :vec3(.28,.24,.16)*p.water_settings.z;
+            vec3 receiver_view=through+transmitted*travel,receiver_world=receiver_view*rotation+offset;
+            float depth=receiver_world.y-position.y,up=1.0;
+            if(found) {
+                uint first=primitive*3u;
+                vec3 n=normalize(cross(vertices.vertex[first+1u].xyz-vertices.vertex[first].xyz,
+                    vertices.vertex[first+2u].xyz-vertices.vertex[first].xyz));
+                if(dot(n,transmitted)>0.0)n=-n;
+                up=clamp(-normalize(n*forward).y,0.0,1.0);
+            }
+            uint caustics=(uint(p.water_settings.w)>>5u)&3u;
+            if(caustics!=0u && depth>0.0 && up>0.0) {
+                WaterCausticSample focus=water_caustic_sample(receiver_world.x,receiver_world.z,p.water_settings.x,depth,footprint);
+                vec3 entry=forward*(vec3(focus.entry_x,position.y,focus.entry_z)-offset);
+                vec3 segment=entry-receiver_view;float path=length(segment);
+                if(path>result.bias*2.0
+                    && !caustic_blocked(receiver_view,segment/path,path-result.bias,result.bias,pixel)
+                    && !caustic_blocked(entry,normalize(forward*vec3(0,-1,0)),65536.0,result.bias,pixel))
+                    receiver*=clamp(1.0+(focus.irradiance-exp(-depth/1600.0))*up*float(caustics)/3.0,.25,3.0);
+            }
+            result.radiance=vec3(water_transmitted_channel(receiver.r,result.radiance.r,travel,.0025),
+                water_transmitted_channel(receiver.g,result.radiance.g,travel,.0008),
+                water_transmitted_channel(receiver.b,result.radiance.b,travel,.00035));
+        }
+    }
+    float grazing=pow(1.0-clamp(dot(-direction,result.normal),0.0,1.0),5.0);
+    result.fresnel=total_internal?1.0:clamp((.02+.98*grazing)*p.water_settings.y,0.0,1.0);
+    vec3 halfway=normalize(light-direction);
+    result.specular=vec3(1,.95,.82)*pow(clamp(dot(result.normal,halfway),0.0,1.0),96.0)*visibility
+        *max(authored.r,max(authored.g,authored.b))*.55;
+    return result;
+}
+uint shade_native_water(uvec2 pixel,vec3 direction,float distance,out vec4 surface) {
+    NativeWaterSample water=native_water_sample(vec3(0.0),direction,distance,pixel);
+    surface=vec4(water.normal,water.hit.z);
+    vec3 radiance=water.radiance*(1.0-water.fresnel)+water.specular;
+#ifdef STARFOX_VULKAN_LIQUID_HISTORY
+    history_primary_base=radiance;history_primary_response=vec3(water.fresnel);
+    history_primary_incoming=0u;
+    if(water.fresnel>0.0) {
+        uint incident=trace_mirrors(water.hit+water.normal*water.bias,reflect(direction,water.normal),pixel,water.bias,true);
+        history_primary_incoming=incident;
+        radiance+=reflection_linear(incident)*water.fresnel;
+    }
+#else
+    if(water.fresnel>0.0)radiance+=reflection_linear(trace_mirrors(water.hit+water.normal*water.bias,
+        reflect(direction,water.normal),pixel,water.bias,true))*water.fresnel;
+#endif
+    return reflection_pack_linear(radiance,253u);
+}
+void store_liquid_surface(uint id,vec4 surface) {
+    if(!NATIVE_WATER || (p.liquid_layers.z&2u)==0u)return;
+    uint at=p.liquid_layers.y+id*4u;
+    if(at+3u>=uint(output_image.pixels.length()))return;
+    output_image.pixels[at]=floatBitsToUint(surface.x);output_image.pixels[at+1u]=floatBitsToUint(surface.y);
+    output_image.pixels[at+2u]=floatBitsToUint(surface.z);output_image.pixels[at+3u]=floatBitsToUint(surface.w);
+}
+uint shade_native_metal(uvec2 pixel,vec3 direction,float distance,vec3 hit,vec3 normal,float material) {
+    // Match the native DXR producer: keep the authored diffuse base with
+    // reflection OFF, transport conductor Fresnel in linear light, encode
+    // once. The sky cube is illumination, not a replacement base colour.
+    float bias=max(.05,distance*1e-5);
+    vec3 light=normalize(world_to_view(vec3(-1.0)));
+    float visibility=caustic_blocked(hit+normal*bias,light,65536.0,bias,pixel)?0.0:1.0;
+    vec3 authored=rgb(p.environment.x);
+    if(p.environment.y!=0u && p.cube_info.w==0u)
+        authored=rgb(sample_backdrop(128.0+256.0*hit.x/hit.z,112.0+256.0*hit.y/hit.z));
+    vec3 base=dot(authored,vec3(.30,.59,.11))
+        *(material==2.0?vec3(1.0,.875,.58):vec3(.8,.82,.85));
+    vec3 radiance=(p.material_info.z==2u?calibrated_decode_srgb(base):base)
+        *(.65+.35*visibility*max(0.0,dot(normal,light)));
+#ifdef STARFOX_VULKAN_REFLECTION_HISTORY
+    if(HISTORY_MODEL_RECORDS==3u || HISTORY_MODEL_RECORDS==4u) {history_primary_base=radiance;history_primary_response=vec3(0);}
+#endif
+    if(p.water_settings.y>0.0) {
+        uint colour=trace_mirrors(hit+normal*bias,reflect(direction,normal),pixel,bias,true);
+        float grazing=pow(1.0-clamp(dot(-direction,normal),0.0,1.0),5.0);
+        vec3 f0=material==2.0?vec3(1.0,.766,.336):vec3(1.0);
+#ifdef STARFOX_VULKAN_REFLECTION_HISTORY
+        if(HISTORY_MODEL_RECORDS==3u || HISTORY_MODEL_RECORDS==4u) {
+            history_primary_base=radiance*(1.0-p.water_settings.y);
+            history_primary_response=(f0+(1.0-f0)*grazing)*p.water_settings.y;
+            if(HISTORY_MODEL_RECORDS==4u)history_primary_incoming=colour;
+        }
+#endif
+        radiance=mix(radiance,reflection_linear(colour)*(f0+(1.0-f0)*grazing),p.water_settings.y);
+    }
+    float specular=pow(max(0.0,dot(normal,normalize(light-direction))),96.0)*visibility;
+    radiance+=vec3(1.0,.95,.82)*specular*max(authored.r,max(authored.g,authored.b))*.55;
+#ifdef STARFOX_VULKAN_REFLECTION_HISTORY
+    if(HISTORY_MODEL_RECORDS==3u || HISTORY_MODEL_RECORDS==4u)
+        history_primary_base+=vec3(1.0,.95,.82)*specular*max(authored.r,max(authored.g,authored.b))*.55;
+#endif
+    return reflection_pack_linear(radiance,254u);
+}
 uint shade_water(uvec2 pixel, vec3 direction, float distance) {
+    float water_material=float(uint(p.water_settings.w)&15u);
     vec3 hit = direction * distance;
+    if(water_material==1.0 || water_material==2.0) {
+        // These are planar specular materials, not water dyed with the old
+        // floor palette. Use the SAME analytic plane as secondary transport.
+        vec3 normal=normalize(p.ground_normal.xyz);
+        if(dot(normal,direction)>0.0) normal=-normal;
+        if(NATIVE_SURFACE)return shade_native_metal(pixel,direction,distance,hit,normal,water_material);
+        vec3 value=vec3(0.0);
+        if(p.water_settings.y>0.0) {
+            float bias=max(.05,distance*1e-5);
+            uint colour=trace_mirrors(hit+normal*bias,reflect(direction,normal),pixel,bias,true);
+            float grazing=pow(1.0-clamp(dot(-direction,normal),0.0,1.0),5.0);
+            vec3 f0=water_material==2.0?vec3(1.0,.766,.336):vec3(1.0);
+            value=rgb(colour)*sqrt(p.water_settings.y*(f0+(1.0-f0)*grazing));
+        }
+        return rgba(value*p.water_settings.z,254u);
+    }
     vec3 position = view_to_world(hit)
         + vec3(p.water_row0.w, p.water_row1.w, p.water_row2.w);
     float t = p.water_settings.x;
-    float dx = 0.055 * cos(position.x * 0.018 + position.z * 0.011 - t * 0.8)
-        + 0.025 * cos(position.x * 0.047 - position.z * 0.025 + t * 1.2);
-    float dz = 0.045 * cos(position.z * 0.022 - position.x * 0.009 - t * 0.65)
-        - 0.020 * cos(position.x * 0.047 - position.z * 0.025 + t * 1.2);
-    if (p.water_settings.w > 2.5) {
-        dx = 0.18 * cos(position.x * 0.08 + position.z * 0.055 - t * 0.8)
-            + 0.08 * cos(position.x * 0.19 - position.z * 0.12 + t * 1.2);
-        dz = 0.16 * cos(position.z * 0.10 - position.x * 0.04 - t * 0.65)
-            - 0.06 * cos(position.x * 0.19 - position.z * 0.12 + t * 1.2);
+    float footprint=distance/max(p.camera.x,1.0)/max(abs(dot(direction,p.ground_normal.xyz)),.04);
+    float dx=0.0,dz=0.0;
+    if(water_material<0.5) {
+        dx = 0.055 * cos(position.x * 0.018 + position.z * 0.011 - t * 0.8)*water_light_band(footprint,.022)
+            + 0.025 * cos(position.x * 0.047 - position.z * 0.025 + t * 1.2)*water_light_band(footprint,.054);
+        dz = 0.045 * cos(position.z * 0.022 - position.x * 0.009 - t * 0.65)*water_light_band(footprint,.024)
+            - 0.020 * cos(position.x * 0.047 - position.z * 0.025 + t * 1.2)*water_light_band(footprint,.054);
     }
-    if (p.water_settings.w > 0.5 && p.water_settings.w < 2.5) {
-        dx = 0.0; dz = 0.0;
+    LavaSample liquid;
+    if (water_material > 2.5) {
+        liquid=lava_surface(position.x,position.z,t,footprint);
+        vec3 travel=view_to_world(direction);
+        float shift=clamp(-liquid.height/max(travel.y,.12),-distance*.2,distance*.2);
+        position+=travel*shift;hit+=direction*shift;
+        liquid=lava_surface(position.x,position.z,t,footprint);
+        dx=liquid.dx;dz=liquid.dz;
     }
     vec3 normal = normalize(world_to_view(vec3(dx, -1.0, dz)));
     if (dot(normal, direction) > 0.0) normal = -normal;
-    if (p.water_settings.w > 2.5) {
-        float a = sin(position.x * 0.08 + position.z * 0.055 - t * 0.8);
-        float b = sin(position.x * 0.19 - position.z * 0.12 + t * 1.2);
-        float c = sin(position.z * 0.10 - position.x * 0.04 - t * 0.65);
-        float heat = clamp(0.47 + 0.25 * a + 0.17 * b + 0.08 * c, 0.0, 1.0);
-        float bubble = pow(max(0.0,
-            sin(position.x * 0.035 + position.z * 0.018 - t * 1.8)
-            * sin(position.z * 0.041 - position.x * 0.012 + t * 1.3)), 24.0);
-        // 253 marks slope/heat data. Stage 30 warps the full-detail lava
-        // material with this water-style motion instead of painting flat orange.
-        return rgba(vec3(0.5 + dx * 1.5, 0.5 + dz * 1.5,
-            heat + bubble * 0.15), 253u);
+    if (water_material > 2.5) {
+        vec3 viewer=view_to_world(-direction);
+        LavaColour colour=lava_shade(liquid,viewer.x,viewer.y,viewer.z);
+        vec3 molten=vec3(colour.r,colour.g,colour.b)*p.water_settings.z;
+        bool native_lava=NATIVE_SURFACE;
+        if(native_lava)molten=reflection_authored_linear(molten);
+#ifdef STARFOX_VULKAN_LIQUID_HISTORY
+        history_primary_base=molten;history_primary_response=vec3(0);history_primary_incoming=0u;
+#endif
+        if(p.water_settings.y>0.0) {
+            float bias=max(.05,distance*1.0e-5);
+            vec3 reflected=normalize(reflect(direction,normal));
+            uint reflected_colour=trace_mirrors(hit+normal*bias,reflected,pixel,bias,true);
+            float fresnel=.035+.40*pow(1.0-clamp(dot(-direction,normal),0.0,1.0),5.0);
+#ifdef STARFOX_VULKAN_LIQUID_HISTORY
+            history_primary_incoming=reflected_colour;
+            history_primary_response=vec3(fresnel*p.water_settings.y*(.3+.7*liquid.crust));
+#endif
+            molten+=(native_lava?reflection_linear(reflected_colour):rgb(reflected_colour))
+                *fresnel*p.water_settings.y*(.3+.7*liquid.crust);
+        }
+        return native_lava?reflection_pack_linear(molten,254u):rgba(molten,254u);
     }
     vec3 light = normalize(world_to_view(vec3(-1.0)));
     float bias = max(0.05, distance * 1.0e-5);
     vec3 reflected = normalize(reflect(normalize(direction), normal));
-    rayQueryEXT secondary;
-    rayQueryInitializeEXT(secondary, scene, gl_RayFlagsOpaqueEXT, 0xff,
-                          hit + normal * bias, bias, reflected, 65536.0);
-    while (rayQueryProceedEXT(secondary)) {}
-    uint reflected_colour = rayQueryGetIntersectionTypeEXT(secondary, true)
-        == gl_RayQueryCommittedIntersectionTriangleEXT
-        ? material_colour(rayQueryGetIntersectionPrimitiveIndexEXT(secondary, true),
-            rayQueryGetIntersectionBarycentricsEXT(secondary, true), pixel)
-        : reflected_backdrop(reflected);
+    uint reflected_colour;
+    if((uint(p.water_settings.w)&16u)!=0u || water_material==1.0 || water_material==2.0)
+        reflected_colour=trace_mirrors(hit+normal*bias,reflected,pixel,bias,true);
+    else {
+        rayQueryEXT secondary;
+        rayQueryInitializeEXT(secondary, scene, gl_RayFlagsNoOpaqueEXT, 0xff,
+                              hit + normal * bias, bias, reflected, 65536.0);
+        while (rayQueryProceedEXT(secondary)) {
+            if(rayQueryGetIntersectionTypeEXT(secondary,false)==gl_RayQueryCandidateIntersectionTriangleEXT
+                && material_visible(rayQueryGetIntersectionPrimitiveIndexEXT(secondary,false),
+                    rayQueryGetIntersectionBarycentricsEXT(secondary,false),pixel))
+                rayQueryConfirmIntersectionEXT(secondary);
+        }
+        reflected_colour = rayQueryGetIntersectionTypeEXT(secondary, true)
+            == gl_RayQueryCommittedIntersectionTriangleEXT
+            ? material_colour(rayQueryGetIntersectionPrimitiveIndexEXT(secondary, true),
+                rayQueryGetIntersectionBarycentricsEXT(secondary, true), pixel)
+            : reflected_backdrop(reflected);
+    }
     uint authored_colour = hit.z > 1.0
         ? sample_backdrop(128.0 + 256.0 * hit.x / hit.z,
             112.0 + 256.0 * hit.y / hit.z)
         : reflected_backdrop(hit);
     vec3 authored = rgb(authored_colour);
     float luminance = dot(authored, vec3(0.30, 0.59, 0.11));
-    vec3 base = luminance * (p.water_settings.w > 1.5 ? vec3(1.0, 0.875, 0.58)
-        : p.water_settings.w > 0.5 ? vec3(0.8, 0.82, 0.85)
+    vec3 base = luminance * (water_material > 1.5 ? vec3(1.0, 0.875, 0.58)
+        : water_material > 0.5 ? vec3(0.8, 0.82, 0.85)
         : vec3(0.20, 0.58, 0.85));
     float diffuse = 0.65 + 0.35 * max(0.0, dot(normal, light));
     vec3 radiance = base * base * diffuse;
+    if(water_material==0.0) {
+        vec3 transmitted=refract(direction,normal,.75);
+        vec3 world_origin=view_to_world(hit-normal*bias)+vec3(p.water_row0.w,p.water_row1.w,p.water_row2.w);
+        vec3 world_direction=view_to_world(transmitted);
+        float bottom_travel=world_direction.y>0.0?(position.y+640.0-world_origin.y)/world_direction.y:65536.0;
+        rayQueryEXT submerged;
+        rayQueryInitializeEXT(submerged,scene,gl_RayFlagsNoOpaqueEXT,0xff,
+            hit-normal*bias,bias,transmitted,min(65536.0,bottom_travel));
+        while(rayQueryProceedEXT(submerged)) {
+            if(rayQueryGetIntersectionTypeEXT(submerged,false)==gl_RayQueryCandidateIntersectionTriangleEXT
+                && material_visible(rayQueryGetIntersectionPrimitiveIndexEXT(submerged,false),
+                    rayQueryGetIntersectionBarycentricsEXT(submerged,false),pixel))
+                rayQueryConfirmIntersectionEXT(submerged);
+        }
+        if(rayQueryGetIntersectionTypeEXT(submerged,true)==gl_RayQueryCommittedIntersectionTriangleEXT) {
+            vec3 receiver=rgb(material_colour(rayQueryGetIntersectionPrimitiveIndexEXT(submerged,true),
+                rayQueryGetIntersectionBarycentricsEXT(submerged,true),pixel));
+            receiver*=receiver;
+            float travel=rayQueryGetIntersectionTEXT(submerged,true);
+            uint caustics=(uint(p.water_settings.w)>>5u)&3u;
+            if(caustics!=0u) {
+                vec3 camera_position=vec3(p.water_row0.w,p.water_row1.w,p.water_row2.w);
+                vec3 receiver_view=hit-normal*bias+transmitted*travel;
+                vec3 receiver_world=view_to_world(receiver_view)+camera_position;
+                float depth=receiver_world.y-position.y;
+                if(depth>0.0) {
+                    WaterCausticSample focus=water_caustic_sample(receiver_world.x,receiver_world.z,t,depth,footprint);
+                    vec3 entry=world_to_view(vec3(focus.entry_x,position.y,focus.entry_z)-camera_position);
+                    vec3 segment=entry-receiver_view;
+                    float length_to_water=length(segment);
+                    uint first=rayQueryGetIntersectionPrimitiveIndexEXT(submerged,true)*3u;
+                    vec3 receiver_normal=normalize(cross(vertices.vertex[first+1u].xyz-vertices.vertex[first].xyz,
+                        vertices.vertex[first+2u].xyz-vertices.vertex[first].xyz));
+                    if(dot(receiver_normal,transmitted)>0.0) receiver_normal=-receiver_normal;
+                    float up=max(0.0,-view_to_world(receiver_normal).y);
+                    if(length_to_water>bias*2.0 && up>0.0
+                        && !caustic_blocked(receiver_view,segment/length_to_water,length_to_water-bias,bias,pixel)
+                        && !caustic_blocked(entry,world_to_view(vec3(0,-1,0)),65536.0,bias,pixel))
+                        receiver*=clamp(1.0+(focus.irradiance-exp(-depth/1600.0))*up*float(caustics)/3.0,.25,3.0);
+                }
+            }
+            radiance=vec3(water_transmitted_channel(receiver.r,radiance.r,travel,.0025),
+                water_transmitted_channel(receiver.g,radiance.g,travel,.0008),
+                water_transmitted_channel(receiver.b,radiance.b,travel,.00035));
+        }
+        else if(bottom_travel>bias && bottom_travel<65536.0) {
+            vec3 camera_position=vec3(p.water_row0.w,p.water_row1.w,p.water_row2.w);
+            vec3 receiver_view=hit-normal*bias+transmitted*bottom_travel;
+            vec3 receiver_world=view_to_world(receiver_view)+camera_position;
+            vec3 receiver=vec3(.28,.24,.16);
+            uint caustics=(uint(p.water_settings.w)>>5u)&3u;
+            if(caustics!=0u) {
+                WaterCausticSample focus=water_caustic_sample(receiver_world.x,receiver_world.z,t,640.0,footprint);
+                vec3 entry=world_to_view(vec3(focus.entry_x,position.y,focus.entry_z)-camera_position);
+                vec3 segment=entry-receiver_view;float length_to_water=length(segment);
+                if(length_to_water>bias*2.0
+                    && !caustic_blocked(receiver_view,segment/length_to_water,length_to_water-bias,bias,pixel)
+                    && !caustic_blocked(entry,world_to_view(vec3(0,-1,0)),65536.0,bias,pixel))
+                    receiver*=clamp(1.0+(focus.irradiance-exp(-640.0/1600.0))*float(caustics)/3.0,.25,3.0);
+            }
+            radiance=vec3(water_transmitted_channel(receiver.r,radiance.r,bottom_travel,.0025),
+                water_transmitted_channel(receiver.g,radiance.g,bottom_travel,.0008),
+                water_transmitted_channel(receiver.b,radiance.b,bottom_travel,.00035));
+        }
+    }
     float grazing = pow(1.0 - clamp(dot(-normalize(direction), normal), 0.0, 1.0), 5.0);
-    float fresnel = p.water_settings.w > 0.5 ? 0.95 : 0.02 + 0.98 * grazing;
+    float fresnel = water_material == 1.0 ? 1.0 : water_material > 0.5 ? 0.95 : 0.02 + 0.98 * grazing;
     vec3 reflection = rgb(reflected_colour);
     // Gold absorbs blue light. Keep reflected shapes/luminance, but avoid a
     // sky-blue mirror appearance when the source backdrop is blue.
-    if (p.water_settings.w > 1.5) {
+    if (water_material > 1.5) {
         float reflected_luminance = dot(reflection, vec3(0.30, 0.59, 0.11));
         reflection = mix(vec3(reflected_luminance), reflection, 0.25)
             * vec3(1.0, 0.72, 0.24);
@@ -206,32 +742,63 @@ uint shade_water(uvec2 pixel, vec3 direction, float distance) {
     return rgba(sqrt(clamp(radiance, 0.0, 1.0)), 254u);
 }
 
+#ifdef STARFOX_VULKAN_REFLECTION_HISTORY
+#include "vulkan_reflection_hit_history.glsl"
+#else
 void main() {
     uint id = gl_GlobalInvocationID.x;
     if (id >= p.dimensions.x * p.dimensions.y) return;
     uvec2 pixel = uvec2(id % p.dimensions.x, id / p.dimensions.x);
     vec3 direction = vec3((float(pixel.x) + 0.5 - p.camera.z) / p.camera.x,
                           (float(pixel.y) + 0.5 - p.camera.w) / p.camera.y, 1.0);
+    float near_depth=p.primary_range.z>0.5?p.primary_range.x:1.0;
+    float far_depth=p.primary_range.z>0.5?p.primary_range.y:65536.0;
+    store_liquid_surface(id,vec4(0.0));
+    uint world_colour=0u;vec4 world_surface=vec4(0.0);
+    bool world_valid=false;
+    if(NATIVE_WATER && (p.liquid_layers.z&1u)!=0u) {
+        float ground=native_ground_depth(pixel);
+        if(ground>near_depth && ground<far_depth) {
+            world_colour=shade_native_water(pixel,normalize(direction),ground*length(direction),world_surface);
+            world_valid=true;
+        }
+        output_image.pixels[p.liquid_layers.x+id]=world_colour;
+    }
     rayQueryEXT primary;
-    rayQueryInitializeEXT(primary, scene, gl_RayFlagsOpaqueEXT, 0xff,
-                          vec3(0.0), 1.0, direction, 65536.0);
-    while (rayQueryProceedEXT(primary)) {}
-    bool model_hit = rayQueryGetIntersectionTypeEXT(primary, true)
-        == gl_RayQueryCommittedIntersectionTriangleEXT;
-    float distance = model_hit ? rayQueryGetIntersectionTEXT(primary, true) : 65536.0;
+    float distance = far_depth;
+    // Only primary visibility changes. All reflection rays retain the models.
+    if (p.settings.w < 0.5) {
+        rayQueryInitializeEXT(primary, scene, gl_RayFlagsNoOpaqueEXT, 0xff,
+                              vec3(0.0), near_depth, direction, far_depth);
+        while (rayQueryProceedEXT(primary)) {
+            if(rayQueryGetIntersectionTypeEXT(primary,false)==gl_RayQueryCandidateIntersectionTriangleEXT
+                && material_visible(rayQueryGetIntersectionPrimitiveIndexEXT(primary,false),
+                    rayQueryGetIntersectionBarycentricsEXT(primary,false),pixel))
+                rayQueryConfirmIntersectionEXT(primary);
+        }
+        if (rayQueryGetIntersectionTypeEXT(primary, true)
+            == gl_RayQueryCommittedIntersectionTriangleEXT)
+            distance = rayQueryGetIntersectionTEXT(primary, true);
+    }
     bool ground_hit = false;
     if (p.settings.y > 0.5) {
         float denominator = dot(direction, p.ground_normal.xyz);
         if (abs(denominator) > 1.0e-10) {
-            float ground = dot(p.ground_point.xyz, p.ground_normal.xyz) / denominator;
-            if (ground > 1.0 && ground < distance) {
+            float ground = NATIVE_WATER?native_ground_depth(pixel)
+                :dot(p.ground_point.xyz, p.ground_normal.xyz) / denominator;
+            if (ground > near_depth && ground < distance) {
                 distance = ground;
                 ground_hit = true;
             }
         }
     }
-    if (distance >= 65536.0) { output_image.pixels[id] = 0u; return; }
-    if (ground_hit && p.water_settings.z > 0.5) {
+    if (distance >= far_depth) { output_image.pixels[id] = 0u; return; }
+    if(ground_hit && NATIVE_WATER) {
+        vec4 surface;
+        output_image.pixels[id]=world_valid?world_colour:shade_native_water(pixel,normalize(direction),distance*length(direction),surface);
+        store_liquid_surface(id,world_valid?world_surface:surface);return;
+    }
+    if (ground_hit && (p.water_settings.z > 0.0 || (uint(p.water_settings.w)&15u)!=0u)) {
         output_image.pixels[id] = shade_water(pixel, normalize(direction), distance * length(direction));
         return;
     }
@@ -246,6 +813,11 @@ void main() {
     }
     if (dot(normal, direction) > 0.0) normal = -normal;
     vec3 point = direction * distance;
+    if(!ground_hit && NATIVE_MODEL) {
+        output_image.pixels[id]=shade_native_model(pixel,normalize(direction),point,normal,distance*length(direction),
+            rayQueryGetIntersectionPrimitiveIndexEXT(primary,true),rayQueryGetIntersectionBarycentricsEXT(primary,true));
+        return;
+    }
     vec3 reflected = normalize(reflect(normalize(direction), normal));
     uint count = p.dimensions.z >= 3u ? 4u : p.dimensions.z == 2u ? 2u : 1u;
     vec3 sum = vec3(0.0);
@@ -261,11 +833,20 @@ void main() {
             bounce_direction = normalize(reflected + spread *
                 (cos(angle) * tangent + sin(angle) * bitangent));
         }
+        if((uint(p.water_settings.w)&16u)!=0u || (uint(p.water_settings.w)&15u)!=0u) {
+            sum+=rgb(trace_mirrors(point,bounce_direction,pixel,max(.1,distance*1e-5),false));
+            continue;
+        }
         rayQueryEXT secondary;
-        rayQueryInitializeEXT(secondary, scene, gl_RayFlagsOpaqueEXT,
+        rayQueryInitializeEXT(secondary, scene, gl_RayFlagsNoOpaqueEXT,
                               0xff, point, max(0.1, distance * 1.0e-5),
                               bounce_direction, 65536.0);
-        while (rayQueryProceedEXT(secondary)) {}
+        while (rayQueryProceedEXT(secondary)) {
+            if(rayQueryGetIntersectionTypeEXT(secondary,false)==gl_RayQueryCandidateIntersectionTriangleEXT
+                && material_visible(rayQueryGetIntersectionPrimitiveIndexEXT(secondary,false),
+                    rayQueryGetIntersectionBarycentricsEXT(secondary,false),pixel))
+                rayQueryConfirmIntersectionEXT(secondary);
+        }
         bool secondary_model = rayQueryGetIntersectionTypeEXT(secondary, true)
             == gl_RayQueryCommittedIntersectionTriangleEXT;
         float secondary_distance = secondary_model
@@ -301,3 +882,4 @@ void main() {
     else if (p.dimensions.w == 3u) value *= vec3(1.0, 0.59, 0.38);
     output_image.pixels[id] = rgba(value, ground_hit ? 254u : 255u);
 }
+#endif

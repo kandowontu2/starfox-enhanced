@@ -19,13 +19,23 @@ enum class Effect : std::uint8_t {
     duotone, tritone, woodcut, xray, pop_art, iridescent,
     crt_phosphor, noir, uv_glow, topographic,
     silver, brass, rose_gold, titanium, amethyst, sapphire,
-    opal, marble, graphite, molten_glass, count
+    opal, marble, graphite, molten_glass,
+    energy_shield, arc_lightning, hyperspace, dissolve_rebuild, radar_sweep, frost_growth,
+    heat_wake, gravitational_lens, count
 };
 inline constexpr auto effect_count = static_cast<std::uint8_t>(Effect::count);
 inline constexpr bool spatial_manipulation(Effect value) {
     return (value>=Effect::kaleidoscope && value<=Effect::pixel_sort)
         || (value>=Effect::shatter && value<=Effect::checker_fold)
-        || (value>=Effect::twist && value<=Effect::shard_split);
+        || (value>=Effect::twist && value<=Effect::shard_split)
+        || value==Effect::heat_wake || value==Effect::gravitational_lens;
+}
+inline constexpr bool special_fx(Effect value) {
+    return value==Effect::hologram || (value>=Effect::energy_shield && value<=Effect::frost_growth);
+}
+inline constexpr bool valid_special_fx(unsigned value) {return value==0 || (value<effect_count && special_fx(static_cast<Effect>(value)));}
+inline constexpr std::uint8_t next_special_fx(std::uint8_t value,bool backwards) {
+    do {value=(value+(backwards?effect_count-1:1))%effect_count;} while(!valid_special_fx(value));return value;
 }
 inline constexpr bool manipulation(Effect value) {
     return spatial_manipulation(value) || value==Effect::trails || value==Effect::long_exposure;
@@ -84,6 +94,7 @@ inline constexpr std::uint8_t canonical_effect(std::uint8_t value) {
 }
 inline constexpr bool selectable_effect(std::uint8_t value, bool world) {
     return value < effect_count && value != static_cast<std::uint8_t>(Effect::bloom)
+        && !special_fx(static_cast<Effect>(value)) && !manipulation(static_cast<Effect>(value))
         && value != static_cast<std::uint8_t>(Effect::crosshatch)
         && (!world || !reflective_material(static_cast<Effect>(value)))
         && (!world || !decorative_material(static_cast<Effect>(value)))
@@ -118,7 +129,8 @@ inline constexpr std::string_view effect_group(std::uint8_t value) {
     if(effect==Effect::off) return "EFFECTS OFF";
     if(reflective_material(effect)) return "REFLECTIVE MATERIALS";
     if(decorative_material(effect)) return "MODEL MATERIALS";
-    if(spatial_manipulation(effect) || persistence_mode(effect)) return "MANIPULATIONS";
+    if(special_fx(effect)) return "SPECIAL FX";
+    if(spatial_manipulation(effect) || persistence_mode(effect)) return "DISTORTIONS & MOTION";
     switch(effect) {
     case Effect::cel_drawn: case Effect::comic: case Effect::ink: case Effect::pastel:
     case Effect::posterized: case Effect::watercolour: case Effect::chalk: case Effect::emboss:
@@ -159,5 +171,7 @@ inline constexpr std::array<std::string_view, effect_count> effect_names{
     "DUOTONE", "TRITONE", "WOODCUT", "X-RAY", "POP ART", "IRIDESCENT",
     "CRT PHOSPHOR", "NOIR", "UV GLOW", "TOPOGRAPHIC",
     "SILVER", "BRASS", "ROSE GOLD", "TITANIUM", "AMETHYST", "SAPPHIRE",
-    "OPAL", "MARBLE", "GRAPHITE", "MOLTEN GLASS"};
+    "OPAL", "MARBLE", "GRAPHITE", "MOLTEN GLASS",
+    "ENERGY SHIELD", "ARC LIGHTNING", "HYPERSPACE", "DISSOLVE/REBUILD", "RADAR SWEEP", "FROST GROWTH",
+    "HEAT WAKE", "GRAVITY LENS"};
 }

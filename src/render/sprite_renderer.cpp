@@ -156,6 +156,25 @@ void interpolate_crosshair_oam(
     }
 }
 
+std::optional<std::array<std::uint8_t,544>> isolated_crosshair_oam(
+    const simulation::SnesPpuState& ppu,std::int32_t horizontal_offset) noexcept {
+    const auto group=find_crosshair_oam_group(ppu.oam);
+    if(!group) return {};
+    std::array<std::uint8_t,544> isolated{};
+    // Bound before arithmetic, while preserving the source 9-bit wrap.
+    horizontal_offset%=512;
+    for(std::size_t quadrant=0;quadrant<4;++quadrant) {
+        const auto object=group->first_object+quadrant,low=object*4;
+        std::copy_n(ppu.oam.begin()+static_cast<std::ptrdiff_t>(low),4,
+            isolated.begin()+static_cast<std::ptrdiff_t>(low));
+        const auto high=512+object/4;
+        const auto shift=unsigned((object&3)*2);
+        isolated[high]|=std::uint8_t(ppu.oam[high] & (3U<<shift));
+        set_object_position(isolated,object,object_x(ppu.oam,object)+horizontal_offset,ppu.oam[low+1]);
+    }
+    return isolated;
+}
+
 void suppress_crosshair_oam(simulation::SnesPpuState& ppu) noexcept {
     const auto group = find_crosshair_oam_group(ppu.oam);
     if (!group) return;
@@ -179,7 +198,8 @@ void SpriteRenderer::draw_objects(
     bool anchor_edge_hud,
     const HudLayout* hud_layout,
     bool suppress_configurable_hud,
-    const simulation::MeterState* meters) const noexcept {
+    const simulation::MeterState* meters,
+    SpriteSelection selection) const noexcept {
     const ScopedLayer artwork_layer{target, PixelLayer::two_d};
     if ((ppu.main_screen & 0x10U) == 0U) return;
     const auto size_selection = static_cast<std::size_t>(
@@ -187,6 +207,7 @@ void SpriteRenderer::draw_objects(
     const auto sizes = kObjectSizes[size_selection < kObjectSizes.size()
         ? size_selection : kObjectSizes.size() - 1U];
     auto* commands=target.command_buffer();
+    const auto crosshair_group=commands?find_crosshair_oam_group(ppu.oam):std::nullopt;
     std::optional<std::uint32_t> vram_snapshot;
 
     // The source border-warning animation briefly contains both the old and
@@ -301,6 +322,8 @@ void SpriteRenderer::draw_objects(
             element = HudElement::comms;
         }
         if (suppress_configurable_hud && element) continue;
+        if (selection == SpriteSelection::world_only && element) continue;
+        if (selection == SpriteSelection::configurable_hud_only && !element) continue;
         const auto object_offset = hud_layout != nullptr && element
             ? (*hud_layout)[*element] : HudOffset{};
         const auto size = static_cast<std::uint32_t>(
@@ -331,6 +354,7 @@ void SpriteRenderer::draw_objects(
                 c.texture_offset=*vram_snapshot;c.textured=4;
                 c.u=left*scale;c.v=y*scale;c.du=scale;c.dv=int(size);
                 c.reserved0=base;c.reserved1=(flip_x?1U:0U)|(flip_y?2U:0U);
+                if(crosshair_group && object>=crosshair_group->first_object && object<crosshair_group->first_object+4U) c.reserved1|=4U;
                 c.colour_base=128U+palette*16U;c.tag=std::uint32_t(PixelLayer::two_d);
                 commands->add(c);
             }

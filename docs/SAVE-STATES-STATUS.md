@@ -1,5 +1,43 @@
 # Save-state implementation status (unreleased)
 
+## Native 3DS output settings continuation — October 4
+
+The FPS checkpoint `72068db49e11be40d1eefcdae835d8beb272bd2b` passes
+ARM CI `37194119246`, 15 host suites and 13,111 exact Original/EX session
+checks each. 30/60 Hz and SHOW FPS survive full native states. Other GAME
+archive targets are bounded to the LCD range without changing cartridge RAM,
+SPC, pending handshakes or the partial audio phase; candidate preparation
+leaves the live owner unchanged. SD settings schema 3 migrates both prior
+schemas to 60 Hz / counter OFF while preserving bindings and EX SRAM.
+The journal has 131 public checks. Physical SD/NDSP/full-flow acceptance
+remains pending. Evidence: `D:/SFE-validation/3ds-fps-oct4/manifest.json`.
+
+## Native 3DS full states and live SPC preservation — October 4
+
+Native branch `6f923360a0336a4b8098e6810b7e0b2543b437c8` passes ARM CI
+`37192122255` and 14 host suites. The Select+Y quick menu provides ten explicit
+Save/Load slots with alternating, checked SD generations separate from settings
+and EX SRAM. VM, both SPC stems, partial 20 Hz audio phase, pending APU writes,
+grid carry and snapshot revision are retained. Replacement preparation owns
+fresh ROM/symbols and leaves the live source untouched on validation failure;
+NDSP storage is joined before committing the prepared native owners.
+
+Tests exposed an upstream `copy_state` save-time SMP register reload that
+mutated the live machine. A bounded heap-backed guard now preserves it. An
+optional eight-byte SPC tail retains both separate CPU input-port buses;
+existing tail-less archives remain accepted. The independent public SMP
+program distinguishes input and output values, comparing uninterrupted and
+restored execution through 24 blocks and repeated snapshots. Public native
+state/journal/SPC checks pass 1,355 and quick-menu checks 260. Exact Original/EX
+source VM/SPC/PCM checks pass 6,358 each, including BOOT/stage states at all
+three audio phases, retirement of the old ROM owner, SD reopen/recovery and
+runtime-options freeze/resume. Root/exact direct-audio checks also pass.
+
+This is host and native-link evidence, not physical console SD power-loss,
+NDSP handoff, peak allocation, all-stage restore or playable-release acceptance.
+The desktop executable was not rebuilt for this shared source fix. Evidence:
+`D:/SFE-validation/3ds-states-oct4/manifest.json`.
+
 ## Smooth environment clock continuation — September 20
 
 The desktop runtime now appends an optional 64-bit environment clock position

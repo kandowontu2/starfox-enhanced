@@ -1,6 +1,8 @@
 #include "starfox/render/software_renderer.hpp"
+#include "starfox/compat/bit_cast.hpp"
 #include "starfox/render/face_material.hpp"
 #include "starfox/render/source_shading.hpp"
+#include "starfox/render/source_polygon_spans.hpp"
 #include "starfox/render/shadow_scene.hpp"
 
 #include "starfox/simulation/math.hpp"
@@ -253,7 +255,7 @@ bool source_visibility(
         rounded_word(c.y), rounded_word(a.y));
     const auto cross = static_cast<std::int64_t>(bx) * cy
         - static_cast<std::int64_t>(by) * cx;
-    const auto signed_area = std::bit_cast<std::int32_t>(
+    const auto signed_area = starfox::bit_cast<std::int32_t>(
         static_cast<std::uint32_t>(cross));
     const auto odd_behind = (transformed[visibility.a].z < 0.0)
         != ((transformed[visibility.b].z < 0.0)
@@ -719,208 +721,26 @@ void fill_source_polygon(
     bool winding_independent,
     SurfaceBuffer* surfaces,
     const SurfaceSample& surface) {
-    if (polygon.size() < 3U) return;
-    struct Point {
-        std::int32_t x{};
-        std::int32_t y{};
-    };
-    std::vector<Point> points;
+    std::vector<SourceSpanPoint> points;
     points.reserve(polygon.size());
-    for (const auto& vertex : polygon) {
-        points.push_back({
-            std::clamp(static_cast<std::int32_t>(std::lround(vertex.point.x)),
-                0, static_cast<std::int32_t>(target.width())),
-            std::clamp(static_cast<std::int32_t>(std::lround(vertex.point.y)),
-                0, static_cast<std::int32_t>(target.height())),
-        });
-    }
-
-    auto minimum = std::size_t{};
-    auto maximum_y = points.front().y;
-    for (std::size_t index = 1; index < points.size(); ++index) {
-        if (points[index].y < points[minimum].y) minimum = index;
-        maximum_y = std::max(maximum_y, points[index].y);
-    }
-    auto y = points[minimum].y;
-    if (y == maximum_y) return;
-
-    // The source scan converter keeps X in an unsigned 8.8 word. That covers
-    // the retail 0..224 clip window, but an exclusive X=256 boundary wraps to
-    // zero, while the source's -8..0 overflow guard mistakes valid X=248..255
-    // for a negative edge. Use an unwrapped host accumulator only when the
-    // viewport is wider than the cartridge raster; the 224-pixel path below
-    // retains the exact word arithmetic used by MDRAWP.MC.
-    const auto extended_x = target.width() > 224U;
-    const auto fixed_x = [extended_x](std::int32_t value) {
-        return extended_x
-            ? value << 8U
-            : static_cast<std::int32_t>(starfox::simulation::wrap16(
-                static_cast<std::int64_t>(value) << 8U));
-    };
-    const auto integer_x = [extended_x](std::int32_t value) {
-        return extended_x
-            ? starfox::simulation::arithmetic_shift_right(value, 8)
-            : source_fixed_integer(static_cast<std::int16_t>(value));
-    };
-    const auto rounded_x = [extended_x, &integer_x](std::int32_t value) {
-        return extended_x
-            ? starfox::simulation::arithmetic_shift_right(value + 127, 8)
-            : integer_x(starfox::simulation::add16(
-                static_cast<std::int16_t>(value), 127));
-    };
-    const auto advance_x = [extended_x](
-                               std::int32_t value, std::int32_t increment) {
-        return extended_x
-            ? value + increment
-            : static_cast<std::int32_t>(source_advance_edge(
-                static_cast<std::int16_t>(value),
-                static_cast<std::int16_t>(increment)));
-    };
-    const auto edge_increment = [extended_x](
-                                    std::int32_t difference,
-                                    std::int32_t scanlines) {
-        return extended_x
-            ? wide_edge_increment(difference, scanlines)
-            : static_cast<std::int32_t>(
-                source_edge_increment(difference, scanlines));
-    };
-
-    struct Tracer {
-        std::size_t vertex{};
-        int direction{};
-        std::int32_t x{};
-        std::int32_t increment{};
-        std::int32_t remaining{};
-    };
-    const auto initial_x = fixed_x(points[minimum].x);
-    Tracer left{minimum, 1, initial_x, 0, 0};
-    Tracer right{minimum, -1, initial_x, 0, 0};
-    const auto begin_segment = [
-                                   &points, &y, &fixed_x, &rounded_x,
-                                   &edge_increment](Tracer& tracer) {
-        const auto count = points.size();
-        auto rounded = rounded_x(tracer.x);
-        for (std::size_t guard = 0; guard < count; ++guard) {
-            tracer.vertex = tracer.direction > 0
-                ? (tracer.vertex + 1U) % count
-                : (tracer.vertex + count - 1U) % count;
-            const auto& endpoint = points[tracer.vertex];
-            const auto scanlines = endpoint.y - y;
-            if (scanlines < 0) return false;
-            if (scanlines == 0) {
-                rounded = endpoint.x;
-                tracer.x = fixed_x(rounded);
-                continue;
-            }
-            tracer.x = fixed_x(rounded);
-            tracer.increment = edge_increment(
-                endpoint.x - rounded, scanlines);
-            tracer.remaining = scanlines;
-            return true;
+    for(const auto& vertex:polygon) points.push_back({
+        std::clamp<std::int32_t>(static_cast<std::int32_t>(std::lround(vertex.point.x)),
+            0,static_cast<std::int32_t>(target.width())),
+        std::clamp<std::int32_t>(static_cast<std::int32_t>(std::lround(vertex.point.y)),
+            0,static_cast<std::int32_t>(target.height()))});
+    const SourceSpanModes modes{pose.wireframe_mode,pose.wobble_mode,
+        pose.cel_mode,pose.wave_mode,winding_independent,pose.wave_offset,pose.animation_frame};
+    source_polygon_spans(points,target.width(),modes,[&](SourcePolygonSpan span) {
+        if(record_span(target,span.left,span.right,span.y,colour,colour_index_base,surfaces,surface)) return;
+        for(auto x=span.left;x<=span.right;++x) {
+            const auto index=std::uint8_t(colour_index_base
+                +(colour.dither && ((x^span.y)&1)?colour.odd:colour.even));
+            target.set(x,span.y,index);
+            if(colour.dither) target.annotate_dither(x,span.y,
+                std::uint8_t(colour_index_base+colour.even),std::uint8_t(colour_index_base+colour.odd));
+            if(surfaces) surfaces->set(x,span.y,surface,index);
         }
-        return false;
-    };
-
-    constexpr std::array<std::int8_t, 32> wave_sine{
-        0, 1, 2, 3, 3, 3, 2, 1,
-        0, -1, -2, -3, -3, -3, -2, -1,
-        0, 1, 2, 3, 3, 3, 2, 1,
-        0, -1, -2, -3, -3, -3, -2, -1,
-    };
-    const auto wave_y = [&pose, &wave_sine](
-                            std::int32_t x, std::int32_t scanline) {
-        auto phase = starfox::simulation::wrap16(
-            static_cast<std::int32_t>(pose.wave_offset) + x);
-        phase = starfox::simulation::wrap16(
-            starfox::simulation::arithmetic_shift_right(phase, 1)
-            + static_cast<std::int32_t>(pose.animation_frame & 15U) - 1);
-        auto index = static_cast<std::int32_t>(phase);
-        index %= static_cast<std::int32_t>(wave_sine.size());
-        if (index < 0) index += static_cast<std::int32_t>(wave_sine.size());
-        return scanline + wave_sine[static_cast<std::size_t>(index)];
-    };
-    auto mode2_edge_continuation = false;
-    auto previous_wobble_left = std::int32_t{};
-    auto has_previous_wobble_left = false;
-
-    while (y < maximum_y) {
-        const auto left_starts_segment = left.remaining == 0;
-        const auto right_starts_segment = right.remaining == 0;
-        if (left_starts_segment && !begin_segment(left)) return;
-        if (right_starts_segment && !begin_segment(right)) return;
-        auto x1 = integer_x(left.x);
-        auto x2 = integer_x(right.x);
-        // Fractional projection and near-plane clipping can reverse the two
-        // active edges without changing whether the source visibility plane
-        // selected this face. The cartridge raster silently assumes its
-        // original winding; at upscale resolution that assumption discarded
-        // the complete span, making the face flash off for a presentation.
-        if (winding_independent && x2 < x1) std::swap(x1, x2);
-        if (x2 >= x1) {
-            const auto plot = [&](std::int32_t x, std::int32_t plot_y) {
-                if(record_span(target,x,x,plot_y,colour,colour_index_base,surfaces,surface)) return;
-                const auto palette_index = static_cast<std::uint8_t>(colour_index_base
-                    + (colour.dither && ((x ^ plot_y) & 1) != 0
-                        ? colour.odd : colour.even));
-                target.set(x, plot_y, palette_index);
-                if (surfaces != nullptr) {
-                    surfaces->set(x, plot_y, surface, palette_index);
-                }
-            };
-            // Wobble mode 2 selects hlines22: its span loop deliberately has
-            // PLOT commented out. On continuing right-edge segments the
-            // mhlines2 entry emits exactly one pixel at the previous left X.
-            if ((pose.wobble_mode & 2U) != 0U) {
-                if (!right_starts_segment && has_previous_wobble_left) {
-                    plot(previous_wobble_left, y);
-                }
-            // EX hlines23 draws a complete chord whenever either polygon
-            // tracer begins a new edge. Its mhlinesA continuation plots only
-            // the two edge pixels on all other scanlines. Mode 2 normally
-            // fills, but a left-only edge change enters that same mhlinesA
-            // continuation until the right tracer begins its next segment.
-            } else if ((pose.wireframe_mode == 1U
-                    && !left_starts_segment && !right_starts_segment)
-                || (pose.wireframe_mode == 2U
-                    && mode2_edge_continuation
-                    && !left_starts_segment && !right_starts_segment)) {
-                plot(x1, y);
-                if (x2 != x1) plot(x2, y);
-            } else if (pose.cel_mode && pose.wireframe_mode == 0U) {
-                // hlines2rr cancels PLOT's automatic X increment and skips
-                // the two span endpoints, leaving the source cel outline.
-                if(!record_span(target,x1+1,x2-1,y,colour,colour_index_base,surfaces,surface))
-                    for (auto x = x1 + 1; x < x2; ++x) plot(x, y);
-            } else if (pose.wave_mode && pose.wireframe_mode == 0U) {
-                for (auto x = x1; x <= x2; ++x) plot(x, wave_y(x, y));
-            } else {
-                if(!record_span(target,x1,x2,y,colour,colour_index_base,surfaces,surface))
-                    for (auto x = x1; x <= x2; ++x) plot(x, y);
-            }
-        }
-        if ((pose.wobble_mode & 2U) != 0U) {
-            previous_wobble_left = x1;
-            has_previous_wobble_left = true;
-        }
-        if (pose.wireframe_mode == 2U) {
-            if (right_starts_segment) mode2_edge_continuation = false;
-            if (left_starts_segment && !right_starts_segment) {
-                mode2_edge_continuation = true;
-            }
-        }
-        left.x = advance_x(left.x, left.increment);
-        right.x = advance_x(right.x, right.increment);
-        --left.remaining;
-        --right.remaining;
-        if ((pose.wobble_mode & 1U) != 0U) {
-            // The source repeats every step of a trapezoid on the same row;
-            // when either tracer expires it advances Y once here and once in
-            // the shared normal tail, producing NAN mode 6's two-row jump.
-            if (left.remaining != 0 && right.remaining != 0) continue;
-            ++y;
-        }
-        ++y;
-    }
+    });
 }
 
 void fill_source_textured_polygon(
@@ -945,9 +765,9 @@ void fill_source_textured_polygon(
     points.reserve(polygon.size());
     for (const auto& vertex : polygon) {
         points.push_back({
-            std::clamp(static_cast<std::int32_t>(std::lround(vertex.point.x)),
+            std::clamp<std::int32_t>(static_cast<std::int32_t>(std::lround(vertex.point.x)),
                 0, static_cast<std::int32_t>(target.width())),
-            std::clamp(static_cast<std::int32_t>(std::lround(vertex.point.y)),
+            std::clamp<std::int32_t>(static_cast<std::int32_t>(std::lround(vertex.point.y)),
                 0, static_cast<std::int32_t>(target.height())),
             static_cast<std::int32_t>(std::lround(vertex.texture.u)),
             static_cast<std::int32_t>(std::lround(vertex.texture.v)),
@@ -1151,8 +971,8 @@ void draw_line(
     const auto sx = x0 < x1 ? 1 : -1;
     const auto dy = std::abs(y1 - y0);
     const auto sy = y0 < y1 ? 1 : -1;
-    const auto dither_scale = static_cast<int>(std::clamp(render_scale, 1U, 4U));
-    const auto thickness = static_cast<int>(std::clamp(render_scale, 1U, 4U)
+    const auto dither_scale = static_cast<int>(std::clamp<std::uint32_t>(render_scale, 1, 10));
+    const auto thickness = static_cast<int>(std::clamp<std::uint32_t>(render_scale, 1, 10)
         * std::clamp<unsigned>(wireframe_thickness, 1U, 4U));
     const auto offset = (thickness - 1) / 2;
     const auto plot = [&] {
@@ -1175,6 +995,7 @@ void draw_line(
                 target.set(x, y, static_cast<std::uint8_t>(colour_index_base
                     + (colour.dither && (((x / dither_scale) ^ (y / dither_scale)) & 1) != 0
                         ? colour.odd : colour.even)));
+                if(colour.dither) target.annotate_dither(x,y,std::uint8_t(colour_index_base+colour.even),std::uint8_t(colour_index_base+colour.odd));
             }
         }
     };
@@ -1230,10 +1051,10 @@ void draw_textured_sprite(
     const auto half_extent = source_width * 128 / increment;
     const auto unclipped_left = centre_x - half_extent;
     const auto unclipped_top = centre_y - half_extent;
-    const auto left = std::max(0, unclipped_left);
+    const auto left = std::max<std::int32_t>(0, unclipped_left);
     const auto right = std::min(static_cast<std::int32_t>(target.width()) - 1,
         centre_x + half_extent);
-    const auto top = std::max(0, unclipped_top);
+    const auto top = std::max<std::int32_t>(0, unclipped_top);
     const auto bottom = std::min(static_cast<std::int32_t>(target.height()) - 1,
         centre_y + half_extent);
     if (left > right || top > bottom) return;
@@ -1300,8 +1121,8 @@ void draw_simple_scaled_sprite(
     auto first_x = 0;
     auto last_x = dimension;
     if (pose.effect_clip_right > pose.effect_clip_left) {
-        first_x = std::max(first_x, pose.effect_clip_left - left);
-        last_x = std::min(last_x, pose.effect_clip_right - left);
+        first_x = std::max<int>(first_x, pose.effect_clip_left - left);
+        last_x = std::min<int>(last_x, pose.effect_clip_right - left);
     }
     if (first_x >= last_x) return;
     if(auto* commands=target.command_buffer()) {
@@ -1469,7 +1290,7 @@ void apply_source_depth_tables(
             + static_cast<std::uint16_t>(object_depth_offset - 1U) * 4U);
     }
     for (std::size_t index = 0; index < pose.depth_thresholds.size(); ++index) {
-        const auto encoded = std::bit_cast<std::int8_t>(
+        const auto encoded = starfox::bit_cast<std::int8_t>(
             rom.read8(data_bank | static_cast<std::uint16_t>(
                 threshold_pointer + static_cast<std::uint16_t>(index))));
         pose.depth_thresholds[index] = static_cast<std::int16_t>(
@@ -1495,14 +1316,27 @@ void SoftwareRenderer::collect_shadow_casters(const assets::Shape& shape,const R
     Framebuffer unused(1,1);
     draw_impl(shape,pose,unused,false,nullptr,&scene,nullptr,true);
 }
+PreparedShapePrimitives SoftwareRenderer::prepare_primitives(
+    const assets::Shape& shape,const RenderPose& pose) const {
+    PreparedShapePrimitives result;
+    result.pose=pose;result.colour_index_base=settings_.colour_index_base;
+    result.focal_length=settings_.focal_length;
+    // No pixel storage proportional to the source viewport, no framebuffer
+    // extraction, and no software draw followed by a second geometry pass.
+    Framebuffer unused(1,1);
+    draw_impl(shape,pose,unused,false,nullptr,nullptr,nullptr,false,&result);
+    return result;
+}
 void SoftwareRenderer::draw_impl(
     const assets::Shape& shape,
     const RenderPose& pose,
     Framebuffer& target,
     bool clear_target,
     SurfaceBuffer* surfaces, shadows::Scene* shadow_scene,
-    RenderDiagnostics* axis_diagnostics,bool shadow_only) const {
+    RenderDiagnostics* axis_diagnostics,bool shadow_only,
+    PreparedShapePrimitives* primitives) const {
     if (axis_diagnostics) *axis_diagnostics = {};
+    if(!primitives && !shadow_only && !target.command_buffer() && settings_.render_scale>1) target.enable_dither_pairs(true);
     // Everything this renderer emits is the Super FX layer, whatever draw
     // scale each path happens to use. Scan conversion drops the scale to 1 and
     // would derive that correctly on its own, but the sprite paths below
@@ -1537,6 +1371,21 @@ void SoftwareRenderer::draw_impl(
         const auto* texture = texture_for_colour(
             shape, pose.simple_sprite_colour, pose.colour_frame);
         if (texture != nullptr) {
+            if(primitives) {
+                if(pose.z>=128 && pose.simple_sprite_world_size>0) {
+                    const auto dimension=std::clamp(std::trunc(
+                        double(pose.simple_sprite_world_size)*settings_.focal_length/pose.z),0.,240.);
+                    if(dimension>0) {
+                        ShapePrimitive primitive;
+                        primitive.kind=ShapePrimitiveKind::sprite;
+                        primitive.material.texture=texture;primitive.simple_sprite=true;
+                        primitive.sprite_half_extent=dimension*.5*pose.z/settings_.focal_length;
+                        primitive.vertices.push_back({{pose.x,pose.y,pose.z},{}});
+                        primitives->primitives.push_back(std::move(primitive));
+                    }
+                }
+                return;
+            }
             // Whole-object sprites (asteroids, explosion billboards) are
             // authored texels point-sampled onto the source raster, not
             // rasterized geometry. They are cartridge art wearing a shape's
@@ -1709,6 +1558,16 @@ void SoftwareRenderer::draw_impl(
                     raster_word_exact, raster_pose.vanish_x,
                     raster_pose.vanish_y, raster_pose.subpixel_projection);
                 if (axis_diagnostics) axis_diagnostics->projected = {{{near_screen.x,near_screen.y},{far_screen.x,far_screen.y}}};
+                if(primitives) {
+                    ShapePrimitive primitive;primitive.kind=ShapePrimitiveKind::line;
+                    primitive.material=face_material(shape,shape.faces.front(),pose.colour_frame,
+                        depth_band,light,pose,next_colour_warp_word(),settings_.colour_index_base);
+                    primitive.material.texture=nullptr; // The source line pass uses ink, not UVs.
+                    primitive.vertices={{{near_axis.x,near_axis.y,near_axis.z},{}},
+                        {{far_axis.x,far_axis.y,far_axis.z},{}}};
+                    primitives->primitives.push_back(std::move(primitive));
+                    return;
+                }
                 if (clip_screen_line(near_screen, far_screen, target,
                         raster_word_exact)) {
                     if (axis_diagnostics) {
@@ -1827,6 +1686,21 @@ void SoftwareRenderer::draw_impl(
                 centre.x += face_offset.x;
                 centre.y += face_offset.y;
                 centre.z += face_offset.z;
+                if(primitives) {
+                    if(centre.z>=32) {
+                        const int width=int(material.texture->u_mask)+1;
+                        const auto z=std::uint16_t(rounded_word(centre.z));
+                        const int increment=std::clamp((int(z)*(width==64?128:256))>>8,1,32767);
+                        ShapePrimitive primitive;primitive.kind=ShapePrimitiveKind::sprite;
+                        primitive.material=material;
+                        // The source sprite's inclusive left..right span
+                        // still draws one texel when integer half_extent=0.
+                        primitive.sprite_half_extent=(double(width*128/increment)+.5)*centre.z/settings_.focal_length;
+                        primitive.vertices.push_back({{centre.x,centre.y,centre.z},{}});
+                        primitives->primitives.push_back(std::move(primitive));
+                    }
+                    continue;
+                }
                 // Sprite faces are texel art too; see the simple_scaled_sprite
                 // branch. The polygon faces around them stay geometry.
                 const ScopedLayer sprite_layer{target, PixelLayer::two_d};
@@ -1911,6 +1785,14 @@ void SoftwareRenderer::draw_impl(
         }
 
         if (polygon.size() == 2) {
+            if(primitives) {
+                ShapePrimitive primitive;primitive.kind=ShapePrimitiveKind::line;
+                primitive.material=material;primitive.material.texture=nullptr;
+                for(const auto& point:camera_polygon)
+                    primitive.vertices.push_back({{point.x,point.y,point.z},{}});
+                primitives->primitives.push_back(std::move(primitive));
+                continue;
+            }
             if (!clip_screen_line(
                     polygon[0], polygon[1], target,
                     raster_word_exact)) {
@@ -1937,7 +1819,22 @@ void SoftwareRenderer::draw_impl(
             trace.signed_area=signed_area;
             axis_diagnostics->polygons.push_back(std::move(trace));
         }
+
         if (settings_.backface_culling && !face.sprite && signed_area >= 0.0) {
+            continue;
+        }
+        if(primitives) {
+            ShapePrimitive primitive;primitive.material=material;
+            for(std::size_t index=0;index<camera_polygon.size();++index) {
+                const auto& point=camera_polygon[index];
+                ShapePrimitiveVertex vertex;vertex.camera={point.x,point.y,point.z};
+                if(material.texture) {
+                    const auto uv=material.texture->coordinates[index%material.texture->coordinates.size()];
+                    vertex.uv={double(uv.u)+pose.texture_scroll_x,double(uv.v)+pose.texture_scroll_y};
+                }
+                primitive.vertices.push_back(vertex);
+            }
+            primitives->primitives.push_back(std::move(primitive));
             continue;
         }
         std::vector<RasterVertex> raster_polygon;

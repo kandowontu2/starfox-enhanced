@@ -18,7 +18,12 @@ args = parser.parse_args()
 root = pathlib.Path(__file__).resolve().parents[1]
 destination = root / 'src/render/shaders/generated'
 destination.mkdir(exist_ok=True)
-sources = ['effects_compute.hlsl', 'xbrz_compute.hlsli', 'xbrz_weights.hlsli', 'edge_corners.hlsli', 'environment_material.hlsli', 'backdrop_sample.hlsli', '../../../include/starfox/render/ex_face_planet_regions.inc', '../../../include/starfox/render/ex_city_moons.inc']
+sources = ['effects_compute.hlsl', 'xbrz_compute.hlsli', 'xbrz_weights.hlsli', 'edge_corners.hlsli', 'environment_material.hlsli', 'backdrop_sample.hlsli', '../../../include/starfox/render/ex_face_planet_regions.inc', '../../../include/starfox/render/ex_city_moons.inc', '../../../include/starfox/render/lava_surface.inc']
+sources.append('../../../include/starfox/render/special_fx.inc')
+sources.append('../../../include/starfox/render/global_enhancements.inc')
+sources.append('../../../include/starfox/render/scene_enhancements.inc')
+sources.append('../../../include/starfox/render/depth_enhancements.inc')
+sources.append('../../../include/starfox/render/ambient_occlusion.inc')
 fingerprint = hashlib.sha256(b''.join((root / 'src/render/shaders' / name).read_bytes().replace(b'\r\n', b'\n')
                                      for name in sources)).hexdigest()
 stamp = '// Source SHA-256: ' + fingerprint
@@ -45,7 +50,7 @@ for xbrz in (0, 1):
                         '-Fo', str(dxil), str(root / 'src/render/shaders/effects_compute.hlsl')], check=True)
         metal = msl.read_text()
         # SDL requires uniforms first, followed by read-only storage buffers.
-        for name, slot in {'Settings': 0, 'layerTags': 1, 'indexedPixels': 2, 'surfaces': 3, 'shadowMask': 4, 'scalefxPixels': 5, 'setupPixels': 6}.items():
+        for name, slot in {'Settings': 0, 'SceneSettings': 1, 'layerTags': 2, 'indexedPixels': 3, 'surfaces': 4, 'shadowMask': 5, 'scalefxPixels': 6, 'setupPixels': 7}.items():
             metal, count = re.subn(r'(\b' + name + r'\s*\[\[buffer\()\d+(\)\]\])',
                                   lambda m: m[1] + str(slot) + m[2], metal)
             if count != 1:

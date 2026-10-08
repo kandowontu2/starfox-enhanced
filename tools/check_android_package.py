@@ -12,6 +12,13 @@ def source_backdrops(root):
     source = (root / 'CMakeLists.txt').read_text(encoding='utf-8')
     entries = re.findall(r'^\s*--resource "(\d+)=\$\{CMAKE_CURRENT_SOURCE_DIR\}/'
                          r'(assets/enhanced-backdrops/[^"\r\n]+\.bmp)"', source, re.M)
+    if re.search(r'starfox_enhanced_backdrop_resources\(\s*'
+                 r'STARFOX_EMBED_BACKDROP_ARGS\s+STARFOX_EMBED_BACKDROP_FILES\)', source):
+        if entries:
+            raise ValueError('Mixed manual and shared backdrop resource declarations')
+        catalogue = (root / 'include/starfox/render/enhanced_backdrop_library.hpp').read_text(encoding='utf-8')
+        declared = re.findall(r'EnhancedBackdropAsset\{\s*"([^"\r\n]+)"', catalogue)
+        entries = [(str(200 + index), path) for index, path in enumerate(declared)]
     if not entries:
         raise ValueError('No enhanced backdrop resource declarations found')
     identifiers = [int(identifier) for identifier, _ in entries]
@@ -19,16 +26,20 @@ def source_backdrops(root):
         raise ValueError('Duplicate enhanced backdrop resource IDs')
     paths = []
     for _, relative in entries:
+        if not relative.startswith('assets/enhanced-backdrops/') or not relative.endswith('.bmp'):
+            raise ValueError(f'Invalid declared backdrop path: {relative}')
         path = (root / relative).resolve()
         if not path.is_relative_to((root / 'assets/enhanced-backdrops').resolve()):
             raise ValueError(f'Backdrop escapes asset directory: {relative}')
         if not path.is_file():
             raise ValueError(f'Missing declared backdrop: {relative}')
         paths.append(path)
+    if len(paths) != len(set(paths)):
+        raise ValueError('Duplicate enhanced backdrop resource paths')
     return paths
 
 
-def check(path, backdrops):
+def check(path, backdrops, native_markers=()):
     if not backdrops:
         raise ValueError('At least one expected backdrop is required')
     with zipfile.ZipFile(path) as apk:
@@ -57,6 +68,9 @@ def check(path, backdrops):
             if lower.startswith(("assets/docs/", "docs/")):
                 raise ValueError(f"Unexpected development documentation: {name}")
         native = apk.read("lib/arm64-v8a/libmain.so")
+        for marker in native_markers:
+            if not marker or marker.encode('utf-8') not in native:
+                raise ValueError(f'Native runtime lacks required build marker: {marker!r}')
         for backdrop_path in backdrops:
             backdrop = backdrop_path.read_bytes()
             if not backdrop.startswith(b"BM") or len(backdrop) < 54:
@@ -84,12 +98,16 @@ def main():
     parser.add_argument("--backdrop", type=Path, action="append", default=[],
                         help="Expected embedded BMP; repeat for every bundled backdrop")
     parser.add_argument('--source-root', type=Path,
-                        help='Verify every enhanced backdrop declared in the source CMake resource list')
+                        help='Verify every enhanced backdrop in the catalogue used by runtime CMake')
+    parser.add_argument('--native-marker', action='append', default=[],
+                        help='Require this exact UTF-8 diagnostic in libmain.so; repeat for each build feature')
     args = parser.parse_args()
     backdrops = args.backdrop + (source_backdrops(args.source_root) if args.source_root else [])
-    count = check(args.apk, backdrops)
+    count = check(args.apk, backdrops, args.native_marker)
     print(f'Android payload verified: arm64 runtimes, no system stubs/ROM/BIN/signing files/docs; '
           f'{count} backdrop resources present')
+    if args.native_marker:
+        print(f'Native build markers verified: {len(args.native_marker)}')
     with args.apk.open("rb") as source:
         print(f"APK SHA-256: {hashlib.file_digest(source, 'sha256').hexdigest()}")
 

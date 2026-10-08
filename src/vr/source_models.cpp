@@ -5,7 +5,7 @@
 #include "starfox/render/grid_projection.hpp"
 #include "starfox/render/grid_line_sample.hpp"
 #include "starfox/vr/background_tiles.hpp"
-#include "starfox/vr/vulkan_connected_grid.hpp"
+#include "starfox/vr/scene_types.hpp"
 namespace starfox::vr {
 SourceModelPackets SourceModels::assemble_world_interpolated(const GameSceneSnapshot& previous,
     const GameSceneSnapshot& current,double alpha,bool srgb,bool surround_stars) {
@@ -486,27 +486,23 @@ SourceModelPackets SourceModels::assemble(const GameSceneSnapshot& scene,bool sr
     const auto shadows=scene.shadows_enabled?interpolate_scene_poses(scene,scene,1.,interpolation_,true):std::vector<render::RenderPose>{};
     return assemble_poses(scene,{},shadows,srgb,units,1.);
 }
+double SourceModels::source_centre_scale(const GameSceneSnapshot& scene,std::uint32_t strategy,bool fixed_landscape_height) const noexcept {
+    if(!fixed_landscape_height) return 1;
+    if(!scene.meters.extended && scene.flow==simulation::GameFlowState::title) return 2;
+    if(scene.meters.extended && scene.flow==simulation::GameFlowState::intro && strategy
+        && std::find(intro_showcase_strategies_.begin(),intro_showcase_strategies_.end(),strategy)!=intro_showcase_strategies_.end()) return .375;
+    return 1;
+}
 SourceModelPackets SourceModels::assemble_interpolated(const GameSceneSnapshot& previous,const GameSceneSnapshot& scene,double alpha,bool srgb,float units,bool fixed_landscape_height) {
     if(!std::isfinite(alpha)) throw std::invalid_argument("Invalid scene interpolation fraction");
     if(previous.flow!=scene.flow || timing::camera_transform_is_discontinuous(previous.camera,scene.camera)) alpha=1.;
     auto rules=interpolation_;rules.fixed_landscape_height=fixed_landscape_height;
     auto poses=interpolate_scene_poses(previous,scene,alpha,rules);
-    if(fixed_landscape_height && !scene.meters.extended && scene.flow==simulation::GameFlowState::title) {
-        // Original's ship belongs behind its logo, independently of EX's
-        // deliberately close model showcase. Preserve the viewing direction.
-        for(auto& pose:poses) {pose.x*=2.;pose.y*=2.;pose.z*=2.;}
-    }
-    if(fixed_landscape_height && scene.meters.extended && scene.flow==simulation::GameFlowState::intro) {
-        for(size_t i=0;i<poses.size();++i) {
-            const auto strategy=scene.objects[i].object.strategy_address;
-            if(strategy && std::find(intro_showcase_strategies_.begin(),intro_showcase_strategies_.end(),strategy)
-                !=intro_showcase_strategies_.end()) {
-                // Apply before either GPU generation or fallback assembly.
-                // Scale the centre, not the geometry; preserve its viewing ray
-                // and source lighting depth while enlarging the model.
-                poses[i].x*=.375;poses[i].y*=.375;poses[i].z*=.375;
-            }
-        }
+    for(size_t i=0;i<poses.size();++i) {
+        // Same source policy for model geometry and enhancement emitters.
+        // Scale the centre only, preserving geometry and source lighting depth.
+        const auto scale=source_centre_scale(scene,scene.objects[i].object.strategy_address,fixed_landscape_height);
+        poses[i].x*=scale;poses[i].y*=scale;poses[i].z*=scale;
     }
     const auto shadows=scene.shadows_enabled?interpolate_scene_poses(previous,scene,alpha,rules,true):std::vector<render::RenderPose>{};
     return assemble_poses(scene,poses,shadows,srgb,units,alpha);

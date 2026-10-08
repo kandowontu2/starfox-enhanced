@@ -1,0 +1,45 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+// Shader-only inverse solve. No ray queries, retracing, readback or new submit.
+layout(local_size_x=64) in;
+layout(set=0,binding=1,std430) buffer Output {uint pixels[];} output_image;
+layout(set=0,binding=2,std140) uniform Parameters {
+    uvec4 dimensions;vec4 camera,settings,ground_point,ground_normal;
+    uvec4 environment;vec4 water_settings,water_row0,water_row1,water_row2;
+    uvec4 enhanced_size,enhanced_modes;
+    vec4 enhanced_motion,enhanced_plane,enhanced_projection,enhanced_palette,enhanced_keep0,enhanced_keep1;
+    uvec4 material_info;vec4 source_colour;uvec4 liquid_layers;vec4 primary_range;
+    uvec4 cube_info;vec4 cube_row0,cube_row1,cube_row2;
+    uvec4 history_info;vec4 history_projection,history_clip;
+    vec4 previous_liquid[8];
+} p;
+layout(set=0,binding=4,std430) readonly buffer Materials {uint word[];} materials;
+#include "generated/vulkan_liquid_hit_motion.glsl"
+vec4 previous_vertex(uint primitive,uint corner) {
+    uint at=p.history_info.x+primitive*12u+corner*4u;
+    if(at>uint(materials.word.length()) || uint(materials.word.length())-at<4u)return vec4(0);
+    return uintBitsToFloat(uvec4(materials.word[at],materials.word[at+1u],materials.word[at+2u],materials.word[at+3u]));
+}
+void main() {
+    uint id=gl_GlobalInvocationID.x,count=p.dimensions.x*p.dimensions.y;if(id>=count)return;
+    uint prefix=p.liquid_layers.w!=0u?p.liquid_layers.w:count;
+    uint identity=prefix+count*4u+id*4u,witness=prefix+count*8u+id*4u,motion=prefix+id*4u;
+    if(p.history_clip.w<.5 || output_image.pixels[identity]!=0xfffffffeu
+        || output_image.pixels[identity+1u]==0xffffffffu || output_image.pixels[identity+3u]==0xffffffffu)return;
+    vec4 feature=uintBitsToFloat(uvec4(output_image.pixels[witness],output_image.pixels[witness+1u],
+        output_image.pixels[witness+2u],output_image.pixels[witness+3u]));
+    if(feature.w!=1)return;
+    ReflectionLiquidFrame old;
+    old.planePoint=p.previous_liquid[0];old.planeNormal=p.previous_liquid[1];
+    old.rotation0=p.previous_liquid[2];old.rotation1=p.previous_liquid[3];old.rotation2=p.previous_liquid[4];
+    old.projection=p.previous_liquid[5];old.extentClip=p.previous_liquid[6];old.settings=p.previous_liquid[7];
+    vec2 pixel=vec2(float(id%p.dimensions.x)+.5,float(id/p.dimensions.x)+.5);
+    vec3 currentHit=vec3((pixel-p.camera.zw)/p.camera.xy,1)*feature.z;
+    vec2 seed=reflection_liquid_receiver_seed(old,currentHit,p.water_row0,p.water_row1,p.water_row2);
+    uint secondary=output_image.pixels[identity+1u];
+    vec4 result=reflection_liquid_hit_motion(old,previous_vertex(secondary,0u),previous_vertex(secondary,1u),
+        previous_vertex(secondary,2u),feature.xy,seed);
+    uvec4 words=floatBitsToUint(result);
+    output_image.pixels[motion]=words.x;output_image.pixels[motion+1u]=words.y;
+    output_image.pixels[motion+2u]=words.z;output_image.pixels[motion+3u]=words.w;
+}

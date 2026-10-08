@@ -6,6 +6,19 @@
 
 namespace starfox::render {
 namespace {
+void resolve_material_pairs(const Framebuffer& source,std::span<std::uint8_t> rgba,
+    std::span<const Rgba8> palette,std::size_t first,std::size_t end) {
+    const auto pairs=source.dither_pairs();
+    if(source.draw_scale()<=1 || pairs.empty()) return;
+    const auto& tags=source.layer_tags();
+    for(auto i=first;i<end;++i) {
+        if(!(pairs[i]&256) || (source.layer_tags_enabled() && tags[i]!=std::uint8_t(PixelLayer::three_d))) continue;
+        const auto& other=palette[std::min<std::size_t>(pairs[i]&255,palette.size()-1)];
+        rgba[i*4]=std::uint8_t((unsigned(rgba[i*4])+other.r+1)/2);
+        rgba[i*4+1]=std::uint8_t((unsigned(rgba[i*4+1])+other.g+1)/2);
+        rgba[i*4+2]=std::uint8_t((unsigned(rgba[i*4+2])+other.b+1)/2);
+    }
+}
 
 constexpr std::array<Rgba8, 16> kPreviewPalette{{
     {0, 0, 0},       {48, 48, 60},    {112, 28, 32},  {38, 70, 150},
@@ -117,6 +130,7 @@ void expand_rgba(
             *output++ = colour.a;
         }
     }
+    resolve_material_pairs(source,destination,palette,0,source.pixels().size());
 }
 
 void expand_rgba(
@@ -161,6 +175,7 @@ void expand_rgba(
                         sizeof(std::uint32_t));
                 }
             }
+            resolve_material_pairs(source,destination,palette,std::size_t(first_row)*stored_width,std::size_t(last_row)*stored_width);
         });
 }
 

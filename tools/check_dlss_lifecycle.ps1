@@ -2,18 +2,15 @@ param([string]$OutputDirectory='tmp/dlss-game-lifecycle-fixed',[string]$Executab
     [ValidateRange(1,10000)][int]$Frames=16,[ValidateRange(20,1000)][int]$PresentationFPS=60,[ValidateRange(1,4)][int]$RenderScale=2,
     [ValidatePattern('^[A-Za-z0-9_]+$')][string]$Level='LEVEL1_1',
     [ValidateSet('ORIGINAL','EX')][string[]]$Experiences=@('ORIGINAL','EX'),
-    [switch]$TestNeuralControl,
     [string]$Presses='',
-    [ValidateSet('','0','1')][string]$NeuralSelection='',
-    [ValidateSet('DLAA','QUALITY','BALANCED','PERFORMANCE')][string]$DlssMode='DLAA',[switch]$NativeRaster,[switch]$Jitter,[switch]$MenuSelection,[switch]$InstalledRuntime,[switch]$RequireNeural,[switch]$CaptureSequence,[switch]$NoJitter,[switch]$RendererCycle,[switch]$ExpectNoEvaluation)
-if($ExpectNoEvaluation -and (!$Evaluate -or !$NativeRaster -or $RequireNeural -or $CompareSerialized -or $RequireContinuousHistory -or $AuditTerrain -or $Jitter)) {
+    [ValidateSet('DLAA','QUALITY','BALANCED','PERFORMANCE')][string]$DlssMode='DLAA',[switch]$NativeRaster,[switch]$Jitter,[switch]$MenuSelection,[switch]$InstalledRuntime,[switch]$CaptureSequence,[switch]$NoJitter,[switch]$RendererCycle,[switch]$ExpectNoEvaluation)
+if($ExpectNoEvaluation -and (!$Evaluate -or !$NativeRaster -or $CompareSerialized -or $RequireContinuousHistory -or $AuditTerrain -or $Jitter)) {
     throw 'Unevaluated viewport check requires native raster preparation and no evaluation-only assertions'
 }
 if($RendererCycle -and (!$Evaluate -or !$MenuSelection -or $Frames -lt 17 -or [math]::Floor(($Frames-1)/8)%2 -ne 0 -or $RequireContinuousHistory)) {
     throw 'Renderer cycle requires evaluated menu selection, ending on GPU after at least 17 frames, without continuous-history assertion'
 }
 if($NoJitter -and $Jitter){throw 'Choose jitter or no jitter, not both'}
-if($RequireNeural -and !$Evaluate){throw 'Neural verification requires Evaluate'}
 if($MenuSelection -and !$Evaluate){throw 'Menu selection requires Evaluate'}
 if($CompareSerialized -and !$Evaluate){throw 'Serialization comparison requires Evaluate'}
 if($Jitter -and (!$Evaluate -or !$NativeRaster)){throw 'Jitter requires native raster evaluation'}
@@ -27,7 +24,6 @@ Get-ChildItem Env: | Where-Object {$_.Name -match '^(STARFOX_|SDL_AUDIODRIVER$|S
     $saved[$_.Name]=$_.Value;Remove-Item -LiteralPath "Env:$($_.Name)"
 }
 try {
-    if($TestNeuralControl){$env:STARFOX_TEST_DLSS5_CONTROL='1'}
     if($RendererCycle){$env:STARFOX_TEST_RENDERER_CYCLE='1'}
     $settings=@{
         SDL_GPU_DRIVER='direct3d12';SDL_AUDIODRIVER='dummy';STARFOX_TEST_HIDDEN='1';STARFOX_TEST_FRAMES="$Frames"
@@ -49,7 +45,6 @@ try {
         $hashes=@{}
         $modes=if($CompareSerialized){@('off','on','serialized')}else{@('off','on')}
         foreach($mode in $modes) {
-            $env:STARFOX_TEST_NEURAL_SELECTION=if($mode -ne 'off' -and $NeuralSelection -ne ''){$NeuralSelection}else{$null}
             # Explicit installed runtime paths now enable capability discovery
             # without diagnostic switches. The off control must omit them.
             $env:STARFOX_DLSS_ADAPTER=if($mode -eq 'off'){$null}else{$settings.STARFOX_DLSS_ADAPTER}
@@ -86,23 +81,24 @@ try {
             $handle=$p.Handle
             if(!$p.WaitForExit(60000)){throw "Still running PID $($p.Id): $log"}
             if($p.ExitCode -ne 0){throw "Game failed ($($p.ExitCode)): $log"}
-            $addonLog=Join-Path (Split-Path ([IO.Path]::GetFullPath($Executable))) 'ReShade.log'
-            if(Test-Path -LiteralPath $addonLog) {
-                $savedAddonLog=Join-Path $proof "$experience-$mode-addon.log"
-                Copy-Item -LiteralPath $addonLog -Destination $savedAddonLog
-                if($RequireNeural -and $mode -ne 'off' -and
-                    !(Select-String -LiteralPath $savedAddonLog -SimpleMatch 'inline feature 18 evaluation succeeded' -Quiet)) {
-                    throw "Neural add-on did not evaluate gameplay: $savedAddonLog"
-                }
-            } elseif($RequireNeural -and $mode -ne 'off') {throw 'Neural add-on log missing'}
             if($InstalledRuntime -and $mode -eq 'off' -and
                 (Select-String -LiteralPath $log -SimpleMatch 'dlss-presentation: upgraded' -Quiet)) {
                 throw "DLSS OFF wrapped the native swapchain: $log"
             }
             if($mode -ne 'off') {
-                foreach($message in @('initialized before SDL','actual game GPU bound','shutdown before renderer destruction','dlss-presentation: upgraded','dlss-presentation: restored')) {
+                foreach($message in @('initialized before SDL','actual game GPU bound','shutdown before renderer destruction')) {
                     if(!(Select-String -LiteralPath $log -SimpleMatch $message -Quiet)){throw "Missing $message in $log"}
                 }
+                $lifecycleText=Get-Content -LiteralPath $log -Raw
+                $explicitEnds=@([regex]::Matches($lifecycleText,'dlss-presentation-lifecycle: completed=(\d+) attempts=(\d+)'))
+                if($lifecycleText -match 'dlss-presentation: upgraded|dlss-presentation: restored|dlss-sdk-(error|warning)|frame-end failed') {
+                    throw "Native-swapchain lifecycle wrapped presentation or reported an SDK failure: $log"
+                }
+                foreach($end in $explicitEnds) {
+                    if($end.Groups[1].Value -ne $end.Groups[2].Value){throw "SDK frame-end failed/retried: $log"}
+                }
+                if($Evaluate -and !$ExpectNoEvaluation -and !$explicitEnds.Count){throw "Evaluated DLSS omitted explicit frame-end: $log"}
+                if((!$Evaluate -or $ExpectNoEvaluation) -and $explicitEnds.Count){throw "Unevaluated viewport performed SDK frame-end: $log"}
                 if($ExpectNoEvaluation -and (!(Select-String -LiteralPath $log -SimpleMatch 'viewport configured' -Quiet) -or
                     (Select-String -LiteralPath $log -Pattern 'dlss-gameplay: evaluated|Release DLSS viewport:|dlss-sdk-error:' -Quiet))) {
                     throw "Expected safely configured but unevaluated viewport: $log"
@@ -146,17 +142,16 @@ try {
                         if(@(Select-String -LiteralPath $log -SimpleMatch 'restarted before renderer creation').Count -ne $restarts) {
                             throw "Missing SDK restart after renderer switch: $log"
                         }
-                        # SDL also recreates swapchains while resizing. Require
-                        # a fresh upgrade and evaluation in each restart segment,
-                        # not an exact total of swapchain creations.
+                        # Each replacement renderer must evaluate and explicitly
+                        # finish its own frames; no DXGI proxy is required.
                         $segments=(Get-Content -LiteralPath $log -Raw) -split 'dlss-lifecycle: restarted before renderer creation'
                         foreach($segment in $segments) {
-                            if($segment -notmatch 'dlss-presentation: upgraded' -or $segment -notmatch 'dlss-gameplay: evaluated frame=0 reset=1') {
+                            if($segment -notmatch 'dlss-presentation: explicit frame-end; native swapchain retained' -or $segment -notmatch 'dlss-gameplay: evaluated frame=0 reset=1') {
                                 throw "Replacement renderer did not resume reconstruction: $log"
                             }
                         }
-                        if(@(Select-String -LiteralPath $log -SimpleMatch 'dlss-presentation: upgraded').Count -lt ($restarts+1)) {
-                            throw "Missing replacement swapchain upgrade: $log"
+                        if($explicitEnds.Count -ne ($restarts+1)) {
+                            throw "Missing replacement SDK frame-end summary: $log"
                         }
                     }
                     if($evaluations.Count -ne $expectedFrames){throw "Expected $expectedFrames evaluations, got $($evaluations.Count): $log"}

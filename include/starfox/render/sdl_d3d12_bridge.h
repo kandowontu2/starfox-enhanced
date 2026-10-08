@@ -41,6 +41,22 @@ typedef struct StarfoxSdlD3D12TextureBridgeV1 {
     bool (*copy_from_external)(void *command, void *native_texture, void *sdl_texture);
 } StarfoxSdlD3D12TextureBridgeV1;
 
+/* OpenXR color images are not COMMON resources: acquired images enter/leave
+ * RENDER_TARGET state. They must have COLOR_ATTACHMENT/TRANSFER usage, one
+ * mip/layer/sample, and belong to this exact SDL device. No CPU readback.
+ * queue() is borrowed; all external queue access must occur inside with_queue.
+ * Its callback cannot call SDL submission/wait/interop APIs or re-enter it,
+ * and must not throw. Resource lifetime extends through GPU completion. */
+#define STARFOX_SDL_D3D12_XR_BRIDGE "starfox.gpu.d3d12.xr.v1"
+typedef bool (*StarfoxD3D12QueueCallback)(void *user, void *queue);
+typedef struct StarfoxSdlD3D12XrBridgeV1 {
+    uint32_t version;
+    void *(*queue)(void *device);
+    bool (*with_queue)(void *device, StarfoxD3D12QueueCallback callback, void *user);
+    bool (*copy_to_color)(void *command, void *sdl_texture, void *native_texture);
+    bool (*copy_from_color)(void *command, void *native_texture, void *sdl_texture);
+} StarfoxSdlD3D12XrBridgeV1;
+
 /* A native compute callback between SDL passes. Read textures enter NON_PIXEL
  * SHADER_RESOURCE, one output enters UAV; callback must preserve those states,
  * not submit/close the list, and never throw across C. SDL restores defaults
@@ -68,3 +84,34 @@ typedef struct StarfoxSdlD3D12PresentBridgeV1 {
     uint32_t version;
     bool (*restore)(void *device);
 } StarfoxSdlD3D12PresentBridgeV1;
+
+/* Native weaving into an APP-OWNED target, never the window swapchain. Both
+ * textures must be BGRA8 UNORM, single mip/sample, with source exactly 2W x H
+ * and target W x H (even extents). Callback must not submit/close/throw. It
+ * receives source in PIXEL_SHADER_RESOURCE and target in RENDER_TARGET, with
+ * RTV/viewport/scissor bound. Both textures must belong to this SDL renderer,
+ * not merely share its D3D12 device. SDL restores resource defaults and heaps.
+ * The native target pointer is borrowed for validation/testing only. */
+#define STARFOX_SDL_D3D12_OWNED_WEAVE "starfox.gpu.d3d12.owned-weave.v1"
+typedef bool (*StarfoxD3D12OwnedWeaveCallback)(void *user, void *command_list,
+    void *source, void *target, uint32_t width, uint32_t height, uint32_t format);
+typedef struct StarfoxSdlD3D12OwnedWeaveV1 {
+    uint32_t version;
+    bool (*weave)(void *command, void *source_texture, void *target_texture,
+        uint32_t width, uint32_t height, StarfoxD3D12OwnedWeaveCallback callback, void *user);
+} StarfoxSdlD3D12OwnedWeaveV1;
+
+/* Optional diagnostics. No new submissions/waits: write/resolve only between
+ * SDL passes; read only AFTER the exact submission fence retires. The caller
+ * must not reuse query indices or destroy the context while commands using it
+ * are pending. create owns only a query heap and a tiny timestamp readback,
+ * never scene pixels. Context must be destroyed before the SDL device. */
+#define STARFOX_SDL_D3D12_TIMESTAMPS "starfox.gpu.d3d12.timestamps.v1"
+typedef struct StarfoxSdlD3D12TimestampsV1 {
+    uint32_t version;
+    void *(*create)(void *device, uint32_t count, uint64_t *frequency);
+    bool (*write)(void *command, void *context, uint32_t index);
+    bool (*resolve)(void *command, void *context, uint32_t first, uint32_t count);
+    bool (*read)(void *context, uint32_t first, uint32_t count, uint64_t *ticks);
+    void (*destroy)(void *context);
+} StarfoxSdlD3D12TimestampsV1;

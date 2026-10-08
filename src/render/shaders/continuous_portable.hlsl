@@ -36,14 +36,25 @@ precise float2 rounded64(float2 value) {
     return value;
 }
 [[vk::binding(0,0)]] StructuredBuffer<Vertex> vertices : register(t0,space0);
+#ifndef SF_INLINE_MODEL_POSES
 [[vk::binding(1,0)]] StructuredBuffer<Pose> poses : register(t1,space0);
+#endif
 [[vk::binding(0,1)]] RWStructuredBuffer<Result> outputPoints : register(u0,space1);
 [[vk::binding(1,1)]] RWStructuredBuffer<Result> outputResiduals : register(u1,space1);
-[[vk::binding(0,2)]] cbuffer Settings : register(b0,space2) { uint count; uint poseCount; uint keepResiduals; uint padding; };
-[numthreads(64,1,1)]
-void main(uint3 id:SV_DispatchThreadID) {
-    if(id.x>=count) return;
-    Vertex v=vertices[id.x];Result result;
+[[vk::binding(0,2)]] cbuffer Settings : register(b0,space2) {
+    uint count; uint poseCount; uint keepResiduals; uint padding;
+#ifdef SF_INLINE_MODEL_POSES
+    Pose poses[6];
+#endif
+#ifdef SF_CONTINUOUS_SMALL_MODEL
+    uint nodeCount; uint visibilityCount; uint faceCount; uint outputCount;
+#endif
+};
+// Shared unchanged source arithmetic for separate and bounded single-group
+// producers. The caller owns synchronization; this function has no barrier.
+void transformVertex(uint index) {
+    if(index>=count) return;
+    Vertex v=vertices[index];Result result;
     result.camera=float4(0,0,0,-1);result.screen=result.camera;
     Result tails;tails.camera=float4(0,0,0,-1);tails.screen=0;
     if(v.pose<poseCount) {
@@ -233,6 +244,10 @@ void main(uint3 id:SV_DispatchThreadID) {
             }
         }
     }
-    outputPoints[id.x]=result;
-    if(keepResiduals!=0) outputResiduals[id.x]=tails;
+    outputPoints[index]=result;
+    if(keepResiduals!=0) outputResiduals[index]=tails;
 }
+#ifndef SF_CONTINUOUS_SMALL_MODEL
+[numthreads(64,1,1)]
+void main(uint3 id:SV_DispatchThreadID) {transformVertex(id.x);}
+#endif

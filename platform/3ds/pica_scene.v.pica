@@ -1,0 +1,48 @@
+; One local-space geometry input, independently projected for each LCD eye.
+.fvec transform[4]
+.fvec uv_scale
+.fvec uv_mode
+.constf constants(0.0, 1.0, 0.0, 0.0)
+.constf screen_scale(25.0, 15.0, 0.0, 0.0)
+.out out_position position
+.out out_colour color
+.out out_uv texcoord0
+.out out_q texcoord0w
+.out out_layers texcoord1
+.alias in_position v0
+.alias in_colour v1
+.alias in_uv v2
+.proc main
+    mov r0.xyz, in_position
+    mov r0.w, constants.y
+    mov r5, uv_mode
+    dp4 r2.x, transform[0], r0
+    dp4 r2.y, transform[1], r0
+    dp4 r2.z, transform[2], r0
+    dp4 r2.w, transform[3], r0
+    mov out_position, r2
+    mov out_colour, in_colour
+    mul r1.xy, uv_scale, in_uv
+    add r1.y, constants.y, -r1.y
+    add r4.z, r5.x, r5.z
+    mul r1.xy, r4.z, r1
+    ; Unit 1's A8 source-layer mask uses its own UV set, never the screen
+    ; projection checker coordinates. It shares padding with the RGBA image.
+    mov out_layers.xy, r1
+    ; Source terrain UVs are authored in the mono source raster. Multiply UV
+    ; and Q by depth so the projector cancels perspective stretching, while
+    ; the independently projected world plane still gives each eye real depth.
+    mad r4.y, r5.z, r2.w, r5.x
+    mul r1.xy, r1, r4.y
+    ; Rotated LCD: X = 200*(W-Y), bottom-up Y = 120*(W+X).
+    ; Divide by the 8x8 repeated source checker, and retain Q=W so texture
+    ; projection cancels perspective interpolation. Pixel parity is fixed.
+    add r3.x, r2.w, -r2.y
+    add r3.y, r2.w, r2.x
+    mul r3.xy, screen_scale, r3
+    mad out_uv.x, r3.x, r5.y, r1.x
+    mad out_uv.y, r3.y, r5.y, r1.y
+    mul r4.x, r5.y, r2.w
+    add out_q.x, r4.y, r4.x
+    end
+.end

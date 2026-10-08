@@ -18,7 +18,7 @@ void OpenXrSwapchains::close() noexcept {
     frame_=false;format_=0;layer_={XR_TYPE_COMPOSITION_LAYER_PROJECTION};
 }
 bool OpenXrSwapchains::initialize(XrSession session,std::span<const XrViewConfigurationView> config,
-    std::span<const int64_t> preferred) {
+    std::span<const int64_t> preferred,XrSwapchainUsageFlags additional_usage) {
     close();
     try {
         if(session==XR_NULL_HANDLE || config.size()!=2 || preferred.empty())
@@ -43,7 +43,7 @@ bool OpenXrSwapchains::initialize(XrSession session,std::span<const XrViewConfig
                 || !view.maxSwapchainSampleCount)
                 throw std::runtime_error("Invalid recommended eye dimensions");
             XrSwapchainCreateInfo create{XR_TYPE_SWAPCHAIN_CREATE_INFO};
-            create.usageFlags=XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT|XR_SWAPCHAIN_USAGE_SAMPLED_BIT;
+            create.usageFlags=XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT|XR_SWAPCHAIN_USAGE_SAMPLED_BIT|additional_usage;
             create.format=format_;create.sampleCount=1;
             create.width=view.recommendedImageRectWidth;create.height=view.recommendedImageRectHeight;
             create.faceCount=create.arraySize=create.mipCount=1;

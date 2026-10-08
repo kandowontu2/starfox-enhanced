@@ -71,6 +71,23 @@ std::vector<std::uint8_t> GameSimulation::save_state() const {
     a(material_);
     a(environment_);
     a(planet_select_cheat_,planet_cheat_active_);
+    a(aa_type_);
+    a(integer_scaling_);
+    a(ray_tracing_quality_);
+    a(extra_effects_);
+    a(global_enhancements_);
+    a(scene_enhancements_);
+    a(depth_enhancements_);
+    a(particle_enhancements_);
+    a(phosphor_persistence_);
+    a(adaptive_exposure_);
+    a(water_caustics_);
+    a(shadow_softness_);
+    a(camera_response_);
+    a(volumetric_fog_);
+    a(stereo_separation_,stereo_convergence_);
+    a(stereo_crosshair_depth_);
+    a(motion_blur_);
     return state::pack(0x47414d01U, assets::crc32(rom_->bytes()), a.bytes());
 }
 
@@ -95,7 +112,49 @@ std::unique_ptr<GameSimulation> GameSimulation::restored_state(
     }
     if(!a.empty()) a(result->environment_);
     if(!a.empty()) a(result->planet_select_cheat_,result->planet_cheat_active_);
+    if(!a.empty()) a(result->aa_type_);
+    if(result->aa_type_ >= 7) throw std::runtime_error("Invalid AA type");
+    if(!a.empty()) a(result->integer_scaling_);
+    if(!a.empty()) a(result->ray_tracing_quality_);
+    if(result->ray_tracing_quality_<1 || result->ray_tracing_quality_>3) throw std::runtime_error("Invalid ray tracing quality");
+    if(!a.empty()) a(result->extra_effects_);
+    else {
+        if(render::manipulation(static_cast<render::Effect>(result->world_effect_))) {result->extra_effects_[0]=result->world_effect_;result->world_effect_=0;}
+        if(render::special_fx(static_cast<render::Effect>(result->effect_))) {result->extra_effects_[1]=result->effect_;result->effect_=0;}
+        if(render::special_fx(static_cast<render::Effect>(result->world_effect_))) {result->extra_effects_[2]=result->world_effect_;result->world_effect_=0;}
+    }
+    const auto extras=result->extra_effects_;result->set_extra_effects(extras);
+    if(extras!=result->extra_effects_) throw std::runtime_error("Invalid special effects");
+    if(!a.empty()) a(result->global_enhancements_);
+    if(result->global_enhancements_&~0x03ffffffU) throw std::runtime_error("Invalid global enhancements");
+    if(!a.empty()) a(result->scene_enhancements_);
+    if(!a.empty()) a(result->depth_enhancements_);
+    if(result->depth_enhancements_>15) throw std::runtime_error("Invalid depth enhancements");
+    if(!a.empty()) a(result->particle_enhancements_);
+    if(result->particle_enhancements_>15) throw std::runtime_error("Invalid particle enhancements");
+    if(!a.empty()) a(result->phosphor_persistence_);
+    if(result->phosphor_persistence_>3) throw std::runtime_error("Invalid phosphor persistence");
+    if(!a.empty()) a(result->adaptive_exposure_);
+    if(result->adaptive_exposure_>3) throw std::runtime_error("Invalid adaptive exposure");
+    if(!a.empty()) a(result->water_caustics_);
+    if(result->water_caustics_>3) throw std::runtime_error("Invalid water caustics");
+    if(!a.empty()) a(result->shadow_softness_);
+    if(result->shadow_softness_>3) throw std::runtime_error("Invalid shadow softness");
+    if(!a.empty()) a(result->camera_response_);
+    if(result->camera_response_>63) throw std::runtime_error("Invalid camera response");
+    if(!a.empty()) a(result->volumetric_fog_);
+    if(result->volumetric_fog_>3) throw std::runtime_error("Invalid volumetric fog");
+    if(!a.empty()) a(result->stereo_separation_,result->stereo_convergence_);
+    const bool legacy_stereo_menu=a.empty();
+    if(!a.empty()) a(result->stereo_crosshair_depth_);
+    if(result->stereo_crosshair_depth_ && result->stereo_crosshair_depth_<16) throw std::runtime_error("Invalid stereo reticle depth");
+    if(result->stereo_separation_<1 || result->stereo_separation_>512 || result->stereo_convergence_<16)
+        throw std::runtime_error("Invalid stereo rig");
+    if(!a.empty()) a(result->motion_blur_);
+    if(result->motion_blur_>3) throw std::runtime_error("Invalid motion blur");
     a.finish();
+    if(legacy_stereo_menu && result->pregame_page_==PregamePage::stereo && result->pregame_selection_>=3U)
+        ++result->pregame_selection_;
     // Before Infinite Lives was added, row five was Back. Preserve the
     // action selected by older archives rather than enabling a new cheat.
     if(legacy_cheats_menu && result->pregame_page_==PregamePage::cheats
@@ -107,12 +166,12 @@ std::unique_ptr<GameSimulation> GameSimulation::restored_state(
     };
     if (!valid_enum(result->flow_state_, GameFlowState::finished)
         || !valid_enum(result->frontend_phase_, FrontendPhase::planet_fade_to_level)
-        || !valid_enum(result->pregame_page_, PregamePage::cheats)
+        || !valid_enum(result->pregame_page_, PregamePage::stereo)
         || !valid_enum(result->experience_, Experience::starfox_ex)
         || !valid_enum(result->timing_mode_, TimingMode::original_speed)
-        || !valid_enum(result->display_mode_, DisplayMode::super_ultrawide_32_9)
+        || !valid_enum(result->display_mode_, DisplayMode::fit_screen)
         || !valid_enum(result->renderer_mode_, RendererMode::software)
-        || !valid_enum(result->render_scale_, RenderScale::scale_4x)
+        || !valid_enum(result->render_scale_, RenderScale::scale_10x)
         || !valid_enum(result->crosshair_colour_, CrosshairColour::orange)
         || !valid_enum(result->two_d_filter_, TwoDFilterMode::scalefx)
         || !valid_enum(result->anti_aliasing_mode_, AntiAliasingMode::heavy)
@@ -133,6 +192,10 @@ std::unique_ptr<GameSimulation> GameSimulation::restored_state(
     // Older archives may have stopped on the removed Enhanced Shadows row.
     if(result->pregame_page_==PregamePage::three_d && result->pregame_selection_==26U)
         result->pregame_selection_=29U;
+    if(result->pregame_page_==PregamePage::three_d && (result->pregame_selection_==10
+        || result->pregame_selection_==27 || result->pregame_selection_==28
+        || result->pregame_selection_==29 || result->pregame_selection_==32))
+        result->pregame_page_=PregamePage::global;
     // Campaign selection rebinds ROM entry points and writes one RAM flag.
     // Do it before restoring the native image, to preserve every saved byte.
     result->select_planet_campaign(result->second_planet_campaign_active_);
@@ -151,12 +214,14 @@ std::unique_ptr<GameSimulation> GameSimulation::restored_state(
     // Output-device selection belongs to the current session, not the saved
     // cartridge timeline. Preserve it without invalidating existing archives.
     result->stereo_output_ = stereo_output_;
+    result->stereo_separation_=stereo_separation_;
+    result->stereo_convergence_=stereo_convergence_;
+    result->stereo_crosshair_depth_=stereo_crosshair_depth_;
     result->dlss_mode_ = dlss_mode_;
+    result->dlss45_mode_ = dlss45_mode_;
     result->fsr1_mode_ = fsr1_mode_;
     result->fsr1_menu_ = fsr1_menu_;
     result->reflective_surfaces_ = reflective_surfaces_;
-    result->neural_filter_available_ = neural_filter_available_;
-    result->neural_filter_requested_ = neural_filter_requested_;
     return result;
 }
 

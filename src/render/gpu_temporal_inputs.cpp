@@ -1,8 +1,10 @@
 #include "starfox/render/gpu_temporal_inputs.hpp"
+#include "starfox/render/gpu_image_extent.hpp"
 #include <cmath>
 #include <stdexcept>
 #if defined(STARFOX_SDL_GPU_EFFECTS)
 #include <SDL3/SDL.h>
+#include "starfox/render/gpu_preparation.hpp"
 #include "shaders/generated/temporal_inputs_portable.hpp"
 #include "shaders/generated/temporal_hud_portable.hpp"
 #include "shaders/generated/temporal_resample_portable.hpp"
@@ -33,7 +35,7 @@ struct GpuTemporalInputs::Impl {
         else throw std::runtime_error("Temporal textures require a GPU shader backend");
         info.num_readonly_storage_buffers=3;info.num_readwrite_storage_textures=3;info.num_uniform_buffers=1;
         info.threadcount_x=info.threadcount_y=8;info.threadcount_z=1;
-        pipeline=SDL_CreateGPUComputePipeline(device,&info);if(!pipeline) throw std::runtime_error(SDL_GetError());
+        pipeline=create_gpu_compute_pipeline(device,&info);if(!pipeline) throw std::runtime_error(SDL_GetError());
     }
     void resize(Uint32 w,Uint32 h) {
         if(width==w && height==h && textures[0] && textures[1] && textures[2]) return;
@@ -56,7 +58,7 @@ GpuTemporalResampled GpuTemporalInputs::resample(void* device,void* command,void
 #if defined(STARFOX_SDL_GPU_EFFECTS)
     try {
         if(!device || source.device!=device || !command || !color || !source.depth || !source.motion ||
-            !width || !height || width>source.width || height>source.height || source.width>4096 || source.height>4096)
+            !width || !height || width>source.width || height>source.height || !bounded_gpu_image_extent(source.width,source.height))
             throw std::runtime_error("Invalid temporal resampling inputs");
         if(impl_->device && impl_->device!=device) impl_=std::make_unique<Impl>();
         auto* d=static_cast<SDL_GPUDevice*>(device);impl_->device=d;
@@ -70,7 +72,7 @@ GpuTemporalResampled GpuTemporalInputs::resample(void* device,void* command,void
             else throw std::runtime_error("Temporal resampling requires GPU shaders");
             info.num_readonly_storage_textures=3;info.num_readwrite_storage_textures=3;info.num_uniform_buffers=1;
             info.threadcount_x=info.threadcount_y=8;info.threadcount_z=1;
-            impl_->resample_pipeline=SDL_CreateGPUComputePipeline(d,&info);if(!impl_->resample_pipeline) throw std::runtime_error(SDL_GetError());
+            impl_->resample_pipeline=create_gpu_compute_pipeline(d,&info);if(!impl_->resample_pipeline) throw std::runtime_error(SDL_GetError());
         }
         if(impl_->resample_width!=width || impl_->resample_height!=height) {
             for(auto*& texture:impl_->resampled) {if(texture) SDL_ReleaseGPUTexture(d,texture);texture=nullptr;}
@@ -99,11 +101,11 @@ GpuTemporalResampled GpuTemporalInputs::resample(void* device,void* command,void
     return {};
 }
 void* GpuTemporalInputs::restore_hud(void* device,void* command,void* original,void* reconstructed,
-    void* packed,std::uint32_t width,std::uint32_t height,bool preserve_artwork) {
+    void* packed,std::uint32_t width,std::uint32_t height,bool preserve_artwork,bool protect_hud,bool reconstruct_edges) {
     if(!impl_) impl_=std::make_unique<Impl>();
 #if defined(STARFOX_SDL_GPU_EFFECTS)
     try {
-        if(!device || !command || !original || !reconstructed || !packed || !width || !height || width>4096 || height>4096 ||
+        if(!device || !command || !original || !reconstructed || !packed || !bounded_gpu_image_extent(width,height) ||
             original==impl_->hud_texture || reconstructed==impl_->hud_texture) throw std::runtime_error("Invalid temporal HUD inputs");
         if(impl_->device && impl_->device!=device) impl_=std::make_unique<Impl>();
         auto* d=static_cast<SDL_GPUDevice*>(device);impl_->device=d;
@@ -115,7 +117,7 @@ void* GpuTemporalInputs::restore_hud(void* device,void* command,void* original,v
             else throw std::runtime_error("HUD reconstruction requires GPU shaders");
             info.num_readonly_storage_textures=2;info.num_readonly_storage_buffers=1;info.num_readwrite_storage_textures=1;info.num_uniform_buffers=1;
             info.threadcount_x=info.threadcount_y=8;info.threadcount_z=1;
-            impl_->hud_pipeline=SDL_CreateGPUComputePipeline(d,&info);if(!impl_->hud_pipeline) throw std::runtime_error(SDL_GetError());
+            impl_->hud_pipeline=create_gpu_compute_pipeline(d,&info);if(!impl_->hud_pipeline) throw std::runtime_error(SDL_GetError());
         }
         if(!impl_->hud_texture || impl_->hud_width!=width || impl_->hud_height!=height) {
             if(impl_->hud_texture) SDL_ReleaseGPUTexture(d,impl_->hud_texture);
@@ -126,7 +128,7 @@ void* GpuTemporalInputs::restore_hud(void* device,void* command,void* original,v
             impl_->hud_texture=SDL_CreateGPUTexture(d,&info);if(!impl_->hud_texture) throw std::runtime_error(SDL_GetError());
             impl_->hud_width=width;impl_->hud_height=height;
         }
-        auto* cb=static_cast<SDL_GPUCommandBuffer*>(command);Uint32 constants[]{width,height,preserve_artwork?1U:0U,0};
+        auto* cb=static_cast<SDL_GPUCommandBuffer*>(command);Uint32 constants[]{width,height,(preserve_artwork?1U:0U)|(reconstruct_edges?2U:0U),protect_hud?1U:0U};
         SDL_PushGPUComputeUniformData(cb,0,constants,sizeof(constants));
         SDL_GPUStorageTextureReadWriteBinding out{};out.texture=impl_->hud_texture;
         auto* pass=SDL_BeginGPUComputePass(cb,&out,1,nullptr,0);if(!pass) throw std::runtime_error(SDL_GetError());
@@ -138,7 +140,7 @@ void* GpuTemporalInputs::restore_hud(void* device,void* command,void* original,v
         return impl_->hud_texture;
     } catch(const std::exception& e) {impl_->status=e.what();}
 #else
-    (void)device;(void)command;(void)original;(void)reconstructed;(void)packed;(void)width;(void)height;(void)preserve_artwork;
+    (void)device;(void)command;(void)original;(void)reconstructed;(void)packed;(void)width;(void)height;(void)preserve_artwork;(void)protect_hud;(void)reconstruct_edges;
 #endif
     return nullptr;
 }
@@ -147,11 +149,11 @@ GpuTemporalInputs::~GpuTemporalInputs()=default;
 void GpuTemporalInputs::release_device() noexcept {impl_.reset();}
 const std::string& GpuTemporalInputs::status() const {static const std::string empty{"Temporal textures released"};return impl_?impl_->status:empty;}
 GpuTemporalTextures GpuTemporalInputs::enqueue(void* device,void* command,void* depth,void* motion,
-    std::uint32_t width,std::uint32_t height,float near_plane,float far_plane,bool reset,const TemporalGroundInputs* ground) {
+    std::uint32_t width,std::uint32_t height,float near_plane,float far_plane,bool reset,const TemporalGroundInputs* ground,bool frozen_scene) {
     if(!impl_) impl_=std::make_unique<Impl>();
 #if defined(STARFOX_SDL_GPU_EFFECTS)
     try {
-        if(!device || !command || !depth || (!reset && (!motion || depth==motion)) || !width || !height || width>4096 || height>4096 ||
+        if(!device || !command || !depth || (!reset && (!motion || depth==motion)) || !bounded_gpu_image_extent(width,height) ||
             !(near_plane>0) || !(far_plane>near_plane) || !std::isfinite(far_plane)) throw std::runtime_error("Invalid temporal texture inputs");
         if(ground) {
             if(!ground->coverage || ground->coverage==depth || ground->coverage==motion)
@@ -178,6 +180,7 @@ GpuTemporalTextures GpuTemporalInputs::enqueue(void* device,void* command,void* 
             std::array<float,16> previous;
         } constants{};
         constants.width=width;constants.height=height;constants.reset=reset;
+        constants.pad=frozen_scene?1U:0U;
         constants.near_plane=near_plane;constants.far_plane=far_plane;
         if(ground) {
             constants.ground_enabled=ground->packed_coverage?2:1;constants.ground_previous_valid=ground->previous_valid;
@@ -196,7 +199,7 @@ GpuTemporalTextures GpuTemporalInputs::enqueue(void* device,void* command,void* 
         return {device,impl_->textures[0],impl_->textures[1],impl_->textures[2],width,height};
     } catch(const std::exception& e) {impl_->status=e.what();}
 #else
-    (void)device;(void)command;(void)depth;(void)motion;(void)width;(void)height;(void)near_plane;(void)far_plane;(void)reset;(void)ground;
+    (void)device;(void)command;(void)depth;(void)motion;(void)width;(void)height;(void)near_plane;(void)far_plane;(void)reset;(void)ground;(void)frozen_scene;
 #endif
     return {};
 }

@@ -15,7 +15,8 @@ Windows x64 releases include unmodified production runtime binaries from
 [NVIDIA Streamline 2.14.1](https://github.com/NVIDIA-RTX/Streamline/releases/tag/v2.14.1).
 These are separately licensed components, not relicensed under the game's
 source license. Full NVIDIA RTX SDK terms, Streamline copyright/license and
-third-party notices accompany them in the `dlss` folder. DLSS is optional and
+third-party notices accompany them in `licenses/dlss` and the embedded runtime
+cache (or the `dlss` folder in non-embedded builds). DLSS is optional and
 defaults to off. ReShade, RenoDX and DLSS5 add-on binaries are not included.
 
 ## RetroCPU
@@ -77,6 +78,15 @@ freely, subject to the following restrictions:
 2. Altered source versions must be plainly marked as such, and must not be
    misrepresented as being the original software.
 3. This notice may not be removed or altered from any source distribution.
+
+The desktop build applies plainly marked, pinned-source extensions for native
+GPU/display interoperation. Its private opt-in multisample shader-read extension
+allows 2D colour-attachment samples to be read on D3D12 and standard-sample
+Vulkan devices; ordinary SDL texture validation and storage restrictions remain
+in force. The Windows GPU renderer also has a private opt-in joined callback
+for its built-in presenter shader compilation; device/window creation,
+command recording and presentation retain their owner-thread behavior.
+These are project modifications, not upstream SDL features.
 
 ### SDL3 UWP/WinRT fork
 
@@ -170,6 +180,47 @@ representations in `src/render/shaders/generated`, is also derived from this imp
 and covered by GPLv3. Distributing a binary containing either implementation carries the GPLv3
 obligations for the combined work.
 
+
+## Optional DisplayXR / Leia SR interfaces
+
+The Windows desktop discovery path uses Khronos OpenXR SDK headers, revision
+`f2448a8797c85814aa892efc1ab8707900fbcc78`, and adapted Apache-2.0 interface
+declarations from DisplayXR runtime `v2.21.11`. Attribution, modifications and
+the complete Apache-2.0 license are in `third_party/displayxr` in source and
+`licenses/displayxr` in packaged desktop builds. No DisplayXR runtime is linked
+into the game. Windows x64 release packaging additionally includes untouched,
+optional upstream installers under `optional-runtimes/displayxr`: runtime
+2.21.11 (BSL-1.0, source `316bed95f4ad9f68427966723c99dbe14f3731eb`) and
+Leia SR plug-in 2.7.6 (Apache-2.0, source
+`c8f7e1cb9b4d0dda485991961759998dd400bbdf`). The original publisher signatures,
+sizes and SHA-256 checksums are checked before packaging. Upstream notices and
+all runtime `LICENSES` texts are preserved in `licenses/displayxr-runtime` and
+`licenses/displayxr-leia-plugin`; pinned inputs are recorded in
+`tools/package/displayxr-runtime.json`. The game never runs these installers
+automatically. They do not replace the separately required vendor SR Platform
+service/drivers; see the optional package README for installation side effects.
+
+### Optional direct SR Platform adapter
+
+The additional Windows x64 `starfox_leia_sr.dll` adapter uses the Leia SR SDK
+1.34.10 headers/import libraries from bo3b/SR-lib `api_expansion` commit
+`0c80cc01f671e1491ea70f8f9c2358ff938a6503`. The pinned archive SHA-256 is
+`bc270bb61eef12581169601b57c8585ad821f46cc1cc004edcd30c6355040056`.
+SR-lib's MIT copyright/license (Bo3b Johnson, 2026), SDK permission notice
+(Leia, Inc., 2025), and third-party terms are preserved in
+`third_party/leia-sr/SR-lib-LICENSE.txt` and the adapter's packaged
+`licenses/leia-sr` directory. The license copy is from SR-lib master commit
+`174a0cf8868ed91838c9765db5128814c7a31c5c`; the SDK's own License.txt is
+installed from the pinned SDK source.
+
+The app-owned texture bridge adapts the GPLv3 implementation in agrofubris's
+Star Fox Enhanced stereo fork at `129d9176b9d643b3c7f9627b0809d6777be9cebb`.
+Its handoff credits oneup03's RT64 3D and bo3b's SR-lib. Vendor runtime/service
+DLLs, optional hand-tracking/UltraLeap components, and DisplayXR are not
+redistributed by the adapter. The user installs the supported SR Platform
+software for their display. SDK C++ calls stay in a separately built MSVC
+module with delay-loaded dependencies; the game loads that module optionally
+through a C ABI, including in MinGW packages.
 
 ## ScaleFX
 

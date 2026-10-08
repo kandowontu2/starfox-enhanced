@@ -1,6 +1,8 @@
 #include "starfox/render/packed_projection.hpp"
+#include "starfox/render/packed_faces.hpp"
 #include "starfox/assets/shape_decoder.hpp"
 #include <cmath>
+#include <cstring>
 #include <iostream>
 #include <limits>
 #include <numbers>
@@ -9,6 +11,31 @@
 using namespace starfox;
 namespace {
 void require(bool value){if(!value) throw std::runtime_error("Packed projection assertion failed");}
+template<class T> void same(std::span<const T> a,std::span<const T> b) {
+    require(a.size()==b.size());
+    require(a.empty() || std::memcmp(a.data(),b.data(),a.size_bytes())==0);
+}
+void prepared(const assets::Shape& shape,render::RenderPose pose,render::RenderSettings settings={}) {
+    const render::PreparedProjectionSource source(shape,pose,settings);
+    // Pose/camera constants must remain independent from the source packet.
+    pose.x-=1.25;pose.y+=2.5;pose.vanish_x+=3.75;pose.roll+=127;
+    if(settings.render_scale>1 || pose.continuous_geometry) pose.scale*=1.5;
+    const auto reference=render::pack_projection(shape,pose,settings);
+    auto actual=render::pack_projection(shape,pose,settings,&source);
+    require(actual.source==&source && actual.native_vertices.empty()
+        && actual.continuous_vertices.empty() && actual.visibility_faces.empty());
+    same(actual.native_input(),reference.native_input());
+    same(actual.continuous_input(),reference.continuous_input());
+    same(actual.visibility_input(),reference.visibility_input());
+    require(std::memcmp(&actual.native_pose,&reference.native_pose,sizeof(actual.native_pose))==0);
+    require(std::memcmp(actual.continuous_poses.data(),reference.continuous_poses.data(),sizeof(actual.continuous_poses))==0);
+    require(std::memcmp(actual.euler_operands.data(),reference.euler_operands.data(),sizeof(actual.euler_operands))==0);
+    actual.own_source();require(!actual.source);
+    same(actual.native_input(),reference.native_input());
+    same(actual.continuous_input(),reference.continuous_input());
+    same(actual.visibility_input(),reference.visibility_input());
+    const auto bytes=source.storage_bytes();require(bytes>=source.visibility_input().size_bytes());
+}
 void inspect(const assets::Shape& shape,std::uint32_t frame) {
     render::RenderPose pose;pose.use_rotation_matrix=true;pose.scale=1.25;pose.animation_frame=frame;
     pose.rotation_matrix={32767,-12345,23456,7890,-32768,19000,-9999,8888,7777};
@@ -27,7 +54,9 @@ void inspect(const assets::Shape& shape,std::uint32_t frame) {
     const auto& words=shape.frames.empty()?shape.word_coordinates:shape.frames[frame%shape.frames.size()].word_coordinates;
     const double factor=std::ldexp(pose.scale,shape.header.shift);
     auto native=render::pack_projection(shape,pose,{});
+    prepared(shape,pose);
     pose.continuous_geometry=true;auto continuous=render::pack_projection(shape,pose,{});
+    prepared(shape,pose);pose.use_rotation_matrix=false;prepared(shape,pose);
     require(native.native_vertices.size()==source.size() && continuous.continuous_vertices.size()==source.size());
     for(std::size_t i=0;i<source.size();++i) {
         const bool word=i<words.size() && words[i];const auto& s=source[i];
@@ -101,6 +130,49 @@ int main(int argc,char** argv)try {
     bool threw=false;pose.scale=std::numeric_limits<double>::infinity();
     try{static_cast<void>(render::pack_projection(shape,pose,{}));}catch(const std::runtime_error&){threw=true;}require(threw);
     pose={};threw=false;try{static_cast<void>(render::pack_projection(shape,pose,{}));}catch(const std::runtime_error&){threw=true;}require(threw);
+    {
+        render::RenderPose p;p.continuous_geometry=true;p.animation_frame=0;
+        const render::PreparedProjectionSource source(shape,p,{});
+        auto bad_shape=shape;
+        for(unsigned policy=0;policy<3;++policy) {
+            auto other=p;render::RenderSettings settings;
+            if(policy==1) other.animation_frame=1;
+            if(policy==2) {other.continuous_geometry=false;other.use_rotation_matrix=true;}
+            bool rejected=false;
+            try{static_cast<void>(render::pack_projection(policy==0?bad_shape:shape,other,settings,&source));}
+            catch(const std::runtime_error&){rejected=true;}require(rejected);
+        }
+        // Native prescaled bytes cannot be reused at a different object scale.
+        p.continuous_geometry=false;p.use_rotation_matrix=true;
+        const render::PreparedProjectionSource native(shape,p,{});p.scale=2;
+        require(!native.matches(shape,p,{}));
+        // All-word native coordinates do not depend on unused object scale,
+        // even with a header shift which would be illegal for byte vertices.
+        auto word=shape;word.header.shift=255;
+        p.animation_frame=1;p.scale=std::numeric_limits<double>::quiet_NaN();
+        const render::PreparedProjectionSource word_source(word,p,{});
+        require(word_source.matches(word,p,{}));
+        same(render::pack_projection(word,p,{},&word_source).native_input(),word_source.native_input());
+    }
+    {
+        assets::Shape fragment;fragment.header.shift=1;
+        fragment.vertices={{-10,-10,0},{10,-10,0},{0,10,0}};
+        fragment.word_coordinates=std::vector<bool>(3,false);fragment.word_coordinates[1]=true;
+        fragment.faces={{-1,0,{1,2,3},{2,1,0}}};
+        render::RenderPose p;p.continuous_geometry=true;p.explosion_progress=7;p.explosion_phase=6.5;
+        p.force_colour=true;p.forced_colour=0x11;
+        const render::PreparedProjectionSource source(fragment,p,{});
+        const auto graph=render::pack_bsp(fragment,true);
+        auto reference=render::pack_projection(fragment,p,{}),actual=render::pack_projection(fragment,p,{},&source);
+        auto ref_faces=render::pack_faces(fragment,graph,p,{}),actual_faces=ref_faces;
+        const auto ref_poses=render::pack_continuous_fragments(reference,ref_faces,graph,p,{},false);
+        const auto actual_poses=render::pack_continuous_fragments(actual,actual_faces,graph,p,{},false);
+        require(!actual.source && source.continuous_input().size()==3);
+        same(actual.continuous_input(),reference.continuous_input());
+        same(actual.visibility_input(),reference.visibility_input());
+        same<render::ContinuousTransformPose>(actual_poses,ref_poses);
+        same<std::array<std::uint32_t,4>>(actual_faces.corners,ref_faces.corners);
+    }
     unsigned models=0,frames=0;
     if(argc==3) {
         const auto rom=assets::RomImage::load(argv[1]);const auto symbols=assets::SymbolMap::load(argv[2]);const assets::ShapeDecoder decoder(rom,symbols);

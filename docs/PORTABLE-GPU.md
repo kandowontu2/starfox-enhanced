@@ -46,6 +46,25 @@ Windows builds with SDL GPU support now select Vulkan by default. Set
 support retain the D3D11 path. `STARFOX_TRACE_GPU=1` reports direct presentation.
 The effects diagnostic accepts SPIR-V, MSL and DXIL, matching the renderer.
 
+Screen-space water/mirror/gold reflections now resolve after environment
+replacement, so their immutable source contains the enhanced sky, live palette
+and fractional scrolling. The resolve reuses the existing GPU ping-pong images
+and command; it does not add readback, another texture, or a second physical-ray
+finish. CPU row workers use the same two-pass ownership. Excluded HUD taps retain
+their bilinear coverage rather than normalizing a tiny edge tap into a bright
+full-strength reflection. Basic nonreflective surfaces and the physical-ray
+path do not run this extra screen resolve.
+
+The bounded `STARFOX_TEST_SCREEN_REFLECTION_ONLY=1` diagnostic checks Auto water,
+water, mirror and gold at 1×/3×/6× with banked horizons, procedural/photographic
+sky, fractional scrolling, foreground models, HUD exclusion and source alpha.
+It separately qualifies the environment shade, then independently mixes that
+renderer’s completed UNORM source with a one-channel-unit bound; it does not
+raise the bound to conceal accumulated quantization. On Windows,
+`STARFOX_TEST_D3D11_SCREEN_REFLECTION_ONLY=1` runs the same fixture against the
+legacy D3D11 effects implementation. Neither is a whole-game performance or
+mobile-device acceptance test.
+
 Verified locally: Vulkan effect comparisons and captured gameplay smoke runs on
 Windows and Linux/WSL; the Linux regression suite passed 38/38 after integration.
 Floating-point effects permit at most one channel unit

@@ -6,6 +6,7 @@
 #include <iomanip>
 #include <numbers>
 #include <SDL3/SDL.h>
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cmath>
@@ -15,6 +16,7 @@
 #include <stdexcept>
 #include <source_location>
 #include <vector>
+#include "check_occupied_tiles.inc"
 namespace {
 void require(bool ok,std::source_location where=std::source_location::current()) {
     if(!ok) throw std::runtime_error("Projection check line "+std::to_string(where.line())+": "+SDL_GetError());
@@ -35,6 +37,7 @@ std::array<int,4> reference(const starfox::render::NativeProjectionPoint& source
 }
 struct Resources {
     SDL_GPUDevice* device{};SDL_GPUBuffer* input{},*faces{},*poses{};
+    std::vector<SDL_GPUBuffer*> extra;
     SDL_GPUTransferBuffer *upload{},*download{};
     ~Resources(){
         if(device) {
@@ -42,6 +45,7 @@ struct Resources {
             if(input) SDL_ReleaseGPUBuffer(device,input);
             if(faces) SDL_ReleaseGPUBuffer(device,faces);
             if(poses) SDL_ReleaseGPUBuffer(device,poses);
+            for(auto* buffer:extra) SDL_ReleaseGPUBuffer(device,buffer);
             if(upload) SDL_ReleaseGPUTransferBuffer(device,upload);
             if(download) SDL_ReleaseGPUTransferBuffer(device,download);
             SDL_DestroyGPUDevice(device);
@@ -49,6 +53,7 @@ struct Resources {
         SDL_Quit();
     }
 };
+#include "check_inline_pose_lifetime.inc"
 }
 int main()try {
     using starfox::render::NativeProjectionPoint;
@@ -56,6 +61,7 @@ int main()try {
     using starfox::render::NativeTransformVertex;
     Resources r;require(SDL_Init(SDL_INIT_VIDEO));
     r.device=SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV|SDL_GPU_SHADERFORMAT_MSL|SDL_GPU_SHADERFORMAT_DXIL,true,nullptr);require(r.device);
+    check_inline_pose_lifetime(r.device);
     starfox::render::GpuProjection projection;
     require(!projection.enqueue(nullptr,nullptr,nullptr,1));
     constexpr unsigned maximum=131071;
@@ -69,6 +75,7 @@ int main()try {
     SDL_GPUTransferBufferCreateInfo download_info{SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD,maximum*256,0};
     r.upload=SDL_CreateGPUTransferBuffer(r.device,&upload_info);require(r.upload);
     r.download=SDL_CreateGPUTransferBuffer(r.device,&download_info);require(r.download);
+    check_occupied_tiles(r.device);
     std::vector<NativeProjectionPoint> points(maximum);
     starfox::render::GpuScene text_scene;
     // Fractional raster output must preserve source texture coordinates,
@@ -556,10 +563,13 @@ int main()try {
     // Signed-min product overflows the Q15 word; negative products must floor,
     // not truncate toward zero. Include both explicitly along with random poses.
     poses[0].row0[0]=-32768;poses[0].row1[1]=-1;poses[0].row2[2]=32767;
+    const auto original_poses=poses;
     const auto original_points=points;
     std::vector<NativeTransformVertex> vertices(maximum);
-    for(unsigned phase=0;phase<3;++phase) {
+    for(unsigned phase=0;phase<4;++phase) {
     const bool transform=phase!=0;
+    const bool inline_pose=phase==3;
+    if(inline_pose) poses=original_poses;
     if(phase==2) for(unsigned i=0;i<pose_count;++i) {
         constexpr std::uint8_t progress[]{0,1,2,127,255};
         poses[i]=starfox::render::native_explosion_pose(poses[i],int(i)*15-128,127-int(i)*13,
@@ -567,7 +577,7 @@ int main()try {
     }
     points=original_points;
     if(transform) for(unsigned i=0;i<maximum;++i) {
-        auto& p=points[i];vertices[i]={p.x,p.y,p.z,i%pose_count};
+        auto& p=points[i];vertices[i]={p.x,p.y,p.z,inline_pose?0U:i%pose_count};
         if(i%23==0) vertices[i].pose=UINT32_MAX;
         if(vertices[i].pose>=pose_count) {p.reserved=1;continue;}
         const auto& pose=poses[vertices[i].pose];
@@ -609,8 +619,15 @@ int main()try {
         from.offset=count*48;to={r.poses,0,sizeof(poses)};
         SDL_UploadToGPUBuffer(copy,&from,&to,true);SDL_EndGPUCopyPass(copy);
         void* camera_points=nullptr;
+        if(inline_pose) {
+            require(!projection.enqueue_transformed(r.device,command,r.input,count,r.poses,1,&camera_points,std::span(poses).first(1)));
+            require(!camera_points);
+            require(!projection.enqueue_transformed(r.device,command,r.input,count,nullptr,2,&camera_points,std::span(poses).first(2)));
+            require(!camera_points);
+        }
         auto* output=static_cast<SDL_GPUBuffer*>(transform
-            ?projection.enqueue_transformed(r.device,command,r.input,count,r.poses,pose_count,&camera_points)
+            ?projection.enqueue_transformed(r.device,command,r.input,count,inline_pose?nullptr:r.poses,inline_pose?1:pose_count,&camera_points,
+                inline_pose?std::span<const NativeTransformPose>(poses).first(1):std::span<const NativeTransformPose>{})
             :projection.enqueue(r.device,command,r.input,count));
         if(!output){SDL_CancelGPUCommandBuffer(command);throw std::runtime_error(projection.status());}
         auto* visibility=static_cast<SDL_GPUBuffer*>(projection.enqueue_visibility(command,r.faces,count));
@@ -661,7 +678,7 @@ int main()try {
     }
     if(!visible_count || visible_count==checked) throw std::runtime_error("Visibility fixture did not cover both outcomes");
     std::cout<<projection.status()<<": "<<checked<<" exact points and faces; "<<visible_count
-        <<" visible; Q15 transforms/destruction offsets, camera coordinates, all depth words, saturation/seams, invalid poses/indices and allocation reuse passed\n";
+        <<" visible; buffered/inline Q15 transforms, destruction offsets, camera coordinates, all depth words, saturation/seams, invalid poses/indices and allocation reuse passed\n";
     using starfox::render::ContinuousTransformPose;
     using starfox::render::ContinuousTransformVertex;
     using starfox::render::ContinuousProjectedPoint;
@@ -699,7 +716,8 @@ int main()try {
     std::size_t naive_visibility_mismatches=0;
     double maximum_relative_error=0;
     double maximum_onscreen_error=0;
-    for(unsigned count:{1U,63U,64U,65U,maximum,65U}) {
+    for(bool inline_pose:{false,true}) for(unsigned count:{1U,63U,64U,65U,maximum,65U}) {
+        const unsigned supplied_poses=inline_pose?6:pose_count;
         std::vector<std::array<Uint32,4>> continuous_faces(count);
         for(unsigned i=0;i<count;++i) {
             continuous_faces[i]={(i*3)%count,(i*11+1)%count,(i*37+2)%count,0};
@@ -725,7 +743,13 @@ int main()try {
         SDL_UploadToGPUBuffer(copy,&from,&to,true);
         from.offset=count*16+sizeof(continuous_poses);to={r.faces,0,count*16};
         SDL_UploadToGPUBuffer(copy,&from,&to,true);SDL_EndGPUCopyPass(copy);
-        auto* output=static_cast<SDL_GPUBuffer*>(projection.enqueue_continuous(r.device,command,r.input,count,r.poses,pose_count));
+        if(inline_pose) {
+            require(!projection.enqueue_continuous(r.device,command,r.input,count,r.poses,6,nullptr,false,std::span(continuous_poses).first(6)));
+            require(!projection.enqueue_continuous(r.device,command,r.input,count,nullptr,7,nullptr,false,std::span(continuous_poses).first(7)));
+            require(!projection.enqueue_continuous(r.device,command,r.input,count,nullptr,5,nullptr,false,std::span(continuous_poses).first(6)));
+        }
+        auto* output=static_cast<SDL_GPUBuffer*>(projection.enqueue_continuous(r.device,command,r.input,count,inline_pose?nullptr:r.poses,supplied_poses,
+            nullptr,false,inline_pose?std::span<const ContinuousTransformPose>(continuous_poses).first(6):std::span<const ContinuousTransformPose>{}));
         if(!output) {SDL_CancelGPUCommandBuffer(command);throw std::runtime_error(projection.status());}
         if(projection.enqueue_visibility(command,r.faces,1)) {
             SDL_CancelGPUCommandBuffer(command);throw std::runtime_error("Word visibility accepted continuous geometry");
@@ -742,7 +766,7 @@ int main()try {
         const auto* values=static_cast<const ContinuousProjectedPoint*>(SDL_MapGPUTransferBuffer(r.device,r.download,false));require(values);
         for(unsigned i=0;i<count;++i) {
             const auto& v=continuous_vertices[i];const auto& actual=values[i];
-            if(v.pose>=pose_count || !std::isfinite(v.x)) {
+            if(v.pose>=supplied_poses || !std::isfinite(v.x)) {
                 if(actual.camera[3]!=-1 || actual.screen[3]!=-1)
                     throw std::runtime_error("Continuous invalid input was not rejected");
                 continue;
@@ -791,14 +815,14 @@ int main()try {
         }
         SDL_UnmapGPUTransferBuffer(r.device,r.download);continuous_checked+=count;
     }
-    std::cout<<"Continuous transforms: "<<continuous_checked<<" points passed; maximum relative error "
+    std::cout<<"Buffered/inline continuous transforms: "<<continuous_checked<<" points passed; maximum relative error "
         <<maximum_relative_error<<", screen-region absolute error "<<maximum_onscreen_error
         <<" source pixels; fractional poses, zero/near/negative depth, tangent visibility and invalid inputs passed\n";
     if(!naive_visibility_mismatches) throw std::runtime_error("Tangent fixture did not exercise compensated visibility");
     std::cout<<"Compensated visibility avoided "<<naive_visibility_mismatches<<" naive FP32 decisions\n";
     // FACE_B's destruction places an Euler-rotated side exactly at nominal
     // zero depth. Keep a camera-level diagnostic separate from raster coverage.
-    {
+    for(bool inline_pose:{false,true}) {
         starfox::assets::Shape shape;shape.header.shift=4;
         shape.vertices={{30,50,5},{30,-50,5},{30,-50,-5},{30,50,-5}};
         starfox::render::RenderPose pose;pose.yaw=16384;pose.pitch=8192;pose.z=512;pose.continuous_geometry=true;
@@ -817,7 +841,8 @@ int main()try {
         SDL_GPUTransferBufferLocation from{r.upload,0};SDL_GPUBufferRegion to{r.input,0,64};SDL_UploadToGPUBuffer(copy,&from,&to,true);
         from.offset=64;to={r.poses,0,sizeof(poses)};SDL_UploadToGPUBuffer(copy,&from,&to,true);SDL_EndGPUCopyPass(copy);
         void* residual_output=nullptr;
-        auto* output=static_cast<SDL_GPUBuffer*>(projection.enqueue_continuous(r.device,cmd,r.input,4,r.poses,6,&residual_output));require(output);require(residual_output);
+        auto* output=static_cast<SDL_GPUBuffer*>(projection.enqueue_continuous(r.device,cmd,r.input,4,inline_pose?nullptr:r.poses,6,&residual_output,false,
+            inline_pose?std::span<const ContinuousTransformPose>(poses):std::span<const ContinuousTransformPose>{}));require(output);require(residual_output);
         copy=SDL_BeginGPUCopyPass(cmd);to={output,0,128};SDL_GPUTransferBufferLocation destination{r.download,0};
         SDL_DownloadFromGPUBuffer(copy,&to,&destination);
         to={static_cast<SDL_GPUBuffer*>(residual_output),0,128};destination.offset=128;
@@ -900,7 +925,14 @@ int main()try {
         SDL_UnmapGPUTransferBuffer(r.device,r.download);
     }
     std::cout<<"GPU vertex motion: direction, scale, reset, near-plane, NaN, overflow and alias checks pass\n";
-    for(unsigned fixture=0;fixture<8;++fixture) {
+    std::array<SDL_GPUBuffer*,5> merge_inputs{};
+    const std::array<Uint32,5> merge_sizes{91*4,91*4,91*16,91*16,91*4};
+    for(unsigned i=0;i<merge_inputs.size();++i) {
+        SDL_GPUBufferCreateInfo info{SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ,merge_sizes[i],0};
+        merge_inputs[i]=SDL_CreateGPUBuffer(r.device,&info);require(merge_inputs[i]);
+        r.extra.push_back(merge_inputs[i]);
+    }
+    for(unsigned fixture=0;fixture<72;++fixture) {
         starfox::render::GpuProjection::MotionSurfaceSettings s;
         s.width=13;s.height=7;s.reset_history=fixture==6;
         s.current_projection[0]=81;s.current_projection[1]=93;
@@ -912,27 +944,101 @@ int main()try {
         if(fixture==4) {s.jitter_x=.375f;s.jitter_y=-.125f;}
         if(fixture==5) s.previous_row2[3]=-200;
         if(fixture==7) s.previous_near=105;
+        if(fixture>=8) {
+            const float angle=float(int(fixture%17)-8)*.043f;
+            s.current_projection[0]=32+float(fixture*13%89);s.current_projection[1]=48+float(fixture*17%103);
+            s.current_projection[2]=float(int(fixture%19)-9)*.375f;s.current_projection[3]=float(int(fixture%13)-6)*.25f;
+            s.previous_projection[0]=50+float(fixture*31%151);s.previous_projection[1]=60+float(fixture*19%137);
+            s.previous_projection[2]=float(int(fixture%23)-11)*.25f;s.previous_projection[3]=float(int(fixture%11)-5)*.375f;
+            s.previous_row0[0]=std::cos(angle);s.previous_row0[2]=std::sin(angle);
+            s.previous_row0[3]=float(int(fixture*7%31)-15)*.125f;
+            s.previous_row1[3]=float(int(fixture*11%29)-14)*.25f;
+            s.previous_row2[0]=-std::sin(angle);s.previous_row2[2]=std::cos(angle);
+            s.previous_row2[3]=float(int(fixture*29%121)-60);
+            s.previous_near=float(fixture%5)*20;
+            s.jitter_x=float(int(fixture%7)-3)*.125f;s.jitter_y=float(int(fixture%9)-4)*.125f;
+            s.reset_history=fixture%7==0;
+        }
         std::array<float,91> depth{};
         for(unsigned i=0;i<depth.size();++i) depth[i]=100.f+float(i)*.25f;
         depth[0]=0;depth[1]=-1;depth[2]=std::numeric_limits<float>::quiet_NaN();
         depth[3]=std::numeric_limits<float>::infinity();
-        auto* mapped=SDL_MapGPUTransferBuffer(r.device,r.upload,true);require(mapped);
-        std::memcpy(mapped,depth.data(),sizeof(depth));SDL_UnmapGPUTransferBuffer(r.device,r.upload);
+        std::array<Uint32,91> front_pixels{},back_pixels{};
+        std::array<std::array<float,4>,91> back_motion{},normals{};
+        std::array<float,91> back_depth{};
+        for(unsigned i=0;i<depth.size();++i) {
+            // Transparent holes, covered black, world sprites, terrain and
+            // surface ownership differ deliberately. Motion follows colour,
+            // not retained surface metadata from a hidden model.
+            front_pixels[i]=(i%5?1U<<26:0U)|(i%3?i+1:0U)|(1U<<8)
+                |(i%2?(1U<<24)|(57U<<16):0U);
+            back_pixels[i]=(1U<<26)|(1U<<24)|(1U<<27)|(2U<<8)|(93U<<16)|42U;
+            back_depth[i]=200.f+i;
+            back_motion[i]={float(i)*.125f,-float(i)*.25f,back_depth[i],float(i%3!=0)};
+            normals[i]={.25f,-.5f,.75f,back_depth[i]};
+        }
+        auto* mapped=static_cast<std::byte*>(SDL_MapGPUTransferBuffer(r.device,r.upload,true));require(mapped);
+        std::memcpy(mapped,depth.data(),sizeof(depth));
+        const std::array<const void*,5> merge_data{front_pixels.data(),back_pixels.data(),back_motion.data(),normals.data(),back_depth.data()};
+        Uint32 offset=sizeof(depth);
+        for(unsigned i=0;i<merge_inputs.size();++i) {std::memcpy(mapped+offset,merge_data[i],merge_sizes[i]);offset+=merge_sizes[i];}
+        SDL_UnmapGPUTransferBuffer(r.device,r.upload);
         auto* cmd=SDL_AcquireGPUCommandBuffer(r.device);require(cmd);
         auto* copy=SDL_BeginGPUCopyPass(cmd);require(copy);
         SDL_GPUTransferBufferLocation from{r.upload,0};SDL_GPUBufferRegion to{r.input,0,sizeof(depth)};
-        SDL_UploadToGPUBuffer(copy,&from,&to,true);SDL_EndGPUCopyPass(copy);
+        SDL_UploadToGPUBuffer(copy,&from,&to,true);
+        offset=sizeof(depth);
+        for(unsigned i=0;i<merge_inputs.size();++i) {
+            from={r.upload,offset};to={merge_inputs[i],0,merge_sizes[i]};
+            SDL_UploadToGPUBuffer(copy,&from,&to,true);offset+=merge_sizes[i];
+        }
+        SDL_EndGPUCopyPass(copy);
         auto* output=static_cast<SDL_GPUBuffer*>(projection.enqueue_motion_surface(r.device,cmd,r.input,s));require(output);
         require(!projection.enqueue_motion_surface(r.device,cmd,output,s));
         auto invalid=s;invalid.current_projection[0]=0;
         require(!projection.enqueue_motion_surface(r.device,cmd,r.input,invalid));
-        invalid=s;invalid.width=4097;require(!projection.enqueue_motion_surface(r.device,cmd,r.input,invalid));
+        invalid=s;invalid.width=8193;require(!projection.enqueue_motion_surface(r.device,cmd,r.input,invalid));
+        using starfox::render::GpuRasterOutput;
+        starfox::render::GpuScene separate_merge,inline_merge;
+        GpuRasterOutput front{r.device,merge_inputs[0],merge_inputs[3],s.width,s.height};
+        front.geometry_depth=r.input;front.motion=output;
+        GpuRasterOutput back{r.device,merge_inputs[1],merge_inputs[3],s.width,s.height};
+        back.geometry_depth=merge_inputs[4];back.motion=merge_inputs[2];
+        const auto separate=separate_merge.enqueue(cmd,front,&back,fixture&2,fixture&1);
+        require(separate.motion && separate.geometry_depth && separate.surfaces);
+        // Reject ambiguous correspondence and invalid inline settings before
+        // allocating or encoding any work.
+        require(!inline_merge.enqueue(cmd,front,&back,false,false,nullptr,0,0,&s).pixels);
+        front.motion=nullptr;
+        require(!inline_merge.enqueue(cmd,front,&back,false,false,nullptr,0,0,&invalid).pixels);
+        invalid=s;invalid.height=8;
+        require(!inline_merge.enqueue(cmd,front,&back,false,false,nullptr,0,0,&invalid).pixels);
+        invalid=s;invalid.previous_row0[0]=std::numeric_limits<float>::quiet_NaN();
+        require(!inline_merge.enqueue(cmd,front,&back,false,false,nullptr,0,0,&invalid).pixels);
+        auto no_depth=front;no_depth.geometry_depth=nullptr;
+        require(!inline_merge.enqueue(cmd,no_depth,&back,false,false,nullptr,0,0,&s).pixels);
+        const auto merged=inline_merge.enqueue(cmd,front,&back,fixture&2,fixture&1,nullptr,0,0,&s);
+        require(merged.motion && merged.geometry_depth && merged.surfaces);
         copy=SDL_BeginGPUCopyPass(cmd);require(copy);
         to={output,0,91*16};SDL_GPUTransferBufferLocation dest{r.download,0};
-        SDL_DownloadFromGPUBuffer(copy,&to,&dest);SDL_EndGPUCopyPass(copy);
+        SDL_DownloadFromGPUBuffer(copy,&to,&dest);
+        offset=91*16;
+        const std::array<Uint32,4> result_sizes{91*4,91*16,91*4,91*16};
+        for(const auto& result:{separate,merged}) {
+            const std::array<void*,4> buffers{result.pixels,result.surfaces,result.geometry_depth,result.motion};
+            for(unsigned i=0;i<buffers.size();++i) {
+                to={static_cast<SDL_GPUBuffer*>(buffers[i]),0,result_sizes[i]};dest={r.download,offset};
+                SDL_DownloadFromGPUBuffer(copy,&to,&dest);offset+=result_sizes[i];
+            }
+        }
+        SDL_EndGPUCopyPass(copy);
         auto* fence=SDL_SubmitGPUCommandBufferAndAcquireFence(cmd);require(fence);
         require(SDL_WaitForGPUFences(r.device,true,&fence,1));SDL_ReleaseGPUFence(r.device,fence);
         const auto* result=static_cast<const float*>(SDL_MapGPUTransferBuffer(r.device,r.download,false));require(result);
+        const auto* bytes=reinterpret_cast<const std::byte*>(result);
+        constexpr unsigned merge_bytes=91*40;
+        if(std::memcmp(bytes+91*16,bytes+91*16+merge_bytes,merge_bytes)!=0)
+            throw std::runtime_error("Inline scene-motion byte mismatch, fixture="+std::to_string(fixture));
         for(unsigned i=0;i<depth.size();++i) {
             const double x=double(i%s.width)+.5-s.jitter_x,y=double(i/s.width)+.5-s.jitter_y;
             const double camera[]{(x-s.current_projection[2])/s.current_projection[0]*depth[i],
@@ -951,7 +1057,112 @@ int main()try {
         }
         SDL_UnmapGPUTransferBuffer(r.device,r.download);
     }
-    std::cout<<"GPU per-pixel motion: 728 perspective, translation, rotation, jitter, invalid-depth and reset samples pass\n";
+    std::cout<<"GPU per-pixel motion: 6552 perspective, translation, rotation, jitter, invalid-depth and reset samples pass\n";
+    std::cout<<"Inline scene motion: 6552 exact motion/depth/surface/colour samples match separate dispatch; transparent holes, covered black, emissive/world sprites and validation guards pass\n";
+    for(unsigned fixture=0;fixture<32;++fixture) {
+        using namespace starfox::render;
+        const unsigned flags=fixture&3;const bool metadata=fixture&4,waves=fixture&8,empty=fixture&16;
+        std::array<RasterCommand,28> spans{};
+        std::array<std::array<float,4>,4> planes{};
+        std::array<std::uint8_t,32> texels{};
+        for(unsigned i=0;i<texels.size();++i) texels[i]=i%5?std::uint8_t(73+i):0;
+        for(unsigned polygon=0;polygon<4;++polygon) {
+            planes[polygon]={0,0,1,float(100+20*polygon)};
+            for(unsigned row=0;row<7;++row) {
+                auto& span=spans[polygon*7+row];
+                span.left=polygon==0?2:polygon==1?5:polygon==2?6:1;
+                span.right=polygon==0?11:polygon==1?6:polygon==2?8:2;
+                span.top=row;span.bottom=row+1;
+                span.even=span.odd=polygon==1?0:polygon==2?73:31;
+                span.tag=polygon==2?1:2;
+                span.has_surface=(polygon+1)*2+(metadata && polygon==0?1:0);
+                span.surface={.25f,-.5f,.75f,float(100+20*polygon)};
+                if(polygon==2) {
+                    span.textured=3;span.u_mask=3;span.v_mask=7;
+                    span.du=256;span.dv=1;span.v=row*256;
+                }
+                if(polygon==3 && waves) {span.reserved1=2;span.du=-3;span.dv=7;}
+                if(empty || (polygon==3 && !waves)) span.right=span.left;
+            }
+        }
+        auto* mapped=static_cast<std::byte*>(SDL_MapGPUTransferBuffer(r.device,r.upload,true));require(mapped);
+        std::memcpy(mapped,spans.data(),sizeof(spans));std::memcpy(mapped+sizeof(spans),planes.data(),sizeof(planes));
+        std::memcpy(mapped+sizeof(spans)+sizeof(planes),texels.data(),sizeof(texels));
+        SDL_UnmapGPUTransferBuffer(r.device,r.upload);
+        auto* cmd=SDL_AcquireGPUCommandBuffer(r.device);require(cmd);
+        auto* copy=SDL_BeginGPUCopyPass(cmd);require(copy);
+        SDL_GPUTransferBufferLocation from{r.upload,0};SDL_GPUBufferRegion to{r.faces,0,sizeof(spans)};
+        SDL_UploadToGPUBuffer(copy,&from,&to,true);
+        from={r.upload,sizeof(spans)};to={r.input,0,sizeof(planes)};SDL_UploadToGPUBuffer(copy,&from,&to,true);
+        from={r.upload,sizeof(spans)+sizeof(planes)};to={merge_inputs[0],0,sizeof(texels)};SDL_UploadToGPUBuffer(copy,&from,&to,true);
+        SDL_EndGPUCopyPass(copy);
+        GpuRaster separate_raster,fused_raster,canonical_raster,inplace_raster;GpuScene separate_merge;
+        GpuGeometryDepthInput geometry{r.input,4,81,93,5.75f,3.125f};
+        GpuRasterOutput back{r.device,merge_inputs[1],merge_inputs[3],13,7};back.geometry_depth=merge_inputs[4];
+        const auto front=separate_raster.enqueue_row_spans(r.device,cmd,r.faces,4,13,7,metadata,merge_inputs[0],true,nullptr,waves,-3,7,sizeof(texels),&geometry);
+        require(front.pixels);
+        const auto separate=separate_merge.enqueue(cmd,front,&back,flags&1,flags&2);
+        const auto fused=fused_raster.enqueue_row_spans(r.device,cmd,r.faces,4,13,7,metadata,merge_inputs[0],true,&back,waves,-3,7,sizeof(texels),&geometry,{},{},flags);
+        require(separate.pixels && fused.pixels && fused.surfaces && fused.geometry_depth);
+        // Normalize an independently initialized backing once, as the scene's
+        // first copying row-span draw does. Invalid hidden normals/packed bits
+        // cannot be silently preserved by an in-place caller.
+        const auto canonical=canonical_raster.enqueue_row_spans(r.device,cmd,nullptr,0,13,7,false,nullptr,true,&back);
+        require(canonical.pixels && canonical.row_span_canonical);
+        const auto inplace=inplace_raster.enqueue_row_spans(r.device,cmd,r.faces,4,13,7,metadata,merge_inputs[0],true,&canonical,waves,-3,7,sizeof(texels),&geometry,{},{},flags,true);
+        require(inplace.pixels==canonical.pixels && inplace.surfaces==canonical.surfaces
+            && inplace.geometry_depth==canonical.geometry_depth && inplace.row_span_canonical);
+        const auto dispatch=inplace_raster.dispatch_info();
+        const bool indirect=!waves && !SDL_getenv("STARFOX_TEST_DISABLE_OCCUPIED_TILES")
+            && !SDL_getenv("STARFOX_TEST_DISABLE_TILED_SPANS") && SDL_getenv("STARFOX_TEST_OCCUPIED_TILES");
+        require(bool(dispatch.arguments)==indirect && bool(dispatch.tiles)==indirect);
+        if(indirect) {
+            require(dispatch.device==r.device && dispatch.tile_capacity==7);
+            copy=SDL_BeginGPUCopyPass(cmd);require(copy);
+            to={static_cast<SDL_GPUBuffer*>(dispatch.arguments),0,16};
+            SDL_GPUTransferBufferLocation destination{r.download,91*96};
+            SDL_DownloadFromGPUBuffer(copy,&to,&destination);
+            to={static_cast<SDL_GPUBuffer*>(dispatch.tiles),0,32};destination.offset+=16;
+            SDL_DownloadFromGPUBuffer(copy,&to,&destination);SDL_EndGPUCopyPass(copy);
+            require(!inplace_raster.enqueue_row_spans(r.device,cmd,dispatch.tiles,4,13,7,false,nullptr,true,&canonical,false,0,0,0,nullptr,{},{},0,true).pixels);
+            require(!inplace_raster.dispatch_info().arguments);
+            require(!inplace_raster.enqueue_row_spans(r.device,cmd,r.faces,4,13,7,false,dispatch.arguments,true,&canonical,false,0,0,0,nullptr,{},{},0,true).pixels);
+        }
+        require(!inplace_raster.enqueue_row_spans(r.device,cmd,canonical.pixels,4,13,7,metadata,merge_inputs[0],true,&canonical,waves,-3,7,sizeof(texels),&geometry,{},{},flags,true).pixels);
+        // Canonical storage belongs to another raster here; nonsparse callers
+        // still get their own immutable output, never an implicit target borrow.
+        const auto untagged=back;
+        const auto fallback=inplace_raster.enqueue_row_spans(r.device,cmd,r.faces,4,13,7,metadata,merge_inputs[0],true,&untagged,waves,-3,7,sizeof(texels),&geometry,{},{},flags,true);
+        require(fallback.pixels && fallback.pixels!=back.pixels);
+        require(!fused_raster.enqueue_row_spans(r.device,cmd,r.faces,4,13,7,metadata,nullptr,true,&back,waves,-3,7,0,&geometry,{},{},4).pixels);
+        copy=SDL_BeginGPUCopyPass(cmd);require(copy);
+        Uint32 offset=0;
+        for(const auto& result:{separate,fused,inplace,fallback}) {
+            const std::array<void*,3> buffers{result.pixels,result.surfaces,result.geometry_depth};
+            const std::array<Uint32,3> sizes{91*4,91*16,91*4};
+            for(unsigned i=0;i<buffers.size();++i) {
+                to={static_cast<SDL_GPUBuffer*>(buffers[i]),0,sizes[i]};SDL_GPUTransferBufferLocation dest{r.download,offset};
+                SDL_DownloadFromGPUBuffer(copy,&to,&dest);offset+=sizes[i];
+            }
+        }
+        SDL_EndGPUCopyPass(copy);
+        auto* fence=SDL_SubmitGPUCommandBufferAndAcquireFence(cmd);require(fence);
+        require(SDL_WaitForGPUFences(r.device,true,&fence,1));SDL_ReleaseGPUFence(r.device,fence);
+        const auto* result=static_cast<const std::byte*>(SDL_MapGPUTransferBuffer(r.device,r.download,false));require(result);
+        const bool exact=std::memcmp(result,result+91*24,91*24)==0
+            && std::memcmp(result,result+91*48,91*24)==0
+            && std::memcmp(result,result+91*72,91*24)==0;
+        if(indirect) {
+            const auto* words=reinterpret_cast<const Uint32*>(result+91*96);
+            const unsigned count=empty?0:7;
+            require(words[0]==std::max(1U,count) && words[1]==1 && words[2]==1 && words[3]==0 && words[4]==count);
+            std::array<bool,7> seen{};
+            for(unsigned i=0;i<count;++i) {require(words[5+i]<7 && !seen[words[5+i]]);seen[words[5+i]]=true;}
+        }
+        SDL_UnmapGPUTransferBuffer(r.device,r.download);
+        if(!exact) throw std::runtime_error("Fused world/emissive raster ownership mismatch, fixture="+std::to_string(fixture));
+    }
+    std::cout<<"Fused/sparse in-place world/emissive raster: 32 exact colour/surface/depth fixtures; holes, black lines, wave rows, empty foreground, noncanonical fallback and alias guards pass\n";
     projection.release_device();
     for(unsigned fractional=0;fractional<2;++fractional) for(unsigned count:{4U,65U,1024U,65536U,65537U}) for(unsigned variant=0;variant<6;++variant) {
         std::vector<NativeProjectionPoint> camera(count);

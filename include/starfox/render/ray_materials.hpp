@@ -4,17 +4,22 @@
 
 namespace starfox::render {
 // One record per ray triangle, in exactly the acceleration structure's order.
-// Keep palette indices, not baked RGB: palette fades must affect reflections.
+// Kind 0 keeps palette indices: palette fades must affect reflections. Native
+// calibrated DXR kind 2 uses packed RGBA in even/odd and a pixel dither scale.
+// Kind 3 uses resident RGBA texels, source UVs/flags and per-layer style words.
+// Other backends must decline this native ABI until supported.
 struct RayMaterial {
     std::array<float,6> uv{};
     std::uint32_t textured{},dither{};
-    std::uint32_t even{},odd{},colour_base{},face{};
-    std::uint32_t offset{},u_mask{},v_mask{},reserved{};
+    std::uint32_t even{},odd{},colour_base{},face{}; // Kind 3: the raster's uint4 layer style.
+    std::uint32_t offset{},u_mask{},v_mask{},reserved{}; // 0 indexed; 2 solid/3 textured native RGBA.
 };
 static_assert(sizeof(RayMaterial)==64);
+enum class RayMaterialEncoding {indexed,native_rgba};
 struct RayMaterials {
     std::vector<RayMaterial> triangles;
     std::vector<std::uint8_t> texels;
+    RayMaterialEncoding encoding{RayMaterialEncoding::indexed};
 };
 // Input must be final shaded materials, not unresolved colour-warp templates.
 // Topology includes offscreen/back-facing triangles and their original face ID.

@@ -4,7 +4,14 @@
 #ifndef STARFOX_CLIP_CAPACITY
 #define STARFOX_CLIP_CAPACITY 128
 #endif
+#ifndef STARFOX_CLIP_SOURCE_CORNERS
+#define STARFOX_CLIP_SOURCE_CORNERS 32
+#endif
 #include "geometry_fp64.hlsli"
+#if defined(STARFOX_CLIP_RADIX16_DIV)
+#include "geometry_fp64_div_radix16.hlsli"
+#define sf_div sf_div_radix16
+#endif
 Sf64 exact_pair(float hi,float lo) {
     return sf_add(sf_from_float_bits(asuint(hi)),sf_from_float_bits(asuint(lo)));
 }
@@ -68,7 +75,7 @@ void main(uint3 id:SV_DispatchThreadID) {
     uint base=id.x*129U;clipped[base]=0;
     uint4 descriptor=polygons[id.x];
     if(descriptor.z>=visibilityCount || descriptor.x>cornerCount
-        || descriptor.y>cornerCount-descriptor.x || descriptor.y>32U) {
+        || descriptor.y>cornerCount-descriptor.x || descriptor.y>STARFOX_CLIP_SOURCE_CORNERS) {
         clipped[base]=asfloat(int4(0,1,0,0));return;
     }
     bool isLine=(descriptor.w&2U)!=0 && descriptor.y==2;
@@ -100,7 +107,14 @@ void main(uint3 id:SV_DispatchThreadID) {
             }
         }
     }
-    float3 camera[32],cameraTail[32];bool behind=false;uint frontCount=0;
+    float3 camera[STARFOX_CLIP_SOURCE_CORNERS],cameraTail[STARFOX_CLIP_SOURCE_CORNERS];bool behind=false;uint frontCount=0;
+#if defined(STARFOX_CLIP_CACHE_RAW_SCREENS)
+    // Reuse the reference's pre-screen arrays, not a narrowed float-pair
+    // reconstruction. The exact depth test also excludes negative values
+    // which round to -0 in the producer's float camera record.
+    Sf64 ax[2*STARFOX_CLIP_SOURCE_CORNERS],ay[2*STARFOX_CLIP_SOURCE_CORNERS];
+    bool cachedRawScreens=residualCount!=0 && !isLine;
+#endif
     for(uint i=0;i<size;++i) {
         uint4 corner=corners[descriptor.x+i];
         if(corner.x>=pointCount) {clipped[base]=asfloat(int4(0,1,0,0));return;}
@@ -123,11 +137,22 @@ void main(uint3 id:SV_DispatchThreadID) {
                     if(!sf_valid(exact)) {clipped[base]=asfloat(int4(0,1,0,0));return;}
                     float2 parts=exact_parts(exact);camera[i][c]=parts.x;cameraTail[i][c]=parts.y;
                 }
+#if defined(STARFOX_CLIP_CACHE_RAW_SCREENS)
+                Sf64 rawDepth=raw_camera(raw,2);
+                cachedRawScreens=cachedRawScreens && (sf_zero(rawDepth) || (rawDepth.hi&0x80000000U)==0);
+#endif
                 for(uint c=0;c<2;++c) {
-                    float2 parts=exact_parts(project_exact(raw_camera(raw,c),raw_camera(raw,2),projectionParams[id.x][c],projectionParams[id.x].z));
+                    Sf64 screen=project_exact(raw_camera(raw,c),raw_camera(raw,2),projectionParams[id.x][c],projectionParams[id.x].z);
+#if defined(STARFOX_CLIP_CACHE_RAW_SCREENS)
+                    if(c==0)ax[i]=screen;else ay[i]=screen;
+#endif
+                    float2 parts=exact_parts(screen);
                     work[i].hi[c]=parts.x;work[i].lo[c]=parts.y;
                 }
             } else {
+#if defined(STARFOX_CLIP_CACHE_RAW_SCREENS)
+            cachedRawScreens=false;
+#endif
             cameraTail[i]=pointResiduals[corner.x].camera.xyz;
             for(uint c=0;c<2;++c) {
                 precise float2 value=sum2(pointResiduals[corner.x].screen[c],pointResiduals[corner.x].screen[c+2]);
@@ -223,10 +248,19 @@ void main(uint3 id:SV_DispatchThreadID) {
     if(!isLine && ((descriptor.w&8U)!=0 || (exactProjection && screenClip))) {
         Sf64 area=sf_make(0,0);
         // Near-plane clipping emits at most two vertices per input corner.
-        // The descriptor is capped at 32 corners, so these pre-screen arrays
-        // need only 64 entries.
-        Sf64 ax[64],ay[64];
+        // These pre-screen arrays need at most twice the source-corner limit.
+#if !defined(STARFOX_CLIP_CACHE_RAW_SCREENS)
+        Sf64 ax[2*STARFOX_CLIP_SOURCE_CORNERS],ay[2*STARFOX_CLIP_SOURCE_CORNERS];
+#endif
         if(rawPolygon) {
+#if defined(STARFOX_CLIP_CACHE_RAW_SCREENS)
+            if(cachedRawScreens && !behind) {
+                // The current/next traversal emits each front source corner
+                // once, in source order. Its identical projection was already
+                // computed above. Retain the reference's validity gate here.
+                [loop] for(uint i=0;i<size;++i) if(!sf_valid(ax[i]) || !sf_valid(ay[i]))return;
+            } else {
+#endif
             uint produced=0;
             [loop] for(uint i=0;i<descriptor.y;++i) {
                 Point a=pointResiduals[corners[descriptor.x+i].x];
@@ -251,6 +285,9 @@ void main(uint3 id:SV_DispatchThreadID) {
                 }
             }
             if(produced!=size) {clipped[base]=asfloat(int4(0,1,0,0));return;}
+#if defined(STARFOX_CLIP_CACHE_RAW_SCREENS)
+            }
+#endif
         } else for(uint i=0;i<size;++i) {
             ax[i]=exact_pair(work[i].hi.x,work[i].lo.x);
             ay[i]=exact_pair(work[i].hi.y,work[i].lo.y);
@@ -278,6 +315,38 @@ void main(uint3 id:SV_DispatchThreadID) {
         }
         if((descriptor.w&8U)!=0 && (!sf_valid(area) || sf_zero(area) || (area.hi&0x80000000U)==0))return;
         if(rawPolygon || (exactProjection && screenClip)) {
+#if defined(STARFOX_CLIP_INTERIOR_OUTPUT)
+            // Only bypass the identity copies of the exact polygon path. Test
+            // authoritative binary64 X/Y with the reference's half-open planes,
+            // not narrowed producer pixels or the compensated screenClip flag.
+            // Near-plane polygons keep the reference path and ordering.
+            bool interior=!behind;
+            [loop] for(uint i=0;i<size && interior;++i)
+                interior=sf_valid(ax[i]) && sf_valid(ay[i])
+                    && exact_inside(ax[i],0,false) && exact_inside(ax[i],float(width),true)
+                    && exact_inside(ay[i],0,false) && exact_inside(ay[i],float(height),true);
+            if(interior) {
+                [loop] for(uint i=0;i<size;++i) {
+                    float4 value=0;
+                    [loop] for(uint c=0;c<4;++c) {
+                        Sf64 coordinate;
+                        if(c==0)coordinate=ax[i];
+                        else if(c==1)coordinate=ay[i];
+                        else coordinate=exact_pair(work[i].hi[c],work[i].lo[c]);
+                        if(!sf_valid(coordinate))return;
+                        float2 parts=exact_parts(coordinate);value[c]=parts.x;
+                        // Preserve the reference's raster-boundary side even
+                        // when its low part is too small for float addition.
+                        if(c<2 && parts.y!=0 && parts.x!=0 && frac(parts.x*8)==0) {
+                            uint raw=asuint(parts.x);bool increase=(parts.y>0)==(parts.x>0);
+                            value[c]=asfloat(increase?raw+1:raw-1);
+                        }
+                    }
+                    clipped[base+i+1]=value;
+                }
+                clipped[base]=asfloat(int4(size,0,0,0));return;
+            }
+#endif
             ExactVertex vertices64[STARFOX_CLIP_CAPACITY],scratch64[STARFOX_CLIP_CAPACITY];
             [loop] for(uint i=0;i<size;++i) {
                 vertices64[i].v[0]=ax[i];vertices64[i].v[1]=ay[i];
@@ -287,6 +356,17 @@ void main(uint3 id:SV_DispatchThreadID) {
             [loop] for(uint plane=0;plane<4 && size>0;++plane) {
                 uint axis=plane/2;bool upper=(plane&1U)!=0;
                 float boundary=upper?float(axis==0?width:height):0.f;
+#if defined(STARFOX_CLIP_IDENTITY_PLANES)
+                // Use the very same half-open, software-binary64 predicate.
+                // If every vertex is inside, the reference copies them to
+                // scratch and back unchanged, in the same order. Skip only
+                // those copies; mixed/edge/near/invalid cases keep that path.
+                bool identity=true;
+                [loop] for(uint i=0;i<size;++i) {
+                    if(!exact_inside(vertices64[i].v[axis],boundary,upper)) {identity=false;break;}
+                }
+                if(identity)continue;
+#endif
                 uint nextSize=0;ExactVertex previous=vertices64[size-1];
                 bool previousInside=exact_inside(previous.v[axis],boundary,upper);
                 [loop] for(uint i=0;i<size;++i) {
@@ -419,6 +499,13 @@ void main(uint3 id:SV_DispatchThreadID) {
         uint axis=plane<2?0:1;
         float boundary=(plane&1U)==0?0.0:float(axis==0?width:height);
         bool keepLess=(plane&1U)!=0;
+#if defined(STARFOX_CLIP_IDENTITY_PLANES)
+        bool identity=true;
+        for(uint i=0;i<size;++i) {
+            if(!inside(work[i],axis,boundary,keepLess)) {identity=false;break;}
+        }
+        if(identity)continue;
+#endif
         uint nextSize=0;Accurate previous=work[size-1];
         bool previousInside=inside(previous,axis,boundary,keepLess);
         for(uint i=0;i<size;++i) {

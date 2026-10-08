@@ -48,7 +48,8 @@ inline constexpr std::array enhanced_backdrop_assets{
     EnhancedBackdropAsset{"assets/enhanced-backdrops/face-moon-v1.bmp"},
     EnhancedBackdropAsset{"assets/enhanced-backdrops/deep-space-v1.bmp"},
     EnhancedBackdropAsset{"assets/enhanced-backdrops/orbital-ocean-surface-v1.bmp"},
-    EnhancedBackdropAsset{"assets/enhanced-backdrops/orbital-lava-surface-v1.bmp"}};
+    EnhancedBackdropAsset{"assets/enhanced-backdrops/orbital-lava-surface-v1.bmp"},
+    EnhancedBackdropAsset{"assets/enhanced-backdrops/kazaru-volcanic-hills-v1.bmp"}};
 
 // One owner/thread per rendering session; returned image addresses stay stable.
 class EnhancedBackdropLibrary {

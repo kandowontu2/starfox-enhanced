@@ -116,6 +116,10 @@ public:
 
     [[nodiscard]] std::uint8_t read8(std::uint32_t address) const;
     [[nodiscard]] std::uint16_t read16(std::uint32_t address) const;
+    // Literal sequential bus transfers for adapter records, including address
+    // wrap, I/O callbacks and open-bus effects. These are not presentation peeks.
+    void read_bytes(std::uint32_t address, std::span<std::uint8_t> output) const;
+    void write_bytes(std::uint32_t address, std::span<const std::uint8_t> input);
     // Presentation/debug RAM reads never touch open bus or I/O latches.
     // Unsupported/ROM/I/O addresses return nullopt rather than reading them.
     [[nodiscard]] std::optional<std::uint8_t> peek_ram8(std::uint32_t address) const noexcept;

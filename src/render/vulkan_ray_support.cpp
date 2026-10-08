@@ -1,6 +1,6 @@
 #include "starfox/render/vulkan_ray_support.hpp"
 
-#if defined(STARFOX_SDL_GPU_EFFECTS) && defined(__linux__)
+#if defined(STARFOX_SDL_GPU_EFFECTS) && (defined(__linux__) || defined(STARFOX_NATIVE_VULKAN_OWNER_PROBE))
 #define VK_NO_PROTOTYPES
 #include <vulkan/vulkan.h>
 #include "starfox/render/sdl_vulkan_bridge.h"
@@ -11,7 +11,7 @@
 namespace starfox::render::shadows {
 
 bool request_vulkan_ray_query(std::uint32_t properties) {
-#if defined(STARFOX_SDL_GPU_EFFECTS) && defined(__linux__)
+#if defined(STARFOX_SDL_GPU_EFFECTS) && (defined(__linux__) || defined(STARFOX_NATIVE_VULKAN_OWNER_PROBE))
     static VkPhysicalDeviceVulkan12Features core=[] {
         VkPhysicalDeviceVulkan12Features value{};
         value.sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
@@ -49,7 +49,7 @@ bool request_vulkan_ray_query(std::uint32_t properties) {
 }
 
 VulkanRaySupport query_vulkan_ray_query(void* raw) {
-#if defined(STARFOX_SDL_GPU_EFFECTS) && defined(__linux__)
+#if defined(STARFOX_SDL_GPU_EFFECTS) && (defined(__linux__) || defined(STARFOX_NATIVE_VULKAN_OWNER_PROBE))
     auto* device=static_cast<SDL_GPUDevice*>(raw);
     if(!device || !SDL_GetGPUDeviceDriver(device)
         || std::strcmp(SDL_GetGPUDeviceDriver(device),"vulkan")!=0)

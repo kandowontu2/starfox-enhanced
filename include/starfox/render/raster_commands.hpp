@@ -26,9 +26,13 @@ struct RasterCommand {
     // textured=4 is SNES OBJ 4bpp: texture_offset points to a 64 KiB VRAM
     // snapshot, u/v are unclipped stored origins, du is draw scale, dv size,
     // reserved0 is the base byte address, reserved1 bits 0/1 are X/Y flips.
+    // Bit 2 marks a verified complete retail reticle group for stereo placement;
+    // rasterizers ignore that metadata and preserve normal palette/coverage.
     // textured=5 composites indexed layers: u/v logical offsets, du/dv source/
     // destination scale, u_mask/v_mask stored source extents, even/odd mosaic
     // origins, reserved0 mosaic step; dither enables per-pixel tags at reserved1.
+    // colour_base, when nonzero, is one plus the byte offset of little-endian
+    // uint16 material pairs (bit 8 valid, low byte alternate palette index).
     // textured=6 decodes 24 font bytes (12 little-endian 16-bit rows): u/v
     // unclipped stored origin, du draw scale, dv output glyph height.
     // textured=7 decodes 8 bitmap-font row bytes: same origin/scale, dv square
@@ -65,9 +69,9 @@ public:
         const auto tiles=(width_+63)/64;
         rows.assign(std::size_t(height_)*tiles+1,0);
         const auto visit=[&](const RasterCommand& c,const auto& action) {
-            const auto first=unsigned(std::max(0,c.left))/64;
-            const auto last=(unsigned(std::min(int(width_),c.right))+63)/64;
-            for(int y=std::max(0,c.top);y<std::min(int(height_),c.bottom);++y)
+            const auto first=unsigned(std::max<std::int32_t>(0,c.left))/64;
+            const auto last=(unsigned(std::min<std::int32_t>(width_,c.right))+63)/64;
+            for(int y=std::max<std::int32_t>(0,c.top);y<std::min<std::int32_t>(height_,c.bottom);++y)
                 for(unsigned tile=first;tile<last;++tile) action(unsigned(y)*tiles+tile);
         };
         for(const auto& c:commands) visit(c,[&](unsigned row){++rows[row+1];});

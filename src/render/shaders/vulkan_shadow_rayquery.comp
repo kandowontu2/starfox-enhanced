@@ -1,5 +1,6 @@
 #version 460
 #extension GL_EXT_ray_query : require
+#extension GL_GOOGLE_include_directive : require
 
 layout(local_size_x = 64) in;
 layout(set = 0, binding = 0) uniform accelerationStructureEXT scene;
@@ -9,14 +10,38 @@ layout(set = 0, binding = 2, std140) uniform Parameters {
     vec4 center_ground;
     vec4 ground_point;
     vec4 ground_normal;
-    vec4 lights[8];
+    vec4 lights[16];
+    uvec4 coverage; // Triangle count, indexed texel bytes, encoding (0 opaque/1 indexed/2 native), native payload bytes.
+    vec4 primary_range; // Near/far +Z camera depths; Z enables explicit clipping.
 } p;
+struct RayMaterial {
+    vec2 uv0,uv1,uv2;
+    uint textured,dither,even_colour,odd_colour,colour_base,face;
+    uint offset,u_mask,v_mask,reserved;
+};
+// Native kind-3 texture/palette words follow the same 64-byte records in this
+// buffer. Offsets are byte-relative to its start, not a separate texel atlas.
+layout(set=0,binding=3,std430) readonly buffer Materials {uint word[];} materials;
+layout(set=0,binding=4,std430) readonly buffer Texels {uint word[];} texels;
+#include "vulkan_indexed_materials.glsl"
+#include "vulkan_native_materials.glsl"
 
-float closest_hit(vec3 origin, vec3 direction, float minimum, float maximum) {
+bool material_visible(uint primitive,vec2 barycentric,uvec2 pixel) {
+    if(primitive>=p.coverage.x || p.coverage.x>0x03ffffffu) return false;
+    if(p.coverage.z==2u)return native_material_sample(primitive,barycentric,pixel,p.coverage.x,p.coverage.w,true)!=0u;
+    if(p.coverage.z!=1u || p.coverage.x*16u>uint(materials.word.length()))return false;
+    return indexed_source_index(load_ray_material(primitive),barycentric,pixel,p.coverage.y)<256u;
+}
+
+float closest_hit(vec3 origin, vec3 direction, float minimum, float maximum,uvec2 pixel) {
     rayQueryEXT ray;
-    rayQueryInitializeEXT(ray, scene, gl_RayFlagsOpaqueEXT,
+    rayQueryInitializeEXT(ray, scene,p.coverage.z!=0u?gl_RayFlagsNoOpaqueEXT:gl_RayFlagsOpaqueEXT,
                           0xff, origin, minimum, direction, maximum);
-    while (rayQueryProceedEXT(ray)) {}
+    while (rayQueryProceedEXT(ray)) {
+        if(p.coverage.z!=0u && rayQueryGetIntersectionTypeEXT(ray,false)==gl_RayQueryCandidateIntersectionTriangleEXT
+            && material_visible(rayQueryGetIntersectionPrimitiveIndexEXT(ray,false),rayQueryGetIntersectionBarycentricsEXT(ray,false),pixel))
+            rayQueryConfirmIntersectionEXT(ray);
+    }
     return rayQueryGetIntersectionTypeEXT(ray, true)
         == gl_RayQueryCommittedIntersectionTriangleEXT
         ? rayQueryGetIntersectionTEXT(ray, true) : maximum;
@@ -31,29 +56,37 @@ void main() {
     uint y = id / width;
     vec3 direction = vec3((float(x) + 0.5 - p.center_ground.x) / p.extent_focal.z,
                           (float(y) + 0.5 - p.center_ground.y) / p.extent_focal.w, 1.0);
-    float receiver = closest_hit(vec3(0.0), direction, 1.0, 65536.0);
+    // Revealed ground ignores model primary hits, retaining all secondary casters.
+    float near_depth=p.primary_range.z>0.5?p.primary_range.x:1.0;
+    float far_depth=p.primary_range.z>0.5?p.primary_range.y:65536.0;
+    float receiver = p.center_ground.w > 0.5 ? far_depth
+        : closest_hit(vec3(0.0), direction, near_depth, far_depth,uvec2(x,y));
     if (p.center_ground.z > 0.5) {
         float denominator = dot(direction, p.ground_normal.xyz);
         if (abs(denominator) > 1.0e-10) {
             float ground = dot(p.ground_point.xyz, p.ground_normal.xyz) / denominator;
-            if (ground > 1.0 && ground < receiver) receiver = ground;
+            if (ground > near_depth && ground < receiver) receiver = ground;
         }
     }
-    if (receiver >= 65536.0) {
+    if (receiver >= far_depth) {
         output_mask.shade[id] = 0;
         return;
     }
     vec3 point = direction * receiver;
     float bias = max(0.1, receiver * 1.0e-5);
     uint blocked = 0;
-    for (uint sample_index = 0; sample_index < 8; ++sample_index) {
+    for (uint sample_index = 0; sample_index < uint(p.lights[0].w); ++sample_index) {
         rayQueryEXT shadow;
         rayQueryInitializeEXT(shadow, scene,
-            gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT,
+            (p.coverage.z!=0u?gl_RayFlagsNoOpaqueEXT:gl_RayFlagsOpaqueEXT) | gl_RayFlagsTerminateOnFirstHitEXT,
             0xff, point, bias, p.lights[sample_index].xyz, 65536.0);
-        while (rayQueryProceedEXT(shadow)) {}
+        while (rayQueryProceedEXT(shadow)) {
+            if(p.coverage.z!=0u && rayQueryGetIntersectionTypeEXT(shadow,false)==gl_RayQueryCandidateIntersectionTriangleEXT
+                && material_visible(rayQueryGetIntersectionPrimitiveIndexEXT(shadow,false),rayQueryGetIntersectionBarycentricsEXT(shadow,false),uvec2(x,y)))
+                rayQueryConfirmIntersectionEXT(shadow);
+        }
         blocked += uint(rayQueryGetIntersectionTypeEXT(shadow, true)
             != gl_RayQueryCommittedIntersectionNoneEXT);
     }
-    output_mask.shade[id] = 160u * blocked / 8u;
+    output_mask.shade[id] = 160u * blocked / uint(p.lights[0].w);
 }

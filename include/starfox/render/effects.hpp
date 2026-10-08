@@ -7,14 +7,21 @@
 #include <cstdlib>
 #include <vector>
 #include <string_view>
+#include <cmath>
 
 namespace starfox::render {
+using std::sin;using std::floor;using std::sqrt;using std::atan2;using std::exp;using std::abs;
+#define FX_MIN std::min
+#define FX_MAX std::max
+#include "starfox/render/special_fx.inc"
+#undef FX_MIN
+#undef FX_MAX
 
 // Apply presentation styles to world pixels, keeping the HUD and menus intact.
 inline void apply_effect(Effect model_effect, const Framebuffer& frame,
     std::vector<std::uint8_t>& rgba, std::vector<std::uint8_t>& scratch,
     std::uint8_t model_intensity = 100U, Effect world_effect = Effect::off,
-    std::uint8_t world_intensity = 100U) {
+    std::uint8_t world_intensity = 100U, float seconds = 0.f) {
     model_intensity = std::min<std::uint8_t>(model_intensity, 100U);
     world_intensity = std::min<std::uint8_t>(world_intensity, 100U);
     if (((model_effect == Effect::off || model_intensity == 0U)
@@ -43,6 +50,27 @@ inline void apply_effect(Effect model_effect, const Framebuffer& frame,
             // These materials are shaded by actual scene rays, never faked by
             // the colour-only fallback when ray tracing is unavailable/off.
             if (effect == Effect::off || effect==Effect::crosshatch || reflective_material(effect) || intensity == 0U) continue;
+            if(effect>=Effect::energy_shield && effect<=Effect::gravitational_lens) {
+                const auto right=std::min(x+step,width-1),down=std::min(y+step,height-1);
+                const float edge=(frame.layer_tags()[i]!=frame.layer_tags()[std::size_t(y)*width+right]
+                    || frame.layer_tags()[i]!=frame.layer_tags()[std::size_t(down)*width+x]
+                    || std::abs(luma(i)-luma(std::size_t(y)*width+right))>28)?1.f:0.f;
+                const auto fx=special_fx_sample(unsigned(effect),float(x)/step,float(y)/step,float(width)/(2*step),float(height)/(2*step),seconds,edge);
+                const float sx=std::clamp(x+fx.dx*step,0.f,float(width-1)),sy=std::clamp(y+fx.dy*step,0.f,float(height-1));
+                const unsigned ax=unsigned(sx),ay=unsigned(sy);const float tx=sx-ax,ty=sy-ay;
+                const std::array<float,3> glow{fx.r,fx.g,fx.b};
+                for(unsigned channel=0;channel<3;++channel) {
+                    float sample=0;
+                    for(unsigned dy=0;dy<2;++dy) for(unsigned dx=0;dx<2;++dx) {
+                        auto n=std::size_t(std::min(ay+dy,height-1))*width+std::min(ax+dx,width-1);
+                        if(frame.layer_tags()[n]==std::uint8_t(PixelLayer::two_d) || is_world(frame.layer_tags()[n])!=background) n=i;
+                        sample+=scratch[n*4+channel]*(dx?tx:1-tx)*(dy?ty:1-ty);
+                    }
+                    const unsigned value=unsigned(std::lround(std::clamp(sample*fx.keep+255.f*glow[channel]*fx.gain,0.f,255.f)));
+                    rgba[i*4+channel]=std::uint8_t((scratch[i*4+channel]*(100-intensity)+value*intensity+50)/100);
+                }
+                continue;
+            }
             if(spatial_manipulation(effect)) {
                 const auto sample=[&](int sx,int sy,unsigned channel) {
                     sx=std::clamp(sx,0,int(width)-1);sy=std::clamp(sy,0,int(height)-1);

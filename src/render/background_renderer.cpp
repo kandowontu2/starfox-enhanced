@@ -1,4 +1,5 @@
 #include "starfox/render/background_renderer.hpp"
+#include "tilemap_coordinates.hpp"
 
 #include <algorithm>
 #include <array>
@@ -9,6 +10,8 @@
 
 namespace starfox::render {
 namespace {
+
+using detail::wrap_tilemap_coordinate;
 
 std::uint16_t vram_word(
     const simulation::SnesPpuState& ppu, std::uint32_t word_address) noexcept {
@@ -126,6 +129,66 @@ std::int32_t mosaic_coordinate(
     return coordinate - remainder;
 }
 
+template<unsigned bits>
+std::array<std::uint8_t, 16> decoded_tile_row(
+    const simulation::SnesPpuState& ppu, std::uint16_t character_base,
+    std::uint16_t tile, std::int32_t source_y, bool large) noexcept {
+    std::array<std::uint8_t, 16> result{};
+    const unsigned edge = large ? 16U : 8U;
+    const unsigned palette = bits == 8U ? 0U : ((tile >> 10U) & 7U) * (1U << bits);
+    for (unsigned column = 0; column < edge; column += 8U) {
+        const auto sample = tile_sample(tile, int(column), source_y, large);
+        const unsigned y = sample.tile & 0x8000U ? 7U - sample.y : sample.y;
+        const unsigned base = (unsigned(character_base) * 2U
+            + unsigned(sample.tile & 1023U) * bits * 8U + y * 2U) & 65535U;
+        std::array<std::uint8_t, bits> planes{};
+        for (unsigned plane = 0; plane < bits; ++plane)
+            planes[plane] = ppu.vram[(base + (plane / 2U) * 16U + (plane & 1U)) & 65535U];
+        for (unsigned x = 0; x < 8; ++x) {
+            const unsigned mask = tile & 0x4000U ? 1U << x : 128U >> x;
+            unsigned ink = unsigned((planes[0] & mask) != 0U)
+                | (unsigned((planes[1] & mask) != 0U) << 1U);
+            if constexpr (bits >= 4U) ink |= (unsigned((planes[2] & mask) != 0U) << 2U)
+                | (unsigned((planes[3] & mask) != 0U) << 3U);
+            if constexpr (bits == 8U) ink |= (unsigned((planes[4] & mask) != 0U) << 4U)
+                | (unsigned((planes[5] & mask) != 0U) << 5U)
+                | (unsigned((planes[6] & mask) != 0U) << 6U)
+                | (unsigned((planes[7] & mask) != 0U) << 7U);
+            result[column + x] = ink ? std::uint8_t(palette + ink) : 0;
+        }
+    }
+    return result;
+}
+
+// Ordinary rows keep one tilemap word, priority, palette and set of bitplanes
+// for all 8/16 texels. Mosaic, unique artwork, rolled offsets and tunnel edge
+// clamping retain their existing coordinate-aware path below.
+template<unsigned bits>
+void draw_tile_scanline(const simulation::SnesPpuState& ppu, Framebuffer& target,
+    TilePriorityPass priority, std::uint16_t screen_base, std::uint16_t character_base,
+    unsigned pages_wide, bool large, int width_pixels, int source_y, int scroll_x,
+    int origin, unsigned first_x, unsigned final_x, unsigned screen_y,
+    bool transparent_black = false) noexcept {
+    const unsigned shift = large ? 4U : 3U, edge = 1U << shift;
+    const unsigned tile_y = unsigned(source_y) >> shift;
+    for (unsigned x = first_x; x < final_x;) {
+        const auto source_x = wrap_tilemap_coordinate(int(x) - origin + scroll_x, width_pixels);
+        const unsigned tile_x = unsigned(source_x) >> shift;
+        const unsigned entry = ((tile_x >> 5U) + (tile_y >> 5U) * pages_wide) * 1024U
+            + (tile_y & 31U) * 32U + (tile_x & 31U);
+        const unsigned inset = unsigned(source_x) & (edge - 1U);
+        const unsigned count = std::min(edge - inset, final_x - x);
+        const auto tile = vram_word(ppu, unsigned(screen_base) + entry);
+        if (selected_priority(tile, priority)) {
+            auto row = decoded_tile_row<bits>(ppu, character_base, tile, source_y, large);
+            if (transparent_black) for (auto& ink : row)
+                if ((ppu.cgram[ink] & 32767U) == 0U) ink = 0;
+            target.set_indexed_row(int(x), int(screen_y), std::span(row).subspan(inset, count));
+        }
+        x += count;
+    }
+}
+
 } // namespace
 
 std::uint8_t tunnel_border_index(const simulation::SnesPpuState& ppu,
@@ -174,25 +237,22 @@ void BackgroundRenderer::draw_bg1(
     const auto width_tiles = (ppu.bg1_screen_size & 1U) != 0U ? 64U : 32U;
     const auto height_tiles = (ppu.bg1_screen_size & 2U) != 0U ? 64U : 32U;
     const auto pages_wide = width_tiles / 32U;
-    const auto tile_edge = ppu.bg1_tile_size_16 ? 16U : 8U;
+    const auto tile_shift = ppu.bg1_tile_size_16 ? 4U : 3U;
+    const auto tile_edge = 1U << tile_shift;
     const auto width_pixels = static_cast<std::int32_t>(width_tiles * tile_edge);
     const auto height_pixels = static_cast<std::int32_t>(height_tiles * tile_edge);
-    const auto wrap = [](std::int32_t value, std::int32_t modulus) {
-        value %= modulus;
-        return value < 0 ? value + modulus : value;
-    };
     const auto outline_sample=[&](int x,int y) {
         if(y<0 || y>=int(target.height()) || x+horizontal_origin<0
             || x+horizontal_origin>=int(target.width())) return false;
         if(!extend_horizontal) {
-            const int inset=int(std::min(horizontal_inset,128U));
+            const int inset=int(std::min<std::uint32_t>(horizontal_inset,128U));
             const int step=mosaic_staging_inset && (ppu.mosaic&1U)?(ppu.mosaic>>4U)+1:1;
             if(x<((inset+step-1)/step)*step
                 || x>=std::min(256,((256-inset+step-1)/step)*step)) return false;
         }
-        x=wrap(mosaic_coordinate(x,ppu.mosaic,1)+ppu.bg1_scroll_x,width_pixels);
-        y=wrap(mosaic_coordinate(y,ppu.mosaic,1)+ppu.bg1_scroll_y,height_pixels);
-        const unsigned tx=unsigned(x)/tile_edge,ty=unsigned(y)/tile_edge;
+        x=wrap_tilemap_coordinate(mosaic_coordinate(x,ppu.mosaic,1)+ppu.bg1_scroll_x,width_pixels);
+        y=wrap_tilemap_coordinate(mosaic_coordinate(y,ppu.mosaic,1)+ppu.bg1_scroll_y,height_pixels);
+        const unsigned tx=unsigned(x)>>tile_shift,ty=unsigned(y)>>tile_shift;
         const auto tile=vram_word(ppu,ppu.bg1_screen_base
             +((tx>>5)+(ty>>5)*pages_wide)*1024+(ty&31)*32+(tx&31));
         if(!selected_priority(tile,priority)) return false;
@@ -206,20 +266,37 @@ void BackgroundRenderer::draw_bg1(
     for (std::uint32_t screen_y = 0; screen_y < target.height(); ++screen_y) {
         const auto sample_y = mosaic_coordinate(
             static_cast<std::int32_t>(screen_y), ppu.mosaic, 0x01U);
-        const auto source_y = wrap(sample_y
+        const auto source_y = wrap_tilemap_coordinate(sample_y
             + ppu.bg1_scroll_y, height_pixels);
-        const auto tile_y = static_cast<std::uint32_t>(source_y) / tile_edge;
+        const auto tile_y = static_cast<std::uint32_t>(source_y) >> tile_shift;
         const auto inset = static_cast<std::int32_t>(
-            std::min(horizontal_inset, 128U));
+            std::min<std::uint32_t>(horizontal_inset, 128U));
         const int step=mosaic_staging_inset && (ppu.mosaic&1U)?(ppu.mosaic>>4U)+1:1;
         const int left_inset=((inset+step-1)/step)*step;
-        const int right_limit=std::min(256,((256-inset+step-1)/step)*step);
+        const int right_limit=int(std::min<std::int32_t>(256,((256-inset+step-1)/step)*step));
         const auto first_x = extend_horizontal ? 0U
-            : static_cast<std::uint32_t>(std::max(
+            : static_cast<std::uint32_t>(std::max<std::int32_t>(
                 horizontal_origin + left_inset, 0));
         const auto final_x = extend_horizontal ? target.width()
             : std::min(target.width(), static_cast<std::uint32_t>(
-                std::max(horizontal_origin + right_limit, 0)));
+                std::max<std::int32_t>(horizontal_origin + right_limit, 0)));
+        if (!text_outline && (ppu.mosaic & 1U) == 0U) {
+            auto first = first_x, final = final_x;
+            if (ppu.tunnel_scene && extend_horizontal && priority == TilePriorityPass::high) {
+                first = std::max(first, static_cast<std::uint32_t>(
+                    std::max<std::int32_t>(horizontal_origin, 0)));
+                final = std::min(final, static_cast<std::uint32_t>(
+                    std::max<std::int32_t>(horizontal_origin + 256, 0)));
+            }
+            if (ppu.background_mode == 3U)
+                draw_tile_scanline<8>(ppu, target, priority, ppu.bg1_screen_base, ppu.bg1_character_base,
+                    pages_wide, ppu.bg1_tile_size_16, width_pixels, source_y, ppu.bg1_scroll_x,
+                    horizontal_origin, first, final, screen_y, transparent_cgram_black);
+            else draw_tile_scanline<4>(ppu, target, priority, ppu.bg1_screen_base, ppu.bg1_character_base,
+                pages_wide, ppu.bg1_tile_size_16, width_pixels, source_y, ppu.bg1_scroll_x,
+                horizontal_origin, first, final, screen_y, transparent_cgram_black);
+            continue;
+        }
         for (auto screen_x = first_x; screen_x < final_x; ++screen_x) {
             const auto logical_x = static_cast<std::int32_t>(screen_x)
                 - horizontal_origin;
@@ -227,9 +304,9 @@ void BackgroundRenderer::draw_bg1(
                 && (logical_x<0 || logical_x>=256)) continue;
             const auto sample_x = mosaic_coordinate(
                 logical_x, ppu.mosaic, 0x01U);
-            const auto source_x = wrap(sample_x
+            const auto source_x = wrap_tilemap_coordinate(sample_x
                 + ppu.bg1_scroll_x, width_pixels);
-            const auto tile_x = static_cast<std::uint32_t>(source_x) / tile_edge;
+            const auto tile_x = static_cast<std::uint32_t>(source_x) >> tile_shift;
             const auto page = (tile_x >> 5U) + (tile_y >> 5U) * pages_wide;
             const auto entry = page * 0x400U
                 + (tile_y & 31U) * 32U + (tile_x & 31U);
@@ -293,13 +370,10 @@ void BackgroundRenderer::draw_bg2(
     const auto width_tiles = (ppu.bg2_screen_size & 1U) != 0U ? 64U : 32U;
     const auto height_tiles = (ppu.bg2_screen_size & 2U) != 0U ? 64U : 32U;
     const auto pages_wide = width_tiles / 32U;
-    const auto tile_edge = ppu.bg2_tile_size_16 ? 16U : 8U;
+    const auto tile_shift = ppu.bg2_tile_size_16 ? 4U : 3U;
+    const auto tile_edge = 1U << tile_shift;
     const auto width_pixels = static_cast<std::int32_t>(width_tiles * tile_edge);
     const auto height_pixels = static_cast<std::int32_t>(height_tiles * tile_edge);
-    const auto wrap = [](std::int32_t value, std::int32_t modulus) {
-        value %= modulus;
-        return value < 0 ? value + modulus : value;
-    };
     auto black_colour = std::uint8_t{};
     auto darkest = std::numeric_limits<unsigned>::max();
     for (std::size_t index = 0U; index < ppu.cgram.size(); ++index) {
@@ -422,7 +496,7 @@ void BackgroundRenderer::draw_bg2(
             // continues through column zero without duplicating its phase.
             // Preserve the cartridge-width guard exactly in 4:3.
             const auto distance = expanded_mode2
-                ? visible_column - 1 : std::min(visible_column + 1, 0);
+                ? visible_column - 1 : std::min<std::int32_t>(visible_column + 1, 0);
             return wrap_offset(extend_slope(vertical_value(0), distance));
         }
         if (visible_column > 32 && vertical_valid(31)) {
@@ -434,10 +508,78 @@ void BackgroundRenderer::draw_bg2(
 
     const auto extend_ground_down = expanded_mode2 && target.height() > 192U;
     const auto first_x = extend_horizontal ? 0U
-        : static_cast<std::uint32_t>(std::max(horizontal_origin, 0));
+        : static_cast<std::uint32_t>(std::max<std::int32_t>(horizontal_origin, 0));
     const auto final_x = extend_horizontal ? target.width()
         : std::min(target.width(), static_cast<std::uint32_t>(
-            std::max(horizontal_origin + 256, 0)));
+            std::max<std::int32_t>(horizontal_origin + 256, 0)));
+    if (first_x >= final_x) return;
+    if (ppu.tunnel_scene && extend_horizontal && wrap_horizontal
+        && !target.command_buffer() && (ppu.mosaic & 2U) == 0U
+        && !(ppu.background_mode == 2U && ppu.bg2_vertical_offsets_enabled)
+        && unique_regions.empty() && !single_occurrence_top_rows
+        && !ending_star_extension && !game_over_star_extension) {
+        // The source-aware fallback clamps the low/all pass's margins to
+        // logical x=0/255, over an opaque wall. Decode each native tile row
+        // once and write each repeated edge once. High-priority margins stay
+        // untouched; low priority deliberately includes the full tunnel.
+        const auto native_first = unsigned(std::clamp<std::int64_t>(
+            horizontal_origin, first_x, final_x));
+        const auto native_last = unsigned(std::clamp<std::int64_t>(
+            std::int64_t(horizontal_origin) + 256, native_first, final_x));
+        for (unsigned y = 0; y < target.height(); ++y) {
+            const int row_x = ppu.bg2_horizontal_offsets_enabled && y < ppu.bg2_horizontal_offsets.size()
+                ? ppu.bg2_horizontal_offsets[y] : scroll_x;
+            const int row_y = ppu.bg2_scanline_scroll_enabled
+                ? ppu.bg2_scanline_scroll_y[std::min(y, 223U)] : scroll_y;
+            const auto source_y = wrap_tilemap_coordinate(int(y) + row_y, height_pixels);
+            const auto edge_colour = [&](int logical_x) {
+                const auto source_x = wrap_tilemap_coordinate(logical_x + row_x, width_pixels);
+                const unsigned tile_x = unsigned(source_x) >> tile_shift;
+                const unsigned tile_y = unsigned(source_y) >> tile_shift;
+                const unsigned entry = ((tile_x >> 5U) + (tile_y >> 5U) * pages_wide) * 1024U
+                    + (tile_y & 31U) * 32U + (tile_x & 31U);
+                const auto tile = vram_word(ppu, unsigned(ppu.bg2_screen_base) + entry);
+                const auto row = decoded_tile_row<4>(ppu, ppu.bg2_character_base,
+                    tile, source_y, ppu.bg2_tile_size_16);
+                const auto ink = row[unsigned(source_x) & (tile_edge - 1U)];
+                return ink && !(transparent_cgram_black && (ppu.cgram[ink] & 32767U) == 0U)
+                    ? ink : wall_colour;
+            };
+            if (priority != TilePriorityPass::high && native_first > first_x)
+                target.set_solid_indexed_row(int(first_x), int(y), native_first - first_x, edge_colour(0));
+            draw_tile_scanline<4>(ppu, target,
+                priority == TilePriorityPass::low ? TilePriorityPass::all : priority,
+                ppu.bg2_screen_base, ppu.bg2_character_base, pages_wide, ppu.bg2_tile_size_16,
+                width_pixels, source_y, row_x, horizontal_origin,
+                native_first, native_last, y, transparent_cgram_black);
+            if (priority != TilePriorityPass::high && native_last < final_x)
+                target.set_solid_indexed_row(int(native_last), int(y), final_x - native_last, edge_colour(255));
+        }
+        return;
+    }
+    if ((ppu.mosaic & 2U) == 0U && !expanded_mode2
+        && !(ppu.background_mode == 2U && ppu.bg2_vertical_offsets_enabled)
+        && !(ppu.tunnel_scene && extend_horizontal)
+        && !(ppu.background_mode == 1U && ppu.bg2_scanline_scroll_enabled && extend_horizontal)
+        && unique_regions.empty() && !single_occurrence_top_rows
+        && !ending_star_extension && !game_over_star_extension) {
+        for (unsigned y = 0; y < target.height(); ++y) {
+            const int row_x = ppu.bg2_horizontal_offsets_enabled && y < ppu.bg2_horizontal_offsets.size()
+                ? ppu.bg2_horizontal_offsets[y] : scroll_x;
+            const int row_y = ppu.bg2_scanline_scroll_enabled
+                ? ppu.bg2_scanline_scroll_y[std::min(y, 223U)] : scroll_y;
+            auto first = first_x, final = final_x;
+            if (!wrap_horizontal) {
+                first = unsigned(std::clamp<std::int64_t>(std::int64_t(horizontal_origin) - row_x, first, final));
+                final = unsigned(std::clamp<std::int64_t>(std::int64_t(horizontal_origin) - row_x + width_pixels, first, final));
+            }
+            draw_tile_scanline<4>(ppu, target, priority, ppu.bg2_screen_base, ppu.bg2_character_base,
+                pages_wide, ppu.bg2_tile_size_16, width_pixels,
+                wrap_tilemap_coordinate(int(y) + row_y, height_pixels), row_x,
+                horizontal_origin, first, final, y, transparent_cgram_black);
+        }
+        return;
+    }
     std::vector<std::int32_t> column_scroll_y;
     constexpr auto no_column_scroll = std::numeric_limits<std::int32_t>::min();
     if (ppu.background_mode == 2U && ppu.bg2_vertical_offsets_enabled) {
@@ -524,221 +666,235 @@ void BackgroundRenderer::draw_bg2(
         }
         return decoded_tilemap[index];
     };
-    for (std::uint32_t screen_y = 0; screen_y < target.height(); ++screen_y) {
-        const auto sample_y = mosaic_coordinate(
-            static_cast<std::int32_t>(screen_y), ppu.mosaic, 0x02U);
-        const auto row_scroll_x = ppu.bg2_horizontal_offsets_enabled
-            && sample_y >= 0
-            && static_cast<std::size_t>(sample_y)
-                < ppu.bg2_horizontal_offsets.size()
-            ? static_cast<std::int32_t>(ppu.bg2_horizontal_offsets[
-                static_cast<std::size_t>(sample_y)])
-            : scroll_x;
-        const auto unique_scroll_x = unique_regions.empty() ? 0
-            : wrap(row_scroll_x + width_pixels / 2, width_pixels) - width_pixels / 2;
-        for (auto screen_x = first_x; screen_x < final_x; ++screen_x) {
-            const auto logical_x = static_cast<std::int32_t>(screen_x)
-                - horizontal_origin;
-            if (ppu.tunnel_scene && extend_horizontal
-                && priority == TilePriorityPass::high
-                && (logical_x < 0 || logical_x >= 256)) {
-                // The low pass already widens the full tunnel cross-section.
-                // Do not paint a second, wrapped high-priority copy over it.
-                continue;
-            }
-            if (ppu.tunnel_scene && extend_horizontal
-                && priority != TilePriorityPass::high
-                && (logical_x < 0 || logical_x >= 256)) {
-                // Widen one authored cross-section rather than tiling tunnels.
-                // Transparent outer texels retain the closed side-wall colour.
-                target.set(static_cast<std::int32_t>(screen_x),
-                    static_cast<std::int32_t>(screen_y), wall_colour);
-            }
-            const auto sample_x = mosaic_coordinate(
-                ppu.tunnel_scene && extend_horizontal && priority!=TilePriorityPass::high
-                    ? std::clamp(logical_x, 0, 255) : logical_x,
-                ppu.mosaic, 0x02U);
-            const auto sampled_screen_x = std::clamp(
-                sample_x + horizontal_origin,
-                static_cast<std::int32_t>(first_x),
-                static_cast<std::int32_t>(final_x - 1U));
-            const auto register_scroll_y = ppu.bg2_scanline_scroll_enabled
-                ? ppu.bg2_scanline_scroll_y[std::clamp(sample_y, 0, 223)]
-                : scroll_y;
-            const auto tile_scroll_y = column_scroll_y.empty() ? no_column_scroll
-                : column_scroll_y[static_cast<std::size_t>(sampled_screen_x) - first_x];
-            // A valid Mode 2 per-tile offset replaces BG2VOFS, including
-            // scanline/HDMA writes. Invalid entries still use that register.
-            const auto current_scroll_y = tile_scroll_y != no_column_scroll
-                ? tile_scroll_y : register_scroll_y;
-            auto source_y = wrap(
-                sample_y + current_scroll_y,
-                height_pixels);
-            if(expanded_mode2 && screen_y<144U && (logical_x<0 || logical_x>=256)
-                && sky_source_min<unsigned(height_pixels) && source_y<int(sky_source_min))
-                source_y=int(sky_source_min);
-            const auto column_index = screen_x - first_x;
-            if (!previous_ground_source_y.empty()) {
-                const auto previous_source_y =
-                    previous_ground_source_y[column_index];
-                if (screen_y >= 144U && previous_source_y >= 0
-                    && source_y < previous_source_y
-                    && previous_source_y - source_y > height_pixels / 2) {
-                    // A rolled floor that reaches the bottom of its 256-line
-                    // tilemap must continue with its last ground colour. The
-                    // wrapped source row is opaque sky, so transparency-only
-                    // continuation still exposed a blue wedge at the front.
-                    ground_source_wrapped[column_index] = true;
+    // Select the native coverage/tag writer once, outside the costly rolled /
+    // mosaic / unique-art path. A borrowed row removes repeated scale, bounds,
+    // command and dither checks without another staging image or changed ink.
+    const auto draw_rows = [&](auto row_at) {
+        for (std::uint32_t screen_y = 0; screen_y < target.height(); ++screen_y) {
+            const auto write = row_at(screen_y);
+            const auto sample_y = mosaic_coordinate(
+                static_cast<std::int32_t>(screen_y), ppu.mosaic, 0x02U);
+            const auto row_scroll_x = ppu.bg2_horizontal_offsets_enabled
+                && sample_y >= 0
+                && static_cast<std::size_t>(sample_y)
+                    < ppu.bg2_horizontal_offsets.size()
+                ? static_cast<std::int32_t>(ppu.bg2_horizontal_offsets[
+                    static_cast<std::size_t>(sample_y)])
+                : scroll_x;
+            const auto unique_scroll_x = unique_regions.empty() ? 0
+                : wrap_tilemap_coordinate(row_scroll_x + width_pixels / 2, width_pixels) - width_pixels / 2;
+            for (auto screen_x = first_x; screen_x < final_x; ++screen_x) {
+                const auto logical_x = static_cast<std::int32_t>(screen_x)
+                    - horizontal_origin;
+                if (ppu.tunnel_scene && extend_horizontal
+                    && priority == TilePriorityPass::high
+                    && (logical_x < 0 || logical_x >= 256)) {
+                    // The low pass already widens the full tunnel cross-section.
+                    // Do not paint a second, wrapped high-priority copy over it.
+                    continue;
                 }
-                previous_ground_source_y[column_index] = source_y;
-                if (ground_source_wrapped[column_index]) {
-                    const auto ground = last_opaque_ground[column_index];
-                    if (ground != 0U) {
-                        target.set(static_cast<std::int32_t>(screen_x),
-                            static_cast<std::int32_t>(screen_y), ground);
+                if (ppu.tunnel_scene && extend_horizontal
+                    && priority != TilePriorityPass::high
+                    && (logical_x < 0 || logical_x >= 256)) {
+                    // Widen one authored cross-section rather than tiling tunnels.
+                    // Transparent outer texels retain the closed side-wall colour.
+                    write(screen_x, wall_colour);
+                }
+                const auto sample_x = mosaic_coordinate(
+                    ppu.tunnel_scene && extend_horizontal && priority!=TilePriorityPass::high
+                        ? std::clamp<std::int32_t>(logical_x, 0, 255) : logical_x,
+                    ppu.mosaic, 0x02U);
+                const auto sampled_screen_x = std::clamp(
+                    sample_x + horizontal_origin,
+                    static_cast<std::int32_t>(first_x),
+                    static_cast<std::int32_t>(final_x - 1U));
+                const auto register_scroll_y = ppu.bg2_scanline_scroll_enabled
+                    ? ppu.bg2_scanline_scroll_y[std::clamp<std::int32_t>(sample_y, 0, 223)]
+                    : scroll_y;
+                const auto tile_scroll_y = column_scroll_y.empty() ? no_column_scroll
+                    : column_scroll_y[static_cast<std::size_t>(sampled_screen_x) - first_x];
+                // A valid Mode 2 per-tile offset replaces BG2VOFS, including
+                // scanline/HDMA writes. Invalid entries still use that register.
+                const auto current_scroll_y = tile_scroll_y != no_column_scroll
+                    ? tile_scroll_y : register_scroll_y;
+                auto source_y = wrap_tilemap_coordinate(
+                    sample_y + current_scroll_y,
+                    height_pixels);
+                if(expanded_mode2 && screen_y<144U && (logical_x<0 || logical_x>=256)
+                    && sky_source_min<unsigned(height_pixels) && source_y<int(sky_source_min))
+                    source_y=int(sky_source_min);
+                const auto column_index = screen_x - first_x;
+                if (!previous_ground_source_y.empty()) {
+                    const auto previous_source_y =
+                        previous_ground_source_y[column_index];
+                    if (screen_y >= 144U && previous_source_y >= 0
+                        && source_y < previous_source_y
+                        && previous_source_y - source_y > height_pixels / 2) {
+                        // A rolled floor that reaches the bottom of its 256-line
+                        // tilemap must continue with its last ground colour. The
+                        // wrapped source row is opaque sky, so transparency-only
+                        // continuation still exposed a blue wedge at the front.
+                        ground_source_wrapped[column_index] = true;
+                    }
+                    previous_ground_source_y[column_index] = source_y;
+                    if (ground_source_wrapped[column_index]) {
+                        const auto ground = last_opaque_ground[column_index];
+                        if (ground != 0U) {
+                            write(screen_x, ground);
+                        }
+                        continue;
+                    }
+                }
+                auto unwrapped_source_x = sample_x + row_scroll_x;
+                if ((ending_star_extension || game_over_star_extension) && extend_horizontal
+                    && (logical_x < 0 || logical_x >= 256)
+                    && (game_over_star_extension || unwrapped_source_x < 0 || unwrapped_source_x >= width_pixels)) {
+                    // The upper-left 256x128 of BG_CRED contains only stars.
+                    // Keep the entire first atlas occurrence intact (nebulae
+                    // included), then extend using stable 32x32 star patches.
+                    // Hash world cells, not frame/time, to avoid shimmer.
+                    const auto cell_x = static_cast<std::uint32_t>(unwrapped_source_x) >> 5U;
+                    const auto cell_y = static_cast<std::uint32_t>(sample_y + current_scroll_y) >> 5U;
+                    auto seed = cell_x * 0x9e3779b9U ^ cell_y * 0x85ebca6bU;
+                    seed ^= seed >> 16U; seed *= 0x7feb352dU; seed ^= seed >> 15U;
+                    unwrapped_source_x = static_cast<std::int32_t>((seed & 7U) * 32U)
+                        + (unwrapped_source_x & 31);
+                    source_y = static_cast<std::int32_t>(((seed >> 3U) & 3U) * 32U)
+                        + ((sample_y + current_scroll_y) & 31);
+                    if(game_over_star_extension) {
+                        // BG_AND combines the dense stars and Andross in one
+                        // atlas. Only rows 0..31 and 160..223 are star-only.
+                        const auto patch=(seed>>3U)%3U;
+                        source_y=int(patch?128U+patch*32U:0U)+((sample_y+current_scroll_y)&31);
+                    }
+                }
+                const auto tile_y = static_cast<std::uint32_t>(source_y) >> tile_shift;
+                // Scanline scrolling also drives open water (Titania). It is not
+                // evidence of a closed tunnel. Actual tunnel margins were handled
+                // above via tunnel_scene; water continues its edge material below.
+                // A scrolling 256-pixel title tilemap normally wraps the portion
+                // that leaves one side back onto the other. In a wide viewport we
+                // instead draw that one tilemap occurrence beyond the native
+                // boundary. This exposes the complete EX logo without duplicating
+                // the wrapped fragment—or the whole logo—across the margins.
+                if (!wrap_horizontal && (unwrapped_source_x < 0
+                        || unwrapped_source_x >= width_pixels)) {
+                    continue;
+                }
+                if (single_occurrence_top_rows != 0U
+                    && screen_y < single_occurrence_top_rows
+                    && (static_cast<std::int32_t>(screen_x) < horizontal_origin
+                        || static_cast<std::int32_t>(screen_x)
+                            >= horizontal_origin + 256)
+                    && (unwrapped_source_x < 0
+                        || unwrapped_source_x >= width_pixels)) {
+                    // A few space stages combine a singular distant planet in
+                    // the upper tilemap with a deliberately repeatable straight
+                    // horizon below it. Expose the rest of the same authored map
+                    // occurrence in wide margins, but do not wrap a second moon
+                    // or planet into view. The native 256-pixel window and the
+                    // lower horizontal surface retain exact cartridge wrapping.
+                    write(screen_x, black_colour);
+                    continue;
+                }
+                auto source_x = wrap_tilemap_coordinate(unwrapped_source_x, width_pixels);
+                if (ppu.background_mode == 1U
+                    && ppu.bg2_scanline_scroll_enabled && !ppu.tunnel_scene
+                    && extend_horizontal && (logical_x < 0 || logical_x >= 256)) {
+                    // Mode 1 water's BG2 contains one bridge/floor cross-section; BG3 is
+                    // its independently repeating mountain/sky backdrop. Expose
+                    // one scrolled BG2 tilemap, then continue its edge material
+                    // rather than wrapping a second bridge into ultrawide edges.
+                    // Mode 2 open water (EX 6-2) is a repeating landscape instead.
+                    const auto water_x = wrap_tilemap_coordinate(128 + row_scroll_x, width_pixels) + sample_x - 128;
+                    source_x = std::clamp<std::int32_t>(water_x, 0, width_pixels - 1);
+                }
+                const auto tile_x = static_cast<std::uint32_t>(source_x) >> tile_shift;
+                const auto page = (tile_x >> 5U) + (tile_y >> 5U) * pages_wide;
+                const auto entry = page * 0x400U
+                    + (tile_y & 31U) * 32U + (tile_x & 31U);
+                const auto tile = cached_tilemap_word(entry);
+                if (!selected_priority(tile, ppu.tunnel_scene && extend_horizontal
+                        && priority==TilePriorityPass::low ? TilePriorityPass::all : priority)) {
+                    if (!last_opaque_ground.empty() && screen_y >= 144U) {
+                        const auto ground = last_opaque_ground[screen_x - first_x];
+                        if (ground != 0U) {
+                            write(screen_x, ground);
+                        }
                     }
                     continue;
                 }
-            }
-            auto unwrapped_source_x = sample_x + row_scroll_x;
-            if ((ending_star_extension || game_over_star_extension) && extend_horizontal
-                && (logical_x < 0 || logical_x >= 256)
-                && (game_over_star_extension || unwrapped_source_x < 0 || unwrapped_source_x >= width_pixels)) {
-                // The upper-left 256x128 of BG_CRED contains only stars.
-                // Keep the entire first atlas occurrence intact (nebulae
-                // included), then extend using stable 32x32 star patches.
-                // Hash world cells, not frame/time, to avoid shimmer.
-                const auto cell_x = static_cast<std::uint32_t>(unwrapped_source_x) >> 5U;
-                const auto cell_y = static_cast<std::uint32_t>(sample_y + current_scroll_y) >> 5U;
-                auto seed = cell_x * 0x9e3779b9U ^ cell_y * 0x85ebca6bU;
-                seed ^= seed >> 16U; seed *= 0x7feb352dU; seed ^= seed >> 15U;
-                unwrapped_source_x = static_cast<std::int32_t>((seed & 7U) * 32U)
-                    + (unwrapped_source_x & 31);
-                source_y = static_cast<std::int32_t>(((seed >> 3U) & 3U) * 32U)
-                    + ((sample_y + current_scroll_y) & 31);
-                if(game_over_star_extension) {
-                    // BG_AND combines the dense stars and Andross in one
-                    // atlas. Only rows 0..31 and 160..223 are star-only.
-                    const auto patch=(seed>>3U)%3U;
-                    source_y=int(patch?128U+patch*32U:0U)+((sample_y+current_scroll_y)&31);
-                }
-            }
-            const auto tile_y = static_cast<std::uint32_t>(source_y) / tile_edge;
-            // Scanline scrolling also drives open water (Titania). It is not
-            // evidence of a closed tunnel. Actual tunnel margins were handled
-            // above via tunnel_scene; water continues its edge material below.
-            // A scrolling 256-pixel title tilemap normally wraps the portion
-            // that leaves one side back onto the other. In a wide viewport we
-            // instead draw that one tilemap occurrence beyond the native
-            // boundary. This exposes the complete EX logo without duplicating
-            // the wrapped fragment—or the whole logo—across the margins.
-            if (!wrap_horizontal && (unwrapped_source_x < 0
-                    || unwrapped_source_x >= width_pixels)) {
-                continue;
-            }
-            if (single_occurrence_top_rows != 0U
-                && screen_y < single_occurrence_top_rows
-                && (static_cast<std::int32_t>(screen_x) < horizontal_origin
-                    || static_cast<std::int32_t>(screen_x)
-                        >= horizontal_origin + 256)
-                && (unwrapped_source_x < 0
-                    || unwrapped_source_x >= width_pixels)) {
-                // A few space stages combine a singular distant planet in
-                // the upper tilemap with a deliberately repeatable straight
-                // horizon below it. Expose the rest of the same authored map
-                // occurrence in wide margins, but do not wrap a second moon
-                // or planet into view. The native 256-pixel window and the
-                // lower horizontal surface retain exact cartridge wrapping.
-                target.set(static_cast<std::int32_t>(screen_x),
-                    static_cast<std::int32_t>(screen_y), black_colour);
-                continue;
-            }
-            auto source_x = wrap(unwrapped_source_x, width_pixels);
-            if (ppu.background_mode == 1U
-                && ppu.bg2_scanline_scroll_enabled && !ppu.tunnel_scene
-                && extend_horizontal && (logical_x < 0 || logical_x >= 256)) {
-                // Mode 1 water's BG2 contains one bridge/floor cross-section; BG3 is
-                // its independently repeating mountain/sky backdrop. Expose
-                // one scrolled BG2 tilemap, then continue its edge material
-                // rather than wrapping a second bridge into ultrawide edges.
-                // Mode 2 open water (EX 6-2) is a repeating landscape instead.
-                const auto water_x = wrap(128 + row_scroll_x, width_pixels) + sample_x - 128;
-                source_x = std::clamp(water_x, 0, width_pixels - 1);
-            }
-            const auto tile_x = static_cast<std::uint32_t>(source_x) / tile_edge;
-            const auto page = (tile_x >> 5U) + (tile_y >> 5U) * pages_wide;
-            const auto entry = page * 0x400U
-                + (tile_y & 31U) * 32U + (tile_x & 31U);
-            const auto tile = cached_tilemap_word(entry);
-            if (!selected_priority(tile, ppu.tunnel_scene && extend_horizontal
-                    && priority==TilePriorityPass::low ? TilePriorityPass::all : priority)) {
-                if (!last_opaque_ground.empty() && screen_y >= 144U) {
+                const auto sample = tile_sample(
+                    tile, source_x, source_y, ppu.bg2_tile_size_16);
+                auto colour = cached_character_pixel(sample);
+                auto palette = static_cast<std::uint8_t>((tile >> 10U) & 7U);
+                if (colour == 0U && !last_opaque_ground.empty()
+                    && screen_y >= 144U) {
                     const auto ground = last_opaque_ground[screen_x - first_x];
                     if (ground != 0U) {
-                        target.set(static_cast<std::int32_t>(screen_x),
-                            static_cast<std::int32_t>(screen_y), ground);
+                        write(screen_x, ground);
                     }
-                }
-                continue;
-            }
-            const auto sample = tile_sample(
-                tile, source_x, source_y, ppu.bg2_tile_size_16);
-            auto colour = cached_character_pixel(sample);
-            auto palette = static_cast<std::uint8_t>((tile >> 10U) & 7U);
-            if (colour == 0U && !last_opaque_ground.empty()
-                && screen_y >= 144U) {
-                const auto ground = last_opaque_ground[screen_x - first_x];
-                if (ground != 0U) {
-                    target.set(static_cast<std::int32_t>(screen_x),
-                        static_cast<std::int32_t>(screen_y), ground);
-                }
-                continue;
-            }
-            if (colour != 0U) {
-                auto indexed_colour = static_cast<std::uint8_t>(
-                    palette * 16U + colour);
-                // Scroll registers wrap; 8191 is -1, not a distant copy of
-                // the map. Anchor the unique occurrence around the view.
-                const auto unique_source_x = sample_x + unique_scroll_x;
-                for (const auto& region : unique_regions) {
-                    const bool suppress_every=region.replacement_x_offset>=0 && (region.replacement_x_offset
-                        & BackgroundUniqueRegion::suppress_every_copy)!=0;
-                    const bool suppress_all=region.replacement_x_offset>=0 && (region.replacement_x_offset
-                        & BackgroundUniqueRegion::suppress_all_side_copies)!=0;
-                    const auto replacement_offset=(suppress_all || suppress_every)
-                        ?region.replacement_x_offset&~(BackgroundUniqueRegion::suppress_all_side_copies|BackgroundUniqueRegion::suppress_every_copy)
-                        :region.replacement_x_offset;
-                    if ((suppress_every || (extend_horizontal
-                        && (logical_x < 0 || logical_x >= 256)
-                        && (suppress_all || unique_source_x < 0 || unique_source_x >= width_pixels)))
-                        && source_x >= region.left && source_x < region.right
-                        && source_y >= region.top && source_y < region.bottom
-                        && indexed_colour >= region.first_colour
-                        && indexed_colour <= region.last_colour) {
-                        indexed_colour = region.replacement_colour;
-                        if(replacement_offset) {
-                            const auto replacement_x=wrap(source_x+replacement_offset,width_pixels);
-                            const auto rx=std::uint32_t(replacement_x)/tile_edge;
-                            const auto replacement_entry=((rx>>5U)+(tile_y>>5U)*pages_wide)*0x400U
-                                +(tile_y&31U)*32U+(rx&31U);
-                            const auto replacement_tile=cached_tilemap_word(replacement_entry);
-                            const auto ink=cached_character_pixel(tile_sample(replacement_tile,replacement_x,source_y,ppu.bg2_tile_size_16));
-                            indexed_colour=ink?std::uint8_t(((replacement_tile>>10U)&7U)*16U+ink):region.replacement_colour;
-                        }
-                        break;
-                    }
-                }
-                if (transparent_cgram_black
-                    && (ppu.cgram[indexed_colour] & 0x7fffU) == 0U) {
                     continue;
                 }
-                if (!last_opaque_ground.empty()) {
-                    last_opaque_ground[screen_x - first_x] = indexed_colour;
+                if (colour != 0U) {
+                    auto indexed_colour = static_cast<std::uint8_t>(
+                        palette * 16U + colour);
+                    // Scroll registers wrap; 8191 is -1, not a distant copy of
+                    // the map. Anchor the unique occurrence around the view.
+                    const auto unique_source_x = sample_x + unique_scroll_x;
+                    for (const auto& region : unique_regions) {
+                        const bool suppress_every=region.replacement_x_offset>=0 && (region.replacement_x_offset
+                            & BackgroundUniqueRegion::suppress_every_copy)!=0;
+                        const bool suppress_all=region.replacement_x_offset>=0 && (region.replacement_x_offset
+                            & BackgroundUniqueRegion::suppress_all_side_copies)!=0;
+                        const auto replacement_offset=(suppress_all || suppress_every)
+                            ?region.replacement_x_offset&~(BackgroundUniqueRegion::suppress_all_side_copies|BackgroundUniqueRegion::suppress_every_copy)
+                            :region.replacement_x_offset;
+                        if ((suppress_every || (extend_horizontal
+                            && (logical_x < 0 || logical_x >= 256)
+                            && (suppress_all || unique_source_x < 0 || unique_source_x >= width_pixels)))
+                            && source_x >= region.left && source_x < region.right
+                            && source_y >= region.top && source_y < region.bottom
+                            && indexed_colour >= region.first_colour
+                            && indexed_colour <= region.last_colour) {
+                            indexed_colour = region.replacement_colour;
+                            if(replacement_offset) {
+                                const auto replacement_x=wrap_tilemap_coordinate(source_x+replacement_offset,width_pixels);
+                                const auto rx=std::uint32_t(replacement_x)>>tile_shift;
+                                const auto replacement_entry=((rx>>5U)+(tile_y>>5U)*pages_wide)*0x400U
+                                    +(tile_y&31U)*32U+(rx&31U);
+                                const auto replacement_tile=cached_tilemap_word(replacement_entry);
+                                const auto ink=cached_character_pixel(tile_sample(replacement_tile,replacement_x,source_y,ppu.bg2_tile_size_16));
+                                indexed_colour=ink?std::uint8_t(((replacement_tile>>10U)&7U)*16U+ink):region.replacement_colour;
+                            }
+                            break;
+                        }
+                    }
+                    if (transparent_cgram_black
+                        && (ppu.cgram[indexed_colour] & 0x7fffU) == 0U) {
+                        continue;
+                    }
+                    if (!last_opaque_ground.empty()) {
+                        last_opaque_ground[screen_x - first_x] = indexed_colour;
+                    }
+                    write(screen_x, indexed_colour);
                 }
-                target.set(static_cast<std::int32_t>(screen_x),
-                    static_cast<std::int32_t>(screen_y), indexed_colour);
             }
         }
+    };
+    if (target.native_indexed_row(0)) {
+        draw_rows([&](std::uint32_t y) {
+            const auto row = target.native_indexed_row(y);
+            return [row](std::uint32_t x, std::uint8_t ink) { row.set(x, ink); };
+        });
+    } else {
+        // Scaled, dithered and recording targets preserve every original
+        // point write, including repeated wall writes and command ordering.
+        draw_rows([&](std::uint32_t y) {
+            return [&, y](std::uint32_t x, std::uint8_t ink) {
+                target.set(std::int32_t(x), std::int32_t(y), ink);
+            };
+        });
     }
 }
 
@@ -752,33 +908,36 @@ void BackgroundRenderer::draw_bg3(
     const auto width_tiles = (ppu.bg3_screen_size & 1U) != 0U ? 64U : 32U;
     const auto height_tiles = (ppu.bg3_screen_size & 2U) != 0U ? 64U : 32U;
     const auto pages_wide = width_tiles / 32U;
-    const auto tile_edge = ppu.bg3_tile_size_16 ? 16U : 8U;
+    const auto tile_shift = ppu.bg3_tile_size_16 ? 4U : 3U;
+    const auto tile_edge = 1U << tile_shift;
     const auto width_pixels = static_cast<std::int32_t>(width_tiles * tile_edge);
     const auto height_pixels = static_cast<std::int32_t>(height_tiles * tile_edge);
-    const auto wrap = [](std::int32_t value, std::int32_t modulus) {
-        value %= modulus;
-        return value < 0 ? value + modulus : value;
-    };
 
     for (std::uint32_t screen_y = 0; screen_y < target.height(); ++screen_y) {
         const auto sample_y = mosaic_coordinate(
             static_cast<std::int32_t>(screen_y), ppu.mosaic, 0x04U);
-        const auto source_y = wrap(sample_y
+        const auto source_y = wrap_tilemap_coordinate(sample_y
             + ppu.bg3_scroll_y, height_pixels);
-        const auto tile_y = static_cast<std::uint32_t>(source_y) / tile_edge;
+        const auto tile_y = static_cast<std::uint32_t>(source_y) >> tile_shift;
         const auto first_x = extend_horizontal ? 0U
-            : static_cast<std::uint32_t>(std::max(horizontal_origin, 0));
+            : static_cast<std::uint32_t>(std::max<std::int32_t>(horizontal_origin, 0));
         const auto final_x = extend_horizontal ? target.width()
             : std::min(target.width(), static_cast<std::uint32_t>(
-                std::max(horizontal_origin + 256, 0)));
+                std::max<std::int32_t>(horizontal_origin + 256, 0)));
+        if ((ppu.mosaic & 4U) == 0U) {
+            draw_tile_scanline<2>(ppu, target, priority, ppu.bg3_screen_base, ppu.bg3_character_base,
+                pages_wide, ppu.bg3_tile_size_16, width_pixels, source_y, ppu.bg3_scroll_x,
+                horizontal_origin, first_x, final_x, screen_y);
+            continue;
+        }
         for (auto screen_x = first_x; screen_x < final_x; ++screen_x) {
             const auto logical_x = static_cast<std::int32_t>(screen_x)
                 - horizontal_origin;
             const auto sample_x = mosaic_coordinate(
                 logical_x, ppu.mosaic, 0x04U);
-            const auto source_x = wrap(sample_x
+            const auto source_x = wrap_tilemap_coordinate(sample_x
                 + ppu.bg3_scroll_x, width_pixels);
-            const auto tile_x = static_cast<std::uint32_t>(source_x) / tile_edge;
+            const auto tile_x = static_cast<std::uint32_t>(source_x) >> tile_shift;
             const auto page = (tile_x >> 5U) + (tile_y >> 5U) * pages_wide;
             const auto entry = page * 0x400U
                 + (tile_y & 31U) * 32U + (tile_x & 31U);

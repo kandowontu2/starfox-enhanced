@@ -2,6 +2,7 @@
 #include "starfox/render/gpu_scene.hpp"
 #include "starfox/render/gpu_composite.hpp"
 #include "starfox/render/gpu_temporal_inputs.hpp"
+#include "starfox/render/gpu_projection.hpp"
 #include <limits>
 #include <SDL3/SDL.h>
 #include <array>
@@ -65,9 +66,9 @@ Capture capture(SDL_GPUDevice* device,starfox::render::GpuModel& model,
     return download(device,command,output,depth);
 }
 }
-void check_temporal_textures(SDL_GPUDevice* device) {
-    constexpr Uint32 width=64,height=2,count=width*height;
-    std::array<float,count> depths{};std::array<std::array<float,4>,count> motions{};
+void check_temporal_textures(SDL_GPUDevice* device,Uint32 width=64,Uint32 height=2) {
+    const Uint32 count=width*height;
+    std::vector<float> depths(count);std::vector<std::array<float,4>> motions(count);
     for(unsigned i=0;i<count;++i) {
         const float cases[]{0.1f,0.5f,1.f,100.f,101.f,0.f,-1.f,std::numeric_limits<float>::quiet_NaN(),std::numeric_limits<float>::infinity()};
         depths[i]=cases[i%9];motions[i]={float(i)*0.25f,-float(i)*0.5f,depths[i],1.f};
@@ -87,7 +88,8 @@ void check_temporal_textures(SDL_GPUDevice* device) {
     for(unsigned i=0;i<count;++i) {Uint32 coverage=i%3;std::memcpy(mapped+count*20+i*4,&coverage,4);}
     SDL_UnmapGPUTransferBuffer(device,upload);
     starfox::render::GpuTemporalInputs converter;
-    for(unsigned ground_case=0;ground_case<5;++ground_case) for(bool reset:{false,true}) for(bool jittered:{false,true}) for(bool packed_coverage:{false,true}) {
+    float max_terrain_motion_error=0;
+    for(unsigned ground_case=0;ground_case<5;++ground_case) for(bool reset:{false,true}) for(bool jittered:{false,true}) for(bool packed_coverage:{false,true}) for(bool frozen:{false,true}) {
         auto* coverage_upload=static_cast<unsigned char*>(SDL_MapGPUTransferBuffer(device,upload,false));require(coverage_upload,"coverage upload map");
         for(unsigned i=0;i<count;++i) {
             const Uint32 value=packed_coverage?(0x04000223u|(i%3==1?0x08000000u:0)):i%3;
@@ -97,6 +99,8 @@ void check_temporal_textures(SDL_GPUDevice* device) {
         auto* command=SDL_AcquireGPUCommandBuffer(device);require(command,"temporal command");
         require(!converter.enqueue(device,command,depth,motion,width,height,1,0,reset).depth,"bad camera accepted");
         require(!converter.enqueue(device,command,depth,depth,width,height,.1f,100,false).depth,"aliased buffers accepted");
+        require(!converter.enqueue(device,command,depth,motion,8193,1,.1f,100,reset).depth,"oversized temporal axis accepted");
+        require(!converter.enqueue(device,command,depth,motion,8192,2049,.1f,100,reset).depth,"temporal pixel budget exceeded");
         auto* pass=SDL_BeginGPUCopyPass(command);
         SDL_GPUTransferBufferLocation from{upload,0};SDL_GPUBufferRegion to{depth,0,count*4};SDL_UploadToGPUBuffer(pass,&from,&to,false);
         from.offset=count*4;to={motion,0,count*16};SDL_UploadToGPUBuffer(pass,&from,&to,false);
@@ -112,7 +116,7 @@ void check_temporal_textures(SDL_GPUDevice* device) {
         if(ground_case==2) ground.plane={0,1,.125f,-2}; // sloped ground / near-parallel rays
         if(ground_case==3) ground.plane={0,0,1,10}; // entirely behind current camera
         if(ground_case==4) ground.current_to_previous[14]=-20; // previous view behind camera
-        const auto output=converter.enqueue(device,command,depth,reset?nullptr:motion,width,height,.1f,100,reset,ground_case?&ground:nullptr);
+        const auto output=converter.enqueue(device,command,depth,reset?nullptr:motion,width,height,.1f,100,reset,ground_case?&ground:nullptr,frozen);
         require(output.depth && output.motion && output.exposure,converter.status().c_str());
         pass=SDL_BeginGPUCopyPass(command);
         SDL_GPUTextureRegion region{};region.texture=static_cast<SDL_GPUTexture*>(output.depth);region.w=width;region.h=height;region.d=1;
@@ -125,14 +129,14 @@ void check_temporal_textures(SDL_GPUDevice* device) {
         require(SDL_WaitForGPUFences(device,true,&fence,1),"temporal completion");SDL_ReleaseGPUFence(device,fence);
         const auto* data=static_cast<const float*>(SDL_MapGPUTransferBuffer(device,readback,false));require(data,"temporal readback");
         for(unsigned i=0;i<count;++i) {
-            float z=depths[i];auto m=motions[i];
+            float z=depths[i];auto m=motions[i];bool analytic_terrain=false;
             if(ground_case && i%3==1 && !(std::isfinite(z) && z>=.1f && z<=100.f)) {
                 const float px=float(i%width)+.5f-ground.raster_jitter[0],py=float(i/width)+.5f-ground.raster_jitter[1];
                 const float rx=(px-32)/2,ry=(py-1)/2;
                 const float denominator=ground.plane[0]*rx+ground.plane[1]*ry+ground.plane[2];
                 const float candidate=std::abs(denominator)>1e-7f?-ground.plane[3]/denominator:0;
                 if(std::isfinite(candidate) && candidate>=.1f && candidate<=100.f) {
-                    z=candidate;m={};
+                    z=candidate;m={};analytic_terrain=true;
                     const float previous_z=z+ground.current_to_previous[14];
                     if(previous_z>=.1f && previous_z<=100.f)
                         m={(rx*z+1)/previous_z*2+32-px,ry*z/previous_z*2+1-py,z,1};
@@ -142,7 +146,19 @@ void check_temporal_textures(SDL_GPUDevice* device) {
             const float expected=valid?float((1.-double(.1f)/z)/(1.-double(.1f)/100.)):1.f;
             require(std::abs(data[i]-expected)<2e-6f,"projected depth differs");
             const bool correspondence=valid && !reset && m[3]==1 && std::isfinite(m[0]) && std::isfinite(m[1]) && std::isfinite(m[2]) && std::abs(m[2]-z)<=std::max(.001f,std::abs(z)*.00001f);
-            if(correspondence) require(std::abs(data[count+i*2]-m[0])<1e-5f && std::abs(data[count+i*2+1]-m[1])<1e-5f,"motion conversion differs");
+            if(frozen && !reset) require(data[count+i*2]==0 && data[count+i*2+1]==0,"frozen scene motion must be exactly zero without changing depth");
+            else if(correspondence) {
+                const float error=std::max(std::abs(data[count+i*2]-m[0]),std::abs(data[count+i*2+1]-m[1]));
+                // Analytic reprojection subtracts two pixel coordinates. Its
+                // FP32 roundoff grows with the coordinate magnitude, not just
+                // the final subpixel displacement. Bound it to four coordinate
+                // ULPs; supplied physical model motion must remain byte-exact.
+                const float tolerance=std::max(1e-5f,4*std::numeric_limits<float>::epsilon()
+                    *(std::max(width,height)+std::max(std::abs(m[0]),std::abs(m[1]))));
+                if(analytic_terrain) {max_terrain_motion_error=std::max(max_terrain_motion_error,error);
+                    require(error<=tolerance,"analytic terrain motion exceeds coordinate precision");}
+                else require(error==0,"supplied physical model motion changed");
+            }
             else require(data[count+i*2]==-std::numeric_limits<float>::max() && data[count+i*2+1]==-std::numeric_limits<float>::max(),"motion validity conversion differs");
         }
         require(data[count*3]==1.f,"exposure must equal one");SDL_UnmapGPUTransferBuffer(device,readback);
@@ -150,11 +166,13 @@ void check_temporal_textures(SDL_GPUDevice* device) {
     converter.release_device();SDL_ReleaseGPUBuffer(device,depth);SDL_ReleaseGPUBuffer(device,motion);
     SDL_ReleaseGPUBuffer(device,terrain);
     SDL_ReleaseGPUTransferBuffer(device,upload);SDL_ReleaseGPUTransferBuffer(device,readback);
-    std::cout<<"Temporal guide textures: 5120 depth/motion samples, packed/explicit terrain masks, jitter/slopes/occlusion/reset passed\n";
+    std::cout<<"Temporal guide textures: "<<count*80U<<" depth/motion samples at "<<width<<'x'<<height
+        <<", max terrain motion error="<<max_terrain_motion_error
+        <<", packed/explicit terrain masks, jitter/slopes/occlusion/reset and explicitly frozen scenes passed\n";
 }
-void check_temporal_hud(SDL_GPUDevice* device,bool preserve_artwork=true) {
-    constexpr Uint32 w=64,h=2,n=w*h;
-    std::array<Uint32,n*3> data{};
+void check_temporal_hud(SDL_GPUDevice* device,bool preserve_artwork=true,Uint32 w=64,Uint32 h=2) {
+    const Uint32 n=w*h;
+    std::vector<Uint32> data(n*3);
     for(unsigned i=0;i<n;++i) {data[i]=((i%5)<<8)|(i%2?0x10000000u:0)|(i%3?0:0x08000000u);data[n+i]=i%7?0xff123456u+i:0xff000000u;data[n*2+i]=0xffcc8844u-i;}
     SDL_GPUTransferBufferCreateInfo ti{SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,n*12,0};
     auto* upload=SDL_CreateGPUTransferBuffer(device,&ti);ti.usage=SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;ti.size=n*4;
@@ -169,21 +187,25 @@ void check_temporal_hud(SDL_GPUDevice* device,bool preserve_artwork=true) {
     SDL_GPUTextureTransferInfo transfer{upload,n*4,w,h};SDL_GPUTextureRegion region{};region.texture=original;region.w=w;region.h=h;region.d=1;
     SDL_UploadToGPUTexture(pass,&transfer,&region,false);transfer.offset=n*8;region.texture=reconstructed;SDL_UploadToGPUTexture(pass,&transfer,&region,false);SDL_EndGPUCopyPass(pass);
     starfox::render::GpuTemporalInputs converter;
+    require(!converter.restore_hud(device,command,original,reconstructed,packed,8193,1),"oversized HUD axis accepted");
+    require(!converter.restore_hud(device,command,original,reconstructed,packed,8192,2049),"HUD pixel budget exceeded");
     auto* output=converter.restore_hud(device,command,original,reconstructed,packed,w,h,preserve_artwork);require(output,converter.status().c_str());
     require(!converter.restore_hud(device,command,output,reconstructed,packed,w,h),"HUD output alias accepted");
     pass=SDL_BeginGPUCopyPass(command);region.texture=static_cast<SDL_GPUTexture*>(output);transfer={read,0,w,h};SDL_DownloadFromGPUTexture(pass,&region,&transfer);SDL_EndGPUCopyPass(pass);
     auto* fence=SDL_SubmitGPUCommandBufferAndAcquireFence(command);require(fence,"HUD submit");require(SDL_WaitForGPUFences(device,true,&fence,1),"HUD wait");SDL_ReleaseGPUFence(device,fence);
     const auto* pixels=static_cast<const Uint32*>(SDL_MapGPUTransferBuffer(device,read,false));require(pixels,"HUD map");
     for(unsigned i=0;i<n;++i) {
-        const bool preserve=(i%5==1 && i%2==0) || (preserve_artwork && i%5==2 && i%3!=0);
+        const bool preserve=(i%5==1 && i%2==0)
+            || (preserve_artwork && ((i%5==2 && i%3!=0) || (i%5==1 && i%2!=0)));
         require(pixels[i]==data[(preserve?n:n*2)+i],"Artwork/HUD protection changed original/world pixels");
     }
     SDL_UnmapGPUTransferBuffer(device,read);converter.release_device();SDL_ReleaseGPUTexture(device,original);SDL_ReleaseGPUTexture(device,reconstructed);
     SDL_ReleaseGPUBuffer(device,packed);SDL_ReleaseGPUTransferBuffer(device,upload);SDL_ReleaseGPUTransferBuffer(device,read);
-    std::cout<<"Temporal artwork/HUD restoration: 128 exact tagged pixels; terrain and world sprites remain reconstructed; output alias rejected\n";
+    std::cout<<"Temporal artwork/HUD restoration: "<<n<<" exact tagged pixels at "<<w<<'x'<<h
+        <<"; terrain and world sprites remain reconstructed; output alias rejected\n";
 }
-void check_temporal_resample(SDL_GPUDevice* device) {
-    constexpr Uint32 w=64,h=4,n=w*h;
+void check_temporal_resample(SDL_GPUDevice* device,Uint32 w=64,Uint32 h=4,bool varying_color=false) {
+    const Uint32 n=w*h;
     SDL_GPUTexture* inputs[3]{};
     const SDL_GPUTextureFormat formats[]{SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,SDL_GPU_TEXTUREFORMAT_R32_FLOAT,SDL_GPU_TEXTUREFORMAT_R32G32_FLOAT};
     SDL_GPUTextureCreateInfo info{};info.type=SDL_GPU_TEXTURETYPE_2D;info.usage=SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_READ;
@@ -192,8 +214,11 @@ void check_temporal_resample(SDL_GPUDevice* device) {
     SDL_GPUTransferBufferCreateInfo ti{SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,n*16,0};auto* upload=SDL_CreateGPUTransferBuffer(device,&ti);
     ti.usage=SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;auto* read=SDL_CreateGPUTransferBuffer(device,&ti);require(upload && read,"resample transfer");
     auto* bytes=static_cast<unsigned char*>(SDL_MapGPUTransferBuffer(device,upload,false));require(bytes,"resample map");
+    const auto sample_color=[&](unsigned i) {return varying_color
+        ?0xff000000u|((i*17u)&255u)|(((i*13u+9u)&255u)<<8)|(((i*23u+61u)&255u)<<16)
+        :0xff804020u;};
     for(unsigned i=0;i<n;++i) {
-        const Uint32 color=0xff804020;const float z=i%2?0.2f:0.8f;
+        const Uint32 color=sample_color(i);const float z=i%2?0.2f:0.8f;
         const float m[]{i%4==3?-std::numeric_limits<float>::max():float(i%2?4:12),i%4==3?-std::numeric_limits<float>::max():-2.f};
         std::memcpy(bytes+i*4,&color,4);std::memcpy(bytes+n*4+i*4,&z,4);std::memcpy(bytes+n*8+i*8,m,8);
     }
@@ -203,10 +228,14 @@ void check_temporal_resample(SDL_GPUDevice* device) {
     SDL_EndGPUCopyPass(pass);require(SDL_SubmitGPUCommandBuffer(command),"resample upload");
     starfox::render::GpuTemporalInputs converter;
     const starfox::render::GpuTemporalTextures guides{device,inputs[1],inputs[2],nullptr,w,h};
-    for(Uint32 target_width:{32u,43u,64u,32u}) {
+    for(Uint32 target_width:{w/2,(w*2+2)/3,w,w/2}) {
         const Uint32 target_height=2;
         command=SDL_AcquireGPUCommandBuffer(device);
         require(!converter.resample(device,command,inputs[0],guides,w+1,h).color,"resample accepted enlargement");
+        auto invalid=guides;invalid.width=8193;invalid.height=1;
+        require(!converter.resample(device,command,inputs[0],invalid,32,1).color,"oversized resample source axis accepted");
+        invalid.width=8192;invalid.height=2049;
+        require(!converter.resample(device,command,inputs[0],invalid,32,1).color,"resample source pixel budget exceeded");
         auto result=converter.resample(device,command,inputs[0],guides,target_width,target_height);require(result.color,converter.status().c_str());
         require(!converter.resample(device,command,result.color,guides,target_width,target_height).color,"resample accepted alias");
         pass=SDL_BeginGPUCopyPass(command);
@@ -216,18 +245,54 @@ void check_temporal_resample(SDL_GPUDevice* device) {
         const auto* data=static_cast<const unsigned char*>(SDL_MapGPUTransferBuffer(device,read,false));require(data,"resample download");
         for(unsigned y=0;y<target_height;++y) for(unsigned x=0;x<target_width;++x) {
             const unsigned i=y*w+x;Uint32 color;float z,m[2];std::memcpy(&color,data+i*4,4);std::memcpy(&z,data+n*4+i*4,4);std::memcpy(m,data+n*8+i*8,8);
-            require(color==0xff804020,"resample constant color");
-            const double ratio=double(w)/target_width;const unsigned first=unsigned(std::floor(x*ratio)),last=unsigned(std::ceil((x+1)*ratio));
-            unsigned chosen=first;for(unsigned s=first;s<last;++s) if((s%2?0.2f:0.8f)<(chosen%2?0.2f:0.8f)) chosen=s;
+            if(!varying_color) require(color==0xff804020,"resample constant color");
+            const double ratio=double(w)/target_width;
+            // Exact rational footprint and source row indexing are independent
+            // of shader FP32 rounding, including odd-width rows and thin edge
+            // overlaps. Equal depth retains the first sample in painter order.
+            const unsigned first_x=std::uint64_t(x)*w/target_width;
+            const unsigned last_x=(std::uint64_t(x+1)*w+target_width-1)/target_width;
+            const unsigned first_y=std::uint64_t(y)*h/target_height;
+            const unsigned last_y=(std::uint64_t(y+1)*h+target_height-1)/target_height;
+            unsigned chosen=first_y*w+first_x;
+            std::array<double,3> color_sum{};double color_weight=0;
+            for(unsigned sy=first_y;sy<last_y;++sy) for(unsigned sx=first_x;sx<last_x;++sx) {
+                const unsigned sample=sy*w+sx;
+                if((sample%2?0.2f:0.8f)<(chosen%2?0.2f:0.8f)) chosen=sample;
+                if(varying_color) {
+                    // Independent double area integral in source coordinates.
+                    const double dx=std::min(double(x+1)*w/target_width,double(sx+1))
+                        -std::max(double(x)*w/target_width,double(sx));
+                    const double dy=std::min(double(y+1)*h/target_height,double(sy+1))
+                        -std::max(double(y)*h/target_height,double(sy));
+                    const double weight=dx*dy;const auto input=sample_color(sample);
+                    for(unsigned c=0;c<3;++c) color_sum[c]+=((input>>(c*8))&255u)*weight;
+                    color_weight+=weight;
+                }
+            }
+            if(varying_color) {
+                require(color_weight>0 && (color>>24)==255,"resample area/alpha");
+                for(unsigned c=0;c<3;++c) require(std::abs(int((color>>(c*8))&255u)
+                    -int(std::lround(color_sum[c]/color_weight)))<=1,"resample independent area color");
+            }
             require(std::abs(z-(chosen%2?0.2f:0.8f))<1e-6f,"resample nearest depth");
-            if(chosen%4==3) require(m[0]==-std::numeric_limits<float>::max() && m[1]==m[0],"resample invalid sentinel");
-            else require(std::abs(m[0]-float(chosen%2?4:12)/ratio)<1e-5 && std::abs(m[1]+1.f)<1e-5,"resample scaled paired motion");
+            if(chosen%4==3 && !(m[0]==-std::numeric_limits<float>::max() && m[1]==m[0]))
+                throw std::runtime_error("resample invalid sentinel source="+std::to_string(w)+"x"+std::to_string(h)
+                    +" target="+std::to_string(target_width)+" x="+std::to_string(x)+" y="+std::to_string(y)
+                    +" chosen="+std::to_string(chosen)+" actual="+std::to_string(m[0])+","+std::to_string(m[1]));
+            if(chosen%4==3) continue;
+            else if(!(std::abs(m[0]-float(chosen%2?4:12)/ratio)<1e-5 && std::abs(m[1]+2./(double(h)/target_height))<1e-5))
+                throw std::runtime_error("resample paired motion source="+std::to_string(w)+"x"+std::to_string(h)
+                    +" target="+std::to_string(target_width)+" x="+std::to_string(x)+" y="+std::to_string(y)
+                    +" chosen="+std::to_string(chosen)+" actual="+std::to_string(m[0])+","+std::to_string(m[1]));
         }
         SDL_UnmapGPUTransferBuffer(device,read);
     }
     converter.release_device();for(auto* t:inputs) SDL_ReleaseGPUTexture(device,t);SDL_ReleaseGPUTransferBuffer(device,upload);SDL_ReleaseGPUTransferBuffer(device,read);
-    std::cout<<"Temporal resampling: fractional ratios, paired closest depth/motion, invalid sentinel, resize and alias rejection passed\n";
+    std::cout<<"Temporal resampling: "<<w<<'x'<<h<<" varying color="<<varying_color
+        <<", independent area color, exact rational closest depth/motion, invalid sentinel, resize and alias rejection passed\n";
 }
+#include "check_wide_motion.inc"
 int main() try {
     require(SDL_Init(SDL_INIT_VIDEO),"SDL");
     auto* device=SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV|SDL_GPU_SHADERFORMAT_DXIL|SDL_GPU_SHADERFORMAT_MSL,true,nullptr);
@@ -236,6 +301,15 @@ int main() try {
     check_temporal_hud(device);
     check_temporal_hud(device,false);
     check_temporal_resample(device);
+    check_temporal_textures(device,4801,2);
+    check_temporal_hud(device,true,4801,2);
+    check_temporal_hud(device,false,4801,2);
+    check_temporal_resample(device,4801,4);
+    check_temporal_resample(device,4801,4,true);
+    check_temporal_textures(device,2,4801);
+    check_temporal_hud(device,true,2,4801);
+    check_temporal_resample(device,2,4801,true);
+    check_wide_motion(device);
     starfox::render::GpuModel model;
     {
         using namespace starfox::render;

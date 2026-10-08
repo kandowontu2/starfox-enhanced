@@ -1,0 +1,235 @@
+name: 3DS native bring-up checks
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/3ds-native-bringup]
+    paths:
+      - 'platform/3ds/**'
+      - 'include/starfox/platform/nintendo_3ds/**'
+      - 'tests/nintendo_3ds*.cpp'
+      - 'tests/nintendo_3ds*.cmake'
+      - 'tests/3ds_audio_stubs/**'
+      - 'tests/3ds_display_stubs/**'
+      - 'tools/check_3ds*.cpp'
+      - '.github/workflows/3ds-native-check.yml'
+      - 'tests/nintendo_3ds_pica_tests.cpp'
+      - 'tests/nintendo_3ds_source_geometry_tests.cpp'
+      - 'tests/nintendo_3ds_raster_tests.cpp'
+      - 'tests/tilemap_coordinates_tests.cpp'
+      - 'tests/owned_65816_step_tests.cpp'
+      - 'tests/background_scanline_tests.cpp'
+      - 'tests/tunnel_scanline_tests.cpp'
+      - 'tests/object_record_tests.cpp'
+      - 'tests/bus_transfer_tests.cpp'
+      - 'include/starfox/simulation/**'
+      - 'tests/framebuffer_extents_tests.cpp'
+      - 'include/starfox/render/framebuffer.hpp'
+      - 'src/render/background_renderer.cpp'
+      - 'src/render/tilemap_coordinates.hpp'
+      - 'src/render/sprite_renderer.cpp'
+      - 'include/starfox/render/background_renderer.hpp'
+      - 'include/starfox/render/sprite_renderer.hpp'
+      - 'src/render/software_renderer.cpp'
+      - 'include/starfox/render/software_renderer.hpp'
+      - 'include/starfox/render/source_polygon_spans.hpp'
+      - 'tests/source_polygon_spans_tests.cpp'
+      - 'include/starfox/render/sprite_selection.hpp'
+      - 'include/starfox/vr/game_scene.hpp'
+      - 'include/starfox/vr/source_pose_interpolation.hpp'
+      - 'src/vr/source_pose_interpolation.cpp'
+      - 'src/render/face_material.cpp'
+      - 'src/simulation/math.cpp'
+      - 'tools/generate_runtime_manifest.py'
+      - 'tools/build_3ds_frontend.sh'
+      - 'tools/package_3ds_test.py'
+      - 'tests/test_3ds_package.py'
+      - 'tests/test_3ds_stack.py'
+      - 'tools/check_3ds_stack.py'
+      - 'tools/check_3ds_spc_timers.py'
+      - 'tools/check_3ds_spc_saturation.py'
+      - 'tools/check_3ds_spc_counters.py'
+      - 'tools/check_3ds_spc_ram.py'
+      - 'tools/check_3ds_spc_output.py'
+      - 'tests/3ds_spc_ram_hook.hpp'
+      - 'tests/nintendo_3ds_game_assets_tests.cpp'
+      - 'src/simulation/**'
+      - 'src/audio/spc700_audio.cpp'
+      - 'include/starfox/audio/spc700_audio.hpp'
+      - 'include/starfox/audio/stem_mixer.hpp'
+      - 'tests/spc_stems_tests.cpp'
+      - 'cmake/SpcState.cmake'
+permissions:
+  contents: read
+jobs:
+  native-diagnostics:
+    name: New 3DS stereo / old-model mono native checks and test package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      # Official devkitPro/devkitARM image, pinned rather than floating latest.
+      CTR_IMAGE: devkitpro/devkitarm@sha256:116afba8df8453961de2936ffab20dd441edf4d682856c1ec8b0e53d7ed0bbf5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify texture packing and independent stereo projections
+        shell: bash
+        run: |
+          g++ -std=c++20 -O2 -Wall -Wextra -Wpedantic -Werror -I include \
+            tests/nintendo_3ds_pica_tests.cpp -o "$RUNNER_TEMP/starfox-pica-contracts"
+          "$RUNNER_TEMP/starfox-pica-contracts"
+      - name: Verify shared source geometry and native conversion
+        shell: bash
+        run: |
+          g++ -std=c++20 -O2 -Wall -Wextra -Wpedantic -Werror -I include \
+            tests/nintendo_3ds_source_geometry_tests.cpp platform/3ds/pica_shapes.cpp \
+            platform/3ds/pica_source_spans.cpp \
+            src/render/software_renderer.cpp src/render/face_material.cpp \
+            src/simulation/math.cpp src/assets/rom.cpp \
+            -o "$RUNNER_TEMP/starfox-3ds-source-contracts"
+          "$RUNNER_TEMP/starfox-3ds-source-contracts"
+      - name: Verify EX ink, surface depth, stereo coverage and transaction limits
+        shell: bash
+        run: |
+          g++ -std=c++20 -O2 -Wall -Wextra -Wpedantic -Werror -I include \
+            tests/nintendo_3ds_source_spans_tests.cpp platform/3ds/pica_shapes.cpp \
+            platform/3ds/pica_source_spans.cpp src/render/software_renderer.cpp \
+            src/render/face_material.cpp src/simulation/math.cpp src/assets/rom.cpp \
+            -o "$RUNNER_TEMP/starfox-3ds-ex-span-contracts"
+          "$RUNNER_TEMP/starfox-3ds-ex-span-contracts"
+      - name: Verify source PPU layers, caches and ordered composition
+        shell: bash
+        run: |
+          g++ -std=c++20 -O2 -Wall -Wextra -Wpedantic -Werror -DSTARFOX_SCENE_SOURCE_ONLY=1 -I include \
+            tests/nintendo_3ds_raster_tests.cpp platform/3ds/pica_raster.cpp \
+            src/render/background_renderer.cpp src/render/sprite_renderer.cpp \
+            -o "$RUNNER_TEMP/starfox-3ds-raster-contracts"
+          "$RUNNER_TEMP/starfox-3ds-raster-contracts"
+      - name: Verify lean cartridge graph and standard companion loader
+        shell: bash
+        run: |
+          cmake -S platform/3ds -B "$RUNNER_TEMP/starfox-3ds-core-host" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DSTARFOX_3DS_BUILD_GAME_CORE=ON \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DSTARFOX_3DS_PROFILE_FRAMES=ON -DSTARFOX_3DS_ENABLE_IPO=OFF
+          cmake --build "$RUNNER_TEMP/starfox-3ds-core-host" --parallel 2
+          ctest --test-dir "$RUNNER_TEMP/starfox-3ds-core-host" --output-on-failure
+          python3 tools/check_3ds_spc_ram.py "$RUNNER_TEMP/starfox-3ds-core-host"
+          python3 tools/check_3ds_spc_output.py "$RUNNER_TEMP/starfox-3ds-core-host"
+          python3 tests/test_3ds_stack.py
+      - name: Cross-build native diagnostics and experimental player
+        shell: bash
+        run: |
+          docker pull "$CTR_IMAGE"
+          docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
+            -e STARFOX_3DS_TEST_PLAYER=ON \
+            -e STARFOX_3DS_PROFILE_FRAMES=ON \
+            -e STARFOX_3DS_ENABLE_IPO=OFF \
+            -v "$GITHUB_WORKSPACE:/src" -w /src "$CTR_IMAGE" \
+            bash tools/build_3ds_frontend.sh . build/3ds-native
+          for target in starfox_3ds_frontend_check starfox_3ds_spc_saturation_check starfox_3ds_spc_counters_check starfox_3ds_spc_output_check starfox_3ds_gpu_check starfox_3ds_game_core_check starfox_3ds_test_player; do
+            test -s "build/3ds-native/$target.elf"
+            test -s "build/3ds-native/$target.3dsx"
+          done
+      - name: Inspect ARM executables and memory sizes
+        shell: bash
+        run: |
+          docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
+            -v "$GITHUB_WORKSPACE:/src" -w /src "$CTR_IMAGE" bash -euc '
+              for target in starfox_3ds_frontend_check starfox_3ds_spc_saturation_check starfox_3ds_spc_counters_check starfox_3ds_spc_output_check starfox_3ds_gpu_check starfox_3ds_game_core_check starfox_3ds_test_player; do
+                "$DEVKITARM/bin/arm-none-eabi-readelf" -h "build/3ds-native/$target.elf"
+                "$DEVKITARM/bin/arm-none-eabi-size" "build/3ds-native/$target.elf"
+              done
+              python3 tools/check_3ds_spc_timers.py build/3ds-native
+              python3 tools/check_3ds_spc_saturation.py build/3ds-native
+              python3 tools/check_3ds_spc_counters.py build/3ds-native
+              python3 tools/check_3ds_spc_ram.py build/3ds-native --native
+              python3 tools/check_3ds_spc_output.py build/3ds-native --native
+            '
+          python3 tools/check_3ds_stack.py build/3ds-native
+      - name: Validate and package the New 3DS stereo / old-model mono test candidate
+        shell: bash
+        run: |
+          python3 tools/package_3ds_test.py \
+            --elf build/3ds-native/starfox_3ds_test_player.elf \
+            --3dsx build/3ds-native/starfox_3ds_test_player.3dsx \
+            --smdh build/3ds-native/test-player.smdh \
+            --source-commit "$GITHUB_SHA" \
+            --output StarFoxEnhanced-3ds-test.zip
+          unzip -t StarFoxEnhanced-3ds-test.zip
+      - name: Upload experimental player for hardware testing, not a verified release
+        uses: actions/upload-artifact@v4
+        with:
+          name: StarFoxEnhanced-3ds-test
+          path: StarFoxEnhanced-3ds-test.zip
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload native executables and diagnostic tools
+        uses: actions/upload-artifact@v4
+        with:
+          name: StarFoxEnhanced-3ds-native-diagnostics
+          path: |
+            build/3ds-native/*.elf
+            build/3ds-native/starfox_3ds_frontend_check.3dsx
+            build/3ds-native/starfox_3ds_gpu_check.3dsx
+            build/3ds-native/starfox_3ds_game_core_check.3dsx
+            build/3ds-native/*.smdh
+            build/3ds-native/pica_scene.shbin
+            build/3ds-native/**/*.su
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload small asset-free EX span GPU probe
+        uses: actions/upload-artifact@v4
+        with:
+          name: StarFoxEnhanced-3ds-ex-spans-gpu-probe
+          path: |
+            build/3ds-native/starfox_3ds_gpu_check.3dsx
+            build/3ds-native/gpu-check.smdh
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload small asset-free NDSP and CSND compatibility check
+        uses: actions/upload-artifact@v4
+        with:
+          name: StarFoxEnhanced-3ds-audio-compatibility-check
+          path: |
+            build/3ds-native/starfox_3ds_frontend_check.3dsx
+            build/3ds-native/frontend-check.smdh
+            platform/3ds/CSND-CHECK.md
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload small asset-free native SPC arithmetic check
+        uses: actions/upload-artifact@v4
+        with:
+          name: StarFoxEnhanced-3ds-spc-saturation-check
+          path: |
+            build/3ds-native/starfox_3ds_spc_saturation_check.3dsx
+            build/3ds-native/spc-saturation-check.smdh
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload small asset-free native DSP counter arithmetic check
+        uses: actions/upload-artifact@v4
+        with:
+          name: StarFoxEnhanced-3ds-spc-counters-check
+          path: |
+            build/3ds-native/starfox_3ds_spc_counters_check.3dsx
+            build/3ds-native/spc-counters-check.smdh
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload small asset-free native voice output arithmetic check
+        # Separate small math probe; never require downloading debug ELFs.
+        uses: actions/upload-artifact@v4
+        with:
+          name: StarFoxEnhanced-3ds-spc-output-check
+          path: |
+            build/3ds-native/starfox_3ds_spc_output_check.3dsx
+            build/3ds-native/spc-output-check.smdh
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload native compiler settings for the performance experiment
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: StarFoxEnhanced-3ds-native-build-settings
+          path: |
+            build/3ds-native/compile_commands.json
+            build/3ds-native/CMakeCache.txt
+          if-no-files-found: warn
+          retention-days: 7

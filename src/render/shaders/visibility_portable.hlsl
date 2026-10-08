@@ -1,10 +1,10 @@
 // Source MSH_VIZIS: signed-word differences, wrapping signed 32-bit area,
 // and odd-behind correction. Projected points are consumed on-device.
+#include "source_visibility.hlsli"
 [[vk::binding(0,0)]] StructuredBuffer<int4> projected : register(t0, space0);
 [[vk::binding(1,0)]] StructuredBuffer<uint4> faces : register(t1, space0);
 [[vk::binding(0,1)]] RWStructuredBuffer<uint> visible : register(u0, space1);
 [[vk::binding(0,2)]] cbuffer Settings : register(b0, space2) { uint count; uint point_count; uint2 padding; };
-int word(int value) { return (value<<16)>>16; }
 [numthreads(64,1,1)]
 void main(uint3 id : SV_DispatchThreadID) {
     if(id.x>=count) return;
@@ -18,9 +18,5 @@ void main(uint3 id : SV_DispatchThreadID) {
     uint3 indices=faces[id.x].xyz;
     if(any(indices>=point_count)) {visible[id.x]=0;return;}
     int4 a=projected[indices.x],b=projected[indices.y],c=projected[indices.z];
-    if(a.w<0 || b.w<0 || c.w<0) {visible[id.x]=0;return;}
-    int bx=word(b.x-a.x),by=word(b.y-a.y),cx=word(c.x-a.x),cy=word(c.y-a.y);
-    int area=asint(asuint(bx*cy)-asuint(by*cx));
-    bool odd_behind=(a.z<0)!=((b.z<0)!=(c.z<0));
-    visible[id.x]=(area<0)!=odd_behind?1:0;
+    visible[id.x]=sourceWordVisibility(a,b,c);
 }

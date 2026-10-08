@@ -50,7 +50,7 @@ FaceMaterial face_material(const assets::Shape& shape,const assets::Face& face,
     auto byte=static_cast<std::uint8_t>(word);
     if(material<62U && shape.has_diffuse_shade_tables && material<shape.diffuse_shade_tables[depth_band].size()) {
         const auto dot=face.normal.x*light[0]+face.normal.y*light[1]+face.normal.z*light[2];
-        const auto intensity=std::clamp(dot>>10,6,15);
+        const auto intensity=std::clamp<std::int32_t>(dot>>10,6,15);
         byte=shape.diffuse_shade_tables[depth_band][material][static_cast<std::size_t>(intensity-6)];
     } else if(material==62U && pose.has_depth_colour_tables) byte=pose.depth_colour_tables[depth_band][byte&0x1fU];
     const auto even=static_cast<std::uint8_t>(byte&0x0fU),odd=static_cast<std::uint8_t>(byte>>4U);

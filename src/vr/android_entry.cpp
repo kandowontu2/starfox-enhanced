@@ -1,6 +1,7 @@
 #include "starfox/vr/application.hpp"
 #include "starfox/assets/embedded.hpp"
 #include "starfox/assets/runtime_bundle.hpp"
+#include "starfox/vr/diagnostic_log.hpp"
 #include <fstream>
 #include <jni.h>
 #include <stdexcept>
@@ -18,9 +19,11 @@ class AndroidErrors final : public std::streambuf {
     std::ostream& stream_;
     int priority_;
     std::streambuf* previous_;
+    starfox::vr::BoundedDiagnosticLog* file_{};
     void flush_line() {
         if (!line_.empty()) {
             __android_log_write(priority_, "StarFoxVR", line_.c_str());
+            if(file_) file_->line(line_);
             line_.clear();
         }
     }
@@ -34,8 +37,9 @@ class AndroidErrors final : public std::streambuf {
     }
     int sync() override {flush_line();return 0;}
 public:
-    explicit AndroidErrors(std::ostream& stream=std::cerr,int priority=ANDROID_LOG_ERROR)
-        :stream_(stream),priority_(priority),previous_(stream.rdbuf(this)) {}
+    explicit AndroidErrors(std::ostream& stream=std::cerr,int priority=ANDROID_LOG_ERROR,
+        starfox::vr::BoundedDiagnosticLog* file=nullptr)
+        :stream_(stream),priority_(priority),previous_(stream.rdbuf(this)),file_(file) {}
     ~AndroidErrors() override {stream_.rdbuf(previous_);flush_line();}
 };
 class GlobalRef {
@@ -85,9 +89,26 @@ Java_com_starfox_enhanced_quest_QuestBridge_validateBundle(JNIEnv* env,jclass,js
 extern "C" JNIEXPORT jint JNICALL
 Java_com_starfox_enhanced_quest_QuestBridge_run(JNIEnv* env,jclass,jobject activity,
         jobject context,jstring rom,jstring symbols,jobject stop) {
-    AndroidErrors diagnostics;
-    AndroidErrors progress(std::cout,ANDROID_LOG_INFO);
+    std::ofstream diagnostic_file;
+    starfox::vr::BoundedDiagnosticLog file_log(diagnostic_file);
+    AndroidErrors diagnostics(std::cerr,ANDROID_LOG_ERROR,&file_log);
+    AndroidErrors progress(std::cout,ANDROID_LOG_INFO,&file_log);
     try {
+        const auto rom_path=path(env,rom);
+        const auto directory=std::filesystem::path(rom_path).parent_path();
+        // Only the two app-owned diagnostic files are replaced. Keep the last
+        // session when a tester relaunches after a native crash/process kill.
+        std::error_code log_error;
+        const auto current_log=directory/"vr-session.log";
+        if(std::filesystem::exists(current_log,log_error))
+            std::filesystem::copy_file(current_log,directory/"vr-session.previous.log",
+                std::filesystem::copy_options::overwrite_existing,log_error);
+        if(!log_error) diagnostic_file.open(current_log,std::ios::out|std::ios::trunc|std::ios::binary);
+        if(!diagnostic_file.is_open())
+            std::cerr<<"Persistent VR diagnostics unavailable; prior log retained and logcat remains active\n";
+        std::cout<<"VR session start_unix_ms="
+            <<std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count()
+            <<" diagnostic_cap=8388608 bytes\n";
         JavaVM* vm=nullptr;
         if(env->GetJavaVM(&vm)!=JNI_OK) throw std::runtime_error("Cannot obtain Java VM");
         GlobalRef activity_ref(env,activity),context_ref(env,context),stop_ref(env,stop);
@@ -104,18 +125,21 @@ Java_com_starfox_enhanced_quest_QuestBridge_run(JNIEnv* env,jclass,jobject activ
             if(env->ExceptionCheck()) throw std::runtime_error("Quest cancellation callback failed");
             return requested;
         };
-        std::vector<std::string> arguments{"starfox_quest",symbols?"--intro":"--bundle",path(env,rom)};
+        std::vector<std::string> arguments{"starfox_quest",symbols?"--intro":"--bundle",rom_path};
         if(symbols) arguments.push_back(path(env,symbols));
         host.cartridge_save_path=std::filesystem::path(arguments[2]).parent_path()/"starfox-ex.srm";
         std::vector<char*> argv;
         for(auto& argument:arguments) argv.push_back(argument.data());
-        return starfox::vr::run_application(static_cast<int>(argv.size()),argv.data(),host);
+        const auto code=starfox::vr::run_application(static_cast<int>(argv.size()),argv.data(),host);
+        std::cout<<"VR session returned code "<<code<<'\n';return code;
     } catch(const std::exception& error) {
+        std::cerr<<"Quest native session failed: "<<error.what()<<'\n';
         if(!env->ExceptionCheck()) {
             const auto type=env->FindClass("java/lang/IllegalStateException");
             if(type) {env->ThrowNew(type,error.what());env->DeleteLocalRef(type);}
         }
     } catch(...) {
+        std::cerr<<"Quest native session failed: unexpected exception\n";
         if(!env->ExceptionCheck()) {
             const auto type=env->FindClass("java/lang/IllegalStateException");
             if(type) {env->ThrowNew(type,"Unexpected Quest native failure");env->DeleteLocalRef(type);}

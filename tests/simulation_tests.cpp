@@ -851,6 +851,44 @@ int main(int argc, char** argv) {
                 && current_crosshair_ppu->oam[1U] == 41U,
             "crosshair presentation interpolation jittered or moved other OAM");
 
+    {
+        current_crosshair_ppu->oam[517]|=0xaa; // Preserve each quadrant's large-size bit.
+        const auto original=current_crosshair_ppu->oam;
+        for(const int offset:{-600,-120,-4,0,4,150,600}) {
+            const auto isolated=starfox::render::isolated_crosshair_oam(*current_crosshair_ppu,offset);
+            require(isolated.has_value(),"complete crosshair was not extracted");
+            for(unsigned object=0;object<128;++object) {
+                const auto low=object*4,high=512+object/4,shift=(object&3)*2;
+                if(object>=20 && object<24) {
+                    const auto x=unsigned((*isolated)[low])|((unsigned((*isolated)[high])>>shift & 1U)<<8);
+                    require(x==(unsigned(int(original[low])+offset)&511U),"isolated reticle X wrap incorrect");
+                    require(((*isolated)[high]&(2U<<shift))==(original[high]&(2U<<shift)),"isolated reticle changed sprite size");
+                    require((*isolated)[low+1]==original[low+1] && (*isolated)[low+2]==original[low+2]
+                        && (*isolated)[low+3]==original[low+3],"isolated reticle changed Y/tile/attributes");
+                } else {
+                    for(unsigned byte=0;byte<4;++byte) require((*isolated)[low+byte]==0,"isolated reticle contains unrelated HUD");
+                    require(((*isolated)[high]&(3U<<shift))==0,"isolated reticle contains unrelated packed OAM");
+                }
+            }
+            require(current_crosshair_ppu->oam==original,"reticle extraction changed source OAM");
+        }
+        current_crosshair_ppu->oam[23*4+2]=0;
+        require(!starfox::render::isolated_crosshair_oam(*current_crosshair_ppu),"partial reticle was extracted");
+        current_crosshair_ppu->oam=original;
+        current_crosshair_ppu->main_screen|=0x10;
+        starfox::render::Framebuffer reticle_frame{256,224,2};
+        starfox::render::RasterCommands reticle_commands;
+        reticle_commands.reset(reticle_frame.stored_width(),reticle_frame.stored_height());
+        reticle_frame.record_to(&reticle_commands);
+        sprite_renderer.draw_objects(*current_crosshair_ppu,reticle_frame);
+        reticle_frame.record_to(nullptr);
+        unsigned tagged=0,other=0;
+        for(const auto& c:reticle_commands.commands) {
+            if(c.textured==4 && (c.reserved1&4U)) ++tagged;
+            else ++other;
+        }
+        require(tagged==4 && other==1,"reticle commands were not isolated from unrelated HUD");
+    }
     starfox::simulation::SnesPpuState mode3_ppu;
     mode3_ppu.background_mode = 3U;
     mode3_ppu.main_screen = 0x01U;
@@ -6857,7 +6895,7 @@ int main(int argc, char** argv) {
                 }
             };
             const auto select = [&](unsigned target) {
-                for (unsigned i = 0; i < 25 && menu.pregame_selection() != target; ++i)
+                for (unsigned i = 0; i < starfox::simulation::global_menu_order.size() && menu.pregame_selection() != target; ++i)
                     press(starfox::input::down);
                 require(menu.pregame_selection() == target, "menu action is unreachable");
             };
@@ -6865,7 +6903,7 @@ int main(int argc, char** argv) {
                 if (menu.pregame_page() != PregamePage::main)
                     press(starfox::input::b);
                 if (page != PregamePage::main) {
-                    select(page == PregamePage::two_d ? 20U : page == PregamePage::three_d ? 21U : 14U);
+                    select(page == PregamePage::two_d ? 20U : page == PregamePage::three_d ? 21U : page==PregamePage::global ? 47U : 14U);
                     press(starfox::input::a);
                 }
             }
@@ -6877,8 +6915,15 @@ int main(int argc, char** argv) {
                 upstream_rom, upstream_symbols, "LEVEL1_1"};
             require(!preview.preview_requested(), "preview must default off");
             preview.enable_menu_preview();
+            for (unsigned frame=0;frame<24;++frame) {
+                for (double fraction:{0.,.125,.5,.875,1.})
+                    require(preview.logic_interpolation_alpha(fraction)==1.,
+                        "frozen preview cycled between old/current model and camera poses");
+                preview.present_frame();
+                if(preview.logic_tick_ready()) static_cast<void>(preview.tick({}));
+            }
             for (auto page : {starfox::simulation::PregamePage::two_d,
-                    starfox::simulation::PregamePage::three_d}) {
+                    starfox::simulation::PregamePage::three_d,starfox::simulation::PregamePage::global}) {
                 const auto order = starfox::simulation::pregame_menu_order(page);
                 select_menu_action(preview, page, order.front());
                 for (unsigned i = 0; i < order.size(); ++i) {
@@ -6890,13 +6935,13 @@ int main(int argc, char** argv) {
                 require(preview.pregame_selection() == 23U, "submenu reverse wrap must reach BACK");
                 static_cast<void>(preview.tick({0, starfox::input::a, 0}));
                 require(preview.pregame_page() == starfox::simulation::PregamePage::main
-                    && preview.pregame_selection() == (page == starfox::simulation::PregamePage::two_d ? 20U : 21U)
+                    && preview.pregame_selection() == (page == starfox::simulation::PregamePage::two_d ? 20U : page==starfox::simulation::PregamePage::global ? 47U : 21U)
                     && preview.preview_requested(), "BACK must restore submenu entry and preserve preview");
             }
             require(preview.bloom() == 0U, "Bloom must default Off");
-            require(!preview.neural_filter_available() && !preview.neural_filter_requested(),
-                "optional neural filter must default absent/off");
-            preview.configure_neural_filter(true,false);
+            const auto graphics_order=starfox::simulation::pregame_menu_order(starfox::simulation::PregamePage::three_d);
+            require(std::find(graphics_order.begin(),graphics_order.end(),31U)==graphics_order.end(),
+                "removed add-on must not return to the graphics menu");
             preview.set_fsr1_menu(true);
             preview.set_dlss_mode(2);
             select_menu_action(preview,starfox::simulation::PregamePage::three_d,30U);
@@ -6908,14 +6953,30 @@ int main(int argc, char** argv) {
             preview.set_fsr1_menu(false);
             static_cast<void>(preview.tick({0,starfox::input::right,0}));
             require(preview.dlss_mode()==3 && preview.fsr1_mode()==1,"adapter change lost independent quality selection");
-            select_menu_action(preview,starfox::simulation::PregamePage::three_d,31U);
-            static_cast<void>(preview.tick({starfox::input::a,starfox::input::a,0}));
-            require(preview.neural_filter_requested(),"neural filter did not toggle on press");
-            static_cast<void>(preview.tick({starfox::input::a,0,0}));
-            require(preview.neural_filter_requested(),"held A toggled neural filter");
-            static_cast<void>(preview.tick({0,0,starfox::input::a}));
+            select_menu_action(preview,starfox::simulation::PregamePage::three_d,78U);
+            static_cast<void>(preview.tick({0,starfox::input::right,0}));
+            require(preview.dlss45_mode()==1 && preview.dlss_mode()==0,"DLSS 4.5 did not select a separate, exclusive temporal model");
+            static_cast<void>(preview.tick({0,starfox::input::left,0}));
+            require(preview.dlss45_mode()==0 && preview.dlss_mode()==0,"DLSS 4.5 OFF unexpectedly enabled standard DLSS");
+            preview.set_dlss45_mode(4);preview.set_dlss_mode(2);
+            require(preview.dlss_mode()==2 && preview.dlss45_mode()==0,"standard DLSS did not disable alternate model");
+            preview.set_dlss45_mode(3);
+            require(preview.dlss45_mode()==3 && preview.dlss_mode()==0,"alternate DLSS did not disable standard model");
+            const auto prior_scale=preview.render_scale();
+            for(unsigned scale=0;scale<starfox::simulation::render_scale_count;++scale) {
+                preview.set_render_scale(static_cast<starfox::simulation::RenderScale>(scale));
+                const auto selected=preview.render_scale();
+                for(std::uint8_t mode=0;mode<=4;++mode) {
+                    preview.set_dlss_mode(mode);
+                    require(preview.render_scale()==selected && preview.effective_render_scale()==selected,
+                        "Standard DLSS quality overrode the independent render upscale");
+                    preview.set_dlss45_mode(mode);
+                    require(preview.render_scale()==selected && preview.effective_render_scale()==selected,
+                        "DLSS 4.5 quality overrode the independent render upscale");
+                }
+            }
+            preview.set_render_scale(prior_scale);preview.set_dlss45_mode(3);
             select_menu_action(preview,starfox::simulation::PregamePage::three_d,23U);
-            preview.configure_neural_filter(false,false);
             for (auto page : {starfox::simulation::PregamePage::two_d,
                     starfox::simulation::PregamePage::three_d}) {
                 select_menu_action(preview, page, 23U);
@@ -6987,7 +7048,7 @@ int main(int argc, char** argv) {
         starfox::simulation::GameSimulation missing_msu_game{
             upstream_rom, upstream_symbols, "BOOT"};
         missing_msu_game.set_msu1_available(false);
-        for (std::size_t row = 0U; row < 5U; ++row) {
+        for (std::size_t row = 0U; row < 6U; ++row) {
             static_cast<void>(missing_msu_game.tick(
                 {0, starfox::input::down, 0}));
         }
@@ -7063,12 +7124,25 @@ int main(int argc, char** argv) {
                 "pre-game display selector did not enable 32:9 super ultrawide");
         drive_boot({0, starfox::input::right, 0});
         require(boot_game.display_mode()
+                    == starfox::simulation::DisplayMode::fit_screen,
+                "pre-game display selector did not enable fit to screen");
+        drive_boot({0, starfox::input::right, 0});
+        require(boot_game.display_mode()
                     == starfox::simulation::DisplayMode::standard_4_3,
                 "pre-game display selector did not wrap to standard mode");
         drive_boot({0, starfox::input::left, 0});
         require(boot_game.display_mode()
-                    == starfox::simulation::DisplayMode::super_ultrawide_32_9,
-                "pre-game display selector did not step backward to 32:9");
+                    == starfox::simulation::DisplayMode::fit_screen,
+                "pre-game display selector did not step backward to fit to screen");
+        drive_boot({0, starfox::input::down, 0});
+        require(boot_game.pregame_selection()==43U && !boot_game.integer_scaling(),
+            "main menu must place integer scaling after display, default off");
+        drive_boot({0, starfox::input::a, 0});
+        require(boot_game.integer_scaling(),"integer scaling did not enable");
+        auto integer_saved=boot_game.restored_state(boot_game.save_state());
+        require(integer_saved->integer_scaling(),"integer scaling did not survive state restore");
+        drive_boot({0, starfox::input::left, 0});
+        require(!boot_game.integer_scaling(),"integer scaling did not disable");
         drive_boot({0, starfox::input::down, 0});
         require(boot_game.pregame_selection() == 4U,
                 "pre-game cursor did not reach RENDERER");
@@ -7123,6 +7197,24 @@ int main(int argc, char** argv) {
         drive_boot({0, starfox::input::down, 0});
         require(boot_game.pregame_selection() == 11U,
                 "VSYNC did not follow ANTI-ALIASING");
+        boot_game.set_aa_type(3);
+        boot_game.set_anti_aliasing_mode(starfox::simulation::AntiAliasingMode::heavy);
+        require(boot_game.effective_render_scale()==starfox::simulation::RenderScale::scale_4x,
+            "SSAA high did not request 4x source supersampling");
+        boot_game.set_aa_type(0);
+        require(starfox::simulation::three_d_menu_order[0]==42
+            && starfox::simulation::three_d_menu_order[1]==7,
+            "AA type must precede AA quality");
+        {
+            auto aa_menu=boot_game.restored_state(boot_game.save_state());
+            select_menu_action(*aa_menu,starfox::simulation::PregamePage::three_d,42U);
+            for(unsigned type:{1U,2U,3U,4U,5U,6U,0U}) {
+                static_cast<void>(aa_menu->tick({0,starfox::input::right,0}));
+                require(aa_menu->aa_type()==type,"AA type menu skipped TAA/SMAA/MSAA or failed to wrap");
+                auto restored=aa_menu->restored_state(aa_menu->save_state());
+                require(restored->aa_type()==type,"AA type did not survive save-state restoration");
+            }
+        }
         drive_boot({0, starfox::input::a, 0});
         require(boot_game.vsync(), "pre-game VSync option did not enable");
         drive_boot({0, starfox::input::up, 0});
@@ -7151,8 +7243,8 @@ int main(int argc, char** argv) {
                 "Render Upscale did not step back to native");
         drive_boot({0, starfox::input::left, 0});
         require(boot_game.render_scale()
-                    == starfox::simulation::RenderScale::scale_4x,
-                "Render Upscale did not wrap backward to 4x");
+                    == starfox::simulation::RenderScale::scale_6x,
+                "Render Upscale did not wrap backward to 6x");
         drive_boot({0, starfox::input::right, 0});
         require(boot_game.render_scale()
                     == starfox::simulation::RenderScale::scale_1x
@@ -7167,15 +7259,10 @@ int main(int argc, char** argv) {
         require(boot_game.pregame_selection() == 17U,
                 "3D BLOOM did not follow 2D BLOOM");
         drive_boot({0, starfox::input::down, 0});
-        select_menu_action(boot_game, starfox::simulation::PregamePage::three_d, 19U, &boot_audio);
-        require(boot_game.pregame_selection() == 19U && boot_game.model_smoothing()==0U,
-                "3D SMOOTHING missing or not default Off");
-        for(unsigned level=1;level<=4;++level) {
-            drive_boot({0, starfox::input::a, 0});
-            require(boot_game.model_smoothing()==level%4U,"3D SMOOTHING did not cycle all levels");
-        }
-        drive_boot({0, starfox::input::down, 0});
-        select_menu_action(boot_game, starfox::simulation::PregamePage::three_d, 10U, &boot_audio);
+        require(boot_game.pregame_selection()==12U,"retired smoothing must not occupy a menu row");
+        boot_game.set_model_smoothing(3);
+        require(boot_game.model_smoothing()==0,"legacy settings re-enabled retired smoothing");
+        select_menu_action(boot_game, starfox::simulation::PregamePage::global, 10U, &boot_audio);
         require(boot_game.pregame_selection() == 10U,
                 "pre-game cursor did not reach RTX LIGHTING");
         drive_boot({0, starfox::input::a, 0});
@@ -7191,7 +7278,8 @@ int main(int argc, char** argv) {
         drive_boot({0, starfox::input::left, 0});
         require(boot_game.rtx_lighting_intensity() == 3U, "lighting did not cycle backwards");
         drive_boot({0, starfox::input::down, 0});
-        require(boot_game.pregame_selection() == 28U, "HDR must appear directly below RTX lighting");
+        require(boot_game.pregame_selection() == 65U, "AO must appear directly below lighting");
+        select_menu_action(boot_game,starfox::simulation::PregamePage::global,28U,&boot_audio);
         require(boot_game.hdr_effect() == 0U, "HDR effect must default Off");
         for (unsigned level=1; level<=4; ++level) {
             drive_boot({0, starfox::input::right, 0});
@@ -7203,7 +7291,7 @@ int main(int argc, char** argv) {
         const auto shadow_menu = starfox::simulation::pregame_menu_order(starfox::simulation::PregamePage::three_d);
         require(std::find(shadow_menu.begin(),shadow_menu.end(),26U)==shadow_menu.end(),
             "removed Enhanced Shadows option remains in menu navigation");
-        select_menu_action(boot_game, starfox::simulation::PregamePage::three_d, 29U, &boot_audio);
+        select_menu_action(boot_game, starfox::simulation::PregamePage::global, 29U, &boot_audio);
         require(!boot_game.ray_tracing(), "hardware ray tracing must default Off");
         require(!boot_game.reflective_surfaces(),"reflections must default Off");
         boot_game.set_reflective_surfaces(3);
@@ -7215,7 +7303,121 @@ int main(int argc, char** argv) {
         drive_boot({0, starfox::input::left, 0});
         require(!boot_game.ray_tracing(), "ray tracing did not toggle back Off");
         require(!boot_game.reflective_surfaces(),"disabling ray tracing left reflections on");
-        select_menu_action(boot_game, starfox::simulation::PregamePage::three_d, 32U, &boot_audio);
+        for(unsigned quality=1;quality<=3;++quality) {
+            drive_boot({0,starfox::input::right,0});
+            require(boot_game.ray_tracing_quality()==quality,"RT quality did not advance");
+            auto saved=boot_game.restored_state(boot_game.save_state());
+            require(saved->ray_tracing_quality()==quality,"RT quality lost in save state");
+        }
+        drive_boot({0,starfox::input::right,0});
+        require(!boot_game.ray_tracing(),"RT High did not wrap to Off");
+        for(unsigned row=44;row<=46;++row) {
+            select_menu_action(boot_game,row==45?starfox::simulation::PregamePage::three_d:starfox::simulation::PregamePage::two_d,row,&boot_audio);
+            drive_boot({0,starfox::input::right,0});
+            require(boot_game.extra_effects()[row-44]!=0,"new effect category did not select");
+        }
+        auto fx_saved=boot_game.restored_state(boot_game.save_state());
+        require(fx_saved->extra_effects()==boot_game.extra_effects(),"independent FX lost in save state");
+        boot_game.set_extra_effects({});
+        for(unsigned row=48;row<=60;++row) {
+            select_menu_action(boot_game,starfox::simulation::PregamePage::global,row,&boot_audio);
+            for(unsigned level=1;level<=4;++level) {
+                drive_boot({0,starfox::input::right,0});
+                require(((boot_game.global_enhancements()>>((row-48)*2))&3)==level%4,"global enhancement cycle failed");
+            }
+            drive_boot({0,starfox::input::left,0});
+            require(((boot_game.global_enhancements()>>((row-48)*2))&3)==3,"global backwards cycle failed");
+        }
+        auto global_saved=boot_game.restored_state(boot_game.save_state());
+        require(global_saved->global_enhancements()==boot_game.global_enhancements(),"global enhancements lost in save state");
+        boot_game.set_global_enhancements(0);
+        for(unsigned row=61;row<=64;++row) {
+            select_menu_action(boot_game,starfox::simulation::PregamePage::global,row,&boot_audio);
+            drive_boot({0,starfox::input::left,0});
+            require(((boot_game.scene_enhancements()>>((row-61)*2))&3)==3,"scene enhancement selection failed");
+        }
+        require(boot_game.restored_state(boot_game.save_state())->scene_enhancements()==255,"scene enhancements lost in save state");
+        boot_game.set_scene_enhancements(0);
+        for(unsigned row=65;row<=66;++row) {
+            select_menu_action(boot_game,starfox::simulation::PregamePage::global,row,&boot_audio);
+            drive_boot({0,starfox::input::left,0});
+            require(((boot_game.depth_enhancements()>>((row-65)*2))&3)==3,"depth enhancement selection failed");
+        }
+        require(boot_game.restored_state(boot_game.save_state())->depth_enhancements()==15,"depth enhancements lost in state");
+        boot_game.set_depth_enhancements(0);
+        for(unsigned row:{67U,68U}) {
+            select_menu_action(boot_game,starfox::simulation::PregamePage::global,row,&boot_audio);
+            drive_boot({0,starfox::input::left,0});
+            require(((boot_game.particle_enhancements()>>((row-67)*2))&3)==3,"particle enhancement selection failed");
+        }
+        require(boot_game.restored_state(boot_game.save_state())->particle_enhancements()==15,"particle enhancements lost in state");
+        boot_game.set_particle_enhancements(0);
+        select_menu_action(boot_game,starfox::simulation::PregamePage::global,69,&boot_audio);
+        drive_boot({0,starfox::input::left,0});
+        require(boot_game.phosphor_persistence()==3,"phosphor menu selection failed");
+        require(boot_game.restored_state(boot_game.save_state())->phosphor_persistence()==3,"phosphor lost in state");
+        boot_game.set_phosphor_persistence(0);
+        select_menu_action(boot_game,starfox::simulation::PregamePage::global,70,&boot_audio);
+        drive_boot({0,starfox::input::left,0});
+        require(boot_game.adaptive_exposure()==3,"exposure menu selection failed");
+        require(boot_game.restored_state(boot_game.save_state())->adaptive_exposure()==3,"exposure lost in state");
+        boot_game.set_adaptive_exposure(0);
+        select_menu_action(boot_game,starfox::simulation::PregamePage::global,71,&boot_audio);
+        drive_boot({0,starfox::input::left,0});
+        require(boot_game.water_caustics()==3,"water caustics menu selection failed");
+        require(boot_game.restored_state(boot_game.save_state())->water_caustics()==3,"water caustics lost in state");
+        drive_boot({0,starfox::input::right,0});
+        require(boot_game.water_caustics()==0,"water caustics menu did not wrap Off");
+        boot_game.set_water_caustics(0);
+        select_menu_action(boot_game,starfox::simulation::PregamePage::global,72,&boot_audio);
+        require(boot_game.shadow_softness()==2,"shadow softness default changed");
+        drive_boot({0,starfox::input::right,0});
+        require(boot_game.shadow_softness()==3,"shadow softness menu selection failed");
+        require(boot_game.restored_state(boot_game.save_state())->shadow_softness()==3,"shadow softness lost in state");
+        drive_boot({0,starfox::input::right,0});
+        require(boot_game.shadow_softness()==0,"shadow softness did not wrap to Hard");
+        drive_boot({0,starfox::input::left,0});
+        require(boot_game.shadow_softness()==3,"shadow softness reverse wrap failed");
+        boot_game.set_shadow_softness(2);
+        require(boot_game.camera_response()==0,"camera response must default Off");
+        for(unsigned channel=0;channel<3;++channel) {
+            select_menu_action(boot_game,starfox::simulation::PregamePage::global,73+channel,&boot_audio);
+            const auto before=boot_game.camera_response();
+            drive_boot({0,starfox::input::left,0});
+            const auto expected=std::uint8_t(before | (3U<<(channel*2)));
+            require(boot_game.camera_response()==expected,"camera menu changed another channel");
+            require(boot_game.restored_state(boot_game.save_state())->camera_response()==expected,"camera response lost in state");
+            drive_boot({0,starfox::input::right,0});
+            require(boot_game.camera_response()==before,"camera response did not wrap Off");
+            drive_boot({0,starfox::input::right,0});
+        }
+        require(boot_game.camera_response()==21,"camera strengths not independent");
+        boot_game.set_camera_response(0);
+        require(boot_game.volumetric_fog()==0,"fog must default Off");
+        select_menu_action(boot_game,starfox::simulation::PregamePage::global,76,&boot_audio);
+        drive_boot({0,starfox::input::left,0});
+        require(boot_game.volumetric_fog()==3,"fog reverse wrap failed");
+        require(boot_game.restored_state(boot_game.save_state())->volumetric_fog()==3,"fog lost in save state");
+        drive_boot({0,starfox::input::right,0});
+        require(boot_game.volumetric_fog()==0,"fog did not wrap Off");
+        for(unsigned quality=1;quality<=3;++quality) {
+            drive_boot({0,starfox::input::right,0});
+            require(boot_game.volumetric_fog()==quality,"fog strength menu failed");
+        }
+        boot_game.set_volumetric_fog(0);
+        require(boot_game.motion_blur()==0,"motion blur must default Off");
+        select_menu_action(boot_game,starfox::simulation::PregamePage::global,77,&boot_audio);
+        drive_boot({0,starfox::input::left,0});
+        require(boot_game.motion_blur()==3,"motion blur reverse wrap failed");
+        require(boot_game.restored_state(boot_game.save_state())->motion_blur()==3,"motion blur lost in save state");
+        drive_boot({0,starfox::input::right,0});
+        require(boot_game.motion_blur()==0,"motion blur did not wrap Off");
+        for(unsigned quality=1;quality<=3;++quality) {
+            drive_boot({0,starfox::input::right,0});
+            require(boot_game.motion_blur()==quality,"motion blur menu strength failed");
+        }
+        boot_game.set_motion_blur(0);
+        select_menu_action(boot_game, starfox::simulation::PregamePage::global, 32U, &boot_audio);
         drive_boot({0,starfox::input::a,0});
         require(!boot_game.reflective_surfaces(),"reflection menu ignored ray-tracing dependency");
         boot_game.set_ray_tracing(true);
@@ -7244,14 +7446,14 @@ int main(int argc, char** argv) {
         require(!boot_game.enhanced_shadows(),"software shadows must default Off");
         boot_game.set_reflective_surfaces(2);
         require(boot_game.reflective_surfaces()==2,"software reflections incorrectly require hardware ray tracing");
-        select_menu_action(boot_game,starfox::simulation::PregamePage::three_d,29U,&boot_audio);
+        select_menu_action(boot_game,starfox::simulation::PregamePage::global,29U,&boot_audio);
         drive_boot({0,starfox::input::a,0});
         require(boot_game.enhanced_shadows() && !boot_game.ray_tracing(),"software shadow menu changed GPU ray tracing");
         drive_boot({starfox::input::a,0,0});
         require(boot_game.enhanced_shadows(),"holding A repeated software shadow action");
         drive_boot({0,starfox::input::a,0});
         require(!boot_game.enhanced_shadows() && boot_game.reflective_surfaces()==2,"software shadows disabled independent reflections");
-        select_menu_action(boot_game,starfox::simulation::PregamePage::three_d,32U,&boot_audio);
+        select_menu_action(boot_game,starfox::simulation::PregamePage::global,32U,&boot_audio);
         drive_boot({0,starfox::input::right,0});
         require(boot_game.reflective_surfaces()==3,"software reflection menu did not cycle");
         boot_game.set_renderer_mode(starfox::simulation::RendererMode::gpu);
@@ -7260,7 +7462,7 @@ int main(int argc, char** argv) {
         require(boot_game.reflective_surfaces()==3,"renderer switching lost software reflection preference");
         boot_game.set_reflective_surfaces(0);
         boot_game.set_renderer_mode(starfox::simulation::RendererMode::gpu);
-        select_menu_action(boot_game, starfox::simulation::PregamePage::three_d, 27U, &boot_audio);
+        select_menu_action(boot_game, starfox::simulation::PregamePage::global, 27U, &boot_audio);
         require(boot_game.chromatic_aberration() == 0U, "chromatic aberration must default Off");
         for (unsigned level=1; level<=4; ++level) {
             drive_boot({0, starfox::input::right, 0});
@@ -7316,13 +7518,39 @@ int main(int argc, char** argv) {
                 "HUD editor return did not select CUSTOMIZE SCREEN in OPTIONS");
         select_menu_action(boot_game, starfox::simulation::PregamePage::options, 9U, &boot_audio);
         require(boot_game.stereo_output()==0U,"Stereo output did not default OFF");
+        drive_boot({0, starfox::input::a, 0});
+        require(boot_game.pregame_page()==starfox::simulation::PregamePage::stereo,"Stereo submenu did not open");
         drive_boot({0, starfox::input::left, 0});
-        require(boot_game.stereo_output()==2U,"Stereo output did not wrap left to Full SBS");
+        require(boot_game.stereo_output()==9U,"Stereo output did not wrap left to SR Platform");
         drive_boot({0, starfox::input::right, 0});
         require(boot_game.stereo_output()==0U,"Stereo output did not wrap right to OFF");
         drive_boot({0, starfox::input::a, 0});
         require(boot_game.stereo_output()==1U,"Stereo confirmation did not select Half SBS");
         boot_game.set_stereo_output(0);
+        drive_boot({0,starfox::input::down,0});
+        drive_boot({0,starfox::input::right,0});
+        require(boot_game.stereo_separation()==17,"Stereo separation did not increase");
+        drive_boot({0,starfox::input::down,0});
+        drive_boot({0,starfox::input::left,0});
+        require(boot_game.stereo_convergence()==960,"Stereo convergence did not decrease");
+        drive_boot({0,starfox::input::down,0});
+        drive_boot({0,starfox::input::a,0});
+        require(boot_game.stereo_crosshair_depth()==2048,"Stereo reticle depth did not enable");
+        drive_boot({0,starfox::input::right,0});
+        require(boot_game.stereo_crosshair_depth()==2176,"Stereo reticle depth did not increase");
+        drive_boot({0,starfox::input::down,0});
+        drive_boot({0,starfox::input::a,0});
+        require(boot_game.stereo_crosshair_depth()==0,"Stereo reticle depth did not reset");
+        require(boot_game.stereo_separation()==16 && boot_game.stereo_convergence()==1024,"Stereo depth reset failed");
+        drive_boot({0,starfox::input::down,0});
+        require(boot_game.pregame_selection()==6,"Native Leia menu option is unreachable");
+        drive_boot({0,starfox::input::a,0});
+        require(boot_game.pregame_page()==starfox::simulation::PregamePage::stereo
+            && boot_game.stereo_output()==0,"Host-owned Leia option mutated ordinary stereo output");
+        drive_boot({0,starfox::input::down,0});
+        require(boot_game.pregame_selection()==5,"Stereo BACK selection changed its saved-state identity");
+        drive_boot({0,starfox::input::b,0});
+        require(boot_game.pregame_page()==starfox::simulation::PregamePage::options && boot_game.pregame_selection()==9,"Stereo back did not restore selection");
         select_menu_action(boot_game, starfox::simulation::PregamePage::options, 12U, &boot_audio);
         boot_game.set_language(0);
         drive_boot({0, starfox::input::left, 0});

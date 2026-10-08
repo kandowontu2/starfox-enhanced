@@ -1,6 +1,7 @@
 #pragma once
 #include "starfox/render/gpu_raster.hpp"
 #include "starfox/render/palette.hpp"
+#include "starfox/render/motion_blur.hpp"
 namespace starfox::render {
 // All handles are borrowed and share one SDL GPU device. Output is valid until
 // the next composition or release. packed uses GpuRasterOutput's byte layout.
@@ -31,6 +32,11 @@ class GpuComposite {
 public:
     GpuComposite();
     ~GpuComposite();
+    // Opt-in only when all producers/consumers submit on this device's ordered
+    // queue before its next compose. Staging is cycled; pending fences are
+    // retained in a bounded queue. Readbacks/teardown still wait. Never use
+    // with an unsubmitted consumer borrowing an old output.
+    void set_ordered_queue_reuse(bool enabled) noexcept {ordered_queue_reuse_=enabled;}
     // cpu contains the background plus subsequent foreground writes. Coverage
     // must mark EVERY subsequent write, including black and same-colour writes.
     // world_only excludes two_d-tagged CPU/native/late artwork except native
@@ -47,6 +53,17 @@ public:
         // CPU retains reference dimensions; late/background may independently
         // use reduced dimensions and are sampled directly into the output.
         std::array<std::uint32_t,4> raster_mapping={},std::array<float,2> cpu_jitter={});
+    // Compose another view with EXACTLY the owner's already-submitted CPU
+    // pixels, tags, coverage masks and palette. No host image is accepted here:
+    // this is not a pointer-identity cache of potentially changed CPU data.
+    // Owner and consumer must use the same device/ordered queue; submit every
+    // consumer before composing/releasing the owner again. Native/late/sky
+    // layers and output depth/motion remain independent for each view.
+    bool compose_with_cpu_inputs(const GpuComposite& owner,const GpuRasterOutput&,
+        std::uint32_t source_scale,const LayerCompositeSettings&,
+        const GpuRasterOutput* late_overlay=nullptr,
+        const GpuCompositeBackground* background=nullptr,bool world_only=false,
+        std::array<std::uint32_t,4> raster_mapping={},std::array<float,2> cpu_jitter={});
     // CPU writes after the late GPU layer are restored last, including zero
     // and unchanged colours. This mask is independent of pre-late foreground.
     // Optional late overlay is already in final stored-pixel coordinates,
@@ -59,10 +76,14 @@ public:
     // Palette bytes submitted on the most recent successful composition.
     std::size_t last_palette_upload_bytes() const noexcept;
     bool readback(Framebuffer&,std::vector<std::uint8_t>& rgba,SurfaceBuffer* = nullptr);
+    // Diagnostic/reference bridge only; the production blur should consume
+    // resident buffers without synchronizing or downloading them each frame.
+    bool readback_motion_guides(bool history_valid,std::vector<MotionBlurGuide>&);
     void release_device() noexcept;
     const std::string& status() const;
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
+    bool ordered_queue_reuse_{};
 };
 }

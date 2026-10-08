@@ -37,7 +37,15 @@ struct SourceModelPackets {
 // This does not enumerate or emit background, overlay or extra shadow passes.
 class SourceModels {
 public:
+    struct CacheStats {std::size_t shapes{},entries{},vertices{},texels{};};
+    [[nodiscard]] CacheStats cache_stats() const noexcept {
+        return {shapes_.size(),geometry_cache_.size(),cached_vertices_,cached_texels_};
+    }
     SourceModels(const assets::RomImage&,const assets::SymbolMap&,bool cache_geometry=true,bool compute_solids=false,bool compute_shadows=true);
+    SceneInterpolationRules source_interpolation_rules(bool fixed_landscape_height=false) const noexcept {
+        auto result=interpolation_;result.fixed_landscape_height=fixed_landscape_height;return result;
+    }
+    double source_centre_scale(const GameSceneSnapshot&,std::uint32_t strategy,bool fixed_landscape_height) const noexcept;
     DrawPacket assemble_dust(const GameSceneSnapshot&,bool srgb_target=false,float units_per_metre=256) const;
     DrawPacket assemble_dust_gpu(const GameSceneSnapshot&,bool srgb_target=false,float units_per_metre=256) const;
     DrawPacket assemble_dust_interpolated(const GameSceneSnapshot& previous,const GameSceneSnapshot& current,

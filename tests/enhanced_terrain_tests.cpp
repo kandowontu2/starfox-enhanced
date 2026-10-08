@@ -3,11 +3,37 @@
 #include "starfox/render/software_renderer.hpp"
 #include "starfox/render/packed_faces.hpp"
 #include "starfox/render/packed_bsp.hpp"
+#include "environment_screen_reflection_cases.hpp"
 #include <iostream>
 #include <stdexcept>
 static void require(bool yes,const char* message){if(!yes) throw std::runtime_error(message);}
 int main() {
     using namespace starfox::render;
+    RowWorkers reflection_workers;reflection_workers.set_worker_count(4);
+    check_environment_screen_reflection_cases([&](const auto& frame,auto pixels,const auto& effects) {
+        auto parallel=pixels;
+        apply_environment(effects,frame,pixels);
+        apply_environment(effects,frame,parallel,&reflection_workers);
+        require(parallel==pixels,"Finished-scenery reflection depends on row worker ordering");
+        return pixels;
+    });
+    {
+        starfox::simulation::SnesPpuState p;
+        p.background_mode=2;p.bg2_vertical_offsets_enabled=true;
+        for(float bank:{-.5f,-.25f,0.f,.25f,.5f}) {
+            for(unsigned i=0;i<32;++i) {
+                const unsigned word=0x4000u|(unsigned(int(300+bank*(8*int(i+1)-128)))&511u);
+                const unsigned at=(0x2fa0+i)*2;
+                p.vram[at]=std::uint8_t(word);p.vram[at+1]=std::uint8_t(word>>8);
+            }
+            const auto horizon=environment_raster_horizon(p,400,0);
+            require(horizon && std::abs((*horizon)[0]-100)<.001f
+                && std::abs((*horizon)[1]+bank)<.001f,
+                "Enhanced horizon does not match the source BG2 bank table");
+        }
+        p.bg2_vertical_offsets_enabled=false;
+        require(!environment_raster_horizon(p,400,0),"Inactive bank table affected enhanced horizon");
+    }
     {
         Framebuffer ground(4,4);ground.enable_layer_tags(true);
         std::fill(ground.layer_tags().begin(),ground.layer_tags().end(),
@@ -62,6 +88,45 @@ int main() {
         const auto nearby=environment_colour(authored,2,0,185,lava);
         require(above==authored && distant!=authored && nearby!=authored,
             "Lava failed to cover the ground from its horizon, or entered the sky");
+        lava.plane[3]=0;
+        require(environment_colour(authored,2,0,185,lava)==std::array<float,3>{0,0,0},
+            "Emissive lava ignored the scene fade");
+    }
+    {
+        // A bubble's periodic reset must not make its height or colour pop.
+        using namespace lava_detail;
+        for(int x=-3;x<=3;++x) for(int z=-3;z<=3;++z) {
+            const float seed=lava_hash(x,z);
+            const float bx=(float(x)+.28f+.44f*lava_hash(x+19,z))*128.f;
+            const float bz=(float(z)+.28f+.44f*lava_hash(x,z+29))*128.f;
+            const float reset=(8.f-seed*7.f)/.14f;
+            const auto before=lava_surface(bx,bz,reset-.0001f,1.f);
+            const auto after=lava_surface(bx,bz,reset+.0001f,1.f);
+            require(std::abs(before.height-after.height)<.01f
+                && std::abs(before.heat-after.heat)<.001f,
+                "Lava bubble lifetime has a discontinuity");
+            const auto far=lava_surface(bx,bz,reset,10000.f);
+            require(std::abs(far.dx)+std::abs(far.dz)<.0001f && far.bubble==0,
+                "Distant lava retained subpixel wave detail");
+        }
+        for(int x=-128;x<=128;x+=8) for(int z=0;z<=512;z+=8) {
+            const auto a=lava_surface(float(x),float(z),3.f,1.f);
+            const auto b=lava_surface(float(x),float(z),3.f+1.f/60.f,1.f);
+            const auto ca=lava_shade(a,0,-1,-1),cb=lava_shade(b,0,-1,-1);
+            require(std::abs(ca.r-cb.r)<.08f && std::abs(ca.g-cb.g)<.08f,
+                "Lava shading jumped between adjacent presentation frames");
+            const float step=.02f;
+            const float dx=(lava_surface(float(x)+step,float(z),3.f,1.f).height
+                -lava_surface(float(x)-step,float(z),3.f,1.f).height)/(2*step);
+            const float dz=(lava_surface(float(x),float(z)+step,3.f,1.f).height
+                -lava_surface(float(x),float(z)-step,3.f,1.f).height)/(2*step);
+            require(std::abs(a.dx-dx)<.003f && std::abs(a.dz-dz)<.003f,
+                "Lava reflection normal does not follow the wave height");
+        }
+        LavaSample molten{};molten.heat=.8f;molten.dx=3;
+        const auto glow=lava_shade(molten,0,-1,-1);
+        require(glow.r>=.95f && glow.r>glow.g && glow.g>glow.b,
+            "Molten lava lost its self-emission on a steep wave");
     }
     {
         std::array<std::uint16_t,256> palette{};
@@ -73,6 +138,15 @@ int main() {
         require(gradient[0][3]==1 && gradient[1][3]==1
             && gradient[0][1]>gradient[1][1],
             "Live source palette failed to supply near/far ground endpoints");
+        classes[17]=classes[18]=5;
+        require(source_ground_gradient(palette,classes)==decltype(gradient){},
+            "Flat basic-ground smoothing included reflective water");
+        const auto water=source_ground_gradient(palette,classes,true);
+        require(water[0][3]==5 && water[1][3]==1 && water[0][1]>water[1][1],
+            "Native Auto water lost its authored near/far palette endpoints");
+        classes[17]=classes[18]=6;
+        require(source_ground_gradient(palette,classes,true)==decltype(gradient){},
+            "Native liquid ramp admitted an unsupported ground class");
     }
     {
         BackdropImage atlas{8,8,std::vector<std::uint32_t>(64,0xffffffff)};
@@ -442,7 +516,7 @@ int main() {
         && gameplay_landscape_backdrop("BG_5_4",true)==17
         && gameplay_landscape_backdrop("BG_6_4",true)==2
         && gameplay_landscape_backdrop("BG_6_5",true)==27
-        && gameplay_landscape_backdrop("BG_6_6",true)==16
+        && gameplay_landscape_backdrop("BG_6_6",true)==37
         && gameplay_landscape_backdrop("BG_2_2",true)==28
         && gameplay_landscape_backdrop("BG_2_5",true)==28
         && gameplay_landscape_backdrop("BG_3_6",true)==28
@@ -548,7 +622,7 @@ int main() {
     clock.advance(2,2);require(clock.ticks()==2,"cartridge reset became a giant time advance");
     for(unsigned motion=0;motion<3;++motion)
         require(backdrop_motion({.25f,.9f},motion,100.f)==std::array<float,2>{.25f,.9f},"cloud motion displaced mountains");
-    EnvironmentEffects soil;soil.modes[0]=1;soil.motion[0]=100;
+    EnvironmentEffects soil;soil.modes[0]=1;soil.motion[0]=100;soil.plane[3]=1;
     {
         Framebuffer mirror(3,8);mirror.enable_layer_tags(true);
         std::fill(mirror.pixels().begin(),mirror.pixels().end(),1);
@@ -559,6 +633,8 @@ int main() {
         constexpr unsigned sample=(6*3+1)*4;
         original[sample]=original[sample+1]=original[sample+2]=0;
         EnvironmentEffects reflection;reflection.modes[0]=7;reflection.classes[1]=1;reflection.water_reflections=true;
+        reflection.classes[2]=6;
+        for(unsigned y=0;y<4;++y) for(unsigned x=0;x<3;++x) mirror.pixels()[y*3+x]=2;
         for(unsigned step=0;step<5;++step) {
             reflection.motion[0]=4.f+float(step)*.1f;
             auto pixels=original;apply_environment(reflection,mirror,pixels);

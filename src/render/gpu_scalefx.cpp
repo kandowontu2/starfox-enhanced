@@ -3,6 +3,7 @@
 #include <stdexcept>
 #if defined(STARFOX_SDL_GPU_EFFECTS)
 #include <SDL3/SDL.h>
+#include "starfox/render/gpu_preparation.hpp"
 #include <SDL3/SDL_gpu.h>
 #include "shaders/generated/scalefx_portable.hpp"
 #endif
@@ -67,7 +68,7 @@ struct GpuScaleFx::Impl {
                 info.num_readonly_storage_buffers=i==5?0:3;info.num_readwrite_storage_buffers=1;
                 info.num_readonly_storage_textures=i==5?1:0;
                 info.num_uniform_buffers=1;info.threadcount_x=8;info.threadcount_y=8;info.threadcount_z=1;
-                pipelines[i]=SDL_CreateGPUComputePipeline(device,&info);require(pipelines[i]);
+                pipelines[i]=create_gpu_compute_pipeline(device,&info);require(pipelines[i]);
             }
         } catch(...) {release();throw;}
     }

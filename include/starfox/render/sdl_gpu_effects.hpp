@@ -6,6 +6,9 @@ class SdlGpuEffects {
 public:
     SdlGpuEffects();
     ~SdlGpuEffects();
+    // Same-device, already-submitted queue consumers only. Cycled CPU staging
+    // can encode ahead with bounded fence retirement; readback/destruction wait.
+    void set_ordered_queue_reuse(bool enabled) noexcept {ordered_queue_reuse_=enabled;}
     bool apply(void* device,const Framebuffer&,std::vector<std::uint8_t>&,const GpuEffectSettings&);
     // Consumes composition directly on its device. CPU frame supplies only
     // dimensions/draw scale; no RGBA, index, tag or surface upload is needed.
@@ -21,5 +24,6 @@ public:
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
+    bool ordered_queue_reuse_{};
 };
 }

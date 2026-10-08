@@ -41,7 +41,9 @@ public:
     bool initialize(XrInstance,XrSystemId,const void* graphics_binding);
     void close() noexcept;
     bool poll_events(); // transitions READY/STOPPING, records exit/loss
-    std::optional<StereoFrame> begin_frame();
+    // Optional vendor rig/result chains; defaults preserve headset behavior.
+    // Caller owns the chains for the duration of the locate call.
+    std::optional<StereoFrame> begin_frame(const void* locate_chain=nullptr,void* view_state_chain=nullptr);
     // Submit only completed/released swapchain layers. Invisible/untracked
     // frames always submit zero layers, while retaining frame pacing.
     bool end_frame(std::span<const XrCompositionLayerBaseHeader* const> layers={});

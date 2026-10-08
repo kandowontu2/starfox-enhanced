@@ -1,4 +1,5 @@
 #include "raster_jitter.hlsli"
+#include "native_pixel.hlsli"
 struct Command {
     int left,top,right,bottom;
     uint even,odd,dither,tag;
@@ -12,16 +13,20 @@ StructuredBuffer<uint> rows:register(t1,space0);
 StructuredBuffer<uint> indices:register(t2,space0);
 ByteAddressBuffer texels:register(t3,space0);
 StructuredBuffer<uint> back_pixels:register(t4,space0);
+#if !defined(STARFOX_PIXEL_ONLY_RASTER)
 StructuredBuffer<float4> back_surfaces:register(t5,space0);
 StructuredBuffer<float4> geometry_planes:register(t6,space0);
 StructuredBuffer<float> back_depth:register(t7,space0);
+#endif
 RWStructuredBuffer<uint> pixels:register(u0,space1);
+#if !defined(STARFOX_PIXEL_ONLY_RASTER)
 RWStructuredBuffer<float4> surfaces:register(u1,space1);
 RWStructuredBuffer<float> geometry_depth:register(u2,space1);
+#endif
 cbuffer Settings:register(b0,space2) {
     uint width,height,want_surface,reserved;
     uint has_back,has_back_surface,take_surface,padding;
-    uint texel_bytes,reserved1,reserved2,reserved3;
+    uint texel_bytes,reserved1,reserved2,painterFlags;
     uint want_depth,plane_count,has_back_depth,depth_padding;
     float4 depth_projection; // focal x/y, center x/y in output pixels.
     float2 rasterJitter;uint2 jitterPadding;
@@ -33,8 +38,42 @@ int waveShift(int x,int offset,uint frame) {
     static const int sine[16]={0,1,2,3,3,3,2,1,0,-1,-2,-3,-3,-3,-2,-1};
     return sine[uint(phase)&15U];
 }
+#if defined(STARFOX_ROW_TILE_RASTER)
+groupshared Command tileCommands[64];
+groupshared uint tileMask[2];
+#endif
 [numthreads(64,1,1)]
+#if defined(STARFOX_ROW_TILE_RASTER)
+void main(uint3 id:SV_DispatchThreadID,uint3 group:SV_GroupID,uint lane:SV_GroupIndex) {
+    // The owner guarantees <=64 ordinary row spans, no sample remapping/wave
+    // rows. Every lane, including a partial tile's out-of-range lanes, reaches
+    // the barrier before the ordinary pixel bounds check below.
+    uint count=reserved&0x3fffffffU;
+    if(lane<2) tileMask[lane]=0;
+    GroupMemoryBarrierWithGroupSync();
+    uint candidate=0;
+    if(lane<count && group.y<height) {
+        Command c=commands[lane*height+group.y];
+        candidate=c.left<c.right && c.right>int(group.x*64)
+            && c.left<int(min(group.x*64+64,width));
+        if(candidate!=0) {
+            tileCommands[lane]=c;
+            InterlockedOr(tileMask[lane/32],1u<<(lane%32));
+        }
+    }
+    GroupMemoryBarrierWithGroupSync();
+    uint2 remaining=uint2(tileMask[0],tileMask[1]);
+#elif defined(STARFOX_OCCUPIED_RASTER)
+void main(uint3 id:SV_DispatchThreadID,uint3 group:SV_GroupID,uint lane:SV_GroupIndex) {
+    if((depth_padding&2u)!=0) {
+        uint entry=group.x+group.y*65535u;
+        if(entry>=rows[0]) return;
+        uint tile=rows[1+entry],tiles_x=(width+63)/64;
+        id.xy=uint2((tile%tiles_x)*64+lane,tile/tiles_x);
+    }
+#else
 void main(uint3 id:SV_DispatchThreadID) {
+#endif
     uint outputWidth=reserved1!=0?reserved1:width,outputHeight=reserved2!=0?reserved2:height;
     if(id.x>=outputWidth || id.y>=outputHeight) return;
     uint outputIndex=id.y*outputWidth+id.x;
@@ -42,28 +81,60 @@ void main(uint3 id:SV_DispatchThreadID) {
         int2 sampleAt=int2(jitterFloor(id.x,width,outputWidth,rasterJitter.x,true),jitterFloor(id.y,height,outputHeight,rasterJitter.y,true));
         if(any(sampleAt<0) || any(sampleAt>=int2(width,height))) {
             pixels[outputIndex]=0;
+#if !defined(STARFOX_PIXEL_ONLY_RASTER)
             if(want_surface) surfaces[outputIndex]=0;
             if(want_depth) geometry_depth[outputIndex]=0;
+#endif
             return;
         }
         id.xy=uint2(sampleAt);
     } else if(reserved1!=0) id.xy=id.xy*uint2(width,height)/uint2(outputWidth,outputHeight);
-    bool have_pixel=false,have_surface=take_surface==0;
+    bool have_pixel=false;
     uint packed=0;
+#if !defined(STARFOX_PIXEL_ONLY_RASTER)
+    bool have_surface=take_surface==0;
     float4 surface=float4(0,0,1,0);
     float depth=0;
-    uint pixel_owner=0,surface_owner=0;
+    uint surface_owner=0;
+#endif
+    uint pixel_owner=0;
+#if defined(STARFOX_SINGLE_FACE_RASTER) || defined(STARFOX_MASK_TILE_RASTER)
+    // Specialized owners guarantee ordinary row spans, not wave/scatter input.
+    const bool row_spans=true,wave_rows=false,sparse=false,tiled_spans=false;
+#else
     bool row_spans=(reserved&0x80000000U)!=0;
     bool wave_rows=row_spans && (padding&1U)!=0;
-    int wave_delta=wave_rows?waveShift(int(id.x),int((padding>>1)&65535U),(padding>>17)&15U):0;
     bool sparse=!row_spans && (reserved&1U)!=0;
     bool tiled_spans=row_spans && (padding&0x80000000U)!=0;
+#endif
+    int wave_delta=wave_rows?waveShift(int(id.x),int((padding>>1)&65535U),(padding>>17)&15U):0;
+    bool in_place=depth_padding!=0;
     // Last covering command wins, as in the source painter. Surface metadata
     // survives later non-surface lines/sprites, matching SurfaceBuffer::set.
     uint row=id.y*((width+63)/64)+id.x/64;
+#if defined(STARFOX_MASK_TILE_RASTER)
+    uint2 remaining=uint2(indices[row*2],indices[row*2+1]);
+    if(in_place && all(remaining==0)) return;
+#endif
     uint begin=row_spans?0:rows[row];
     if(tiled_spans) begin=row*((reserved&0x3fffffffU)+1)+1;
+    // The ordered owner explicitly lends a fully initialized canonical target.
+    // Empty tiles need neither a background fetch nor any output write.
+    if(in_place && tiled_spans && indices[begin-1]==0) return;
+#if defined(STARFOX_SINGLE_FACE_RASTER)
+    [unroll] for(uint cursor=1;cursor>0;) {
+#else
     for(uint cursor=tiled_spans?begin+indices[begin-1]:row_spans?(reserved&0x3fffffffU)*(wave_rows?2U:1U):rows[row+1];cursor>begin;) {
+#endif
+#if defined(STARFOX_ROW_TILE_RASTER) || defined(STARFOX_MASK_TILE_RASTER)
+        // Walk only live commands, in exact descending painter order. Empty
+        // tiles do not scan all 64 face slots for every one of their pixels.
+        if(remaining.y!=0) {
+            uint bit=firstbithigh(remaining.y);remaining.y&=~(1u<<bit);cursor=bit+33;
+        } else if(remaining.x!=0) {
+            uint bit=firstbithigh(remaining.x);remaining.x&=~(1u<<bit);cursor=bit+1;
+        } else break;
+#endif
         --cursor;
         bool wave_candidate=wave_rows && (cursor&1U)!=0;
         int source_y=int(id.y)-(wave_candidate?wave_delta:0);
@@ -74,9 +145,17 @@ void main(uint3 id:SV_DispatchThreadID) {
         // Sparse atomic scatter is unordered. Once both independent owners
         // outrank this command, neither coverage nor texture transparency
         // can change the result; avoid fetching its material altogether.
+#if defined(STARFOX_PIXEL_ONLY_RASTER)
+        if(sparse && have_pixel && owner<=pixel_owner) continue;
+#else
         if(sparse && have_pixel && owner<=pixel_owner && have_surface
             && (take_surface==0 || owner<=surface_owner)) continue;
+#endif
+#if defined(STARFOX_ROW_TILE_RASTER)
+        Command c=tileCommands[polygon];
+#else
         Command c=commands[command_index];
+#endif
         if(wave_rows) {
             bool wave=c.textured==0 && (c.scroll_y&2U)!=0;
             if(wave!=wave_candidate) continue;
@@ -94,6 +173,7 @@ void main(uint3 id:SV_DispatchThreadID) {
         uint dither_scale=max(1U,c.scroll_x);
         uint colour=c.dither && (((id.x/dither_scale)^(id.y/dither_scale))&1)!=0?c.odd:c.even;
         uint pixelTag=c.tag;
+        uint materialPair=0;
         if(c.textured==8) {
             if(c.du<=0 || c.texture_offset>texel_bytes || texel_bytes-c.texture_offset<640) continue;
             int px=c.dv!=0?((int(id.x)-c.u)*6+2)/(7*c.du):(int(id.x)-c.u)/c.du;
@@ -135,7 +215,16 @@ void main(uint3 id:SV_DispatchThreadID) {
             uint at=(uint(snapped.y)*uint(c.du)+sub.y)*c.u_mask+uint(snapped.x)*uint(c.du)+sub.x;
             uint offset=c.texture_offset+at;
             colour=(texels.Load(offset&~3U)>>((offset&3U)*8))&255;
-            if(colour==0) continue;
+            if(c.colour_base!=0) {
+                uint pairBase=c.colour_base-1;
+                if(pairBase>texel_bytes || c.u_mask>(texel_bytes-pairBase)/2
+                    || c.v_mask>(texel_bytes-pairBase)/2/c.u_mask) continue;
+                uint pairAt=pairBase+at*2;
+                materialPair=(texels.Load(pairAt&~3U)>>((pairAt&3U)*8))&255;
+                ++pairAt;
+                materialPair|=((texels.Load(pairAt&~3U)>>((pairAt&3U)*8))&255)<<8;
+            }
+            if(colour==0 && (materialPair&256)==0) continue;
             if(c.dither!=0) {offset=c.scroll_y+at;pixelTag=(texels.Load(offset&~3U)>>((offset&3U)*8))&255;}
         } else if(c.textured==4) {
             if(c.du<=0 || c.dv<=0 || c.texture_offset>texel_bytes || texel_bytes-c.texture_offset<65536) continue;
@@ -173,7 +262,12 @@ void main(uint3 id:SV_DispatchThreadID) {
             if(c.textured==2 && (c.scroll_x&256)!=0) colour=c.scroll_x&255;
         }
         if(!have_pixel || (sparse && owner>pixel_owner)) {
-            packed=(packed&0xffff0000U)|colour|(pixelTag<<8);have_pixel=true;pixel_owner=owner;
+            packed=(packed&0x7fff0000U)|colour|(pixelTag<<8);have_pixel=true;pixel_owner=owner;
+            if(pixelTag==0 && (materialPair&256)!=0)
+                packed=(packed&0xffff00ffU)|((materialPair&255U)<<8)|0x80000000U;
+            if(c.textured==0 && pixelTag==0 && c.dither!=0 && c.even!=c.odd)
+                packed=(packed&0xffff00ffU)|(((colour==c.even?c.odd:c.even)&255U)<<8)|0x80000000U;
+#if !defined(STARFOX_PIXEL_ONLY_RASTER)
             if(want_depth!=0) {
                 depth=0;
                 uint plane_id=c.has_surface>>1;
@@ -188,23 +282,41 @@ void main(uint3 id:SV_DispatchThreadID) {
                     if(abs(denominator)>1e-8 && isfinite(candidate) && candidate>0) depth=candidate;
                 }
             }
+#endif
         }
+#if !defined(STARFOX_PIXEL_ONLY_RASTER)
         if(take_surface!=0 && (c.has_surface&1u)!=0 && (!have_surface || (sparse && owner>surface_owner))) {
-            packed=(packed&65535U)|(colour<<16)|(1U<<24);surface=c.surface;have_surface=true;surface_owner=owner;
+            packed=(packed&0x8000ffffU)|(colour<<16)|(1U<<24);surface=c.surface;have_surface=true;surface_owner=owner;
         }
         if(!sparse && have_pixel && have_surface) break;
+#else
+        if(!sparse && have_pixel) break;
+#endif
     }
+    if(in_place && !have_pixel) return; // Texture holes preserve ALL ownership.
     if((reserved&0x40000000U)!=0 && have_pixel) packed|=0x04000000U;
+    if((painterFlags&1u)!=0 && have_pixel && nativeTag(packed)==1u) packed|=0x10000000u;
     if(has_back!=0) {
-        uint back=back_pixels[id.y*width+id.x];
-        if(!have_pixel) packed=(packed&0x01ff0000U)|(back&0x1c00ffffU);
-        if(want_depth!=0 && !have_pixel && has_back_depth!=0) depth=back_depth[id.y*width+id.x];
+        uint back=in_place?pixels[outputIndex]:back_pixels[id.y*width+id.x];
+        if(!have_pixel) packed=(packed&0x01ff0000U)|(back&0x9c00ffffU);
+#if !defined(STARFOX_PIXEL_ONLY_RASTER)
+        if(want_depth!=0 && !have_pixel && has_back_depth!=0) depth=in_place?geometry_depth[outputIndex]:back_depth[id.y*width+id.x];
         if((packed&0x01000000U)==0 && has_back_surface!=0 && (back&0x01000000U)!=0) {
-            packed=(packed&0x1c00ffffU)|(back&0x01ff0000U);
-            surface=back_surfaces[id.y*width+id.x];
+            packed=(packed&0x9c00ffffU)|(back&0x01ff0000U);
+            surface=in_place?surfaces[outputIndex]:back_surfaces[id.y*width+id.x];
         }
+#endif
     }
+    // Emissive colour must erase hidden receiver metadata too. Transparent
+    // texels retain the background unmodified, exactly like GpuScene.
+#if !defined(STARFOX_PIXEL_ONLY_RASTER)
+    if((painterFlags&2u)!=0 && have_pixel) {
+        packed&=0x9c00ffffu;surface=float4(0,0,1,0);
+    }
+#endif
     pixels[outputIndex]=packed;
+#if !defined(STARFOX_PIXEL_ONLY_RASTER)
     if(want_surface!=0) surfaces[outputIndex]=surface;
     if(want_depth!=0) geometry_depth[outputIndex]=depth;
+#endif
 }

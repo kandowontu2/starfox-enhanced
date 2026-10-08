@@ -25,6 +25,9 @@ int main() {
         input=SDL_CreateGPUTexture(device,&info);require(input);
         {
             starfox::render::GpuFsr1 fsr;
+            void* rejected_world=input;
+            const auto rejected=fsr.enqueue_composite(nullptr,{}, {},.2F,&rejected_world);
+            if(rejected.rgba || rejected_world) throw std::runtime_error("Failed FSR composition retained borrowed world");
             // Reuse, resize and opposite constant colours catch stale contents
             // and verify dispatch guards for non-multiples of the 8x8 group.
             for(unsigned iteration=0;iteration<4;++iteration) {

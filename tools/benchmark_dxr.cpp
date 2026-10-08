@@ -5,11 +5,15 @@
 #include "starfox/render/portable_shadows.hpp"
 #include "starfox/render/sdl_gpu_effects.hpp"
 #include <SDL3/SDL.h>
+#if defined(__APPLE__)
+#include "starfox/render/metal_hardware_rt.hpp"
+#endif
 #endif
 #include <chrono>
 #include <iostream>
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <iomanip>
 #if defined(_WIN32) && !defined(STARFOX_TEST_PORTABLE_SHADOWS)
 #include <windows.h>
@@ -69,6 +73,37 @@ int main() {
     PortableShadows gpu;
 #else
     DxrShadows gpu;
+    {
+        // Independent four-tap colour oracle, not a CPU re-use of the GPU's
+        // cube pixels. Native linear targets must not get legacy gamma^2
+        // filtering; sRGB targets must decode, filter, then encode exactly.
+        Scene mirror;
+        mirror.add({{-2,-2,3},{2,-2,7},{0,2,5}});
+        starfox::render::RayMaterials materials;materials.triangles.resize(1);materials.triangles[0].even=1;
+        std::array<std::uint32_t,256> palette{};palette[1]=0xffffffffU;
+        constexpr unsigned size=8,codes[4]={0,64,128,255};
+        std::vector<std::uint32_t> cube(size*size*6,0xff000000U);
+        for(unsigned i=0;i<4;++i) cube[(3+i/2)*size+3+i%2]=0xff000000U|codes[i]|(codes[i]<<8)|(codes[i]<<16);
+        const Camera camera{1,1,1,.5,.5};
+        for(unsigned encoding:{0U,1U,2U,0U}) {
+            DxrShadows::ReflectionInput input{&materials,palette,0xff123456U};
+            input.environment_cube=cube;input.face_size=size;input.cube_encoding=encoding;
+            std::vector<std::uint8_t> result;
+            if(!gpu.render_resident(mirror,camera,{0,1,0},{},nullptr,nullptr,false,false,&input)
+                || !gpu.readback_resident(result) || result.size()!=4 || result[3]!=255) return 126;
+            double mean=0;
+            for(auto code:codes) {double value=double(code)/255;
+                if(encoding==0) value*=value;
+                if(encoding==2) value=value<=.04045?value/12.92:std::pow((value+.055)/1.055,2.4);
+                mean+=value/4;
+            }
+            if(encoding==0) mean=std::sqrt(mean);
+            if(encoding==2) mean=mean<=.0031308?mean*12.92:1.055*std::pow(mean,1/2.4)-.055;
+            const int expected=int(std::lround(mean*255));
+            for(unsigned c=0;c<3;++c) if(std::abs(int(result[c])-expected)>1) return 127;
+        }
+        std::cout<<"DXR cube filtering: independent linear/sRGB/legacy four-tap oracle and encoding restoration passed\n";
+    }
     {
         Scene reflected;
         reflected.add({{-2,-2,3},{2,-2,7},{0,2,5}});
@@ -130,6 +165,29 @@ int main() {
         resident_input.resident_materials=small_gpu.Get();
         if(gpu.render_resident(reflected,camera,{0,1,0},{},nullptr,nullptr,false,false,&resident_input)
             || gpu.resident_output().resource) return 83;
+        // A single producer may switch between native/flat colour and native
+        // alpha-coverage masks. Neither a cached PSO nor its output byte layout
+        // may leak across those transitions. CPU records here are fixture-only.
+        std::array<starfox::render::RayMaterial,2> native_records{};
+        for(unsigned i=0;i<2;++i) {
+            native_records[i].reserved=2;
+            native_records[i].even=native_records[i].odd=i?0xff665544U:0xffffffffU;
+        }
+        auto native_gpu=resident_material_fixture(material_device,native_records);
+        starfox::render::RayMaterials native_metadata;native_metadata.encoding=starfox::render::RayMaterialEncoding::native_rgba;
+        auto native_input=input;native_input.materials=&native_metadata;native_input.resident_materials=native_gpu.Get();
+        native_input.resident_material_bytes=sizeof(native_records);
+        for(unsigned repeat=0;repeat<3;++repeat) {
+            if(!gpu.render_resident(reflected,camera,{0,1,0},{},nullptr,nullptr,false,false,&native_input)
+                || !gpu.readback_resident(result) || result!=std::vector<std::uint8_t>{0x44,0x55,0x66,255}) return 161;
+            if(!gpu.render_resident(reflected,camera,{0,1,0},{},nullptr,nullptr,false,false,&input)
+                || !gpu.readback_resident(result) || result!=std::vector<std::uint8_t>{0x44,0x55,0x66,255}) return 162;
+            auto native_coverage=native_input;native_coverage.coverage_only=true;
+            if(!gpu.render_resident(reflected,camera,{0,1,0},{},nullptr,nullptr,false,false,&native_coverage)
+                || gpu.resident_output().bytes_per_pixel!=1 || gpu.resident_output().row_bytes!=4
+                || !gpu.readback_resident(result) || result.size()!=1) return 163;
+        }
+        std::cout<<"DXR native/flat PSO and reflection/alpha-shadow byte-layout transitions passed\n";
         // Restore the previous 13x9 fixture before comparing resident output.
         if(!gpu.render_reflections(reflected,Camera{13,9,5,6.5,4.5},materials,palette,0xff998877,result)) return 79;
         const auto expected=result;
@@ -484,7 +542,7 @@ int main() {
             || gpu.resident_output().resource) return 64;
         // Water is a ray receiver in front of scene geometry, not a flipped
         // framebuffer. A reflected red wall lies outside the primary view.
-        Scene water_scene;water_scene.add({{-20,-20,4},{20,-20,4},{0,20,4}});
+        Scene water_scene;water_scene.add({{-20,-20,4},{20,-20,4},{0,1.5,4}});
         starfox::render::RayMaterials water_materials;water_materials.triangles.resize(1);
         water_materials.triangles[0].even=2;palette[2]=0xff0000ff;
         RayWater water;water.reflection_strength=1;
@@ -505,18 +563,154 @@ int main() {
         water.reflection_strength=1;water.material=1;
         if(!water_capture()) return 95;
         const auto mirror=result;
+        {
+            // A near triangle covers the primary view, while an offscreen wall
+            // remains visible in the mirror. Retain the full secondary scene.
+            Scene covered_ground;
+            covered_ground.add({{-20,-20,1},{20,-20,1},{0,20,1}});
+            covered_ground.add({{-20,-20,4},{20,-20,4},{0,1.5,4}});
+            water_materials.triangles.resize(2,water_materials.triangles.front());
+            auto underlay=water_input;underlay.ground_only=true;
+            if(!gpu.render_resident(covered_ground,water_camera,{0,1,0},{},nullptr,nullptr,false,false,&water_input)
+                || !gpu.readback_resident(result) || result[3]!=255) return 160;
+            if(!gpu.render_resident(covered_ground,water_camera,{0,1,0},{},nullptr,nullptr,false,false,&underlay)
+                || !gpu.readback_resident(result) || result[3]!=254) return 161;
+            const auto red_underlay=result;palette[2]=0xff00ff00;
+            if(!gpu.render_resident(covered_ground,water_camera,{0,1,0},{},nullptr,nullptr,false,false,&underlay)
+                || !gpu.readback_resident(result) || result[3]!=254 || result==red_underlay) return 162;
+            palette[2]=0xff0000ff;
+            auto invalid=underlay;invalid.ground.reset();
+            if(gpu.render_resident(covered_ground,water_camera,{0,1,0},{},nullptr,nullptr,false,false,&invalid)
+                || gpu.resident_output().resource) return 163;
+            water_materials.triangles.resize(1);
+            if(!water_capture() || result!=mirror) return 164;
+            std::cout<<"DXR reflective underlay: primary model excluded, secondary colour retained, invalidation and recovery passed\n";
+        }
         water.time=1234;
         if(!water_capture() || result!=mirror) return 104;
+        water.mirror_models=true;
+        if(!water_capture() || result==mirror || result[2]<=result[0]) {
+            std::cerr<<"Mirror ground returned a mirror model's red base colour\n";return 113;
+        }
+        water.mirror_models=false;
+        if(!water_capture() || result!=mirror) return 114;
         water.material=2;
         if(!water_capture() || result==mirror) return 96;
         water_input.water=nullptr;
+        // Without a water plane, restore a wall that intersects the primary
+        // camera ray (the reflection-only fixture above intentionally does not).
+        water_scene.clear();water_scene.add({{-20,-20,4},{20,-20,4},{0,20,4}});
         if(!gpu.render_resident(water_scene,water_camera,{0,1,0},{},nullptr,nullptr,false,false,&water_input)
             || !gpu.readback_resident(result) || result[3]!=255) return 94;
         std::cout<<"DXR water: physical receiver, scene-hit reflection, deterministic waves, reflection Off and legacy model isolation passed\n";
+        {
+            Scene submerged_scene;
+            submerged_scene.add({{-1000,200,-1000},{1000,200,-1000},{0,200,1500}});
+            water={};water_input.water=&water;
+            water_input.ground=ReceiverPlane{{0,100,0},{0,1,0}};
+            const Camera submerged_camera{1,1,256,.5,-255.5};
+            const auto capture_submerged=[&] {
+                return gpu.render_resident(submerged_scene,submerged_camera,{0,-1,0},{},nullptr,nullptr,false,false,&water_input)
+                    && gpu.readback_resident(result) && result.size()==4 && result[3]==254;
+            };
+            palette[2]=0xff0000ff;
+            if(!capture_submerged()) return 115;
+            const auto red=result;
+            palette[2]=0xff00ff00;
+            if(!capture_submerged() || result==red || result[1]<=result[0] || red[0]<=red[1]) {
+                std::cerr<<"Water did not transmit submerged geometry colour\n";return 116;
+            }
+            for(unsigned opaque:{1U,2U,3U}) {
+                water.material=opaque;palette[2]=0xff0000ff;
+                if(!capture_submerged()) return 117;
+                const auto before=result;palette[2]=0xff00ff00;
+                if(!capture_submerged() || result!=before) {
+                    std::cerr<<"Opaque liquid/metal transmitted submerged geometry\n";return 118;
+                }
+            }
+            std::cout<<"DXR water transmission: submerged colours visible; mirror, gold and lava opaque\n";
+            water.material=0;palette[2]=0xff808080;
+            submerged_scene.clear();
+            submerged_scene.add({{-10000,700,-10000},{10000,700,-10000},{0,700,15000}});
+            unsigned changed=0;
+            for(unsigned tick=0;tick<8;++tick) {
+                water.time=float(tick)*.7f;water.caustics=0;
+                if(!capture_submerged()) return 119;
+                const auto unlit=result;water.caustics=3;
+                if(!capture_submerged()) return 120;
+                changed+=result!=unlit;
+                const auto repeat=result;
+                if(!capture_submerged() || result!=repeat) return 121;
+            }
+            if(changed<2) {std::cerr<<"Caustic focus did not change submerged lighting\n";return 122;}
+            submerged_scene.add({{-10000,-100,-10000},{10000,-100,-10000},{0,-100,15000}});
+            water_materials.triangles.resize(2,water_materials.triangles.front());
+            water.caustics=0;
+            if(!capture_submerged()) return 123;
+            const auto blocked=result;water.caustics=3;
+            if(!capture_submerged() || result!=blocked) {
+                std::cerr<<"Caustic light leaked through opaque overhang\n";return 124;
+            }
+            std::cout<<"DXR caustics: animated focus, deterministic repeats and opaque overhang passed\n";
+            // Geometry below the analytic bed must not shine through it.
+            submerged_scene.clear();
+            submerged_scene.add({{-10000,2000,-10000},{10000,2000,-10000},{0,2000,15000}});
+            water_materials.triangles.resize(1);
+            water.caustics=3;palette[2]=0xff0000ff;
+            if(!capture_submerged()) return 125;
+            const auto bed=result;palette[2]=0xff00ff00;
+            if(!capture_submerged() || result!=bed) return 126;
+            water.caustics=0;
+            if(!capture_submerged() || result==bed) {
+                std::cerr<<"Analytic submerged bed failed caustic illumination\n";return 127;
+            }
+            std::cout<<"DXR water bed: caustic receiver and below-bed geometry isolation passed\n";
+        }
         std::cout<<"DXR reflections: offscreen colour, alpha holes, texture/palette/motion updates, conductor tint, stable roughness, environment updates/occlusion and partial groups passed\n";
     }
 #endif
     starfox::render::RowWorkers workers; workers.set_worker_count(4);
+    for(unsigned quality:{1U,2U,3U}) {
+        Camera contact_camera{128,8,1000,64,4};contact_camera.quality=quality;
+        unsigned previous=0;
+        for(double gap:{1.,100.,500.}) {
+            Scene edge;const double z=1000-gap;
+            edge.add({{-1000,-1000,z},{0,-1000,z},{0,1000,z}});
+            edge.add({{-1000,-1000,z},{0,1000,z},{-1000,1000,z}});edge.build();
+            std::vector<std::uint8_t> hardware,reference;
+            const ReceiverPlane receiver{{0,0,1000},{0,0,1}};
+            if(!gpu.render(edge,contact_camera,{0,0,-1},receiver,hardware)) return 128;
+            render_mask(edge,contact_camera,{0,0,-1},receiver,reference,&workers,true);
+            if(hardware!=reference) {std::cerr<<"Contact shadow CPU/GPU mismatch\n";return 129;}
+            unsigned partial=0;
+            for(unsigned x=64;x<128;++x) if(hardware[4*128+x]>0 && hardware[4*128+x]<160) ++partial;
+            if((gap==1 && partial!=0) || (gap>1 && partial<=previous)) {
+                std::cerr<<"Contact shadow did not harden at the receiver\n";return 130;
+            }
+            previous=partial;
+        }
+    }
+    std::cout<<"Contact shadows: geometry-dependent penumbra growth at all qualities passed\n";
+    {
+        Scene edge;
+        edge.add({{-1000,-1000,500},{0,-1000,500},{0,1000,500}});
+        edge.add({{-1000,-1000,500},{0,1000,500},{-1000,1000,500}});edge.build();
+        Camera camera{128,8,1000,64,4};camera.quality=3;
+        unsigned previous=0;
+        for(unsigned softness=0;softness<4;++softness) {
+            camera.shadow_softness=softness;
+            std::vector<std::uint8_t> actual,expected;
+            const ReceiverPlane receiver{{0,0,1000},{0,0,1}};
+            if(!gpu.render(edge,camera,{0,0,-1},receiver,actual)) return 131;
+            render_mask(edge,camera,{0,0,-1},receiver,expected,&workers,true);
+            if(actual!=expected) return 132;
+            unsigned partial=0;
+            for(unsigned x=64;x<128;++x) if(actual[4*128+x]>0 && actual[4*128+x]<160) ++partial;
+            if((softness==0 && partial!=0) || (softness>0 && partial<=previous)) return 133;
+            previous=partial;
+        }
+        std::cout<<"Shadow softness: Hard/Low/Medium/High CPU/GPU widths passed\n";
+    }
     for (unsigned scale:{1U,2U,4U}) {
         const Camera camera{400*scale,224*scale,256.0*scale,200.0*scale,112.0*scale};
         const ReceiverPlane ground{{0,25,0},{0,1,0}};
@@ -590,7 +784,7 @@ int main() {
 #endif
     // Rebuild and clear the same object to catch accidental cross-frame
     // geometry reuse. Exercise a different size, light axis and receiver.
-    for(unsigned variant=0;variant<6;++variant) {
+    for(unsigned quality=1;quality<=3;++quality) for(unsigned variant=0;variant<6;++variant) {
         scene.clear();
         if(variant!=5) {
             const double z=40+variant*11;
@@ -598,7 +792,7 @@ int main() {
             scene.add({{0,20,z+6},{20,-10,z},{-20,-10,z}});
         }
         scene.build();
-        const Camera camera{133+variant,79+variant,100,64,35};
+        const Camera camera{133+variant,79+variant,100,64,35,0,quality};
         const Vec3 light=variant%2?Vec3{0,-1,0}:Vec3{-1,-1,-1};
         std::optional<ReceiverPlane> ground;
         if(variant%2) ground=ReceiverPlane{{0,25,0},{0,1,0}};
@@ -682,6 +876,33 @@ int main() {
     }
     std::cout<<"Stereo shadow receiver near/convergence/far CPU/GPU checks passed\n";
 #if !defined(STARFOX_TEST_PORTABLE_SHADOWS)
+    {
+        Scene casters;
+        casters.add({{-12,-12,20},{12,-12,20},{0,12,20}});casters.build();
+        const ReceiverPlane plane{{0,0,40},{0,0,1}};
+        std::vector<std::uint8_t> actual,expected;
+        for(unsigned quality:{1U,2U,3U}) for(double tilt:{-.25,0.,.25}) {
+            Camera camera{37,23,30,18.5,11.5,26};camera.quality=quality;
+            const ReceiverPlane tilted{plane.point,{tilt,.125,1}};
+            render_mask(casters,camera,{0,0,-1},tilted,expected,nullptr,true,true);
+            if(!gpu.render_resident(casters,camera,{0,0,-1},tilted,nullptr,nullptr,false,false,nullptr,true)
+                || !gpu.readback_resident(actual) || actual!=expected) return 140;
+        }
+        // Primary-receiver selection and alpha coverage are independent flags.
+        DxrShadows::TriangleCoverage triangle{};triangle.flags=1;
+        std::array<std::uint32_t,1> texels{0};
+        const DxrShadows::Coverage coverage{{&triangle,1},texels};
+        for(unsigned opaque:{0U,1U}) {
+            texels[0]=opaque?0xffffffffU:0;
+            if(!gpu.render_resident(casters,{1,1,1,.5,.5},{0,0,-1},plane,nullptr,&coverage,false,false,nullptr,true)
+                || !gpu.readback_resident(actual) || actual!=std::vector<std::uint8_t>{std::uint8_t(opaque?160:0)}) return 141;
+        }
+        if(gpu.render_resident(casters,{1,1,1,.5,.5},{0,0,-1},{},nullptr,nullptr,false,false,nullptr,true)
+            || gpu.resident_output().resource) return 142;
+        if(!gpu.render_resident(casters,{1,1,1,.5,.5},{0,0,-1},plane,nullptr,nullptr,true,true,nullptr,true)
+            || !gpu.readback_resident(actual) || actual!=std::vector<std::uint8_t>{160}) return 143;
+        std::cout<<"DXR underlay shadows: tilted planes, qualities, alpha holes, no-plane invalidation and deferred recovery passed\n";
+    }
     // A new backend must build its AS. Compare that independent result with
     // the reused backend while alternating stable and changed input geometry.
     for(unsigned variant=0;variant<12;++variant) {
@@ -766,6 +987,66 @@ int main() {
     if(!borrowed.value) return 6;
     PortableShadows resident;
     starfox::render::SdlGpuEffects effects;
+#if defined(__APPLE__)
+    MetalHardwareRt metal_underlay;
+    const bool check_metal_underlay=metal_underlay.available(borrowed.value);
+    if(!check_metal_underlay) std::cout<<"Metal hardware underlay checks SKIPPED: hardware RT unavailable\n";
+#endif
+    {
+        Scene casters;
+        casters.add({{-12,-12,20},{12,-12,20},{0,12,20}});casters.build();
+        const ReceiverPlane plane{{0,0,40},{0,0,1}};
+        std::vector<std::uint8_t> actual,expected,visible;
+        unsigned distinct=0,shadowed=0;
+        for(unsigned quality:{1U,2U,3U}) for(double tilt:{-.25,0.,.25}) {
+            Camera camera{37,23,30,18.5,11.5,26};camera.quality=quality;
+            const ReceiverPlane tilted{plane.point,{tilt,.125,1}};
+            render_mask(casters,camera,{0,0,-1},tilted,expected,nullptr,true,true);
+            if(!resident.render_resident(borrowed.value,casters,camera,{0,0,-1},tilted,true)
+                || !resident.readback(actual) || actual!=expected) {
+                std::cerr<<"Ground-only shadow CPU/GPU mismatch\n";return 130;
+            }
+#if defined(__APPLE__)
+            if(check_metal_underlay) {
+                if(!metal_underlay.render_shadows(borrowed.value,casters,nullptr,camera,{0,0,-1},tilted,true)) return 150;
+                const auto result=metal_underlay.shadow_output();
+                SDL_GPUTransferBufferCreateInfo info{SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD,unsigned(expected.size()*4),0};
+                auto* transfer=SDL_CreateGPUTransferBuffer(borrowed.value,&info);
+                auto* command=SDL_AcquireGPUCommandBuffer(borrowed.value);
+                if(!transfer || !command) return 151;
+                auto* pass=SDL_BeginGPUCopyPass(command);
+                SDL_GPUBufferRegion source{static_cast<SDL_GPUBuffer*>(result.buffer),0,info.size};
+                SDL_GPUTransferBufferLocation target{transfer,0};
+                SDL_DownloadFromGPUBuffer(pass,&source,&target);SDL_EndGPUCopyPass(pass);
+                auto* fence=SDL_SubmitGPUCommandBufferAndAcquireFence(command);
+                if(!fence || !SDL_WaitForGPUFences(borrowed.value,true,&fence,1)) return 152;
+                const auto* values=static_cast<const std::uint32_t*>(SDL_MapGPUTransferBuffer(borrowed.value,transfer,false));
+                if(!values) return 153;
+                bool equal=true;
+                for(unsigned i=0;i<expected.size();++i) equal&=values[i]==expected[i];
+                SDL_UnmapGPUTransferBuffer(borrowed.value,transfer);
+                SDL_ReleaseGPUFence(borrowed.value,fence);SDL_ReleaseGPUTransferBuffer(borrowed.value,transfer);
+                if(!equal) return 154;
+                if(metal_underlay.render_shadows(borrowed.value,casters,nullptr,camera,{0,0,-1},{},true)
+                    || metal_underlay.shadow_output().buffer) return 155;
+            }
+#endif
+            if(!resident.render_resident(borrowed.value,casters,camera,{0,0,-1},tilted)
+                || !resident.readback(visible)) return 131;
+            for(unsigned i=0;i<actual.size();++i) {
+                distinct+=actual[i]!=visible[i];shadowed+=actual[i]>0;
+            }
+        }
+        if(!distinct || !shadowed) return 132;
+        if(resident.render_resident(borrowed.value,casters,{1,1,1,.5,.5},{0,0,-1},{},true)
+            || resident.output().buffer) return 133;
+        if(!resident.render_resident(borrowed.value,casters,{1,1,1,.5,.5},{0,0,-1},plane,true)
+            || !resident.readback(actual) || actual!=std::vector<std::uint8_t>{160}) return 134;
+        std::cout<<"Ground-only underlay shadows: tilted planes, all qualities, retained casters, no-plane invalidation and recovery passed\n";
+#if defined(__APPLE__)
+        if(check_metal_underlay) std::cout<<"Metal hardware underlay CPU comparisons and no-plane invalidation passed\n";
+#endif
+    }
     for(unsigned variant=0;variant<5;++variant) {
         scene.clear();
         const double z=45+variant*8;

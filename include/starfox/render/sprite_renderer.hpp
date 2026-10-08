@@ -2,6 +2,7 @@
 
 #include "starfox/render/framebuffer.hpp"
 #include "starfox/render/hud_layout.hpp"
+#include "starfox/render/sprite_selection.hpp"
 #include "starfox/simulation/snes_ppu.hpp"
 
 #include <cstdint>
@@ -31,6 +32,12 @@ void interpolate_crosshair_oam(
 // other cartridge sprites.
 void suppress_crosshair_oam(simulation::SnesPpuState& ppu) noexcept;
 
+// Extract only a complete retail four-quadrant reticle for a separate eye pass.
+// The source OAM is never modified. Offset is in native logical pixels; preserve
+// packed X-high/size bits and wrapped sprite coordinates, not unrelated HUD.
+[[nodiscard]] std::optional<std::array<std::uint8_t,544>> isolated_crosshair_oam(
+    const simulation::SnesPpuState& ppu,std::int32_t horizontal_offset=0) noexcept;
+
 class SpriteRenderer {
 public:
     // Retail MSHOWPERCGRAPH: 104x12 frame, 100x8 maximum fill.
@@ -44,7 +51,8 @@ public:
         bool anchor_edge_hud = false,
         const HudLayout* hud_layout = nullptr,
         bool suppress_configurable_hud = false,
-        const simulation::MeterState* meters = nullptr) const noexcept;
+        const simulation::MeterState* meters = nullptr,
+        SpriteSelection selection = SpriteSelection::all) const noexcept;
     void draw_meters(
         const simulation::MeterState& meters,
         Framebuffer& target,

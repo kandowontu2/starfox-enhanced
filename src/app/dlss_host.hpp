@@ -1,9 +1,12 @@
 #pragma once
 #include "starfox/render/dlss_native.h"
+#include "starfox/render/calibrated_dlss_api.hpp"
 #include "starfox/render/sdl_d3d12_bridge.h"
 #include "starfox/render/gpu_temporal_inputs.hpp"
 #include "starfox/render/gpu_composite.hpp"
 #include "starfox/render/temporal_projection.hpp"
+#include "starfox/render/dlss_preview_history.hpp"
+#include "starfox/render/dlss_presentation_lifecycle.hpp"
 #include <SDL3/SDL.h>
 #include <cstdlib>
 #include <filesystem>
@@ -15,6 +18,8 @@
 
 #if defined(_WIN32) && !defined(STARFOX_UWP)
 #include <windows.h>
+#include "embedded_dlss.hpp"
+#include "d3d12_validation.hpp"
 // Default-off integration scaffold. Construct before SDL initialization, but
 // finish before destroying the Window, then destroy before SDL_Quit.
 class DlssHost {
@@ -32,9 +37,18 @@ class DlssHost {
     decltype(&starfox_dlss_swapchain_v1) swapchain_{};
     StarfoxSdlD3D12PresentHooksV1 hooks_{};
     decltype(&starfox_dlss_configure_v1) configure_{};
+    decltype(&starfox_dlss_configure_v2) configure_model_{};
     decltype(&starfox_dlss_evaluate_v1) evaluate_{};
     decltype(&starfox_dlss_release_viewport_v1) release_{};
+    decltype(&starfox_dlss_finish_frame_v1) finish_frame_{};
+    starfox::render::DlssPresentationLifecycle presentation_;
+    bool explicit_presentation_{},reported_explicit_presentation_{};
+    bool test_cancelled_evaluation_{};
+    PlayerD3d12Validation validation_;
+    decltype(&starfox_dlss_evaluate_v2) evaluate_rejection_{};
     starfox::render::GpuTemporalInputs guides_;
+    starfox::render::GpuTemporalInputs world_artwork_;
+    bool second_generation_{},configured_second_generation_{};
     SDL_GPUDevice* evaluation_device_{};SDL_GPUTexture* output_{};
     uint32_t width_{},height_{},frame_index_{};uint64_t epoch_{},serial_{};
     bool configured_{};
@@ -45,10 +59,12 @@ class DlssHost {
     std::optional<std::int32_t> previous_ground_height_;
     std::array<float,4> previous_pixel_projection_{};
     std::array<uint32_t,2> previous_input_extent_{};
+    starfox::render::DlssPreviewHistory preview_history_;
     void invalidate_history() noexcept {
         serial_=0;previous_camera_.reset();previous_projection_.reset();
         previous_ground_height_.reset();previous_input_extent_={};
         previous_pixel_projection_={};
+        preview_history_.reset();
     }
     uint32_t requested_mode() const {
         const auto* value=std::getenv("STARFOX_TEST_DLSS_MODE");
@@ -62,6 +78,7 @@ class DlssHost {
     }
     bool check_device(void* device) {
         if(!sdk_ || !device) return false;
+        validation_.capture(device);
         if(checked_device_==device) return device_supported_;
         char error[512]{};
         checked_device_=device;
@@ -82,8 +99,11 @@ class DlssHost {
         const uint32_t depth_offset=(count*4+511u)&~511u;
         const uint32_t pitch=(input.width+63u)&~63u;
         const uint32_t motion_offset=(depth_offset+pitch*input.height*4+511u)&~511u;
+        const bool stationary=std::getenv("STARFOX_TEST_DLSS_AUDIT_STATIONARY")!=nullptr;
+        const uint32_t raw_motion_offset=(motion_offset+pitch*input.height*8+511u)&~511u;
+        if(stationary && !input.motion) throw std::runtime_error("Stationary preview lacks raw geometry motion");
         SDL_GPUTransferBufferCreateInfo info{};info.usage=SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
-        info.size=motion_offset+pitch*input.height*8;
+        info.size=stationary?raw_motion_offset+count*16:motion_offset+pitch*input.height*8;
         auto* transfer=SDL_CreateGPUTransferBuffer(device,&info);
         if(!transfer) throw std::runtime_error(SDL_GetError());
         struct Cleanup {SDL_GPUDevice* device;SDL_GPUTransferBuffer* transfer;
@@ -101,6 +121,13 @@ class DlssHost {
         SDL_DownloadFromGPUTexture(pass,&region,&texture_destination);
         region.texture=static_cast<SDL_GPUTexture*>(guides.motion);texture_destination.offset=motion_offset;
         SDL_DownloadFromGPUTexture(pass,&region,&texture_destination);SDL_EndGPUCopyPass(pass);
+        if(stationary) {
+            pass=SDL_BeginGPUCopyPass(command);
+            if(!pass){SDL_CancelGPUCommandBuffer(command);throw std::runtime_error(SDL_GetError());}
+            SDL_GPUBufferRegion raw{static_cast<SDL_GPUBuffer*>(input.motion),0,count*16};
+            SDL_GPUTransferBufferLocation raw_destination{transfer,raw_motion_offset};
+            SDL_DownloadFromGPUBuffer(pass,&raw,&raw_destination);SDL_EndGPUCopyPass(pass);
+        }
         auto* fence=SDL_SubmitGPUCommandBufferAndAcquireFence(command);
         if(!fence) throw std::runtime_error(SDL_GetError());
         const bool waited=SDL_WaitForGPUFences(device,true,&fence,1);SDL_ReleaseGPUFence(device,fence);
@@ -109,7 +136,25 @@ class DlssHost {
         if(!mapped) throw std::runtime_error(SDL_GetError());
         const auto* depth=reinterpret_cast<const float*>(reinterpret_cast<const unsigned char*>(mapped)+depth_offset);
         const auto* motion=reinterpret_cast<const float*>(reinterpret_cast<const unsigned char*>(mapped)+motion_offset);
+        const auto* raw_motion=stationary?reinterpret_cast<const float*>(reinterpret_cast<const unsigned char*>(mapped)+raw_motion_offset):nullptr;
         uint32_t covered=0,valid=0,valid_motion=0,moving=0,mismatches=0;
+        uint32_t model_pixels=0,model_valid_motion=0,raw_model_valid=0;
+        float model_max_motion=0,raw_model_max_motion=0;
+        for(uint32_t y=0;y<input.height;++y) for(uint32_t x=0;x<input.width;++x) {
+            const auto packed=mapped[y*input.width+x];
+            if((packed&0x02000000u)==0 || (packed&0x08000000u)!=0 || ((packed>>8)&255u)==1) continue;
+            ++model_pixels;
+            const float mx=motion[(y*pitch+x)*2],my=motion[(y*pitch+x)*2+1];
+            if(std::isfinite(mx) && std::isfinite(my) && std::abs(mx)<1e20f && std::abs(my)<1e20f) {
+                ++model_valid_motion;model_max_motion=std::max({model_max_motion,std::abs(mx),std::abs(my)});
+            }
+            if(raw_motion && raw_motion[(y*input.width+x)*4+3]>0.f) {
+                const float rx=raw_motion[(y*input.width+x)*4],ry=raw_motion[(y*input.width+x)*4+1];
+                if(std::isfinite(rx) && std::isfinite(ry)) {
+                    ++raw_model_valid;raw_model_max_motion=std::max({raw_model_max_motion,std::abs(rx),std::abs(ry)});
+                }
+            }
+        }
         for(uint32_t y=0;y<input.height;++y) for(uint32_t x=0;x<input.width;++x)
             if(mapped[y*input.width+x]&0x08000000u) {
                 ++covered;const float value=depth[y*pitch+x];
@@ -136,6 +181,15 @@ class DlssHost {
         SDL_UnmapGPUTransferBuffer(device,transfer);
         std::cerr<<"dlss-terrain-audit: covered="<<covered<<" valid_depth="<<valid
             <<" valid_motion="<<valid_motion<<" moving="<<moving<<" mismatches="<<mismatches<<'\n';
+        std::cerr<<"dlss-model-audit: covered="<<model_pixels<<" valid_motion="<<model_valid_motion
+            <<" max_motion="<<model_max_motion<<'\n';
+        if(stationary) {
+            std::cerr<<"dlss-preview-raw-motion: valid="<<raw_model_valid<<" max="<<raw_model_max_motion<<'\n';
+            if(!raw_model_valid || raw_model_max_motion>.01f)
+                throw std::runtime_error("Frozen preview geometry moved before zero-motion guide conversion");
+            if(!model_valid_motion || model_max_motion>0.001f || moving)
+                throw std::runtime_error("Stationary preview has nonzero/missing temporal correspondence");
+        }
         if(!covered || !valid) throw std::runtime_error("Diagnostic scene has no usable terrain depth");
         if(!valid_motion || mismatches) throw std::runtime_error("Diagnostic terrain reprojection mismatch");
     }
@@ -154,7 +208,13 @@ public:
             if(adapter && !*adapter) adapter=nullptr;
             if(binaries && !*binaries) binaries=nullptr;
             if(bool(adapter)!=bool(binaries)) throw std::runtime_error("Set both adapter and official binary paths");
-            const auto binary_path=binaries?std::filesystem::path(binaries):executable_directory/"dlss";
+            auto binary_path=binaries?std::filesystem::path(binaries):executable_directory/"dlss";
+#if defined(STARFOX_EMBEDDED_DLSS)
+            if(!binaries) {
+                binary_path=starfox::app::embedded_dlss_directory();
+                std::cerr<<"dlss-lifecycle: using verified embedded standard runtime\n";
+            }
+#endif
             const auto adapter_path=adapter?std::filesystem::path(adapter):binary_path/"starfox_dlss_native.dll";
             if(!adapter && !std::filesystem::is_regular_file(adapter_path)) {
                 availability_="DLSS runtime not installed";return;
@@ -167,14 +227,22 @@ public:
             bind_=reinterpret_cast<decltype(bind_)>(GetProcAddress(adapter_,"starfox_dlss_bind_device_v1"));
             swapchain_=reinterpret_cast<decltype(swapchain_)>(GetProcAddress(adapter_,"starfox_dlss_swapchain_v1"));
             configure_=reinterpret_cast<decltype(configure_)>(GetProcAddress(adapter_,"starfox_dlss_configure_v1"));
+            configure_model_=reinterpret_cast<decltype(configure_model_)>(GetProcAddress(adapter_,"starfox_dlss_configure_v2"));
             evaluate_=reinterpret_cast<decltype(evaluate_)>(GetProcAddress(adapter_,"starfox_dlss_evaluate_v1"));
             release_=reinterpret_cast<decltype(release_)>(GetProcAddress(adapter_,"starfox_dlss_release_viewport_v1"));
+            finish_frame_=reinterpret_cast<decltype(finish_frame_)>(GetProcAddress(adapter_,"starfox_dlss_finish_frame_v1"));
+            evaluate_rejection_=reinterpret_cast<decltype(evaluate_rejection_)>(GetProcAddress(adapter_,"starfox_dlss_evaluate_v2"));
             if(!open || !close_ || !bind_ || !swapchain_ || !configure_ || !evaluate_ || !release_) throw std::runtime_error("DLSS adapter lifecycle ABI missing");
             char error[512]{};
             if(open(binary_path.c_str(),&sdk_,error,sizeof(error))) throw std::runtime_error(error);
             open_=open;binary_path_=binary_path;
+            // DLSS SR does not require a DXGI proxy. Use the same common-plugin
+            // frame-end ABI as native XR, retaining the legacy wrapper only for
+            // older adapters and the isolated comparison control.
+            explicit_presentation_=finish_frame_ && !std::getenv("STARFOX_TEST_DLSS_PRESENT_PROXY");
             hooks_={1,this,[](void* user,void* device,void** chain,bool restore)->bool {
                 auto& self=*static_cast<DlssHost*>(user);if(!self.sdk_) return true;
+                if(self.explicit_presentation_) return true;
                 // The SDK's presentation wrapper has a per-frame cost even
                 // when no DLSS viewport evaluates. Keep ordinary GPU play on
                 // SDL's native swapchain until the user actually enables it.
@@ -218,7 +286,30 @@ public:
     DlssHost(const DlssHost&)=delete;
     DlssHost& operator=(const DlssHost&)=delete;
     bool available() const noexcept {return sdk_ && device_supported_;}
+    starfox::render::CalibratedDlssApi native_api() const noexcept {
+        // Borrow this same pre-DXGI trusted instance; native owners retire both
+        // eye viewports before Window calls finish() or replaces the GPU.
+        return available() && finish_frame_ && evaluate_rejection_?starfox::render::CalibratedDlssApi{sdk_,bind_,configure_,configure_model_,evaluate_,release_,finish_frame_,evaluate_rejection_}
+            :starfox::render::CalibratedDlssApi{};
+    }
     bool runtime_loaded() const noexcept {return sdk_!=nullptr;}
+    // Call after SDL submits/presents or cancels this mono frame. Native Leia
+    // owns its two eye notifications separately and never touches this ticket.
+    bool complete_presentation(bool presented=true) {
+        if(!presented) invalidate_history();
+        if(!sdk_ || !explicit_presentation_) return true;
+        char error[512]{};
+        const bool ok=presentation_.finish([&] {return finish_frame_(sdk_,error,sizeof(error))==0;});
+        if(!ok) {
+            invalidate_history();
+            std::cerr<<"dlss-presentation: frame-end failed: "<<error<<'\n';return false;
+        }
+        if(presentation_.completed() && !reported_explicit_presentation_) {
+            std::cerr<<"dlss-presentation: explicit frame-end; native swapchain retained\n";
+            reported_explicit_presentation_=true;
+        }
+        return true;
+    }
     bool wants_d3d12() const noexcept {
         return sdk_ && (selected_mode_ || std::getenv("STARFOX_TEST_DLSS_EVALUATE"));
     }
@@ -227,11 +318,12 @@ public:
     bool jitter_enabled() const noexcept {
         if(const auto* override_value=std::getenv("STARFOX_TEST_DLSS_JITTER"))
             return enabled() && *override_value && std::string_view(override_value)!="0";
-        // Screen-space source backgrounds do not yet have reliable temporal
-        // correspondence. Subpixel sampling makes those layers visibly wobble.
-        // Keep reconstruction available without jitter until those inputs are
-        // complete; the diagnostic override above retains the validation path.
-        return false;
+        // Models/terrain need subpixel samples for temporal reconstruction;
+        // feeding repeated unjittered samples produces soft, undersampled edges.
+        // Native tilemaps, HUD and world OAM sprites are restored unjittered
+        // after evaluation, including the camera-effect underlay. They do not
+        // borrow fabricated camera correspondence from the neural history.
+        return enabled();
     }
     bool set_mode(uint32_t mode) noexcept {
         mode=mode<=4?mode:0;
@@ -239,23 +331,14 @@ public:
         if(selected_mode_!=mode) {selected_mode_=mode;invalidate_history();}
         return presentation_changed;
     }
-    const std::string& availability() const noexcept {return availability_;}
-    void test_neural_control(std::uint64_t frame) {
-        if(!std::getenv("STARFOX_TEST_DLSS5_CONTROL") || (frame!=8 && frame!=24)) return;
-        // ReShade's public global-config ABI; only touch an already-loaded
-        // proxy in the explicitly enabled isolated experiment.
-        const auto module=GetModuleHandleW(L"dxgi.dll");
-        if(!module) return;
-        using Set=void(*)(void*,void*,const char*,const char*,const char*);
-        using Get=bool(*)(void*,void*,const char*,const char*,char*,size_t*);
-        const auto set=reinterpret_cast<Set>(GetProcAddress(module,"ReShadeSetConfigValue"));
-        const auto get=reinterpret_cast<Get>(GetProcAddress(module,"ReShadeGetConfigValue"));
-        if(!set || !get) return;
-        set(nullptr,nullptr,"RenoDX.DLSS5","NeuralUplift",frame==8?"1":"0");
-        char value[32]{};size_t size=sizeof(value);
-        const bool read=get(nullptr,nullptr,"RenoDX.DLSS5","NeuralUplift",value,&size);
-        std::cerr<<"dlss5-control: frame="<<frame<<" config="<<(read?value:"unreadable")<<'\n';
+    bool supports_dlss45() const noexcept {return configure_model_!=nullptr;}
+    std::array<float,2> raster_jitter(bool frozen,std::uint64_t serial,std::uint64_t epoch) const noexcept {
+        return preview_history_.jitter(frozen,serial,epoch);
     }
+    void set_dlss45(bool enabled) noexcept {
+        if(second_generation_!=enabled) {second_generation_=enabled;invalidate_history();}
+    }
+    const std::string& availability() const noexcept {return availability_;}
     // Restart only after the old renderer/device is destroyed, and before
     // SDL creates the replacement D3D12 swapchain. Keep SDK shutdown ordered.
     void restart() {
@@ -266,6 +349,7 @@ public:
             std::cerr<<"dlss-lifecycle: restart failed: "<<error<<'\n';return;
         }
         frame_index_=0;
+        presentation_={};reported_explicit_presentation_=false;test_cancelled_evaluation_=false;
         availability_="Waiting for a compatible D3D12 device";
         std::cerr<<"dlss-lifecycle: restarted before renderer creation\n";
     }
@@ -273,7 +357,9 @@ public:
         if(!sdk_) return;
         auto* gpu=static_cast<SDL_GPUDevice*>(SDL_GetPointerProperty(SDL_GetRendererProperties(renderer),SDL_PROP_RENDERER_GPU_DEVICE_POINTER,nullptr));
         if(gpu && !SDL_WaitForGPUIdle(gpu)) {std::cerr<<"dlss-lifecycle: GPU idle failed\n";return;}
+        if(!complete_presentation()) return;
         guides_.release_device();
+        world_artwork_.release_device();
         if(output_) {SDL_ReleaseGPUTexture(evaluation_device_,output_);output_=nullptr;}
         char viewport_error[512]{};
         if(evaluated_viewport_ && release_(sdk_,99,viewport_error,sizeof(viewport_error))) {std::cerr<<viewport_error<<'\n';return;}
@@ -284,12 +370,17 @@ public:
         }
         char error[512]{};
         if(close_(sdk_,error,sizeof(error))) {std::cerr<<"dlss-lifecycle: shutdown failed: "<<error<<'\n';return;}
+        validation_.report("sdk-teardown");
+        if(explicit_presentation_ && presentation_.attempts())
+            std::cerr<<"dlss-presentation-lifecycle: completed="<<presentation_.completed()
+                <<" attempts="<<presentation_.attempts()<<'\n';
         sdk_=nullptr;std::cerr<<"dlss-lifecycle: shutdown before renderer destruction\n";
         upgraded_swapchains_.clear();
         evaluation_device_=nullptr;invalidate_history();
         checked_device_=nullptr;device_supported_=false;availability_="DLSS shut down";
         width_=height_=render_width_=render_height_=0;
     }
+    void validate_gpu_teardown() const noexcept {validation_.report("renderer-teardown");}
     void bind(SDL_Renderer* renderer) {
         if(!sdk_) return;
         auto* gpu=static_cast<SDL_GPUDevice*>(SDL_GetPointerProperty(SDL_GetRendererProperties(renderer),SDL_PROP_RENDERER_GPU_DEVICE_POINTER,nullptr));
@@ -314,10 +405,12 @@ public:
             throw std::runtime_error("Invalid DLSS preparation");
         if(evaluation_device_ && evaluation_device_!=device)
             throw std::runtime_error("DLSS device changed without teardown");
-        if(width_==width && height_==height && mode_==requested_mode && configured_ && output_)
+        if(width_==width && height_==height && mode_==requested_mode && configured_ && output_
+            && configured_second_generation_==second_generation_)
             return {render_width_,render_height_};
         auto checked=[](bool ok,const char* error){if(!ok) throw std::runtime_error(error);};
         checked(SDL_WaitForGPUIdle(device),SDL_GetError());
+        checked(complete_presentation(),"DLSS previous frame-end did not complete before reconfiguration");
         char error[512]{};
         if(evaluated_viewport_) checked(!release_(sdk_,99,error,sizeof(error)),error);
         configured_=false;evaluated_viewport_=false;invalidate_history();
@@ -325,8 +418,11 @@ public:
         // failure must not make a subsequent call accept the old texture/plan.
         width_=height_=render_width_=render_height_=0;
         uint32_t w{},h{};
-        checked(!configure_(sdk_,99,requested_mode,width,height,&w,&h,error,sizeof(error)),error);
+        checked(!second_generation_ || configure_model_,"The loaded DLSS runtime lacks 4.5 model-selection support");
+        checked(!(configure_model_?configure_model_(sdk_,99,requested_mode,second_generation_?1U:0U,width,height,&w,&h,error,sizeof(error))
+            :configure_(sdk_,99,requested_mode,width,height,&w,&h,error,sizeof(error))),error);
         configured_=true;evaluation_device_=device;
+        configured_second_generation_=second_generation_;
         checked(w && h && w<=width && h<=height,"Invalid DLSS render dimensions");
         SDL_GPUTextureCreateInfo info{};info.type=SDL_GPU_TEXTURETYPE_2D;info.format=SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
         info.usage=SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE|SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_READ|SDL_GPU_TEXTUREUSAGE_SAMPLER;
@@ -335,13 +431,16 @@ public:
         if(output_) SDL_ReleaseGPUTexture(device,output_);
         output_=replacement;width_=width;height_=height;mode_=requested_mode;
         render_width_=w;render_height_=h;
-        std::cerr<<"dlss-lifecycle: viewport configured "<<w<<'x'<<h<<'\n';
+        std::cerr<<"dlss-lifecycle: viewport configured "<<w<<'x'<<h
+            <<" output="<<width<<'x'<<height<<'\n';
         return {w,h};
     }
     starfox::render::GpuCompositeOutput evaluate(const starfox::render::GpuCompositeOutput& input,
         float focal,float cx,float cy,uint64_t serial,uint64_t epoch,const starfox::render::GpuCompositeOutput* final=nullptr,
         const starfox::render::TemporalCamera* camera=nullptr,const starfox::render::TemporalGroundPlane* ground_plane=nullptr,
-        float focal_y=0,std::array<float,2> raster_jitter={}) {
+        float focal_y=0,std::array<float,2> raster_jitter={},void** world_texture=nullptr,bool frozen_scene=false) {
+        // Borrowed HUD-free RGBA8 output, valid until the next evaluation.
+        if(world_texture) *world_texture=nullptr;
         if(focal_y==0) focal_y=focal;
         const auto& original=final?*final:input;
         if(!enabled() || !input.geometry_depth
@@ -353,13 +452,16 @@ public:
         if(!bridge || !std::isfinite(focal) || focal<=0 || !std::isfinite(focal_y) || focal_y<=0
             || !std::isfinite(cx) || !std::isfinite(cy)) {invalidate_history();return original;}
         SDL_GPUCommandBuffer* command{};
+        bool sdk_recorded=false;
         try {
             auto checked=[](bool ok,const char* error){if(!ok) throw std::runtime_error(error);};
+            checked(complete_presentation(),"DLSS previous frame-end did not complete before evaluation");
             checked(std::isfinite(raster_jitter[0]) && std::isfinite(raster_jitter[1]),"Invalid DLSS raster jitter");
             const auto requested_mode=DlssHost::requested_mode();
             bool reset=serial_+1!=serial || epoch_!=epoch || !configured_ || !input.motion || !previous_camera_
                 || previous_input_extent_!=std::array<uint32_t,2>{input.width,input.height};
-            if(width_!=original.width || height_!=original.height || requested_mode!=mode_ || !configured_ || !output_) {
+            if(width_!=original.width || height_!=original.height || requested_mode!=mode_ || !configured_ || !output_
+                || configured_second_generation_!=second_generation_) {
                 prepare(device,original.width,original.height,requested_mode);reset=true;
             }
             // Direct native-size inputs must agree exactly with the SDK plan.
@@ -374,7 +476,8 @@ public:
             ground.projection={focal,focal_y,cx,cy};ground.previous_projection=ground.projection;
             ground.raster_jitter=raster_jitter;
             if(ground_plane) ground.plane=ground_plane->camera_plane;
-            StarfoxDlssFrameV1 frame{};frame.size=sizeof(frame);frame.viewport=99;frame.frame_index=frame_index_++;
+            const bool reuse_preview=preview_history_.reusable(frozen_scene,reset,epoch);
+            StarfoxDlssFrameV1 frame{};frame.size=sizeof(frame);frame.viewport=99;frame.frame_index=frame_index_;
             frame.width=input.width;frame.height=input.height;
             frame.output_width=original.width;frame.output_height=original.height;frame.reset=reset;
             const auto projection=starfox::render::temporal_projection(input.width,input.height,focal,cx,cy,near_plane,far_plane,focal_y);
@@ -409,7 +512,7 @@ public:
                 frame.camera_forward[i]=(*forward_axis)[i];
             }
             frame.near_plane=near_plane;frame.far_plane=far_plane;frame.vertical_fov=projection->vertical_fov;frame.aspect=projection->aspect;
-            const auto textures=guides_.enqueue(device,command,input.geometry_depth,input.motion,input.width,input.height,near_plane,far_plane,reset,ground_plane?&ground:nullptr);
+            const auto textures=guides_.enqueue(device,command,input.geometry_depth,input.motion,input.width,input.height,near_plane,far_plane,reset,ground_plane?&ground:nullptr,frozen_scene);
             checked(textures.depth,guides_.status().c_str());
             auto evaluation_textures=textures;void* evaluation_color=input.rgba;
             if(render_width_!=input.width || render_height_!=input.height) {
@@ -421,26 +524,56 @@ public:
             // displacement, scaled if the diagnostic resample path is used.
             frame.jitter[0]=raster_jitter[0]*float(render_width_)/input.width;
             frame.jitter[1]=raster_jitter[1]*float(render_height_)/input.height;
-            struct Callback {DlssHost* host;StarfoxDlssFrameV1* frame;char error[512]{};} callback{this,&frame};
+            struct Callback {DlssHost* host;StarfoxDlssFrameV1* frame;bool* recorded;char error[512]{};} callback{this,&frame,&sdk_recorded};
             void* resources[]{evaluation_color,evaluation_textures.depth,evaluation_textures.motion,output_,evaluation_textures.exposure};
-            checked(bridge->dispatch(command,resources,5,3,[](void* user,void* list,void* const* textures,uint32_t count)->bool {
+            if(!reuse_preview) checked(bridge->dispatch(command,resources,5,3,[](void* user,void* list,void* const* textures,uint32_t count)->bool {
                 auto& c=*static_cast<Callback*>(user);if(count!=5) return false;
                 auto& f=*c.frame;f.command=list;f.color=textures[0];f.depth=textures[1];f.motion=textures[2];f.output=textures[3];f.exposure=textures[4];
                 // D3D12 NON_PIXEL_SHADER_RESOURCE=0x40, UNORDERED_ACCESS=0x8.
                 for(unsigned i=0;i<5;++i) f.states[i]=i==3?0x8u:0x40u;
+                if(c.host->explicit_presentation_) c.host->presentation_.touch();
+                // The SDK consumes a CPU frame token even if its encoded GPU
+                // command is later cancelled. Reusing that index with changed
+                // constants traps all subsequent frames in duplicate-constants
+                // failure. Accumulated preview samples still count only actual
+                // successful submissions below, not these evaluation attempts.
+                ++c.host->frame_index_;
+                *c.recorded=true;
                 const bool success=c.host->evaluate_(c.host->sdk_,&f,c.error,sizeof(c.error))==0;
                 if(success) c.host->evaluated_viewport_=true;
                 return success;
             },&callback),callback.error);
-            auto* protected_output=guides_.restore_hud(device,command,original.rgba,output_,original.packed,original.width,original.height);
+            // Exercise real SDK CPU bookkeeping after cancelling its encoded
+            // GPU evaluation, not a pre-evaluation/no-op rejection fixture.
+            if(!reuse_preview && !test_cancelled_evaluation_
+                && std::getenv("STARFOX_TEST_DLSS_CANCEL_AFTER_EVALUATION")) {
+                test_cancelled_evaluation_=true;
+                std::cerr<<"dlss-test: cancelling evaluated command\n";
+                throw std::runtime_error("Injected cancellation after SDK evaluation");
+            }
+            auto* protected_output=guides_.restore_hud(device,command,original.rgba,output_,original.packed,original.width,original.height,true,true,true);
             checked(protected_output,guides_.status().c_str());
+            void* protected_world{};
+            if(world_texture) {
+                // Camera effects use a HUD-free underlay. They previously
+                // borrowed the raw neural output, bypassing native sky/sprite
+                // protection and softening the entire backdrop a second time.
+                protected_world=world_artwork_.restore_hud(device,command,original.rgba,output_,original.packed,
+                    original.width,original.height,true,false,true);
+                checked(protected_world,world_artwork_.status().c_str());
+            }
             // The native callback, HUD restore, effects and presentation all use
             // this SDL device's one D3D12 command queue. Submission order and
             // resource transitions order reuse; a CPU fence wait here needlessly
             // serialized every frame. Reconfiguration/shutdown still wait idle.
             const bool submitted=SDL_SubmitGPUCommandBuffer(command);command=nullptr;
             checked(submitted,SDL_GetError());
-            if(std::getenv("STARFOX_TEST_DLSS_AUDIT_TERRAIN") && (frame.frame_index==1 || frame.frame_index%16==15))
+            if(reuse_preview && explicit_presentation_) presentation_.touch();
+            if(!reuse_preview) {
+                preview_history_.evaluated(frozen_scene,reset,epoch,raster_jitter);
+            }
+            if((std::getenv("STARFOX_TEST_DLSS_AUDIT_TERRAIN") || std::getenv("STARFOX_TEST_DLSS_AUDIT_STATIONARY"))
+                && (frame.frame_index==1 || frame.frame_index%16==15))
                 audit_terrain(device,input,textures,ground);
             // Explicit diagnostic comparison only, never a normal-frame stall.
             if(std::getenv("STARFOX_TEST_DLSS_SERIALIZE"))
@@ -449,27 +582,52 @@ public:
             previous_pixel_projection_=ground.projection;
             previous_input_extent_={input.width,input.height};
             previous_ground_height_=ground_plane?std::optional<std::int32_t>(ground_plane->world_height):std::nullopt;
-            std::cerr<<"dlss-gameplay: evaluated frame="<<frame.frame_index<<" reset="<<reset<<" size="<<input.width<<'x'<<input.height
+            std::cerr<<(reuse_preview?"dlss-preview: reused reconstructed frame=":"dlss-gameplay: evaluated frame=")
+                <<frame.frame_index<<" reset="<<reset<<" size="<<input.width<<'x'<<input.height
                 <<" mode="<<mode_<<" render="<<render_width_<<'x'<<render_height_
-                <<" jitter="<<raster_jitter[0]<<','<<raster_jitter[1]<<" diagnostic, incomplete world inputs\n";
+                <<" jitter="<<raster_jitter[0]<<','<<raster_jitter[1]<<" frozen="<<frozen_scene
+                <<" samples="<<preview_history_.samples()
+                <<" output="<<frame.output_width<<'x'<<frame.output_height<<'\n';
+            if(world_texture) *world_texture=protected_world;
             auto result=original;result.rgba=protected_output;return result;
         } catch(const std::exception& e) {
-            if(command) SDL_CancelGPUCommandBuffer(command);
+            if(command && sdk_recorded) {
+                // SDK evaluation advances private resource-state bookkeeping
+                // while ENCODING GPU work. Cancelling it makes the next frame's
+                // barriers disagree with the actual GPU (even with reset=true).
+                // Drain the recorded command in queue order, but reject its
+                // image and all app history. SDL retains its tracked inputs;
+                // ordinary frames gain no fence wait or extra submission.
+                const bool drained=SDL_SubmitGPUCommandBuffer(command);command=nullptr;
+                if(drained) std::cerr<<"dlss-gameplay: rejected SDK work drained\n";
+                else {
+                    // Submission uncertainty cannot be repaired by another
+                    // SDK evaluation on this device. Leave selection intact,
+                    // but require renderer/device recovery before re-binding.
+                    device_supported_=false;availability_="DLSS rejected-work submission failed";
+                    std::cerr<<"dlss-gameplay: rejected SDK drain failed: "<<SDL_GetError()<<'\n';
+                }
+            } else if(command) SDL_CancelGPUCommandBuffer(command);
             invalidate_history();
             std::cerr<<"dlss-gameplay: failed: "<<e.what()<<'\n';return original;
         }
     }
 };
 #else
-class DlssHost {public:explicit DlssHost(const std::filesystem::path& ={}) {} void bind(SDL_Renderer*) {} void finish(SDL_Renderer*) {} void restart() {} void test_neural_control(std::uint64_t) {}
+class DlssHost {public:explicit DlssHost(const std::filesystem::path& ={}) {} void bind(SDL_Renderer*) {} void finish(SDL_Renderer*) {} void restart() {} bool complete_presentation(bool=true){return true;}
+    void validate_gpu_teardown() const noexcept {}
     bool available() const noexcept {return false;}
+    starfox::render::CalibratedDlssApi native_api() const noexcept {return {};}
     bool runtime_loaded() const noexcept {return false;}
     bool wants_d3d12() const noexcept {return false;}
     bool enabled() const noexcept {return false;}
     bool native_raster() const noexcept {return false;}
     bool jitter_enabled() const noexcept {return false;}
     bool set_mode(uint32_t) noexcept {return false;}
+    std::array<float,2> raster_jitter(bool,std::uint64_t serial,std::uint64_t) const noexcept {return starfox::render::temporal_jitter(serial);}
+    bool supports_dlss45() const noexcept {return false;}
+    void set_dlss45(bool) noexcept {}
     const std::string& availability() const noexcept {static const std::string reason="DLSS requires Windows D3D12";return reason;}
     std::array<uint32_t,2> prepare_requested(SDL_GPUDevice*,uint32_t,uint32_t) {return {};}
-    starfox::render::GpuCompositeOutput evaluate(const starfox::render::GpuCompositeOutput& input,float,float,float,uint64_t,uint64_t,const starfox::render::GpuCompositeOutput* final=nullptr,const starfox::render::TemporalCamera* =nullptr,const starfox::render::TemporalGroundPlane* =nullptr,float=0,std::array<float,2> = {}){return final?*final:input;}};
+    starfox::render::GpuCompositeOutput evaluate(const starfox::render::GpuCompositeOutput& input,float,float,float,uint64_t,uint64_t,const starfox::render::GpuCompositeOutput* final=nullptr,const starfox::render::TemporalCamera* =nullptr,const starfox::render::TemporalGroundPlane* =nullptr,float=0,std::array<float,2> = {},void** world_texture=nullptr,bool=false){if(world_texture) *world_texture=nullptr;return final?*final:input;}};
 #endif

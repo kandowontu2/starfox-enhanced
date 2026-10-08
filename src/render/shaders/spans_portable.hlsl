@@ -2,6 +2,7 @@
 // command slots; empty rows are zero-area commands. Repeated-row EX effects
 // accumulate a coverage mask rather than overwrite earlier row spans.
 // Input is GpuClip's 129-int4 block.
+#include "msaa_coverage.hlsli"
 struct Command {
     int left,top,right,bottom;
     uint even,odd,dither,tag;
@@ -72,14 +73,55 @@ bool beginSegment(inout Tracer t,uint base,uint size,int y) {
     }
     return false;
 }
+#if STARFOX_SPANS_COLOUR_XY
+// Flat-colour spans use only the geometric tracer. UV state is neither used
+// for coverage nor stored in their commands: u/v are replaced with x1/x2.
+// Keep the same segment traversal, reciprocal, rounding and word arithmetic.
+bool beginColourSegment(inout Tracer t,uint base,uint size,int y) {
+    int rounded=roundedX(t.x);
+    for(uint guard=0;guard<size;++guard) {
+        t.vertex=t.direction>0?(t.vertex+1)%size:(t.vertex+size-1)%size;
+        int2 endpoint=pointAt(base,t.vertex);int lines=endpoint.y-y;
+        if(lines<0) return false;
+        if(lines==0) {rounded=endpoint.x;t.x=fixedX(rounded);continue;}
+        t.x=fixedX(rounded);
+        int reciprocal=lines==1?32767:32768/lines;
+        t.increment=((endpoint.x-rounded)*reciprocal)>>7;
+        if(width<=224) t.increment=word(t.increment);
+        t.remaining=lines;return true;
+    }
+    return false;
+}
+#endif
+#if STARFOX_SPANS_SERIAL_HELPER
+void traceSerial(uint3 id) {
+#else
 [numthreads(32,1,1)]
 void main(uint3 id:SV_DispatchThreadID) {
+#endif
+    if(rasterPadding.y==1) {
+        uint wordIndex=id.x+id.y*(65535U*32U);
+        uint words=count*uint(height)*(maskStride/4)*(rasterPadding.x+1);
+        if(wordIndex<words) masks.Store(maskOffset+wordIndex*4,0);
+        return;
+    }
     if(id.x>=count) return;
     uint commandBase=id.x*uint(height);
     Command empty=(Command)0;
-    for(int row=0;row<height;++row) commands[commandBase+uint(row)]=empty;
-    uint maskBase=maskOffset+id.x*uint(height)*maskStride;
-    if(maskEnabled!=0) for(uint at=0;at<uint(height)*maskStride;at+=4) masks.Store(maskBase+at,0);
+    // Bounds are the validity marker for every consumer. Keep all four zero,
+    // including top/bottom for ordinary sparse bins and diagnostic replay.
+    // Recycled payload is deliberately unspecified until a live row replaces
+    // the entire command; no geometry/material field can make empty bounds live.
+    if((padding&2U)!=0) {} // Bounds were cleared by the preceding ordered pass.
+    else if((padding&1U)!=0) for(int row=0;row<height;++row) {
+        commands[commandBase+uint(row)].left=0;
+        commands[commandBase+uint(row)].top=0;
+        commands[commandBase+uint(row)].right=0;
+        commands[commandBase+uint(row)].bottom=0;
+    } else for(int row=0;row<height;++row) commands[commandBase+uint(row)]=empty;
+    uint maskPlanes=rasterPadding.x+1;
+    uint maskBase=maskOffset+id.x*uint(height)*maskStride*maskPlanes;
+    if(maskEnabled!=0 && rasterPadding.x==0) for(uint at=0;at<uint(height)*maskStride;at+=4) masks.Store(maskBase+at,0);
     uint polygon=id.x;
     if(orderedMode!=0) {
         uint2 result=orderResults[orderTree];
@@ -155,21 +197,53 @@ void main(uint3 id:SV_DispatchThreadID) {
     left.vertex=right.vertex=minimum;left.direction=1;right.direction=-1;
     left.x=right.x=fixedX(pointAt(base,minimum).x);
     left.increment=right.increment=left.remaining=right.remaining=0;
+#if STARFOX_SPANS_COLOUR_XY
+    bool traceUV=material.textured==1;
+    int2 uv=0;
+    if(traceUV) uv=uvAt(base,minimum);
+#else
     int2 uv=uvAt(base,minimum);
+#endif
     left.uv=right.uv=int2(word(uv.x<<8),word(uv.y<<8));
     left.uvIncrement=right.uvIncrement=0;
     bool mode2Continuation=false;
     bool sparseWobble=material.textured==0 && (material.scroll_y&65536U)!=0,havePrevious=false;
     bool repeatedRow=material.textured==0 && (material.scroll_y&262144U)!=0;
     if(repeatedRow && maskEnabled==0) return;
-    int previousLeft=0;
+    int previousLeft=0;float previousSampleLeft=0;
     while(y<maximumY) {
         bool leftStarts=left.remaining==0,rightStarts=right.remaining==0;
+#if STARFOX_SPANS_COLOUR_XY
+        if(left.remaining==0) {
+            bool started;
+            if(traceUV) started=beginSegment(left,base,size,y);
+            else started=beginColourSegment(left,base,size,y);
+            if(!started) return;
+        }
+        if(right.remaining==0) {
+            bool started;
+            if(traceUV) started=beginSegment(right,base,size,y);
+            else started=beginColourSegment(right,base,size,y);
+            if(!started) return;
+        }
+#else
         if(left.remaining==0 && !beginSegment(left,base,size,y)) return;
         if(right.remaining==0 && !beginSegment(right,base,size,y)) return;
+#endif
         int x1=integerX(left.x),x2=integerX(right.x);
+        float sampleLeft=width>224?float(left.x)/256.0:float(uint(left.x)&65535U)/256.0;
+        float sampleRight=width>224?float(right.x)/256.0:float(uint(right.x)&65535U)/256.0;
+        if(windingIndependent!=0 && sampleRight<sampleLeft) {float swap=sampleLeft;sampleLeft=sampleRight;sampleRight=swap;}
+#if STARFOX_SPANS_COLOUR_XY
+        int2 nextLeft=0,nextRight=0;
+        if(traceUV) {
+            nextLeft=int2(textureAdvance(left.uv.x,left.uvIncrement.x),textureAdvance(left.uv.y,left.uvIncrement.y));
+            nextRight=int2(textureAdvance(right.uv.x,right.uvIncrement.x),textureAdvance(right.uv.y,right.uvIncrement.y));
+        }
+#else
         int2 nextLeft=int2(textureAdvance(left.uv.x,left.uvIncrement.x),textureAdvance(left.uv.y,left.uvIncrement.y));
         int2 nextRight=int2(textureAdvance(right.uv.x,right.uvIncrement.x),textureAdvance(right.uv.y,right.uvIncrement.y));
+#endif
         int2 spanUV=left.uv,spanRight=nextRight;
         if(windingIndependent!=0 && x2<x1) {
             int swap=x1;x1=x2;x2=swap;spanUV=right.uv;spanRight=nextLeft;
@@ -198,6 +272,27 @@ void main(uint3 id:SV_DispatchThreadID) {
                 }
             }
             if(repeatedRow) {
+                if(rasterPadding.x!=0 && span.right>span.left) {
+                    float a=sampleLeft,b=sampleRight+1;
+                    uint wireframe=(material.scroll_y>>1)&255U;
+                    if(wireframe==0 && (material.scroll_y&1U)!=0) {a+=1;b-=1;}
+                    if(sparseWobble) {a=previousSampleLeft;b=a+1;}
+                    bool edges=(span.scroll_y&1U)!=0;
+                    for(uint sample=0;sample<rasterPadding.x;++sample) {
+                        float offset=.5+msaaOffsets[rasterPadding.x-2+sample].x;
+                        for(uint interval=0;interval<(edges?2U:1U);++interval) {
+                            float start=edges && interval==1?max(a,b-1):a;
+                            float end=edges && interval==0?min(b,a+1):b;
+                            int firstSample=max(0,int(ceil(start-offset))),lastSample=min(width,int(ceil(end-offset)));
+                            for(int x=firstSample;x<lastSample;) {
+                                uint bit=uint(x)&31U,n=min(uint(lastSample-x),32U-bit);
+                                uint bits=(0xffffffffU>>(32U-n))<<bit;
+                                uint at=maskBase+(sample+1)*uint(height)*maskStride+uint(y)*maskStride+uint(x/32)*4;
+                                masks.Store(at,masks.Load(at)|bits);x+=int(n);
+                            }
+                        }
+                    }
+                }
                 int first=max(0,span.left),last=min(width,span.right);
                 if((span.scroll_y&1U)!=0) {
                     for(uint edge=0;edge<2;++edge) {
@@ -228,7 +323,7 @@ void main(uint3 id:SV_DispatchThreadID) {
             }
             commands[commandBase+uint(y)]=span;
         }
-        previousLeft=x1;havePrevious=true;
+        previousLeft=x1;previousSampleLeft=sampleLeft;havePrevious=true;
         if(rightStarts) mode2Continuation=false;
         if(leftStarts && !rightStarts) mode2Continuation=true;
         left.x=advanceX(left.x,left.increment);right.x=advanceX(right.x,right.increment);

@@ -227,7 +227,8 @@ struct BackdropImage {
         if(u16(0)!=0x4d42 || u32(14)<40 || u16(26)!=1 || u32(30)!=0)
             throw std::runtime_error("Unsupported backdrop BMP");
         const auto w=std::int32_t(u32(18)),h=std::int32_t(u32(22));
-        const auto bits=u16(28),offset=u32(10);
+        const auto bits=u16(28);
+        const auto offset=u32(10);
         if(w<=0 || w>8192 || h==0 || h < -8192 || h>8192 || (bits!=24 && bits!=32))
             throw std::runtime_error("Invalid backdrop BMP dimensions");
         BackdropImage image;image.width=unsigned(w);image.height=unsigned(h<0?-h:h);

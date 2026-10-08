@@ -1,25 +1,43 @@
 // Column-major world-to-eye and Vulkan eye projection, matching EyeCamera.
 struct Camera { float4 view_rows[3]; column_major float4x4 projection; uint4 effects; };
+#if defined(STARFOX_SDL_SCENE_VERTEX)
+ConstantBuffer<Camera> camera : register(b0,space1);
+#elif defined(STARFOX_SDL_SCENE_FRAGMENT)
+ConstantBuffer<Camera> camera : register(b0,space3);
+#else
 [[vk::push_constant]] ConstantBuffer<Camera> camera;
+#endif
+#if defined(STARFOX_CALIBRATED_MSAA_GUIDES)
+#define SCENE_CENTROID sample
+#elif defined(STARFOX_CALIBRATED_MSAA)
+#define SCENE_CENTROID centroid
+#else
+#define SCENE_CENTROID
+#endif
+#if defined(STARFOX_SDL_SCENE_VERTEX) || defined(STARFOX_SDL_SCENE_FRAGMENT)
+#define SCENE_INPUT(index,semantic) TEXCOORD##index
+#else
+#define SCENE_INPUT(index,semantic) semantic
+#endif
 float4x4 view_matrix() {
     return float4x4(camera.view_rows[0],camera.view_rows[1],camera.view_rows[2],float4(0,0,0,1));
 }
 struct Vertex {
-    [[vk::location(0)]] float3 position : POSITION;
-    [[vk::location(1)]] float4 color : COLOR0;
-    [[vk::location(2)]] float4 odd_color : COLOR1;
-    [[vk::location(3)]] uint dither_scale : TEXCOORD0;
-    [[vk::location(4)]] float3 visibility_a : TEXCOORD1;
-    [[vk::location(5)]] float3 visibility_b : TEXCOORD2;
-    [[vk::location(6)]] float3 visibility_c : TEXCOORD3;
-    [[vk::location(7)]] uint visibility_enabled : TEXCOORD4;
-    [[vk::location(8)]] float3 group_a : TEXCOORD5;
-    [[vk::location(9)]] float3 group_b : TEXCOORD6;
-    [[vk::location(10)]] float3 group_c : TEXCOORD7;
-    [[vk::location(11)]] uint group_enabled : TEXCOORD8;
-    [[vk::location(12)]] float2 uv : TEXCOORD9;
-    [[vk::location(13)]] uint4 texture : TEXCOORD10;
-    [[vk::location(14)]] float2 billboard : TEXCOORD11;
+    [[vk::location(0)]] float3 position : SCENE_INPUT(0,POSITION);
+    [[vk::location(1)]] float4 color : SCENE_INPUT(1,COLOR0);
+    [[vk::location(2)]] float4 odd_color : SCENE_INPUT(2,COLOR1);
+    [[vk::location(3)]] uint dither_scale : SCENE_INPUT(3,TEXCOORD0);
+    [[vk::location(4)]] float3 visibility_a : SCENE_INPUT(4,TEXCOORD1);
+    [[vk::location(5)]] float3 visibility_b : SCENE_INPUT(5,TEXCOORD2);
+    [[vk::location(6)]] float3 visibility_c : SCENE_INPUT(6,TEXCOORD3);
+    [[vk::location(7)]] uint visibility_enabled : SCENE_INPUT(7,TEXCOORD4);
+    [[vk::location(8)]] float3 group_a : SCENE_INPUT(8,TEXCOORD5);
+    [[vk::location(9)]] float3 group_b : SCENE_INPUT(9,TEXCOORD6);
+    [[vk::location(10)]] float3 group_c : SCENE_INPUT(10,TEXCOORD7);
+    [[vk::location(11)]] uint group_enabled : SCENE_INPUT(11,TEXCOORD8);
+    [[vk::location(12)]] float2 uv : SCENE_INPUT(12,TEXCOORD9);
+    [[vk::location(13)]] uint4 texture : SCENE_INPUT(13,TEXCOORD10);
+    [[vk::location(14)]] float2 billboard : SCENE_INPUT(14,TEXCOORD11);
 };
 struct Fragment {
     float4 position : SV_Position;
@@ -27,82 +45,35 @@ struct Fragment {
     [[vk::location(1)]] nointerpolation float4 odd_color : COLOR1;
     [[vk::location(2)]] nointerpolation uint dither_scale : TEXCOORD0;
     [[vk::location(3)]] nointerpolation uint visible : TEXCOORD1;
-    [[vk::location(4)]] noperspective float2 uv : TEXCOORD2;
+    [[vk::location(4)]] SCENE_CENTROID noperspective float2 uv : TEXCOORD2;
     [[vk::location(5)]] nointerpolation uint4 texture : TEXCOORD3;
     [[vk::location(6)]] nointerpolation float3 horizon : TEXCOORD4;
     [[vk::location(7)]] nointerpolation uint border_index : TEXCOORD5;
-    [[vk::location(8)]] float2 perspective_uv : TEXCOORD6;
-    [[vk::location(9)]] float3 surface_position : TEXCOORD7;
+    [[vk::location(8)]] SCENE_CENTROID float2 perspective_uv : TEXCOORD6;
+    [[vk::location(9)]] SCENE_CENTROID float3 surface_position : TEXCOORD7;
     [[vk::location(10)]] nointerpolation float3 orbital_low : TEXCOORD8;
     [[vk::location(11)]] nointerpolation float3 orbital_high : TEXCOORD9;
     [[vk::location(12)]] nointerpolation uint4 cloud0 : TEXCOORD10;
     [[vk::location(13)]] nointerpolation uint4 cloud1 : TEXCOORD11;
     [[vk::location(14)]] nointerpolation uint4 cloud2 : TEXCOORD12;
     [[vk::location(15)]] nointerpolation uint4 cloud3 : TEXCOORD13;
+#if defined(STARFOX_CALIBRATED_MSAA_GUIDES)
+    // Only the native MSAA guide ABI carries this. SV_Position.w may remain
+    // centre-evaluated even in a sample-frequency shader; ordinary surface UV
+    // payloads can be source-span numerators rather than geometric positions.
+    [[vk::location(16)]] sample float forward_depth : TEXCOORD14;
+#endif
 };
 float4 tile_background_sample(Fragment input);
-uint source_visible(float3 point_a,float3 point_b,float3 point_c) {
-    float3 a=mul(view_matrix(),float4(point_a,1)).xyz;
-    float3 b=mul(view_matrix(),float4(point_b,1)).xyz;
-    float3 c=mul(view_matrix(),float4(point_c,1)).xyz;
-    precise float determinant=a.x*(b.y*c.z-b.z*c.y)-a.y*(b.x*c.z-b.z*c.x)+a.z*(b.x*c.y-b.y*c.x);
-    float3 maximum=max(max(abs(a),abs(b)),abs(c));
-    float scale=max(max(maximum.x,maximum.y),max(maximum.z,1.0));
-    return determinant<=scale*scale*scale*1.0e-12;
-}
-int explosion_round(float value) {return int(sign(value)*floor(abs(value)+0.5));}
-int explosion_word(int value) {return int(uint(value)<<16)>>16;}
-int explosion_q15(float3 row,float3 value) {
-    int3 coefficients=int3(round(row*32768.));
-    int3 words=int3(explosion_word(explosion_round(value.x)),explosion_word(explosion_round(value.y)),explosion_word(explosion_round(value.z)));
-    int3 products=(coefficients*words)>>15;
-    return explosion_word(products.x+products.y+products.z);
-}
-float3 explosion_rotate(Vertex input,float3 value) {
-    if(input.group_c.z!=0) return float3(explosion_q15(input.visibility_a,value),explosion_q15(input.visibility_b,value),explosion_q15(input.visibility_c,value));
-    return float3(dot(input.visibility_a,value),dot(input.visibility_b,value),dot(input.visibility_c,value));
-}
+#include "scene_geometry.hlsli"
 Fragment vertex_main(Vertex input) {
     Fragment output;
-    bool particle_visible=true;
-    if((input.texture.w&0x80000000U)!=0) {
-        int3 delta=int3(input.group_b)-int3(input.group_a);
-        delta=(delta<<16)>>16;
-        float3 current=input.group_a+float3(delta)*input.group_c.x;
-        float depth=input.group_c.y+current.z;
-        particle_visible=depth>=256 && (input.group_c.z==0 || input.group_c.y+input.group_a.z>=256);
-        input.position=input.group_c.z==1?input.group_a:current;
-        input.billboard*=depth/128.;
-        input.texture.w&=~0x80000000U;
-    }
-    bool exploding=input.visibility_enabled==2;
-    float3 position=input.position;
-    if(exploding) {
-        float3 source=explosion_rotate(input,input.position);
-        if(input.group_c.z!=0) source=float3(
-            explosion_word(int(source.x)+explosion_round(input.group_a.x)),
-            explosion_word(int(source.y)+explosion_round(input.group_a.y)),
-            explosion_word(int(source.z)+explosion_round(input.group_a.z)));
-        else source+=input.group_a;
-        float3 direction=explosion_rotate(input,input.group_b);
-        direction.y=-abs(direction.y);
-        int3 rounded=int3(explosion_round(direction.x),explosion_round(direction.y),explosion_round(direction.z));
-        float phase=input.group_c.x;
-        int low=int(floor(phase)),high=int(ceil(phase));
-        source+=lerp(float3((rounded*low)>>2),float3((rounded*high)>>2),
-            phase-float(low));
-        position=source*float3(1,-1,-1)/input.group_c.y;
-    }
-    float4 eye_position=mul(view_matrix(),float4(position,1));
-    if((input.texture.w&4)!=0) {
-        // Keep the centre's model transform, but orient the art toward each
-        // eye. Model-to-world unit scaling survives without rotating the quad.
-        float sx=length(mul(view_matrix(),float4(1,0,0,0)).xyz);
-        float sy=length(mul(view_matrix(),float4(0,1,0,0)).xyz);
-        if(exploding) {sx/=input.group_c.y;sy/=input.group_c.y;}
-        eye_position.xy+=input.billboard*float2(sx,sy);
-    }
+    float3 position;uint visible;
+    float4 eye_position=scene_eye_position(input,position,visible);
     output.position=mul(camera.projection,eye_position);
+#if defined(STARFOX_CALIBRATED_MSAA_GUIDES)
+    output.forward_depth=-eye_position.z;
+#endif
     // Source coplanar texture decals must survive the backing polygon's depth
     // (including tiny interpolation rounding differences), but remain occluded
     // by genuinely nearer geometry. One part per million of normalized depth.
@@ -122,7 +93,7 @@ Fragment vertex_main(Vertex input) {
     output.texture=input.texture;
     output.horizon=0;
     output.border_index=0;
-    output.visible=particle_visible?1:0;
+    output.visible=visible;
     output.orbital_low=1;
     output.orbital_high=0;
     output.cloud0=output.cloud1=output.cloud2=output.cloud3=0;
@@ -132,52 +103,34 @@ Fragment vertex_main(Vertex input) {
         output.cloud2=uint4(input.visibility_c.z,input.group_a);
         output.cloud3=uint4(input.group_b,input.group_c.x);
     }
-    if(input.visibility_enabled==1) {
-        output.visible=source_visible(input.visibility_a,input.visibility_b,input.visibility_c);
-    }
-    if(input.group_enabled!=0)
-        output.visible &= source_visible(input.group_a,input.group_b,input.group_c);
     return output;
 }
-float4 styled_colour(float4 colour) {
-    uint style=camera.effects.x;
-    if(style==0 || camera.effects.y==0) return colour;
-    float3 rgb=colour.rgb,result=rgb;
-    float light=dot(rgb,float3(77,150,29))/256;
-    // Quantize brightness, not individual channels: retain material hue.
-    if(style==1) {
-        float peak=max(max(rgb.r,rgb.g),max(rgb.b,1./255));
-        result=rgb*(min(1.,floor(peak*5.+.5)/5.)/peak);
-    }
-    else if(style==4) result=light.xxx;
-    else if(style==8) result=saturate(float3(dot(rgb,float3(101,197,48)),
-        dot(rgb,float3(89,176,43)),dot(rgb,float3(70,137,34)))/256);
-    else if(style==9) {
-        const float3 palette[5]={float3(8,5,40),float3(65,20,150),float3(220,30,70),
-            float3(255,150,15),float3(255,255,210)};
-        float value=light*255/64;uint band=min(uint(value),3U);
-        result=lerp(palette[band],palette[band+1],value-band)/255;
-    } else if(style==10) result=saturate(float3(light/7,24./255+light*1.2,light/4));
-    else if(style==11) result=96./255+rgb*5/8;
-    else if(style==13) result=lerp(float3(55,8,100),float3(70,250,245),light)/255;
-    else if(style==14) result=floor(saturate(rgb)*5+.5)/5;
-    else if(style==15) result=lerp(float3(8,24,65),float3(224,250,246),light)/255;
-    else if(style==16) {
-        float3 contrast=rgb*rgb*(3-2*rgb);
-        result=saturate(contrast*float3(1.06,1.,.87)+float3(.035,.015,.025));
-    }
-    return float4(lerp(rgb,result,min(camera.effects.y,100U)/100.),colour.a);
-}
-float4 fragment_main(Fragment input) : SV_Target0 {
+#include "scene_colour.hlsli"
+float4 styled_colour(float4 colour) {return scene_styled_colour(colour,camera.effects);}
+float4 fragment_solid_raw(Fragment input) {
     if(input.visible==0) discard;
     if((input.texture.w&4096)!=0 && dot(input.perspective_uv,input.perspective_uv)>1.) discard;
     if(input.dither_scale!=0) {
+#if defined(STARFOX_CALIBRATED_MSAA)
+        // Smooth flat-model authored colour pairs, not framebuffer checkerboard
+        // resampling. Protected bitmap/HUD/native ink retains its source path.
+        if(((camera.effects.w>>24)&3U)==2) return (input.color+input.odd_color)*.5;
+#endif
         uint2 pixel=uint2(input.position.xy)/input.dither_scale;
-        if(((pixel.x^pixel.y)&1)!=0) return styled_colour(input.odd_color);
+        if(((pixel.x^pixel.y)&1)!=0) return input.odd_color;
     }
-    return styled_colour(input.color);
+    return input.color;
 }
+float4 fragment_main(Fragment input) : SV_Target0 {
+    return styled_colour(fragment_solid_raw(input));
+}
+#if defined(STARFOX_SDL_SCENE_VERTEX)
+StructuredBuffer<uint> texels : register(t0,space0);
+#elif defined(STARFOX_SDL_SCENE_FRAGMENT)
+StructuredBuffer<uint> texels : register(t0,space2);
+#else
 [[vk::binding(0,0)]] StructuredBuffer<uint> texels;
+#endif
 #include "connected_grid.hlsli"
 // Tile payload: 16 control words, 256 RGBA palette words, then packed 64KiB
 // VRAM. Controls: character/screen bases (words), screen size, signed scroll
@@ -223,29 +176,7 @@ Fragment vertex_textured_main(Vertex input) {
         input.position.y=ground_y;
         input.texture.w&=~268435456U;
     }
-    [branch] if((input.texture.w&134217728U)!=0) {
-        float size=input.group_a.x,depth=input.group_a.y;
-        bool valid=isfinite(size) && isfinite(depth) && size>0 && depth>=128;
-        bool glyph=(input.texture.w&1024U)!=0;
-        float dimension=valid?trunc(size*256./depth):0;
-        if(glyph) {
-            // Scaled source text has no whole-object sprite's 240px cap.
-            precise float side=dimension*depth/256.;
-            precise float left=input.group_b.x*side;
-            input.billboard=float2(left+input.billboard.x*side,input.billboard.y*side);
-        } else {
-            dimension=clamp(dimension,0.,240.);
-            input.billboard*=dimension*depth/512.;
-        }
-        if(!glyph && input.group_b.z==1) {
-            // EX aiming stations retain the game-plane basis under head roll.
-            input.position.xy+=input.billboard;
-            input.billboard=0;
-            input.texture.w&=~4U;
-        }
-        grid_visible=valid && dimension>0?1:0;
-        input.texture.w&=~134217728U;
-    }
+    grid_visible=source_billboard_visible(input);
     [branch] if((input.texture.w&67108864U)!=0) {
         // Axis endpoints stay in the source arena; each line vertex selects
         // one GPU-reduced camera-space endpoint, never a CPU readback copy.
@@ -1067,7 +998,9 @@ float4 fragment_textured_raw(Fragment input) {
         if(coverage==0) discard;
         return float4(input.color.rgb,input.color.a*(float(coverage)/255.0));
     }
-    if((input.texture.w&1)==0) return fragment_main(input);
+    // The outer fragment wrapper styles every producer exactly once. Calling
+    // fragment_main here used to apply palettes twice to solid/dithered faces.
+    if((input.texture.w&1)==0) return fragment_solid_raw(input);
     if((input.texture.w&4)!=0 && (any(input.uv<0) || any(input.uv>=float2(input.texture.yz+1)))) discard;
     uint2 coordinate=uint2(int2(floor(input.uv)))&input.texture.yz;
     uint offset=coordinate.y*(input.texture.y+1)+coordinate.x;

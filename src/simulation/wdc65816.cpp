@@ -1,12 +1,14 @@
 #include "starfox/simulation/wdc65816.hpp"
 #include "starfox/simulation/irq_palette.hpp"
+#include "starfox/platform/nintendo_3ds/frame_profile.hpp"
 
 #include "starfox/assets/decrunch.hpp"
 #include "starfox/assets/bps.hpp"
 #include "starfox/state/archive.hpp"
 #include "starfox/state/container.hpp"
 
-#include "cpu/65816/cpu_65c816.h"
+#include "owned_65816_step.hpp"
+#include "owned_bus_transfer.hpp"
 
 #include <algorithm>
 #include <array>
@@ -1732,7 +1734,7 @@ struct Wdc65816::Impl {
             m_textrightclip == 0U
                 ? 224
                 : static_cast<std::int32_t>(read_superfx16(m_textrightclip)));
-        line_width_limit = std::max(0, line_width_limit);
+        line_width_limit = std::max<std::int32_t>(0, line_width_limit);
 
         std::size_t line_start{};
         while (line_start < characters.size() && y < 192) {
@@ -2033,10 +2035,10 @@ struct Wdc65816::Impl {
         const auto palette = static_cast<std::uint8_t>(
             read_superfx16(mspr_pal) & 15U);
         for (std::int32_t y = 0; y < output_size; ++y) {
-            const auto source_y = std::clamp(
+            const auto source_y = std::clamp<std::int32_t>(
                 y * source_size / output_size, 0, 31);
             for (std::int32_t x = 0; x < output_size; ++x) {
-                const auto source_x = std::clamp(
+                const auto source_x = std::clamp<std::int32_t>(
                     x * source_size / output_size, 0, 31);
                 const auto texel = static_cast<std::uint8_t>(
                     texture_byte(sprite, source,
@@ -2164,7 +2166,7 @@ struct Wdc65816::Impl {
                     static_cast<std::int8_t>(
                         static_cast<std::uint16_t>(light_fixed) >> 8U));
                 const auto light_magnitude = static_cast<std::uint8_t>(
-                    std::min(127, std::abs(light_high)));
+                    std::min<std::int32_t>(127, std::abs(light_high)));
                 auto shade_offset = static_cast<std::uint8_t>(
                     ((light_magnitude & 0x78U) ^ 0x78U) << 1U);
                 // The source explicitly keeps palette 15 out of sphere
@@ -2786,6 +2788,14 @@ std::uint16_t Wdc65816::read16(std::uint32_t address) const {
         | (static_cast<std::uint16_t>(read8(address + 1U)) << 8U);
 }
 
+void Wdc65816::read_bytes(std::uint32_t address, std::span<std::uint8_t> output) const {
+    detail::read_bus_bytes(impl_->bus, address, output);
+}
+
+void Wdc65816::write_bytes(std::uint32_t address, std::span<const std::uint8_t> input) {
+    detail::write_bus_bytes(impl_->bus, address, input);
+}
+
 std::optional<std::uint8_t> Wdc65816::peek_ram8(std::uint32_t address) const noexcept {
     if(address>=0x7e0000U && address<0x800000U) return impl_->wram[address-0x7e0000U];
     const auto bank=address>>16U,offset=address&0xffffU;
@@ -3003,6 +3013,7 @@ std::size_t Wdc65816::call(
     std::size_t instruction_limit,
     bool service_transfer_flag,
     bool long_return) {
+    STARFOX_3DS_FRAME_PHASE(cpu);
     impl_->task_active = false;
     auto& cpu = impl_->cpu;
     cpu.SetRegister("p", registers.status);
@@ -3083,7 +3094,7 @@ std::size_t Wdc65816::call(
         }
         recent_program_counters[instructions % recent_program_counters.size()]
             = pc;
-        cpu.SingleStep();
+        detail::step_owned_65816(cpu);
         ++instructions;
     }
 
@@ -3165,6 +3176,7 @@ Wdc65816TaskResult Wdc65816::run_task(
     std::span<const std::uint32_t> stop_addresses,
     std::size_t instruction_limit,
     bool service_transfer_flag) {
+    STARFOX_3DS_FRAME_PHASE(cpu);
     auto& cpu = impl_->cpu;
     Wdc65816TaskResult result;
     std::array<std::uint32_t, 32> recent_program_counters{};
@@ -3225,7 +3237,7 @@ Wdc65816TaskResult Wdc65816::run_task(
         }
         recent_program_counters[
             result.instructions % recent_program_counters.size()] = pc;
-        cpu.SingleStep();
+        detail::step_owned_65816(cpu);
         ++result.instructions;
         executed_instruction = true;
     }

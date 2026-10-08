@@ -11,7 +11,7 @@ cbuffer Settings : register(b0,space2) {
     uint tag,enabled,transparentBlack,flags;
     uint singleRows,regionCount;int registerX,registerY;
     uint terrainFirst,terrainLast,logicalWidth,logicalHeight;
-    float2 rasterJitter;uint skySourceMin,jitterPadding;
+    float2 rasterJitter;uint skySourceMin;float stereoSkySourceX;
 };
 uint readByte(uint address) {address&=65535u;return (memory[address>>2]>>((address&3u)*8u))&255u;}
 uint readWord(uint address) {address=(address&32767u)*2u;return readByte(address)|(readByte(address+1u)<<8u);}
@@ -135,6 +135,21 @@ void main(uint3 id:SV_DispatchThreadID) {
             if(wrapped) {if(lastGround) put(x,y,lastGround,true,lastTerrain);continue;}
         }
         int unwrappedX=sampleX+rowX;
+        // Move sky texture coordinates, not the assembled frame. Ground rows,
+        // tunnel walls, scanline horizon and foreground/HUD ownership stay put.
+        if(!tunnel && stereoSkySourceX!=0 && !(terrainLast>terrainFirst && sourceY>=terrainFirst && sourceY<terrainLast)) {
+            int shift=int(round(stereoSkySourceX));
+            unwrappedX+=shift;
+            // Banked BG2 uses per-column vertical offsets. Sample the shifted
+            // column too, otherwise each eye acquires vertical disparity.
+            int skyColumnY=columnScroll(int(x)+shift,expanded);
+            uint shiftedY=uint(sampleY+(skyColumnY!=-2147483647?skyColumnY:rowY))&(mapHeight-1);
+            // Do not pull ground ink across the unchanged authored horizon.
+            if(terrainLast>terrainFirst && shiftedY>=terrainFirst && shiftedY<terrainLast)
+                shiftedY=sourceY<terrainFirst?(terrainFirst+mapHeight-1)&(mapHeight-1):terrainLast&(mapHeight-1);
+            sourceY=shiftedY;
+            if(expanded && y<144 && outside && skySourceMin<mapHeight) sourceY=max(sourceY,skySourceMin);
+        }
         bool outMap=unwrappedX<0 || unwrappedX>=int(mapWidth);
         if((flags&384u) && extend && outside && (outMap || (flags&256u))) {
             uint cellX=uint(unwrappedX)>>5u;

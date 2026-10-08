@@ -7,14 +7,43 @@
 #include "starfox/render/software_renderer.hpp"
 #include "starfox/render/portable_shadows.hpp"
 #include "starfox/render/sdl_dxr_shadows.hpp"
+#include "starfox/render/scene_enhancements.hpp"
+#include "starfox/render/depth_enhancements.hpp"
+#include "starfox/render/camera_response.hpp"
+#include "starfox/render/gpu_volumetric_fog.hpp"
+#include "starfox/render/gpu_motion_blur.hpp"
 #include <memory>
 #include <optional>
 #include <string>
 namespace starfox::render {
 struct GpuEffectSettings {
+    struct MotionBlurPass {
+        // Already styled world-only underlay, in the same colour space and
+        // extent as the scene at the pre-presentation blur point.
+        GpuCompositeOutput underlay;
+        MotionBlurSettings settings;
+        bool history_valid{};
+        // TAA presents stable colour but retains a jittered geometry grid.
+        // Keep final-frame ownership for HUD protection; borrow only guides.
+        std::array<float,2> guide_jitter{};
+        std::optional<GpuCompositeOutput> guide_source;
+    };
+    std::optional<MotionBlurPass> motion_blur;
+    // Particle coverage integrated jointly with model exposure before bloom/AA.
+    // scene_fx must contain surface lighting only in this mode.
+    // The supplied model underlay must likewise be pre-bloom/pre-AA.
+    std::optional<SceneFxFrame> particle_shutter;
+    GpuVolumetricOutput volumetric;
     EnvironmentEffects environment;
     unsigned manipulation{},manipulation_intensity{100};
     unsigned material{};
+    std::array<std::uint8_t,3> extra_effects{};
+    std::uint32_t global_enhancements{};
+    SceneFxFrame scene_fx;
+    DepthEnhancements depth_fx;
+    // World-only pass: caller must composite HUD afterward.
+    std::optional<CameraResponsePose> camera_response;
+    std::array<double,2> camera_response_focal{256,256};
     // Temporal manipulations: one effects instance per eye/output.
     unsigned persistence_mode{}; // 0 off, 1 fading trails, 2 long exposure.
     bool persistence_models{},persistence_world{};
@@ -25,6 +54,11 @@ struct GpuEffectSettings {
     // Intermediate passes in a multi-pass presentation neither advance nor
     // discard the final pass's history. Normal disabled presentation frees it.
     bool preserve_persistence{};
+    unsigned phosphor{}; // Independent CRT afterglow: off/low/medium/high.
+    bool preserve_phosphor{};
+    unsigned exposure{}; // Adaptive exposure: off/low/medium/high.
+    bool preserve_exposure{};
+    bool exposure_paused{};
     // Stored-pixel Y bounds for the source shutter and its open band. X guard
     // uses the source's exact native-window rule unless expanded is selected.
     struct HorizontalWipe {

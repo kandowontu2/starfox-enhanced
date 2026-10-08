@@ -12,7 +12,7 @@ cbuffer Settings : register(b0, space2) {
     float4 options;
     float4 groundPoint;
     float4 groundNormal;
-    float4 lights[8];
+    float4 lights[16];
 };
 bool bounds_hit(Node n, float3 origin, float3 direction, float nearT, float farT) {
     for (uint axis=0; axis<3; ++axis) {
@@ -74,11 +74,13 @@ void main(uint3 id:SV_DispatchThreadID) {
             if (d>1 && d<depth) {depth=d;receiver=true;}
         }
     }
-    receiver=trace(0,ray,1,depth,false) || receiver;
+    // A revealed world underlay needs its own receiver, not the model that
+    // currently covers it. Secondary rays still visit the complete scene.
+    if (options.w==0) receiver=trace(0,ray,1,depth,false) || receiver;
     uint blocked=0;
-    if (receiver) for (uint sample=0;sample<8;++sample) {
+    if (receiver) for (uint sample=0;sample<uint(lights[0].w);++sample) {
         float distance=65536;
         blocked+=trace(ray*depth,lights[sample].xyz,max(.1,depth*1e-5),distance,true)?1:0;
     }
-    outputMask[id.y*width+id.x]=160*blocked/8;
+    outputMask[id.y*width+id.x]=160*blocked/uint(lights[0].w);
 }

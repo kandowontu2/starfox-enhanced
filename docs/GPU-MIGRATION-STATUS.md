@@ -1,5 +1,2399 @@
 # GPU migration checkpoint
 
+October 7 R30 completes the BOUNDED real rigid/liquid-clock owner gate in all four
+D3D12 R8/B8 linear/sRGB formats: fixed eye/lens, model transforms out/return,
+advancing water/lava clock, both eyes and sharp/eight-lobe finishes. Independent
+binary64 forward roots retain full old ownership/depth/feature/fold guards and
+the existing bounded small-step float-ABI exit. Neither a downloaded inverse nor
+output RGB chooses the reference. Positive direct/curved/liquid/final reuse,
+one-quantum incident/two-quantum CURRENT recomposition, exact CURRENT words,
+old-bank immutability, protected ink and complete-owner lifetimes pass.
+R24-R29 failures remain recorded; no production shader/tolerance or ordinary
+curved-history enablement change. Fresh static owner checks pass all four formats
+with zero D3D12 validation errors. All 33 selected host tests pass, including 27
+3DS tests; the final six-test rendering/XR subset, two shader stamps and six
+package tests also pass. Authorized R42 source-only ARM CI and its tester ZIP
+remain successful/unchanged; no player, README or index replacement, new push,
+CI, install or release. General motion/visibility, broader effect/AA/upscaler and
+backend combinations, practical cost, physical Leia/VR and complete native/physical
+3DS acceptance are STILL OPEN; the complete goal remains active.
+Details: `docs/CURRENT-ACCEPTANCE.md` and
+`D:/SFE-validation/reflected-radiance-oct4/native-curved-motion-owner-checkpoint-oct7-r30.json`.
+
+October 7 R23 motion qualification is still OPEN. The new actual-owner diagnostic
+uses real rigid model transforms and advancing liquid metadata, with a separate
+binary64 old forward-optics reference. Its float-boundary/visibility/radius/old
+geometry/clock unit tests pass; the full motion run still rejects the independent
+old source at water/sharp phase 1, eye 0, (123,67). This is not a general motion
+PASS or an established production bug cause. No shader/guard changes or normal
+curved-history enablement were made. Static owner regressions pass all four R8/B8
+linear/sRGB formats with zero D3D12 validation messages; six host tests pass.
+R42 3DS ARM CI and six package checks remain green, without changing the tester
+ZIP, PC/PCVR players, disclosure or Git index. The complete goal is still active.
+Details: `docs/CURRENT-ACCEPTANCE.md` and
+`D:/SFE-validation/reflected-radiance-oct4/native-curved-motion-owner-checkpoint-oct7-r23.json`.
+
+October 7 R19 advances the bounded fractional-lens owner gate to PASS in all
+four D3D12 formats: actual water/lava, both eyes, sharp/eight-lobe finishes,
+quarter-pixel located-XR FOV out/return, independently authored old bilinear
+RGB and CURRENT recomposition. The original difficult faces remain; 24
+bounded angle/depth probes add eligible coverage without relaxing path,
+fold, depth, feature or colour guards. R16's production shader is unchanged.
+Static owner regression, both shader stamps and all 32 selected host tests
+(27 3DS plus five rendering/DisplayXR) pass. Six package tests and the exact
+R42 ZIP member/digest/provenance checks pass; authorized ARM CI remains green.
+No new push/build publication or playable EXE/ZIP replacement. Ordinary
+curved reuse stays off pending broader motion/visibility/backend/cost checks.
+Physical/full-route 3DS acceptance remains open; the full goal is active.
+Fresh 2/4/8-sample MSAA whole-owner reconstruction and all 96 count transitions
+also pass in all four formats with zero D3D12 validation messages. Independent
+finished RGB and protected centre ink remain mandatory; no pixel exclusions.
+Terminal results and immutable evidence:
+`D:/SFE-validation/reflected-radiance-oct4/native-curved-lens-owner-checkpoint-oct7-r19.json`.
+
+October 7 fractional-lens owner follow-up is NOT fully accepted. R16 fixes
+finite-face depth comparison at the lookup position using reciprocal-Z
+interpolation with unchanged tolerances; bounded bilinear loops avoid the
+observed zero-footprint nested-unrolled form. Exact CURRENT/old-path, protected
+ink, canonical, one-quantum incident/two-quantum recomposition and whole-owner
+lifetime gates remain. A read-only diagnostic checks the old GPU bank is not
+overwritten; trace-only neighbour classification never becomes player input.
+
+The first-format water/sharp and water/eight-lobe native-owner cohorts pass,
+but lava/sharp phase 1 eye 0 still lacks required curved-model reuse (0 curved,
+383 direct; model/liquid incident changes 383/227). Do not call this a complete
+moving-owner PASS or enable ordinary curved reuse. Fresh planar and curved
+component regressions pass all four formats; eight host tests and both shader
+stamps pass. Other native-owner formats, lava motion, current MSAA and broader
+motion/visibility/AA/upscaler/backend/physical/performance gates remain open.
+
+R42 source-only ARM CI and its test ZIP remain unchanged and successful;
+physical/full-3DS acceptance remains open. Normal PC/PCVR players, README and
+Git index are untouched; no new push/install/release. CURRENT-ACCEPTANCE.md
+and the immutable native-curved-lens-owner October 7 R16 checkpoint record
+the failed qualification, scoped regressions and next investigation.
+
+October 6 accepted sample-count retirement is terminal scoped D3D12 PASS:
+all six directed 2/4/8 transitions pass across water/lava, sharp/eight-lobe
+materials, both eyes and four formats. New grids have exact cold CURRENT
+records, active banks are disjoint, removed samples disappear and all retained
+history-buffer bytes match the active double-bank layout. The explicit
+read-only diagnostic includes inactive/pending slots; no hidden extra bank is
+waived. Complete image/ink/canonical/hold/reject/cut/retry/close and fresh AA-OFF
+checks still pass with zero native validation messages. No transport/shader or
+normal-player enablement change is made.
+
+All 32 host tests pass, including the complete configured 3DS suite and new
+permanent Original/EX menu/landscape regression registration. Fortuna's actual
+host input/results/map route retains source/SPC and full-LCD priority parity.
+This does not establish ARM/PICA pixels, complete console playthroughs, audible
+audio, physical slider/Home/sleep, console FPS or total memory. Other rendering
+motion/visibility/finite RGB/conductor/AA/upscaler/hidden-world/backend,
+physical-display and practical-cost gates remain open. Protected normal
+players/README/index/R42 ZIP are unchanged; no new CI/push/install/release.
+CURRENT-ACCEPTANCE.md and the native-curved-msaa-retirement October 7 UTC
+checkpoint contain the immutable terminal evidence and precise scope.
+
+October 6 finished-image MSAA follow-up is terminal scoped D3D12 PASS:
+all four formats at 2/4/8 hardware samples match an independent external-XR
+single-sample reconstruction, including centre-grid overlay ordering, exact
+protected ink/opacity and positive finished model/liquid reuse. All pixels
+are checked; none are excluded. Existing CURRENT/canonical/bank/hold/reject/
+cut/retry/close gates and fresh AA-OFF/eight host regressions pass with zero
+native validation messages. This extends diagnostic tests only, not normal
+player curved-reuse enablement or shader/owner implementation.
+
+R42 additionally reaches gameplay through the real Original-model mono menus
+in a no-replay native emulator run and closes gracefully at its planned limit.
+Save/config restoration is byte-exact. Authorized ARM CI and the tester ZIP
+are unchanged. Full 3DS routes/results, audible audio, physical slider/Home/
+sleep, pixels and sustained console performance remain unqualified. Renderer
+motion/visibility/finite RGB/conductor, successful sample retirement, other
+AA/upscaler/hidden-world/backend and practical-cost gates remain open.
+No new push/install/release. Precise evidence and scope are recorded in
+CURRENT-ACCEPTANCE.md and the native-curved-msaa-resolve October 6 checkpoint.
+
+October 6 ordered-liquid actual-owner MSAA follow-up is terminal scoped PASS:
+all four D3D12 formats exercise genuine 2/4/8 samples. Every eye/sample needs
+positive model/liquid ownership and sharp/eight-lobe incident reuse; its CURRENT
+and accepted banks must not alias another eye/sample. Sampled water now proves
+the nonzero CURRENT surface-only prefix with physical normal/depth witnesses.
+2,484,522 incident changes match independent static old RGB within one quantum;
+all CURRENT path/light and canonical words stay exact. Held/rejected/count-
+rejected presentations, cuts, real queue retries and in-flight close pass with
+zero D3D12 validation messages. Fresh AA-OFF and eight host tests also pass.
+
+This adds diagnostic coverage, not a production curved-reuse enablement or
+shader/owner change. Independent final MSAA reconstruction, successful sample-
+retirement, other AA/SDK/upscaler and hidden-world combinations, motion/visibility/
+finite RGB/conductor, other-backend/physical display and practical-cost gates
+remain open. Normal players/README/index/R42 3DS ZIP are unchanged. Authorized
+R42 ARM CI remains SUCCESS; 3DS full-flow and physical acceptance remain open.
+No new push/install/release. CURRENT-ACCEPTANCE.md and the native-curved-msaa-owner
+October 6 checkpoint record precise scope and immutable terminal evidence.
+
+October 6 ordered water/lava reuse is now staged in the actual game owner,
+behind an explicit D3D12-only diagnostic switch requiring ordinary diagnostic
+opt-in. Cold candidates keep complete CURRENT records with zero old weight;
+accepted banks change only after complete presentation acceptance. The switch
+is off for normal players and refuses changes during pending presentation.
+
+The actual-owner fixture exposed erased CURRENT paths behind protected ink;
+the curved consumer is fixed while planar shader binaries stay byte-identical.
+Four-format component, native static/fractional lens and legacy water/MSAA
+regressions pass, as do eight host tests. R4 traces a subsequent cold-cut test
+failure to intentionally rejected raster ownership, not color/path/light.
+R5's corrected ownership-plus-exact-CURRENT whole-owner test passes two water
+cohorts, then fails its mandatory lava coverage/reuse gate. R6 replaces its
+blank source BG2 fixture with opaque authored tiles but still fails (330 model
+incident changes, zero accepted lava primaries). Its distant scenery was drawn
+after the non-depth-writing floor. R7 matches actual game background/BG2/model
+ordering, retaining opaque foreground protection and every positive coverage/
+RGB gate. R7 is now terminal scoped PASS in all four formats: 172,052
+independently checked incident changes, exact CURRENT paths/light even behind
+protected ink, and exact CURRENT words/raster ownership on history cuts.
+Held/rejected presentations, actual queue retry, pending selection guards and
+in-flight close pass with zero native D3D12 validation messages. This uses AA
+OFF and zero canonical auxiliary words; sampled/canonical/upscaler owner
+acceptance must not be inferred from it.
+See CURRENT-ACCEPTANCE.md for precise scope and retained failures.
+Sample/upscaler/canonical layer, motion/visibility/finite RGB/conductor,
+other-backend, physical display and practical-cost qualification remain open.
+Ordinary players/README/index/R42 package and native Vulkan guards are unchanged.
+Authorized source-only R42 ARM CI is SUCCESS; physical 3DS/full-flow acceptance
+still remains open. No further push, install or release occurred.
+Exact terminal evidence is pinned in the native-curved-owner October 6 checkpoint.
+
+October 6 R6 native fractional-projection coupling is terminal D3D12 PASS:
+all four formats/eight cohorts pass the independent known old-source bilinear
+RGB gate, missing/different/protected-old-footprint refusal, exact CURRENT
+lighting/canonical/opacity/compositor gates, and post-commit stale-projection
+cut. The actual native raster/RT upload occurs in each phase. The authored
+(+.25, -.375)-pixel lens shift produces 104,140 independently checked incident
+changes and 399,436 old-footprint refusals, including 20,016 old-ink witnesses.
+Fresh static R6 regression passes all four formats with 247,700 independent
+identity-source changes; seven host tests and embedded source stamps pass.
+This qualifies only that fixed-geometry/liquid-clock fractional lens change,
+not arbitrary moving optics, finite-terminal reuse, general old visibility,
+resident environment/conductors, live whole-presentation owner/backend or
+practical cost. Normal curved-owner/native-Vulkan guards and protected ordinary
+players/README/index/R42 ZIP are unchanged. Authorized R42 source-only ARM CI
+is SUCCESS; physical 3DS/full-flow acceptance remains open. Precise scope and
+immutable evidence are in CURRENT-ACCEPTANCE.md and the native-curved-shift
+checkpoint. No additional push/install/release was performed.
+
+October 6 native curved coupling R4 is terminal PASS in all four D3D12 formats.
+This diagnostic joins real submitted scene geometry/correspondence, the actual
+enhanced BG2 ground packet/raster ownership, native DXR records, the curved
+consumer and post-ray foreground composition. Eight water/lava, MODEL/full,
+sharp/eight-lobe cohorts pass per format. The independent static-calibration
+identity-source RGB gate checks all 247,700 actual incident changes within one
+quantum; 45,547,920 CURRENT geometry/light words and 4,423,680 canonical layer
+bytes remain exact. Separate eye banks, discarded whole presentations, repeat,
+stale-epoch/OFF fallbacks and source alpha/foreground order pass. Seven selected
+host tests pass freshly. This is concrete native producer-to-consumer contract
+progress, NOT moving-optics/general visibility, positive finite-terminal reuse,
+resident environment-cube/conductor, live-game owner, other-backend or practical
+cost acceptance. The normal curved-owner/native-Vulkan guards and ordinary
+player executables are unchanged. R42 source-only ARM CI/test ZIP remains
+SUCCESS and unchanged; physical console/full-flow acceptance remains open.
+See CURRENT-ACCEPTANCE.md and the pinned native-curved-coupling checkpoint for
+precise scope, setup-failure retention and terminal evidence.
+
+October 6 actual curved-cache traces isolate the prior water float-precision
+stall and a distinct two-root lava cell. R11's screen-position convergence and
+five interior forward samples fix those two targeted GPU cases, but its full
+test then fails a water-primary finite path after eight MODEL cohorts pass.
+R12's actual negative-Jacobian branch lies in a neighboring cell; independent
+binary64 forward optics confirm opposite orientations on the two sides of a
+narrow fold. R13 adds a same-complete-path one-cell ring check, with independent
+forward-only refusal classification. R13 passes the first format's 20 water
+cohorts and sharp lava finite cohort, then fails the sharp lava/environment
+positive-coverage gate. Independent optics confirm zero safe samples in that
+13x9 field under the ring guard. R14 keeps the original optical field and ink
+coordinates and extends to 33x17, adding four independently safe sharp and 38
+rough-lobe environment witnesses. R14 is now terminal component PASS in all
+four R8/B8 linear/sRGB formats, each with 34,447 incident changes, 31,793 safety
+refusals and 993,600 exact CURRENT words across all 32 cohorts. Canonical layers,
+opacity, one-quantum colors, malformed/absorbed records and accepted-bank/cut/
+OFF/reset lifetime gates pass. No failed cohort is waived and one-quantum color/
+positive-coverage gates remain unchanged. This is not native/live-owner or cost
+acceptance.
+Ordinary color-history owners/native Vulkan producers still reject curved
+reuse. Sampled fold checks do not prove global uniqueness or practical cost.
+
+The fresh default D3D12 optical sweep still matches all 143,903 complete saved
+results exactly; default guide binaries match R8 byte-for-byte. Seven selected
+host tests pass. Embedded R11/R13 Vulkan1.2 consumers structurally validate, but
+R13's 7.79 MB SPIR-V has no runtime/cold-cost acceptance. Current PC/PCVR players,
+README/index and R42 ZIP remain unchanged; authorized R42 source-only CI is
+confirmed SUCCESS. See CURRENT-ACCEPTANCE.md for the precise diagnostic scope.
+
+October 6 diagnostic curved-color staging: accepted liquid calibration/lifetime,
+complete old-tap path/feature checks, folded-cell rejection and exact current
+light/canonical-layer preservation are implemented behind an explicit diagnostic
+flag. Ordinary callers reject this mode; native Vulkan producers remain guarded.
+R4 passes water component cohorts but fails a lava finite-hit RGB sample, so
+curved color reuse is NOT accepted or enabled. Independent endpoint decoding
+places the expected source within .00002 pixels of its authored location; R7 is
+testing a tighter diagnostic-only residual gate, not a relaxed color tolerance.
+R7 fails a valid water finite-hit sample; R8 retains the strict gate with finer
+central derivatives and fails the same sample. Both are unaccepted; actual
+guide/refusal-reason diagnostics are needed, not failed-cohort exemptions.
+Fresh R4/R8 legacy ordered history passes all four color formats and all three
+fixtures. Seven fresh selected host tests pass. R4/R8 raw shaders validate and
+match their embedded arrays exactly. Current-light and one-quantum gates remain.
+R8's default D3D12 optical sweep freshly matches all 143,903 complete saved
+224-byte results exactly. Its default guide binaries changed, so prior pinned
+Vulkan results do not qualify those new binaries. The curved consumer SPIR-V
+remains over 5 MB; practical cold/frame cost is not accepted.
+
+The smaller single-witness Windows Vulkan optical run is now terminal PASS:
+all 143,862 authored paths plus 41 exclusions, 129,156 accepted valid roots and
+zero strict forward/inverse/coverage failures. Both pipelines ready at 535.578s
+under concurrent load remains impractical; this is not native Linux/Metal/VR or
+cached-color/performance acceptance. Source-only R42 3DS CI is confirmed SUCCESS;
+player executables, README/index/R42 ZIP are unchanged. Physical console testing,
+complete curved owner/native backend qualification and practical cost remain.
+See the latest CURRENT-ACCEPTANCE.md entry for scope and retained failures.
+
+October 6 full native liquid receiver follow-up: a distinct opt-in full-primary
+64-byte ordered-path producer now retains the unchanged canonical water prefix
+and CURRENT primary/per-hop transmission, emission and material response. Actual
+DXR testing passes all four R8/B8 linear/sRGB formats, each with 4,630,794 record
+checks, 271,296 water / 45,216 lava primaries, visible/dry guides and byte-exact
+ordinary RGBA/hidden-water/surface prefixes. High caustics are independently
+checked and demonstrably affect current light. No cached colour or old response
+is enabled: complete old visibility/cache ownership and native Linux/Metal/VR
+qualification remain. Legacy/MODEL-only layouts and all safety guards remain.
+
+The prior strict full Windows Vulkan optical job is now terminal PASS, not
+still pending: all 143,862 paths and 41 exclusions pass unchanged independent
+forward/inverse/coverage gates. Its 1777.21-second cold pipeline setup remains
+impractical. A separate one-forward-site diagnostic witness cuts D3D12 DXIL
+319,192 -> 117,552 bytes, preserves both guide binaries and freshly matches all
+143,903 complete saved results exactly. Loaded D3D12 both-ready time is 13.6493s;
+this is not a game FPS claim. Its new Vulkan job (session88876/PID121312) is
+pending and has no inherited numerical/cost verdict. Seven current host tests
+pass. Normal players/README/index/R42 are unchanged. The source-only 3DS CI
+authorization is already fulfilled; physical console acceptance remains open.
+See CURRENT-ACCEPTANCE.md and the full-receiver checkpoint for exact scope.
+
+October 6 native curved MODEL/strict scalar follow-up: real DXR now emits a
+distinct staged 64-byte ordered-liquid record with terminal kind, current
+additive base and current throughput. Four R8/B8 linear/sRGB formats each
+pass 719,609 record checks and 216,040 byte-exact ordinary-MODEL prefix
+comparisons, including animated water/lava, rough/sharp lobes and cleared
+misses. Primary-liquid/canonical-layer coverage, complete old visibility and
+cache ownership are still open; the consumer and native Vulkan owner reject
+the new ABI until separately qualified. The sharp dielectric staged ray now
+matches the ordinary renderer without an extra normalization; gates are intact.
+
+Actual small-GPU testing isolates nested compensated division under relaxed
+Vulkan floating-point code generation. Whole-program IEEE strictness (`-Gis`)
+with explicitly requested Vulkan 1.2 and a queried binary32
+SignedZeroInfNanPreserve property passes all 32,910 cases on D3D12 and Windows
+Vulkan. No reciprocal/mantissa workaround remains. This does not certify
+full optical history. The fresh full D3D12 sweep independently passes all
+143,862 paths plus 41 rejection cases and exactly matches all 143,903 saved
+224-byte results. Both strict full SPIR-V binaries validate and embeddings
+are exact. Seven selected host regressions pass. The strict full Vulkan run
+is still at pipeline creation (session56966/PID31632, observed 18:45:55 local),
+with no optical or cost verdict; the preceding relaxed candidate's actual
+failure is preserved below. No ordinary player or R42 package changed.
+See CURRENT-ACCEPTANCE.md and the native/strict checkpoint for exact scope.
+
+October 6 single-residual-site follow-up: the actual ordered inverse search
+now shares one expensive wave residual evaluation site while retaining every
+optical gate, search/retry bound and finite-face retrace. The fresh D3D12 sweep
+passes all 143,862 paths and 41 rejection cases; all 143,903 complete 224-byte
+results are byte-identical to the independently rerun preceding native guide.
+Guide DXIL falls from 1,110,468 to 224,844 bytes and its D3D12 construction takes
+10.7377s rather than 77.0322s in the separate reference run (94.1145s earlier).
+Both new pipelines are ready at 28.1712s, final batch at 31.5684s. These are
+loaded diagnostic wall times, not game FPS or acceptable production cold cost.
+All embeddings/validators and six selected host regressions pass. The new
+Windows Vulkan job is now terminal exit1: actual independent forward/inverse/
+positive-coverage failures are 122/1,891/2, difficult known-source matches
+12/11. This is NOT just the optional exact-byte comparison (never reached).
+Guide construction takes 606.416s, both pipelines are ready at 2,023.63s and
+the last batch is at 2,036.85s. Numerical portability and cold cost remain
+unaccepted; no gate was weakened. The preceding older job was stopped
+after exact owned-identity verification, not classified as a numerical failure.
+Native liquid witness/visibility/current response/owner and cross-platform game
+qualification remain required. Installed players and R42 are untouched. See
+CURRENT-ACCEPTANCE.md and the single-site checkpoint for exact scope/handles.
+
+October 6 full-domain phase follow-up: guide and witness checking now use
+separate kernels and a shared 16 KiB high/low trigonometric table. Full-range
+testing then exposed low-add cancellation and large cosine-shift rounding;
+both are fixed without changing the water/lava wave or existing accuracy gates.
+Permanent host tests include the exact shader scalar prefix and pass 252,776
+sine/cosine cases each in table and table-free modes, over +/-1,048,576.
+The new full-domain candidate freshly passes all 143,862 D3D12 paths and 41
+exclusions, with zero strict failures and unchanged difficult known-source gates.
+Earlier passes are not silently inherited. Its final SPIR-V binaries validate;
+actual Vulkan execution was later explicitly stopped at pipeline creation at
+17:43:41 local (terminal session81824, exit -1), with no optical verdict.
+Prior combined/split/pre-full-domain-table Vulkan attempts
+are terminal forced stops at pipeline creation, not live jobs or numerical
+verdicts. Final D3D12 cold guide creation takes 94.1145s under concurrent load:
+still impractical, not a performance improvement
+claim. Production curved mixed-path colour-history guards remain unchanged.
+See CURRENT-ACCEPTANCE.md for candidate-specific scope and native R42 results.
+
+October 6 staged curved-path follow-up: high/low-binary32 ordered optics and
+split-coefficient Horner phase evaluation now pass the strict independent D3D12
+forward/inverse/coverage sweep (143,862 actual paths, 41 malformed/range cases,
+zero failures). A bounded local retry is restricted to failed four-hop
+liquid-primary lava paths; ordinary and successful-first guides retain one solve.
+All existing optical tolerances, finite-face checks and separate known-source
+coverage gates remain unchanged. The exceptional lava cohorts now have 25/22
+known-source matches; the previous precise single-start candidate's 7/6 result
+remains a failed coverage checkpoint.
+
+This helper is NOT integrated colour history: all production unsupported-path
+guards remain. Its exact SPIR-V validates without Float64/Int64, but current
+Vulkan execution was later stopped at pipeline creation, without an optical
+verdict. Diagnostic D3D12 pipeline
+creation takes 73.8661s, followed by a batched sweep ending at 77.5251s; those
+are loaded-machine diagnostic wall times, not FPS or acceptable game cold cost.
+Native ordered witnesses/complete old visibility/current responses and ownership,
+practical pipeline/game costs, native Linux/Metal and physical acceptance are
+still open. Installed current/PCVR and R42 are untouched. See the newest entry
+in CURRENT-ACCEPTANCE.md for exact candidate/evidence identity.
+
+October 6 normal PC integration follow-up: the freshly linked ordinary player
+still cancelled SDK-encoded GPU work after a rejected evaluation. A real
+diagnostic player reproduces five resource-state errors; the fixed host now
+drains recorded work but rejects its image/history, with no added normal-frame
+wait/submission. All four Original/EX K/M rejection/recovery cases pass exact
+native fallback and zero critical/discarded validation through renderer teardown.
+The same separate fixed candidate passes both experiences' eight-mode preview
+checks, 29 Preview-OFF/navigation checks plus loading, and 40 selected actual
+water/lava/banked-ground/fallback composition image comparisons across D3D12
+and Windows Vulkan. See CURRENT-ACCEPTANCE.md and PC-DLSS-STATUS.md for the exact
+binary and bounds. Installed players are unchanged. These are scoped real PC
+integration checks, not physical stereo, independent artistic/optical quality,
+native Linux/Metal, sustained FPS or full goal acceptance. Earlier SDK-owner
+and native-probe evidence below retains its original source/binary scope.
+
+October 6 SDK-secondary history now retains the exact actual jittered SDK
+source camera per accepted eye/native sample. This avoids reconstructing
+input-pixel jitter on the enlarged SSAA grid; SDK primary motion is not used
+to certify secondary radiance. Existing optical/identity/depth/feature guards
+and current material/base/emission remain unchanged. The cache preflight now
+also counts known SDK input/output and retained resources; overflow keeps
+current full-quality rays and the chosen SDK mode/extent.
+
+Four-format D3D12 K/M DLAA + native 2/4/8-sample optical checks pass against
+70,778,880 independent reference bytes, including changing phases, located
+eyes, source reorder/recycle, exact held images and positive incoming-RGB
+reuse in every model/sample-count case. The actual SDK evaluates before a
+test-only identity filter isolates optical history, so this does not prove
+neural-filter quality, independent SDK mixed/liquid optical parity, physical
+presentation or game FPS. An initial full neural run passed images but FAILED
+D3D12 state validation after a rejected pair. The new work witness ensures
+recorded SDK commands drain without presenting/committing that failed pair;
+reset/private retirement alone did not repair SDK native state tracking.
+Normal frames add no wait/reallocation. Fresh four-format isolated recovery
+and the complete real-neural owner pass with zero retained critical messages on final source:
+160 quality/AA cases, 4,088,800 exact protected bytes and existing palette/
+ground/liquid/distortion/retirement checks. The independent sample oracle also
+passes freshly on this final source, without weakening its byte/positive-history
+criteria. Fresh complete non-SDK owner regressions also pass on that exact
+checker: 27,975,873 D3D12 and 28,327,022 Windows Vulkan/DXR-interoperability
+assertions across all four formats, including native water/lava/MSAA,
+sharp/rough/ordered/mixed reflections and queue retirement. The revised component
+diagnostic now retains all critical messages in a bounded queue and rejects any
+overflow through SDK teardown. Default/reflection groups pass with zero critical
+errors or discarded messages, as does the final pattern group: 5,960 real SDK
+evaluations, 5,936 exact held-eye reuses and 532,180,736 protected/opacity bytes
+across the three complete groups. No image tolerance/input format is weakened.
+An earlier overflowing
+component attempt is rejected. The prior main owner binary did not assert a
+discarded-message count, so this newer capture is not silently attributed to it.
+Independent SDK rough/mixed/liquid optics,
+native Linux/Metal, physical presentation and game costs are not accepted.
+Installed players/runtime,
+main README, root HEAD/index and R39 are untouched. Evidence:
+`D:/SFE-validation/reflected-radiance-oct4/sdk-secondary-checkpoint.json`.
+
+October 6 lava-MSAA reflection history is now enabled and passes the strict
+ordinary owner oracle. Exact native frame/triangle replay isolates a poor
+flat-mirror Newton starting guess whose line search can fail under one-ULP
+camera perturbations. A pose-transported current analytic receiver, using
+the real inverse accepted matrix including scale, initializes the unchanged
+bounded old-wave solve. OLD displacement, bubbles, normal, bias, clock and
+matched finite feature still determine the guide. Visibility/identity/depth/
+feature criteria and the .002 solver residual are unchanged; current colour,
+material and emission are not filtered. The first wave evaluation is reused.
+
+The lava-MSAA cache exclusion is removed. Fresh normal checks (diagnostic
+capture OFF) pass all four linear/sRGB RGBA/BGRA formats and true 2/4/8 samples
+on D3D12 and Windows Vulkan/DXR interoperability: 26,488,160 independent
+ordinary bytes and 297,840 byte-exact protected bytes per API. Sharp/rough
+finite, mirror/gold mixed ground, curved water and displaced lava domains,
+located eyes/banked planes, held/rejected/reordered/recycled presentations
+and real queue retirement pass. Four independent old-wave kernel checks and
+three host gates also pass. Diagnostic capture is opt-in borrowed data only,
+not gameplay readback or waits. Fresh full legacy-owner regressions finish
+with exit 0 on this final source: 27,975,872 D3D12 and 28,327,021 Windows
+Vulkan/DXR-interoperability assertions across all four formats, including
+existing AA-OFF/spatial/SSAA/TAA, native liquid clock/plane transport,
+finite/rough/ordered/mixed history, protected opacity and queue retirement.
+At that earlier lava checkpoint, SDK secondary history was still open; the
+newer SDK follow-up above supersedes that boundary. Native Linux/Metal, curved
+mixed paths, physical presentation and full-game costs remain separate open work.
+Installed players, README, root HEAD/index and R39 are unchanged. Evidence:
+`D:/SFE-validation/reflected-radiance-oct4/lava-pose-seed-acceptance-checkpoint.json`.
+
+October 5 native MSAA reflection history now has independent banks for each
+eye/sample and the exact accepted 2/4/8-sample projection. The four-format
+native owner oracles pass on D3D12 and Windows Vulkan/DXR interoperability:
+21,190,528 independently rendered sample-view bytes and 238,272 exact
+protected bytes per API, with positive finite-model, mixed mirror/gold-floor
+and curved-water incoming-RGB reuse. Held/rejected/count-transition/wait
+ownership, located-eye motion, banked planes and actor reorder/recycle pass.
+The resolver runs after each real hardware sample's receiver extraction,
+before nonlinear style/resolve. CURRENT material and direct/base light stay
+unfiltered. Lazy bank allocation counts retained banks and native images at
+count transitions; overflow keeps CURRENT full-quality rays, not lower RT.
+
+Consistent binary64 pixel-centre subtraction fixes a native old-guide
+precision mismatch without changing the original tolerance/visibility guards.
+At that earlier checkpoint, lava MSAA history was excluded after a strict
+image failure; full-quality current rays and existing single/spatial/SSAA/TAA
+history remained. The newer pose-seed result above supersedes that exclusion.
+The newer SDK follow-up above supersedes this earlier SDK-secondary boundary;
+curved mixed paths still need acceptance.
+Fresh complete old-owner regressions finish with exit 0 after this shared
+precision fix: 27,936,921 D3D12 and 28,251,696 Windows Vulkan/DXR-interoperability
+assertions across four formats, including existing single/spatial/SSAA/TAA,
+finite/rough/mixed/liquid history, protected opacity and queue retirement.
+No installed player/release or 3DS package changed. Whole-game cost, native
+Linux/Metal, physical GPU output and 3DS full-flow/device acceptance remain
+open. Evidence:
+`D:/SFE-validation/reflected-radiance-oct4/msaa-secondary-checkpoint.json`.
+
+October 5 mixed analytic mirror/gold ground plus reflective model paths now
+pass the complete native owner suites (27,782,070 D3D12 / 27,952,244 Windows
+Vulkan/DXR-interoperability assertions, four formats). All six mirror/metal
+materials show separate positive ground AND model incoming-RGB history with
+AA OFF; banking, located-eye motion, TAA, held/rejected/reordered/recycled
+sources and current protected ink pass. The 96/460-byte bounded layout retains
+CURRENT direct/base lighting and all material responses unchanged. Receding
+ground now compares affine reciprocal depth at the optical guide, without
+relaxing ordered-path/feature visibility or finite face bounds.
+
+Independent native producer checks pass 11,209,088 forward paths and 288 exact
+OFF images per backend. Both GPU APIs pass mixed/legacy four-format colour
+oracles, malformed/current-base and finite-as-ground exclusions, accepted
+plane/pose cuts and wrong-depth rejection; optical helpers pass 108,480 forward
+cases. Model-only producers and old ground/liquid/rough owners remain green.
+No installed executable/release or 3DS package changed. At that earlier
+checkpoint, curved mixed paths, MSAA/SDK secondary history, whole-game cost,
+native Linux/Metal and physical hardware acceptance remained open; the newer
+scoped MSAA result is indexed above. Evidence:
+`D:/SFE-validation/reflected-radiance-oct4/scene-path-checkpoint.json`.
+
+October 5 full ordered model-path history is now enabled in the development
+game owner. Both four-format native suites pass (17,076,972 D3D12 / 17,184,788
+Windows Vulkan/DXR-interoperability assertions), including real incoming-RGB
+changes for mirror/metallic/gold/copper/silver/titanium with AA OFF, AA OFF/TAA,
+captured textured scenery, rotating/translating located eyes, held/rejected
+presentations, reordered/recycled identities and current protected ink.
+Existing analytic mirror/gold, curved water/lava and rough-model owner checks
+remain green. Per-hop optics/colour remain independently checked by component
+fixtures; this owner scene does not claim positive coverage of every hop.
+
+The preflight counts new and retained history banks before requesting ordered
+metadata. At the existing caps, excessive cache storage retains full-quality
+current ray tracing without history; it does not force lower resolution or
+ray quality. Fresh retained-bank forecasts, path/legacy GPU consumers, shader
+freshness and host ABI/timeline tests pass. Caps are not available-VRAM or FPS
+claims. Mixed reflective ground/model multibounce, curved-path correspondence,
+MSAA/SDK secondary history, full-game cold/steady costs, native Linux/Metal and
+physical-device acceptance still remain. No installed player/release changed.
+Evidence: `D:/SFE-validation/reflected-radiance-oct4/path-owner-checkpoint.json`.
+
+October 5 ordered-path consumer follow-up: a separate lazy GPU resolver now
+validates the full cached path and feature footprint, reprojects environment
+directions with accepted camera rotations, filters only incoming light and
+retains current per-hop/primary responses and native quantization order.
+D3D12 and Vulkan compute each pass four-format synthetic cache checks with
+105,759 independently known guides and 6,417 visibility/path exclusions per
+format, plus malformed records, accepted-pose/epoch cuts, discard and OFF.
+Legacy colour consumers and host metadata/timeline/rotation tests still pass.
+At this earlier checkpoint it was not enabled in the live game owner;
+the subsequent owner result is indexed above. Whole-frame bounded cost,
+curved/ground multibounce, native Linux/Metal and physical acceptance remain
+open; no installed player or release changed. Evidence:
+`D:/SFE-validation/reflected-radiance-oct4/path-consumer-checkpoint.json`.
+
+October 5 multibounce producer follow-up: ordered planar path witnesses and
+terminal incoming/current per-hop conductor response are now implemented in
+a separate opt-in native PSO. Independent forward checks on D3D12 and Windows
+Vulkan/DXR interoperability each pass 8,205,792 paths and 192 exact OFF RGBA
+comparisons, including all hop counts and resident environment capture.
+The legacy colour mode remains distinct; the new consumer is documented above.
+Accepted runtime owner integration still needs implementation.
+No live multibounce/conductor/environment history, FPS,
+native Linux/Metal or hardware-output acceptance is claimed. No installed
+player or release was changed. Evidence:
+`D:/SFE-validation/reflected-radiance-oct4/ordered-path-checkpoint.json`.
+
+October 5 reflection-history integration supersedes the initial TAA-only
+boundary below. The development owner now stabilizes accepted incoming light
+for sharp finite model hits, analytic mirror/gold ground, curved water,
+displaced lava and single-bounce non-conductor rough models independently of
+primary TAA. Liquid transmission/emission/direct light and the current material
+response are never transported with secondary RGB. The compact rough owner
+accepts its canonical 124-byte-per-pixel record in the existing working bound.
+
+Four-format owner checks pass on D3D12 and Windows Vulkan/DXR interoperability,
+including AA OFF, two eyes, held/rejected frames, source reordering and queue
+stall/lifetime regressions. Fresh native-producer checks after the PSO split
+also pass both APIs, retaining independent physical optical oracles and exact
+OFF output. The producer's four conductor-code fixtures are single-bounce API
+checks, not acceptance of live four-bounce conductor history. Multibounce and
+environment-miss history, MSAA/SDK history, whole-game/cold preparation cost,
+native Linux/Metal and physical headset/panel acceptance remain unfinished.
+No installed PC/PCVR executable or release was replaced. Full goal active;
+latest evidence:
+`D:/SFE-validation/reflected-radiance-oct4/compact-owner-checkpoint.json`.
+
+October 4 reflected-radiance consumer: the native DisplayXR TAA owner now
+composes a separate accepted reflected-RGB timeline for sharp ordinary finite
+single-bounce model hits. Explicit old primitive IDs, full-footprint visibility,
+receiver depth and secondary barycentrics prevent reuse after reordering,
+occlusion or protected ownership. Primary flow never transports reflected RGB.
+Commit/discard follows whole-presentation acceptance; paused/retried frames do
+not advance this timeline. Direct3D 12 and Windows Vulkan/DXR interop pass the
+independent physical-hit and four-format colour fixtures plus real-queue owner
+lifecycle tests. The initial duplicate-SRV D3D12 transition error is fixed and
+the final debug check passes. Public identity/stub, strict resolver, bindings,
+freshness and both full calibrated-scene/compositor checks also pass.
+
+This is not liquid/rough/multibounce/environment-miss stabilization, non-TAA
+coverage, Linux/Metal parity or hardware Leia acceptance. Those paths retain
+their conservative guards. Protected current PC EXE, R6 and root Git state
+are unchanged. Full rendering/3DS goal active and incomplete. Details/failures:
+`D:/SFE-validation/reflected-radiance-oct4/checkpoint.json` and the acceptance index.
+
+Earlier October 4 guide-only foundation (superseded above): accepted old triangle correspondence
+is exported on GPU and consumed by an opt-in native DXR single-bounce guide.
+Independent physical moving-mirror/hit tests pass on Direct3D 12 and Windows
+Vulkan/DXR interop, with exact unchanged current reflection colour. Both full
+calibrated-scene and four-format liquid/ray-history rejection suites pass.
+This is not final reflection stabilization or Linux ray-query parity: the
+reflected-radiance history consumer, secondary visibility/ownership rejection,
+liquid/rough/multibounce/environment motion and Linux/Metal paths remain open.
+Gameplay has not enabled the guide; protected PC EXE and R6 are unchanged.
+See the current acceptance index and
+`D:/SFE-validation/reflected-hit-motion-oct4/checkpoint.json`. Full goal active.
+
+October 4 signed exterior/on-wall 3DS receiver checkpoint `9ef194fe...` passes
+eighteen public suites, four actual ARM links and independent R6 integrity
+verification (CI 37218266377). Source wall crossings interpolate with models;
+physical bounded faces, the open colony side and authored camera/optics/PPU are
+retained. Root/exact full host suites and expanded both-eye ray/depth/UV checks
+pass, as do natural Gekkou entry/inside/exit and Original/EX colony replays.
+The downloadable candidate is a real pre-game/gameplay/slider player, not a
+hardware-accepted release. Exterior disoccluded artwork, orbital/body/full-flow,
+testers' Original 3DS/XL memory/performance and remaining rendering-effects
+secondary motion/finishing remain open. No protected root state or PC executable
+changed. Full goal active; see the acceptance index and
+`D:/SFE-validation/3ds-corridor-oct4/signed-exterior-checkpoint.json`.
+
+October 4 Gekkou/open-colony checkpoint `0e078f16...` passes eighteen public
+host suites, four ARM links and independent R5 package validation
+(CI 37216204068). Gekkou follows its actual source LTUNNEL dimensions; the
+colony preserves its open left side and source WATER state rather than gaining
+a fictitious fourth wall. Root/exact eighteen-suite builds, six strict C++
+checks and controller-only Original/EX source replays pass. Canonical pixels,
+PPU ownership, source VM/SPC and requested optical settings are retained.
+The new asset-free test ZIP is independently verified, not hardware accepted;
+older candidates remain separately attributed. Camera-outside-closed-tube,
+orbital/body/full-flow/device/peak-memory/performance policies and true reflected
+secondary motion remain unfinished. Root HEAD/index/current PC executable are
+unchanged. Full goal active; details and failure history are in the current
+acceptance index and `D:/SFE-validation/3ds-corridor-oct4/gekkou-colony-checkpoint.json`.
+
+October 4 final-room/corridor checkpoint `41d76d4f...` passes eighteen public
+host suites, four ARM links and independent R4 package integrity checks
+(CI 37212486487). Original/EX authored final-room sky now uses fresh native-video
+metadata without changing source state; narrow/max-strength outside-eye
+corridor checks no longer skip cases. Root/exact final-room controller replays
+each pass 10,495,112 source/resource checks and remain within the unchanged
+padded texture budget. Full routes, body/exterior policies, physical 3DS,
+whole-flow memory/performance and reflected secondary-motion remain unfinished.
+See the current acceptance index; R3 is not relabeled as the newer source.
+
+The reported roughly one-minute 0.0.8 VR exit includes PCVR via PC after the
+tester correction. PCVR/Quest persistent logging, scene/cache/memory/GPU/runtime
+diagnostics and EX headset cockpit-shell filtering are implemented in development;
+host tests and both builds pass, but no failing-headset reproduction or crash
+fix is claimed. The investigation remains open in `VR-CRASH-INVESTIGATION.md`.
+Root HEAD/index/current PC executable stay unchanged; full goal still active.
+
+October 4 EX-menu stereo checkpoint
+`e7f8f209751f51166929d03dade945ce7cbd3fb3` passes eighteen root/exact/public host
+suites, three strict changed-source checks, four actual ARM links and independent
+package validation (CI 37209320020). Verified EX orbital/unique/star BG2 menu
+artwork now consumes the physical slider; the original menu text/OBJ remains at
+screen depth with its source width, priority and pixels. Root/exact real-cartridge
+controller-only menu probes each pass 8,257,765 checks across nine choices and
+default/maximum optics, peak padded GPU textures 3,481,600 bytes including lower
+LCD. Original LEVEL2_2 checks 400 actual maximum-strength orbital frames. These
+are source/resource checks, not native pixels or performance. Updated experimental
+R3 package is independently verified; no assets embedded and root PC/index/HEAD
+unchanged. Full 3DS scene/exterior/transition/HUD/device/memory/performance and
+rendering-effects secondary-motion/finishing/performance/package acceptance remain.
+Evidence: `D:/SFE-validation/3ds-test-player-oct4/ex-menu-checkpoint.json`.
+
+The longer EX source run exposed an invalid checker assumption at phase 1,350,
+not missing terrain: its source horizon is below the LCD. Follow-up `60b013de...`
+requires finite geometry exactly when the source near/far domain is visible,
+permits multiple borrowed strips, and adds independent offscreen/partial/all-
+visible canonical tests. Root/exact/public eighteen-suite builds, two strict
+checks and four ARM links pass (CI 37210209680). Actual phase-1,350 combined
+scene replay validates at default/maximum optics within the unchanged budget.
+The initial 3,000-frame requested run is not relabeled as success; whole routes
+remain. R3 production code is unchanged and its package provenance stays e7f8.
+
+October 4 maximum-strength intro checkpoint
+`47b348d8922306fd4f4109c738bf527c66d01609` passes
+[CI 37207991507](https://github.com/kandowontu2/starfox-enhanced/actions/runs/37207991507):
+eighteen public host suites, four actual ARM links and revised test packaging.
+Final root/exact hosts pass eighteen suites and five strict changed-source
+checks. A real phase-24 intro texture-budget failure is fixed by retaining both
+eye-visible infinity strips plus the mono LCD, without uploading their unseen
+gap or changing optical strength. Normal base-guard rendering keeps the prior
+fast path; finite receiver policies are untouched. Independent canonical and
+both-eye colour/opacity/priority coverage regressions pass.
+
+Final exact-source Original/EX BOOT checks each verify 3,600 frames at strength
+2 / separation 64 / convergence 16 with retained owners, including 2,293 /
+2,291 observed intro frames. Peaks are 3,318,016 / 2,168,832 padded GPU bytes
+including lower LCD; 202,459 / 219,638 source checks pass. This is not peak RAM,
+native-pixel or sustained-performance acceptance. The new independently
+verified 933,581-byte ZIP is `build/StarFoxEnhanced-original-3ds-test-r2.zip`.
+Its actual source/ARM/3DSX/SMDH/checksums and absence of private assets validate;
+the older first test candidate remains separately attributed. Physical device,
+EX/orbital/exterior/full-flow scenery/effects/HUD, full memory/performance and
+rendering-effects secondary correspondence/finishing remain open. Protected
+root index/HEAD/PC executable remain unchanged; the full goal stays active.
+Evidence: `D:/SFE-validation/3ds-test-player-oct4/maximum-intro.json`.
+
+October 4 experimental Original 3DS/XL player checkpoint
+`0ec201028f95160e855611eb5c92021510037366` passes
+[CI 37206452911](https://github.com/kandowontu2/starfox-enhanced/actions/runs/37206452911):
+eighteen public host suites, four actual native ARM links and validated
+asset-free SD-card test packaging. Root/exact hosts pass eighteen suites;
+exact Original/EX sessions each pass 13,663 source/menu/control/HUD/VM/SPC
+checks. The downloaded candidate's headers, provenance, embedded icon,
+CRC/checksums and exact five-member ZIP validate independently. The test
+player retains actual pre-game setup and native PICA rendering, excluding only
+the diagnostic label; it is explicitly experimental, not hardware accepted.
+The 932,453-byte ZIP is copied to `build/StarFoxEnhanced-original-3ds-test.zip`.
+Original 3DS/XL physical LCD/slider/NDSP/APT/SD, full-flow memory/performance,
+EX/orbital/exterior scenery policies and effects finishing remain open.
+No physical validation or overall completion is claimed. Protected root
+index, HEAD and PC executable remain unchanged. See
+`D:/SFE-validation/3ds-test-player-oct4/manifest.json`.
+
+October 4 finite corridor source checkpoint
+`4a2cb0818f2b36aa221b88e69ee11b697203e4b3` passes seventeen root/exact host
+suites, six strict checks, rotated/both-eye physical depth and source UV
+oracles. Original/EX Armada each validate 240 source corridor frames and
+458,752 canonical colour/opacity/ownership samples at default and maximum
+optics. Padded GPU texture peaks with lower LCD are 3,150,080 / 3,154,176 bytes.
+The source/VM/SPC remain unmodified. This is assisted host correctness and
+residency evidence, not device performance. [ARM CI 37205227789](https://github.com/kandowontu2/starfox-enhanced/actions/runs/37205227789)
+passes seventeen public host suites and all three actual ARM links. Downloaded
+ELF32 ARM/extended-3DSX headers validate; core package is 2,249,656 bytes and
+the 488-byte shader is unchanged. Static text/data/BSS are
+2,186,764 / 9,872 / 33,604, not peak RAM. Exterior/EX-specific corridor policies, full port flow, hardware
+acceptance and effects finishing remain; goal stays active. Protected root
+index and PC executable remain unchanged. See
+`D:/SFE-validation/3ds-corridor-oct4/manifest.json`.
+
+October 4 native water source checkpoint `070e93f98afde8b6483ca6e4ea01cf5b6156c24a`
+passes [CI 37203496561](https://github.com/kandowontu2/starfox-enhanced/actions/runs/37203496561).
+Finite source-height
+floor/overhead BG2, infinity BG3 and screen-space OBJ retain cartridge source
+pixels/ownership without flat water beneath them. All seventeen rebuilt root
+host suites and five strict changed sources pass, including both-eye UV/edge
+coverage and actual visible priority sprites. A natural unmodified-ROM Titania
+probe (god/infinite lives/bombs, bomb assistance) reaches water at source phase
+10,722 and checks 240 water frames at default and maximum menu optics, with
+full models/dots/effects composition; padded GPU peak is 3,245,312 bytes
+including lower LCD. Exact native-source export also passes seventeen host
+suites and the same natural water probe; both compare 458,752 canonical
+source pixels/ownership. All seventeen public suites and three actual ARM
+targets pass. Downloaded ELF32 ARM/extended-3DSX headers validate; core package
+is 2,237,888 bytes, with unchanged native shader. Static text/data/BSS are
+2,175,088 / 9,872 / 33,604, not peak RAM. Older packages are not relabeled.
+Exact EX Titania also passes 240 actual water frames from phase 11,121 and
+458,752 canonical pixel/ownership comparisons; peak padded GPU textures are
+3,376,384 bytes with the same assisted-input, unmodified-ROM scope.
+Corridor/full-flow/hardware, desktop rendering effects and playable packages
+remain open; no overall completion is claimed.
+
+October 4 native unique-landscape follow-up:
+`0f38a9e42956266c5837337b48f72e8710c74aa8` forwards existing source
+unique-half flags to the shared indexed decoder. Wrapped repeated sky motifs
+use the verified opposite half without changing canonical/ground pixels,
+palette fades, source state or optical requests. A red pixel regression now
+passes; seventeen root host suites and strict changed sources pass. Original
+LEVEL1_4 actual checks pass 102,155 with exact canonical pixels; root/exact EX
+LEVEL5_2 pass 105,959 and exact direct audio passes. Original LEVEL2_6's first
+check failed a mandatory-dust assumption inappropriate for optional stages;
+the repaired root checker passes 105,733 across 1,440 dots-disabled frames.
+Default BOOT/Corneria still require dots, while source-disabled frames require
+empty native ink/geometry. No tunnel was observed in that stage slice, so no
+tunnel-depth acceptance is claimed. The stage checker now exposes bounded
+targeted symbols and reports actual water/tunnel/unique/orbital observations;
+counts alone are not visual/depth acceptance. Source-only CI `37200281553`
+passes all three ARM links; exact native-only export passes seventeen host
+suites. Downloaded ELF32 ARM/extended-3DSX headers and shader validate. Core
+package is 2,228,084 bytes; static text/data/BSS 2,165,352 / 9,872 / 33,604 are
+not peak RAM. The checker/documentation repair is separately published as
+`d21fb41b0b8db4fe96aa4986b1de7879d7bec4bc`; its exact-source 240-frame
+LEVEL2_6 sample passes 65,143 with source-disabled dots and no tunnel.
+Preceding evidence is not relabeled; repair CI `37201185610` now passes
+seventeen public suites and all three ARM cross-links. This two-file change is
+host checker/documentation only; downloaded packages remain attributed to
+preceding production-source0f38. Exact Titania LEVEL2_3 entry passes 6,969
+across 240 frames, 231 terrain and no water; its original script only loads
+water after two preceding map sections. Full native/desktop effects,
+device acceptance and playable packaging remain. Evidence:
+`D:/SFE-validation/3ds-stage-policies-oct4/manifest.json`.
+
+October 4 native coverage checkpoint, repaired native build accepted:
+`5156d01810fad8f96d4a996b0f4b878063699341` passes sixteen rebuilt root/exact
+host suites and strict changed-source compilation; all three actual ARM targets
+link in successful CI `37199059547`. Preceding CI `37198614317` failed a mixed
+unsigned-int/ARM-uint32_t cached width comparison; the repair explicitly converts
+that bounded width to unsigned, preserving source pixels and policy.
+Source-sized infinity/finite eye coverage uses
+borrowed <=1024-texel strips, true opaque-black coverage crops and unchanged
+source caches. No requested optics, pixel quality or aggregate 4 MiB budget
+is reduced. Actual root Original/EX model/PPU/grid checks pass 117,354/124,525;
+three production-menu maximum optical fixtures each peak at 3,670,272 padded
+GPU texture bytes including lower LCD, not whole-flow/peak RAM. The separate
+strength-2 full intro stress and extreme rolled receivers remain open. The preceding
+exact source passes scenes 117,354/124,525, session VM/SPC/PCM 13,663 each and
+direct audio. Repaired scenes/direct audio pass too. Downloaded ELF32 ARM and
+extended 3DSX headers validate; core package is 2,222,516 bytes, static
+text/data/BSS 2,159,788 / 9,872 / 33,604, not peak RAM. Shader remains 488 bytes.
+Preceding session evidence is not relabeled as a repaired-source rerun. Root index/PC
+EXE remain unchanged. Full port/device acceptance and desktop rendering-effects
+finishing remain; goal active.
+Evidence: `D:/SFE-validation/3ds-coverage-oct4/manifest.json`.
+
+Previous accepted native HUD-layout checkpoint:
+
+October 4 native HUD-layout checkpoint:
+`b995634b834e5f0f26c7084790989e16c33f6f43` passes
+[CI 37196938670](https://github.com/kandowontu2/starfox-enhanced/actions/runs/37196938670),
+sixteen root/exact host suites and all three actual ARM links. The real Options
+hook connects the paused touch/button editor, thirteen separately rendered
+HUD panels, Apply/Cancel and native SD schema 4. Old settings migrate; loading
+cartridge state preserves current layout. Default HUD capture hashes stay
+unchanged. Public editor/storage checks pass 2,891/623; actual exact Original/EX
+VM/SPC/PCM checks pass 13,663 each, including all three partial SPC phases.
+Downloaded ARM ELF/extended 3DSX headers pass; core 3DSX is 2,216,764 bytes,
+static text/data/BSS 2,154,048 / 9,872 / 33,604, not peak RAM. Shader remains
+488 bytes. Root index/PC EXE remain unchanged. Complete HUD partition,
+remaining scenery/EX spans/water/tunnels/extreme optics, full-flow and original
+device acceptance, playable packaging and desktop effects finishing remain.
+Evidence: `D:/SFE-validation/3ds-hud-layout-oct4/manifest.json`.
+
+Historical native distant-scenery checkpoint:
+
+October 4 native distant-scenery checkpoint:
+`dda633a6308d37658787ee865478f5919f4fb6a6` passes CI `37195278296`,
+15 root/exact host suites and all three actual ARM links. Contiguous BG2
+groups use infinite eye disparity without moving BG3/OBJ or reordering source
+priorities. Menus, maps, boss roll, water/tunnels and finite outdoor terrain
+retain their separate policy. Mixed source masks remain; isolated BG2 uses
+one-hot ownership without redundant resident A8. Both eyes borrow cached
+texture pixels; lower LCD residency is included in assembly validation.
+Root/exact Original/EX model/PPU/dots checks pass 117,342 / 124,516; exact full
+session checks remain 13,111 each and direct audio passes. Combined fixture
+padded GPU texture peak is 1,835,264 bytes, not whole-flow/peak RAM. Downloaded
+ARM headers pass; core 3DSX is 2,193,552 bytes, static text/data/BSS
+2,131,028 / 9,872 / 33,604, shader unchanged 488 bytes. Root index/current PC
+EXE unchanged. HUD customization/partition, unique EX spans, water/tunnel
+policies, extreme optics, full flow, original-console acceptance and desktop
+rendering-effects finishing remain open; full goal stays active.
+Evidence: `D:/SFE-validation/3ds-panorama-oct4/manifest.json`.
+
+Historical native FPS checkpoint:
+
+October 4 native FPS checkpoint: `72068db49e11be40d1eefcdae835d8beb272bd2b`
+passes CI `37194119246`, fifteen host suites and all three actual ARM links.
+The 30/60 Hz scene gate leaves the fixed 60 Hz cartridge and 20 Hz SPC clocks
+untouched; completed-pair FPS display and schema-3 migration are connected.
+Original/EX BOOT/stage independent state/audio checks pass at both rates.
+Exact full session checks pass 13,111 each; root 13,054 each. Public frontend
+199,452, SD journal 131, menu 100,912 exact / 100,911 root. New shared menu
+rows are checked against the full 80-label table without private ROM assets.
+Initial failed exact menu checks are retained, not hidden by green ARM CI.
+Downloaded ELF32 ARM/3DSX headers pass; core 3DSX is 2,182,208 bytes, shader
+unchanged 488 bytes. Static text/data/BSS 2,119,720 / 9,872 / 33,604 are not
+peak RAM. Root index/current PC EXE unchanged. Physical cadence/pixels/speed,
+HUD customization/full partition, remaining panorama/EX spans/overlays/effects,
+full flow/native-desktop integration and rendering-effects finishing stay open.
+Evidence: `D:/SFE-validation/3ds-fps-oct4/manifest.json`.
+
+Historical native P2 HUD checkpoint:
+
+October 4 native P2 HUD acceptance: source-only branch
+`77715632220963c6c69369a136b8004b2e312dd3` / CI `37192771762` passes
+15 host suites and all three ARM links. Pure EX P2 lives/bomb export, separate
+P1-view counters and correctly selected P2-view labels now reach the owned,
+cached lower dashboard. Actual cartridge glyph/palette/RAM/archive checks pass
+154,787/309,543; exact session parity remains 6,358 each and direct audio passes.
+Strict source and downloaded ARM/3DSX/shader checks pass; PC executable/root
+index are unchanged. Core package is 2,179,300 bytes, not peak memory. Natural
+two-player/full-flow, complete top HUD partition, physical/device/performance,
+native HUD customization/FPS, remaining native scene/effect adapters and desktop
+integration/rendering-effects finishing remain open. No playable-release or
+goal-completion claim. Evidence: `D:/SFE-validation/3ds-hud-oct4/manifest.json`.
+
+Historical native full-state acceptance:
+
+October 4 native full-state acceptance: source-only branch
+`6f923360a0336a4b8098e6810b7e0b2543b437c8` / CI `37192122255` passes
+14 lean host suites and all three actual ARM links. Full VM/SPC slots and a
+paused Select+Y quick menu now preserve partial audio and grid history across
+fresh-owner replacement; actual Game Options is accessible without ticking
+the scene. The shared SPC serializer no longer mutates the live SMP registers
+while saving and retains separate CPU input buses in a backward-readable tail.
+Exact Original/EX session checks pass 6,358 each; model checks pass 57,663/65,058;
+root and exact direct-audio checks pass. New public state/SPC/journal checks
+pass 1,355 and quick-menu checks 260. Downloaded ARM ELF32/3DSX headers and
+unchanged 488-byte shader pass. Core package is 2,179,148 bytes; static sections
+are not peak memory. PC executable/root index remain unchanged. Physical
+original-device/SD/NDSP/full-flow, HUD/FPS/player-two counters, remaining native
+scene/effect adapters, desktop shared integration and rendering-effects
+finishing remain. No playable release or full-goal claim. Evidence:
+`D:/SFE-validation/3ds-states-oct4/manifest.json`.
+
+Historical native dust/grid acceptance:
+
+October 4 native dust/grid acceptance: source branch
+`eda20477fbbd8dd26a4fa6481c702e54e4775198` / CI `37189934817` passes
+twelve lean host suites and three actual ARM links. Source dust and Q15 ground
+dots are finite-depth angular quads; connected-grid ink retains exact canonical
+source pixels/carried endpoint and projects onto the real source ground plane.
+Far carry and zero-distance ink remain at infinity. Shared geometry/ink is
+prepared once; eyes only change projection. Live black fades, alpha/depth,
+source ownership, cache retirement and disabled-mode allocation are covered.
+Native entry order is scenery → dust/grid → models → source overlays/effects.
+
+Public independent dust/grid checks pass 529,492. Exact/root Original/EX model
+checks both pass the 57,663/65,058 pair; exact source/SPC/PCM/session checks pass
+5,896 per cartridge. Actual BOOT/outdoor fixtures exercise dust/plain ground
+dots; connected-line raster fidelity uses synthetic public snapshots, not a
+naturally enabled cartridge run. Strict compiles and downloaded ARM/3DSX
+headers pass. Core package is 2,005,008 bytes; static text/data/BSS
+1,943,516 / 9,872 / 33,604 and unchanged 488-byte shader do not establish peak
+memory or original-device performance. Root index and PC EXE remain unchanged.
+Full state slots, HUD/FPS/runtime access, remaining scenery/EX spans/overlays/
+effects, desktop integration/finishing and physical/full-flow acceptance remain.
+No playable release or full-goal claim. Evidence:
+`D:/SFE-validation/3ds-dots-oct4/manifest.json`.
+
+Historical native controller acceptance:
+
+October 4 native controller acceptance: branch
+`b9775b82e9f6654d60b28207dc23ef5bd67a49a1` / CI `37188702923` passes
+eleven host suites and three actual ARM links. Real Options/Controller now
+opens the SNES-highlighted native editor, with fixed menu navigation, button/
+Circle Pad capture, clear/defaults/deadzone, sleep/release/cancel guards and
+mapped reset. Editing does no source/world work; return retains VM/SPC/PCM
+cadence. LCD canvases are allocated only while open. Protected schema-1 settings
+and EX SRAM migrate to schema-2 bindings without truncating the valid backup.
+Exact Original/EX checks pass 5,896 each, including independent mapped inputs
+and 24 resumed source rasters; local root checks pass 5,839 each. Public tests
+and strict compiles pass. Downloaded ARM/3DSX headers and the unchanged shader
+hash pass; core 3DSX is 1,993,808 bytes, not peak memory. PC EXE/root index remain
+unchanged. Physical original-device/full-flow/performance, full state slots,
+native HUD/FPS/runtime access, remaining scene/effect adapters, desktop root
+integration and rendering-effects finishing remain open. No playable release
+or full-goal completion. Evidence: `D:/SFE-validation/3ds-remap-oct4/manifest.json`.
+
+Historical mapped-reset acceptance:
+
+October 4 native mapped-reset acceptance: branch
+`a1fe2c2f54d48e89d6d85a80fb1e48fc9c5de665` / CI `37187201296` passes
+ten host suites and three real ARM links. The native menu's five-second
+in-game L+R hold is connected to Original/default/Preview-OFF reconstruction,
+protected SD settings writes and real EX bank preservation, with held-input,
+release/focus/rewind/gameplay guards and a lower-screen countdown. Public
+menu/timer/journal contracts and real Original/EX checks pass; the old source
+VM/SPC does not partially advance at the handoff. Root checks pass separately.
+Downloaded ARM/3DSX headers and unchanged shader hash pass. PC EXE and root
+index are untouched. No physical 3DS/SD/APT/performance or whole-port claim;
+full state, native remapping/HUD/FPS, remaining scene/effect adapters, original
+device and desktop rendering-effects finishing remain. Evidence:
+`D:/SFE-validation/3ds-reset-oct4/manifest.json`.
+
+Historical SD acceptance:
+
+October 4 native SD acceptance: branch
+`d4579cbcbcc11c077ce85eda78eef8b4ed542bd1` / CI `37186312347` passes ten
+lean host suites and all three real ARM links. The native entry now loads and
+checkpoints implemented settings, experience/preview and ROM-bound EX SRAM in
+a bounded, checksummed two-generation journal. Handoff/APT/exit paths are
+connected; a corrupt newest slot falls back, while all-invalid or incompatible
+files are preserved/read-only. Real Original/EX branch fixtures pass 4,802
+checks each and 70 public journal checks pass. The local dirty-root also passes
+ten host suites and its 4,745 checks each; it is not the branch's revised API.
+Downloaded ARM ELF32/3DSX headers pass. Core package 1,979,076 bytes; unchanged
+shader 488 bytes; static sections are not peak memory. PC binary/root index are
+unchanged. Full VM/SPC state slots, remaining native scene/effect/host adapters,
+original-device SD/APT/whole-flow/memory/performance and desktop effects/root
+integration remain. No playable release, hardware acceptance or goal completion.
+Evidence: `D:/SFE-validation/3ds-save-oct4/manifest.json`.
+
+Historical ARM menu checkpoint:
+
+October 4 native menu acceptance: the synchronized source-only branch at
+`01bfe252b72bc7e3156811144409c81dd4797078` passes CI `37185299509`, all nine
+lean host suites and three real devkitARM links, including the menu/source
+entry. Downloaded ELF32 ARM/3DSX headers pass. The merged asteroid control,
+PS5 hardware-only policy and portable bit casts are retained; AA/asteroid row
+collisions and legacy saved cursors are covered by real Original/EX tests.
+Exact snapshot tests pass 4,792 session/menu checks each and 50,941 / 58,336
+extended source-model checks. PC binary and root index remain unchanged.
+The source-core 3DSX is 1,954,004 bytes; static sections do not establish peak
+RAM or physical original-3DS performance. This is not a playable release or
+completion: persistence, full scenery/EX spans/grid/dust/host overlays, native
+effect adapters and whole-flow/original-device acceptance still remain, along
+with desktop rendering-effects finishing. Branch API/desktop-root integration
+also remains distinct from the native link acceptance.
+Evidence: `D:/SFE-validation/3ds-menu-oct4/native-menu-manifest.json`.
+
+Historical local menu checkpoint:
+
+October 4 local 3DS pre-game integration: the full current simulation menu is
+rendered with source glyphs, cached/protected mono UI, native separation and
+convergence. Preview OFF skips native model/BG preparation; Preview ON builds
+a real frozen stage scene and both eyes, with RENDERING during load. Source
+Start/fade/selected-level and cartridge replacement preserve implemented settings
+and in-process SRAM. Nine lean host suites and real Original/EX VM/SPC/menu/
+preview checks pass; a mutating boss-roll read was changed to RAM peek. This
+menu revision still needs a feature-preserving shared-API branch synchronization
+and real ARM cross-link, followed by physical original-device acceptance.
+Persistence, other scenery/EX spans/grid/dust/host overlays and desktop effects
+finishing remain. PC executable unchanged; no playable release/full-goal claim.
+Evidence: `D:/SFE-validation/3ds-menu-oct4/manifest.json`.
+
+Historical native terrain checkpoint:
+
+October 4 native terrain: identified outdoor gameplay/Training now separates
+infinite BG2 artwork and a finite source-height receiver, sharing one texture.
+All-sample HDMA horizon fitting and homogeneous source UV/Q preserve color
+bands/roll registration; the ground retains BG2 stencil/depth and both eyes
+share geometry. EX menu/tunnel artwork is not mistaken for outdoor ground.
+CI `37183379840` at `aa1fd65f603f38c7f36bcbdd0f9aa82cfb97ec09` passes eight
+host suites and all three ARM links. Downloaded ARM ELF32/3DSX headers pass;
+core package 1,905,812 bytes and 488-byte shader matches host Picasso assembly.
+Static text/data/BSS 1,849,716 / 9,872 / 33,604 do not establish peak RAM.
+Current-worktree Original/EX source checks pass 50,941 / 58,336, each reaching
+404 outdoor phases over the extended direct-stage run. Root layer tests pass;
+PC `7DB600A7...` is unchanged. Remaining menu/handoffs/settings/SRAM, panorama/
+EX spans/grid/dust, whole-flow/original-device pixels/optics/audio/APT/memory/
+performance and desktop effects finishing prevent a completion claim. No
+playable release, install or private asset push. Evidence:
+`D:/SFE-validation/3ds-terrain-oct4/manifest.json`.
+
+Historical source-painter checkpoint:
+
+October 4 source painter/native entry: CI `37182647615` at
+`184b3245da19495ca481e83a2051d01873679fad` passes eight lean host suites and
+links all three native ARM diagnostics. Actual cartridge models/layers/colour/
+windows and the separate lower HUD now feed Citro3D. Downloaded core package
+is 1,899,356 bytes; ARM ELF32/3DSX headers pass and the unchanged shader is
+440 bytes. Static text/data/BSS 1,843,316 / 9,872 / 33,604 are not measured
+peak RAM. Finite terrain/homogeneous source UVs are a subsequent checkpoint
+being cross-verified. The 240-phase fixture did not reach outdoor terrain;
+it now runs 1,440 phases and requires that source scene to appear. Full menu/
+panorama/EX spans/grid/dust, handoffs/settings/SRAM, original-device full-flow/
+PICA/audio/APT/performance and desktop effects finishing still remain open.
+No playable port, install or full-goal claim. Evidence:
+`D:/SFE-validation/3ds-layers-oct4/manifest.json`.
+
+Historical cartridge-core checkpoint:
+
+October 4 actual 3DS core: the source-only VM/SPC/HUD/model library now links
+with the real libctru/NDSP entry. CI `37181717395` at `93889fafe1cf88d6f7c9828347eb12ed3afebaee`
+passes seven host suites and the existing PICA/geometry/PPU contracts, then
+links all three ARM diagnostics. Downloaded ELF32/3DSX headers pass; unchanged
+440-byte shader matches. Core package 1,812,544 bytes; static text/data/BSS
+1,757,188 / 9,856 / 29,220 bytes do not establish peak RAM. Current standard
+private companion passes Original/EX host BOOT integration (60 rasters, 20 logic
+ticks, 20 PCM blocks each, source model stream and lower HUD). ARM fixed-width
+comparison/sampler deductions are fixed without algorithm changes. The native
+upper LCD is still diagnostic: no playable port or pre-game replacement.
+Full scene/menu/terrain/panorama/pass/EX span/grid/dust integration, handoffs,
+settings/SRAM, full flow and physical original-device audio/PICA/APT/memory/speed
+remain. Desktop secondary correspondence and broader effects finishing/memory
+are open; PC `7DB600A7...` is unchanged. Evidence:
+`D:/SFE-validation/3ds-core-oct4/manifest.json`.
+
+Historical native colour checkpoint:
+
+October 4 3DS colour operations: native integer disk/global colour coverage now
+blends through a winning-source stencil per eye, preserving true stereo model
+geometry, excluded OBJ, protected host UI/window black and the separate lower
+HUD. Mixed PPU groups use one cached A8 provenance sidecar, not duplicated RGBA
+layers; masks survive palette-only fades and count toward the padded texture
+budget. Add/subtract/half terms and circle-before-global ordering are retained.
+Six host suites, four root suites (Original/EX 20,498 / 28,124 checks) and strict
+actual-SDK syntax pass. CI `37179931495` links both ARM diagnostics and passes
+107,474 PICA, 175 geometry and 5,945,439 PPU/window/colour checks. Shader is now
+440 bytes; downloaded native and independent host versions match. No playable
+port yet: physical stencil/alpha/depth and RGBA8-vs-source-five-bit rounding,
+whole-flow effect placement, terrain/panorama/full pass policy, EX spans/grid/
+dust, actual pre-game renderer and native core/asset/settings/save/NDSP entry
+remain. PC `7DB600A7...` is unchanged; desktop GPU image/performance acceptance
+is not renewed. Rendering secondary correspondence, broader finishing/memory
+and the full goal remain open. Evidence:
+`D:/SFE-validation/3ds-colour-math-oct4/manifest.json`.
+
+Historical source-window checkpoint:
+
+October 4 3DS source masks: authored/full-LCD black wipes now use native ordered
+mask geometry, all four source window logic modes and fractional horizontal
+shutters. Geometry is cached across eye/slider reads and generated from row
+boundaries rather than a full bitmap. Source effect clips use actual rotated
+Citro3D scissors per draw; sprites retain both-eye geometry and particles accept
+supported source windows. The separate cockpit HUD resets scissor state.
+Six host suites, strict actual-SDK syntax and four root model/resource suites
+pass. Original/EX fixtures pass 19,058 / 26,684 checks. CI `37178943012` links
+the actual ARM diagnostics and passes 4,888,640 PPU/window, 103,749 PICA and
+175 source checks. There is still no playable port: circle/colour-math/death
+effects, terrain/panorama/full pass policy, EX spans/grid/dust, actual pre-game
+renderer and native core/asset/settings/save/NDSP entry remain, followed by
+full flow and original-device acceptance. PC `7DB600A7...` stays unchanged;
+desktop GPU image/performance acceptance is not renewed. Effects secondary
+correspondence, broader finishing/memory and the full goal remain active.
+Evidence: `D:/SFE-validation/3ds-window-clipping-oct4/manifest.json`.
+
+Historical PPU-composition checkpoint:
+
+October 4 3DS PPU bridge: cached source artwork and an ordered composite now
+surround native cartridge geometry without flattening it. Palette/brightness/
+BG2 subtraction reuse decoded ink and preserve coverage, priorities and the
+gameplay HUD split. Both eyes share raster resources; incompatible frame plans
+or combined resource budgets fail explicitly. Six standalone Windows suites
+pass, and CI `37178249886` passes 111,391 PPU/cache/order plus the existing PICA/
+source contracts on Linux. Both ARM diagnostic executables link; the GPU one
+actually uses the new PPU layer. Original/EX model/resource fixtures pass
+19,057 / 26,683 checks. This is not the final game compositor or playable port:
+terrain depth/panorama placement, full pass policy, EX spans, window/colour-math/
+effect masks, grid/dust, actual host-menu rendering and native entry/asset/
+settings/save/NDSP handoffs remain, followed by full flow and original-hardware
+acceptance. PC `7DB600A7...` is unchanged; desktop GPU image/performance acceptance
+is not renewed. Effects secondary correspondence, broader finishing/memory and
+the full goal remain active. Exact evidence:
+`D:/SFE-validation/3ds-ppu-composition-oct4/manifest.json`.
+All 11 rebuilt root regression suites pass, including Original/EX simulation,
+ending/hit-list checks and PPU/model resources; rebuilt regional-title checks
+also pass for both cartridges.
+
+Historical source-geometry checkpoint:
+
+October 4 3DS source bridge: shared source geometry now feeds native polygons,
+lines, textured sprites, two-ink LCD parity, source shadows/text and particles.
+Original/EX cartridge model-stream fixtures pass (17,137 / 24,763 checks), with
+source/audio state unchanged by slider reads; catalogue conversion covers
+2,697 / 3,511 models. Five standalone host suites and targeted desktop source-
+pose/effects/DisplayXR/material regressions pass. CI `37177415491` cross-compiles
+the GameModels/interpolation ARM object check and links the asset-free native
+diagnostics; PICA/source contracts pass and the native/host 428-byte shaders
+match. This is not a linked console game: the complete background/PPU/EX span/
+window compositor and native session/asset/settings/save/NDSP handoffs remain,
+as do full flow and original-hardware graphics/audio/performance acceptance.
+No silent fallback for unsupported span/window effects. The PC EXE remains
+`7DB600A7...`; broader desktop image/performance matrices are not renewed.
+Effects secondary correspondence, wider finishing/memory and the full goal
+remain open. Exact evidence: `D:/SFE-validation/3ds-source-geometry-oct4`.
+
+Historical diagnostic checkpoint:
+
+October 3/4 3DS native checkpoint: selected asset-free LCD/NDSP and PICA200
+diagnostics now genuinely cross-build/link and produce ARM ELF32 / `.3dsx`
+packages with pinned official devkitPro/GCC 16.1.0. Current CI `37174998251`
+and all four standalone Windows host suites pass, including 103,749 PICA
+texture/projection/pass checks. The native/host 312-byte shader hashes match.
+This removes the earlier SDK cross-build blocker without recreating WSL; it
+does not establish console graphics/audio/DMA, original-device speed or a
+playable port. Cartridge primitive/background/overlay conversion, native
+game-entry/asset/settings/NDSP handoffs and full-flow/hardware acceptance remain.
+PC `7DB600A7...` is unchanged; effects secondary correspondence and the full
+effects/3DS goal remain active. See `platform/3ds/README.md`, the current
+acceptance index and `D:/SFE-validation/3ds-pica-oct3` for exact scope.
+
+October 3 current PC is `7DB600A7...`: ReShade/DLSS5 control integration is
+removed, and process-local layer suppression happens before SDL/DLSS/DisplayXR
+discovery. Eight Original/EX D3D12/Vulkan cases with both initial renderers pass
+32 live renderer switches and 40 clean-runtime checks; no legacy module loads.
+The system installation is untouched. Seven app-side config/log leftovers were
+deleted only after protected-hash checks passed; pregame settings are unchanged.
+All four embedded K and M modes pass (64 evaluations/endings); DLSS OFF
+preserves ordinary D3D12/Vulkan. Ten rebuilt CPU/HUD/source tests pass, including
+both cartridge simulations, state substrate and HUD archive round-trips; the
+full EX state matrix is not renewed (an old checker was stopped as stale).
+The 3DS source HUD
+bridge is now host-verified, but game-owner/PICA/audio/hardware work remains.
+SBS optimization is stopped and inline pose transport is experimental/off.
+This checkpoint does not renew broad rendering/preview/SR acceptance or complete
+the effects/3DS goal. See `D:/SFE-validation/no-reshade-oct3/manifest.json` and
+`D:/SFE-validation/no-reshade-dlss-oct3` for current scope.
+
+Historical accepted PC is `B46552B6...`. Immutable SBS ray triangle/material
+connectivity now shares GPU uploads within each matching source/pair, with
+bounded storage and ordinary full-quality fallback. Eye geometry, materials,
+acceleration structures and results stay separate. Both native GPU APIs, 70
+same-binary SBS images, 50 prior-checkpoint comparisons, nine CPU suites and
+2,697 source models pass. Android syntax, DLSS K/M/K, 29 menu/loading cases and
+SR guards/36 mono images pass. All owned checks ended; seven protected hashes
+unchanged. Matched 180-pair traffic falls 2.59% in bytes and 4.00% in copies;
+loaded timing is effectively unchanged, not sustained speed acceptance.
+Physical Leia/Android, secondary motion, finishing/memory, performance and
+packaging remain open; goal active, Ally deferred. See the newest renderer report.
+
+Preceding development PC is `ED4F4DA0...`. Ordinary SBS ray connectivity borrows
+pair-owned CPU packets; eye geometry/material expansion/results remain separate.
+Both ray/stereo/MSAA APIs, 50 exact SBS images, nine CPU suites, all 2,697 source
+topologies, Android syntax, SR guards/36 mono images, K/M/K and 29 menu/loading
+cases pass. All owned checks ended; seven protected hashes unchanged this turn.
+Loaded timing drifts, not sustained speed acceptance. Physical Leia/Android,
+secondary motion, finishing/memory, performance and packaging remain open;
+full goal active, Ally deferred. See the newest renderer report for exact scope.
+
+Preceding development PC is `D31672B3...`. Exact immutable ordinary SBS face
+inputs are shared per material state, on CPU and GPU; per-eye derived work and
+mutable effects are not shared. Both APIs' native stereo/MSAA and 60 exact SBS
+images pass, alongside nine CPU suites, all 2,697 source-model face packets,
+Android syntax, SR guards/36 unavailable-SR images, embedded K/M/K and 29 menu/
+loading cases. Matched workloads show 33.09% fewer upload bytes and 22.45% fewer
+copies; loaded quiet timing drifts, not sustained FPS acceptance. Owned checks
+ended; six release/settings/injector-config/APK hashes match. An initial native
+checker changed ReShade's diagnostic log; clean native reruns pass and
+the exception is recorded in the renderer report. Broad prior SDK/TAA/clipping matrices historical,
+small-model stage OFF. Physical Leia/Android, secondary motion, finishing/
+memory, SBS speed and packaging stay open; Ally deferred, full goal active.
+Exact artifacts and scope are in the renderer report.
+
+Preceding development PC is `369F87E1...`; native owner checker `8161D814...`.
+Clipping/span creation is independently lazy, with actual job-count and exact
+queued-output checks passing on both GPU APIs. Complete clipping, span-clear,
+colour-tracer and stereo/MSAA suites, plus eight rebuilt CPU suites, pass.
+Intel first-use fixtures and Android ARM64/API 26 clipping syntax pass. Current
+default SBS images match the preceding checkpoint exactly (30/API); SR guards/
+36 unavailable-SR images and mono K/M/K (96 evaluations/24 held uses/120 endings)
+pass. All 29 Preview-OFF menu cases and visually inspected RENDERING/loading
+pass; owned checks ended, seven protected hashes match. No sustained FPS claim. Small-model
+stage OFF; broad earlier SDK/TAA/timing checks historical.
+Physical Leia/Android, secondary motion, broader finishing/memory, SBS speed and
+packaging remain open; Ally deferred, full goal active. See the renderer report.
+
+Preceding development PC is `BC192777...`; native owner checker `7268D388...`.
+Projection initialization no longer prepares five unrelated shader stages.
+Both APIs pass exact lazy-creation/queued-output checks and full projection/
+stereo suites. Eight rebuilt CPU suites and ARM64/API 26 Android syntax
+compilation of GPU projection pass. The shipped path passes 30 exact prior-
+checkpoint full images per API, SR ownership/factory guards and 36 unavailable-
+SR images. Mono K/M/K passes 96 evaluations/24 held uses/120 endings; all 29
+Preview-OFF menu cases and the visually inspected RENDERING/loading capture
+pass. All owned checks ended; seven protected artifact hashes match.
+Both loaded ABBA profiles complete, with
+mixed CPU/frame timing, not sustained FPS acceptance. Executing-thread clocks exclude other
+workers and are OS-quantized. Small-model stage OFF; prior full SDK/TAA matrices
+historical. Physical Leia/Android, secondary motion, broader finishing/memory,
+SBS speed and packaging stay open; Ally deferred, full goal active.
+
+Preceding development PC is `42F277D0...`; native owner checker `5F539C90...`.
+Exact-byte model reuse is enabled per GpuScene recording and no longer loses
+all owned-buffer reuse when stereo source slots are borrowed. Both APIs pass
+144 new independent Software images, complete stereo/MSAA components and
+50 exact full stereo/mono images each. Ordinary draws avoid 1,832,120 bytes
+and 6,844 copies per API in these captures. Six CPU suites, real SR guards,
+36 unavailable-SR images, mono K/M/K and all 29 plain-menu/loading cases pass.
+Loaded ABBA diagnostics complete with reproducible 12.2555% less upload data,
+but mixed/drifting timing, not isolated FPS acceptance.
+Small-model stage OFF; prior full native owner matrices remain historical.
+Physical Leia/Android, secondary motion, broader finishing/peak-memory,
+sustained SBS speed and packaging stay open; Ally deferred, full goal active.
+Protected release/settings/injector/APK hashes and other projects unchanged.
+
+Preceding development PC is `3F01732C...`; native owner checker `4E01AC00...`.
+The bounded small-model stage stays OFF by default. Both APIs pass 294 new
+component cases and 768 real-model SoftwareRenderer comparisons each, plus
+six CPU suites and renewed SR ownership/factory guards. Full-SBS parity passes
+30 exact paired images per API; 36 default SR images, actual mono SDK K/M/K
+and all 29 plain-menu/loading cases also pass. Loaded cost evidence is mixed,
+so there is no default/FPS rollout. Broad prior native owner matrices
+are not renewed by this relink. Physical Leia/Android, true secondary motion,
+broader finishing/peak-memory, sustained SBS speed and packaging stay open;
+Ally deferred, full goal active. Newest renderer report has exact scope/hashes.
+
+Preceding development PC is `ADC89620...`; native owner checker `C41C23E7...`.
+Direct SR Platform compatibility is integrated alongside DisplayXR; owned
+weave and real missing-runtime/re-arm checks pass. Six CPU suites, 36 exact
+unavailable-SR images, 29 plain-menu/loading cases, embedded mono K/M/K and
+216 native TAA liquid post-order cases pass. The genuine K/M SDK post-order
+matrix completed 216 cases and eight summaries, with a post-evaluation
+identity-copy diagnostic rather than private neural-quality acceptance.
+The SBS host trace points to command encoding more than vertex packing in
+the selected scene. A bounded one-pass small-model experiment remains
+source-only/unaccepted at that checkpoint. Physical Leia/Android, true secondary motion, broader
+finishing/peak-memory, sustained SBS speed and packaging remain open. Full
+goal active, Ally deferred; exact evidence is in the newest renderer report.
+
+Historical development PC `8D6D2226...`. Full-panel liquid classification,
+normals and depth now precede native SDK post styles/depth effects. Compensated
+GPU plane arithmetic fixes near-horizon float rounding without retracing,
+readback, shaderFloat64 or relaxed tolerances. D3D12/Vulkan independently pass
+96 distinct geometric cases and the source liquid/style/AO/DOF components;
+CPU, ray-history components, 112 SDK ray and 152 legacy SDK cases, mono K/M/K,
+all 23 plain-menu/loading cases and 30 selected SBS images pass. Native SDK
+original owner/liquid/full-HD, all 72 SDK sample-alignment and 296 legacy TAA
+cases pass. All owned checks ended; all seven protected hashes match.
+The first analytic implementation passed all original
+SDK owner groups, new liquid finishing, full-HD and sample-alignment cases.
+Previous DCDF acceptance and C5FADDAD's 128 SDK pattern cases are historical,
+not newest-binary acceptance. Native TAA centre-liquid integration, true
+secondary motion, broader finishing/peak-memory, physical Leia/Android,
+sustained SBS speed and packaging remain open, Ally deferred, goal active.
+ADB sees no device. Latest renderer report has exact artifacts and scope.
+
+Previous PC `DCDF4F36...` adds local consumed-ray and accepted dry-footprint
+eligibility, not invented secondary motion. CPU, both APIs' TAA history,
+112 genuine SDK ray cases, 152 existing SDK component cases, 72 owner ray and
+16 full-HD cases pass. Its owner/legacy TAA/SBS/mono/menu renewal completed.
+Physical Leia/Android, true secondary/liquid correspondence, broader
+finishing/peak-memory, SBS speed and packaging remain open, goal active, Ally
+deferred. Release/settings/injector/APKs stayed unchanged, protected hashes matched;
+other projects untouched. Newest renderer report records exact scope.
+
+Previous PC `8FCE5087...` advances SDK outlines, ray/raster sample alignment and
+retained-image memory retirement. CPU, real native imports, both APIs' history/
+meter, SDK ray/full-HD/legacy and mono/menu/loading pass; both APIs' SBS renewal
+passes 80 exact images. All owned checks ended; seven protected hashes match.
+The preceding broad SDK/TAA matrices pass on `306E7681...`.
+Physical Leia/Android, wider finishing/secondary/liquid/peak-memory and sustained
+SBS speed remain open, full goal active, Ally deferred. No release/settings/
+injector/APK or other-project change. See the newest renderer report for scope.
+
+Previous PC `6FFEDA43...` reconstructs native K/M SDK radiance before complex
+styles/selected finishing on the actual panel grid, with genuine source AA and
+independent HUD/ownership. Static complex/global clocks no longer refresh a
+frozen source, and rejected trails/exposure preserve accepted history. Expanded
+D3D12/Vulkan TAA passes 816 full-image/temporal cases; all eight old owner routes
+(296), CPU runtime (5,999), mono K/M/K (96/24/120) and all plain-menu/loading
+checks pass. Real full-panel SDK verification passes 1,904 cases across four
+formats, all K/M qualities plus source FXAA/SSAA/MSAA; all four original SDK
+quality/ray/liquid/palette/held/failure/retirement matrices also pass, recorded
+in `sdk-post-accepted-history-oct3/results.json`. All owned checks ended and
+all seven protected hashes match. Wider finishing/edge/
+secondary/liquid, physical Leia/Android and sustained SBS speed remain open,
+Ally deferred, FULL goal active. No release/install/preferences/injector/APK or
+speed/default change; other projects untouched. Newest report has exact scope.
+
+Previous development PC `90224D33...` adds native TAA reconstruction BEFORE
+multi-source/coordinate/animated styles and selected finishing, using unwarped
+geometric history and independent centre ownership rather than inventing post
+motion. Both APIs pass 744 new full-image CPU-effects owner cases and eight
+existing raw/edge/pattern/local-layer routes, all qualities and four formats;
+held/rejected/wait/retirement and exact protected ink pass. CPU runtime tests,
+mono K/M/K (96/24/120), 23 plain-menu/loading cases and helper parsing pass.
+All owned checks ended; protected hashes match. SDK order/guards are unchanged;
+native SDK effects, secondary/liquid correspondence, static complex-style
+clocks, broader finishing, physical Leia/Android and sustained SBS speed remain
+open, Ally deferred, FULL goal active. No release/install/preferences/injector/
+APK change or speed/default acceptance; other projects untouched. Exact scope,
+hashes, early failed fixtures and evidence are in the newest renderer report.
+
+Previous development PC `ABA7D0C1...` adds immutable paired billboard texture
+uploads, keeping eye geometry/depth/palette/output/history separate. All three
+actual GPU/API routes pass independent 128-image sprite/queued and full stereo/
+MSAA/ownership suites; both NVIDIA model/queued suites and runtime-input pass.
+App integration passes 22 cases/66 exact images, actual shared uploads, joined/
+parallel/MSAA/rays/reflections and failed-eye recovery. Asteroids source copies
+fall 48 -> 3 on all routes, with no image change. Final DLSS K/M/K (96/24/120),
+all 23 plain-menu cases plus RENDERING/loading, nine shader helpers and script
+parsing pass. All owned checks end and protected hashes match. Diagnostic PC
+`B0CD7F7A...` completes 144 broader exact SBS comparisons and all 48 loaded
+GPU-cost runs; mixed Intel results keep cooperative writing opt-in. No sustained
+FPS/default acceptance, quiet-host retry, release/install or settings change.
+Physical Leia/Android, broader correspondence and SBS speed remain open,
+Ally deferred and full goal active. Exact scope is in the newest renderer report.
+
+Previous development PC `03061908...` adds opt-in cooperative row writing,
+not a new default. Three executed adapter/API routes pass exact reused-buffer/
+style/mask oracles, real-host 65,535-group boundary cases and independent CPU
+clip/span oracles. Both NVIDIA APIs' model/stereo/MSAA/lifetime suites pass;
+both full-game matrices pass 160 exact SBS comparisons. Shader/source and
+runtime-input helpers pass. Six loaded Corneria 1x cost traces show lower span
+intervals on all three routes, not sustained FPS or portable-default acceptance.
+Broader workload coverage is next. Normal mono DLSS K/M/K (96/24/120), all 23
+plain-menu cases plus RENDERING/loading pass; all owned checks ended and
+protected release/settings/injector/APK hashes match. No speed/quality acceptance,
+other-job intervention, saved-setting or release/device change. Physical
+Leia/Android, broader effects correspondence and sustained SBS speed remain
+open, Ally deferred and full goal active. Android candidate unchanged, ADB empty.
+See the newest renderer report for precise hashes, evidence and runner mistakes.
+
+Previous development PC `5B03564C...` adds an opt-in colour-only span tracer,
+skipping unused UV work for flat polygons, not changing geometric/texture paths.
+Three executed adapter/API routes pass 384 exact paired reused-buffer/style/
+MSAA cases each and independent CPU clipping/span oracles. Both NVIDIA APIs'
+model/stereo/lifetime suites, runtime-input and shader checks pass. Both full-game
+matrices pass 160 exact SBS comparisons. Mono DLSS K/M/K, all 23 plain-menu cases
+and RENDERING/loading pass; all owned checks ended and protected hashes match.
+Loaded colour-path traces are mixed, so no performance/default acceptance or device/release change.
+Previous interior clipping remains opt-in after inconclusive loaded GPU traces.
+Other jobs untouched; physical Leia/Android, broader correspondence and sustained
+SBS speed remain open, Ally deferred, full goal active. See the newest report.
+
+Previous development PC `6D11265F...` adds an experimental exact-interior output
+shortcut, not a new rendering default. NVIDIA D3D12/Vulkan and Intel Vulkan
+independent/reference clip/span oracles pass, as do both NVIDIA APIs' model,
+stereo ownership and MSAA fixtures. Corrected D3D12/Vulkan app checks pass 160
+exact SBS comparisons. Mono DLSS K/M/K passes 96 evaluations / 24 retained uses;
+all 23 plain-menu cases plus RENDERING/loading pass. All owned checks ended.
+The discarded menu-control test combined incompatible entry fixtures and
+failed before rendering. Other jobs remain untouched, no isolated/sustained
+FPS acceptance, quality cut, release/install or saved-setting change. Android
+candidate `5EA2FFB4...` is unchanged; physical Leia/Android, wider transport and
+SBS speed remain open, Ally deferred, full goal active. See the newest report.
+
+Android test candidate `5EA2FFB4...` now packages the EGL/Vulkan handoff fix;
+actual ordinary-app Gradle, native feature/payload checks and signature validation
+pass separately from the unchanged existing APK. Physical close/relaunch is
+still unverified, ADB empty. Unchanged PC `E98BF0AD...` also completes two short
+NVIDIA D3D12/Vulkan GPU-cost traces; clipping/span/background work remains a
+performance target, not an accepted FPS gain. Other jobs stay untouched; no
+isolated timing retry. No device install/release/settings change. Physical Leia,
+wider correspondence and sustained SBS speed stay open, Ally deferred, full
+goal active; exact paths/hashes/evidence are in the newest renderer report.
+
+Android-only transition fix: a retained GLES/EGL window is destroyed before
+Vulkan GPU opt-in claims its replacement. Optimized arm64 native build
+`6E066C86...` and host ordering/fullscreen/failure/recovery tests pass. Actual
+Android exit/relaunch remains unverified, ADB empty; ordinary APK `5E96D652...`
+is unchanged and does NOT include this native-only rebuild. PC `E98BF0AD...`
+and release/settings/injector files are unchanged; earlier graphics evidence
+is not renewed here. Other builds stay running, no timing claims. Physical
+Leia, wider transport and sustained SBS speed remain open, Ally deferred,
+full goal active. Exact scope and hashes are in the newest renderer report.
+
+Current PC `E98BF0AD...` shares immutable ordinary-stereo model GPU uploads,
+including repeated instances, while keeping camera/material/output work per eye.
+Mutable/specialized/empty paths stay full-quality; payload/handle caps fall back
+to normal uploads. Both APIs' full stereo/ray fixtures and 13 CPU suites pass,
+plus 80 exact graphics-checkpoint and 50 renewed final-build SBS comparisons.
+Mono K/M/K and all 23 plain-menu cases plus RENDERING/loading pass. Native
+calibrated correspondence matrices are not renewed. All owned checks ended;
+other builds stay running, no isolated/sustained FPS claim. Physical Leia/
+Android, wider transport and SBS speed remain open, ADB empty, Ally deferred,
+goal active; release/settings/injector/APK unchanged. See the newest renderer
+report for exact hashes, source lifetime, memory bounds and evidence.
+
+Previous PC `F2B5FC6E...` adds actual pre-style edge/grid witnesses to native TAA
+for 13 drawn styles. Compatible history remains usable, changed edges retain
+exact centre artwork, and untracked mixed passes still guard their layer.
+Optional bounded per-eye/centre MRT atlases add no production pass/readback/
+submit/wait; ordinary rendering and SDK upscaling do not request them. Both APIs'
+components and 216 native owner cases pass four formats/all qualities, plus full
+compositors, legacy liquid/pattern TAA, 13 CPU suites, nine shader tests, mono
+K/M/K and all 23 plain-menu cases plus RENDERING/loading. Native SDK correspondence
+is not renewed. All owned checks ended; other builds stay running, no isolated
+FPS claim. Physical Leia/Android, wider transport and SBS speed remain open,
+Ally deferred, ADB empty, goal active; release/settings/injector/APK unchanged.
+See the newest renderer report for exact hashes and acceptance boundaries.
+
+Previous PC `523EEB2D...` also removes repeated ordinary-stereo animation-frame
+coordinate/visibility packing. Immutable source views stay pair-scoped; eye
+transforms, GPU uploads and outputs remain independent, mutation materializes
+first and common 8 MiB payload overflow keeps full-quality packing. Both APIs'
+shared/duplicate component routes, 13 selected CPU suites, 6,208 cartridge models /
+9,378 frames and 200 exact D3D12/Vulkan app images pass. Mono K/M/K passes 96
+evaluations, 24 held uses and 120 once-only frame ends without SDK warnings.
+All 23 plain-menu cases plus RENDERING/loading pass with no hidden Preview-OFF
+scene/effect/SDK work and both models' Software-to-D3D12 transitions. No new GPU image/pass/
+readback/submit/wait; native owner matrices are not renewed. All owned checks
+ended; other builds stay running, no isolated/sustained FPS claim. Physical
+Leia/Android, wider correspondence and SBS speed remain open, ADB empty, Ally
+deferred, goal active; release/settings/injector/APK unchanged. See the report.
+
+Previous PC `C95CC05E...` removes repeated ordinary-stereo model-local face/BSP/
+normal preparation per eye and instance. Unique shape/explosion sources are
+immutable and pair-scoped; transforms, materials, GPU uploads and outputs remain
+independent. The checked Corneria pair prepares 8 sources instead of 42, with
+all 42 model draws retained. An 8 MiB payload budget preserves full-quality
+fallback; no new GPU image/pass/readback/submit/wait. Both APIs' shared and
+duplicated GPU stereo component routes, eleven CPU suites and 200 exact D3D12/
+Vulkan app images pass. Mono K/M/K passes 96 evaluations, 24 held uses and 120
+once-only frame ends without SDK warnings. All 23 plain-menu cases plus RENDERING/
+loading pass, with no hidden Preview-OFF scene/effect/SDK work and both models'
+Software-to-D3D12 transitions. Native owner matrices are not renewed. All owned
+checks ended; other builds remain running, no measured FPS
+claim. Physical Leia/Android, wider effects correspondence and sustained SBS
+speed stay open; Ally deferred, full goal active, release/settings/APK unchanged.
+See the newest renderer report for precise scope and evidence.
+
+Previous PC `AE3F4755...` removes duplicate ordinary-stereo fog triangle copies,
+CPU BVH builds and scene uploads. Both eyes and blur underlays borrow one source,
+while rays/projections and integral outputs stay eye-specific. Source uploads
+reduce 2 to 1, or 4 to 1 with blur; no new GPU image/readback/submission/wait.
+Both APIs' independent fog/lifetime components, 150 initial and 50 final selected
+exact app images, eleven CPU suites and embedded mono K/M/K pass. D3D12 includes
+genuinely stalled-reader donor teardown; Vulkan does not claim that extra test.
+This is workload/correctness evidence, not measured sustained FPS.
+All 23 plain-menu cases and RENDERING/loading also pass with no Preview-OFF
+scene/effect/SDK work and both models' Software-to-D3D12 transitions. Other builds
+remain running; native owner matrices are not rerun, physical Leia/Android and
+broader effects/speed remain open. Ally deferred, full goal active; release/
+preferences/injector/APK unchanged. See the newest renderer report for scope.
+
+Previous PC `491003E4...` avoids duplicate per-eye native temporal source matching:
+packet identities, key maps and primitive scans are prepared once per accepted
+history source, with independent per-eye mappings and SDK/blur lifetimes. Ten
+rebuilt CPU suites, four-format D3D12/Vulkan native TAA/blur owners, four-format
+real K/M SDK native owner, 40 selected exact ordinary app images and mono preview
+pass. No new GPU image/pass/readback; ordinary SBS is unchanged. Other builds
+remain running; no isolated/sustained speed claim. Physical Leia/Android, broader
+effects correspondence and sustained SBS performance remain open, Ally deferred,
+full goal active. See the newest renderer report for exact renewed scope.
+Release/preferences/injector/APK unchanged; no push, install or settings change.
+
+Previous PC `7A6ED2FA...` adds only a quiet one-time actual fixed-layer route marker.
+Fifty selected exact D3D12/Vulkan images, ten current-core CPU suites and embedded
+mono K/M/K pass. The guarded quiet timing batch rejects concurrent compiler work
+on run six; no partial speed result, no interruption of other builds. Rendering,
+native SDK transport and resource ownership are unchanged. Earlier broader
+matrices are not renewed by this narrow rebuild. See the newest renderer report.
+Physical Leia/Android, wider correspondence and sustained performance stay open;
+Ally deferred, full goal active; release/preferences/injector/APK unchanged.
+
+Previous PC `ABC68124...` removes duplicate ordinary-stereo fixed source producers
+without sharing eye-composed images/history or allocating additional GPU images.
+Both NVIDIA APIs pass 140 exact packed format/enhancement/recovery images and
+20 Original/EX briefing images. Ten rebuilt CPU suites, mono K/M/K and all 23
+plain-menu/loading cases pass. Eligible producer work halves; total speed is
+not measured in these correctness runs. See the newest renderer report for scope.
+Calibrated native transport is unchanged; physical Leia/Android, wider effect
+correspondence and sustained performance remain open. Other builds stay running,
+Ally deferred, full goal active; no release/push/install or Android APK change.
+
+Previous PC `258CA386...` adds resident native-SDK point-pattern rejection
+witnesses. Current AA samples and accepted previous taps are independently
+checked; descriptor/layout changes and rejected work preserve acceptance
+lifecycle. K/M real-SDK component and four-format native owner matrices, CPU
+suites, exact ordinary D3D12/Vulkan comparisons and mono preview are covered by
+the newest renderer report. The SDK formats/RGB order are unchanged; extra phase
+images are lazy, and no production CPU readback/additional pass is introduced.
+This does not close all-effects/private-SDK parity, physical Leia/Android or
+sustained performance. Other builds stay running, Ally deferred, full goal active;
+no release/push/install.
+
+Previous PC `8EB8241C...` implements phase-aware native calibrated TAA for four
+point-pattern styles, including guarded centre reconstruction. Both NVIDIA APIs/
+four formats pass independent component and actual owner oracles; ten CPU suites,
+40 ordinary app image comparisons and embedded K/M/K preview pass. No new GPU
+history image/pass/readback; SDK pattern correspondence and other untracked
+transport remain guarded. See the newest renderer report for full hashes/scope.
+This does not close all-effects, physical Leia/Android or sustained performance.
+Other builds stay running, Ally deferred, full goal active; no release/push/install.
+
+Previous PC `51EF42F1...` makes bounded independent-eye compositor/effects queue
+reuse automatic in ordinary stereo. Mono/shared-owner paths remain synchronous.
+The `C8E28DE9...` graphics checkpoint passes the 190-image full format/enhancement/
+recovery comparison; the final quiet-marker-only rebuild renews 40 selected images
+across both NVIDIA APIs, ten CPU suites and mono K/M/K preview.
+NVIDIA D3D12 and Intel D3D12/Vulkan pass retained-frame mode-change and failure/
+teardown stress. See the newest renderer report for hashes, rejected hardware
+requests and scope. The normal path avoids unconditional previous-eye waits,
+but still joins completed work and bounded queue pressure; this is not a measured
+sustained-FPS claim. Other builds stay running;
+physical Leia/Android, native correspondence and sustained performance remain
+open, Ally deferred, full goal active. No release, push or install.
+
+Previous PC `807730CC...` retains native DXGI presentation for mono DLSS and fixes
+consumed-token reuse after cancelling an SDK-evaluated command. Selected moving/
+held proxy comparisons and actual cancelled-command recovery pass for both models;
+the isolated EXE-only embedded K/M quality matrix and OFF controls pass. See the
+newest renderer report for scope/evidence. This is not sustained SBS performance
+or native/physical Leia/Android completion. Other builds stay running, queued SBS
+stays OFF by default, Ally deferred and the full goal active. Release/settings/
+ordinary APK unchanged; no push/install.
+
+Previous PC `A97EB3CB...` repairs premature fence recycling in the queued SBS
+experiment. In-flight fences stay retained with bounded queue pressure, including
+when timing is disabled. Ten CPU suites and the `12905742...` graphics checkpoint's
+84 selected exact D3D12/Vulkan app images pass, including reflective water that
+lost the Vulkan device before the fix. The final binary passes 40 additional
+water/MSAA/motion/recovery image comparisons, both retained-frame stress routes
+and embedded K/M/K preview. The guarded timing batch is rejected on run five for
+other compiler jobs; partial rows are not accepted. See the newest renderer
+report for hashes and scope. Queued reuse remains opt-in/OFF by default, not a general
+FPS fix. The previous ordinary Android APK is unchanged; physical Leia/Android,
+broader native effect correspondence and sustained performance remain open.
+Other compiler jobs remain running, Ally stays deferred and the full goal is
+active. Release/settings/ReShade unchanged; no push/install.
+
+Previous PC `D6E2BF61...` makes settings/GPU journal writes interruption-safe.
+Nine CPU suites, forced-close settings persistence and fourteen host GPU
+recovery cases pass. The ordinary Android APK builds and passes all 38-backdrop
+payload checks after separating the host DLSS ABI from optional XR math.
+Embedded K/M/K preview and 40 exact MSAA/fallback images pass; the 30 direct
+MSAA images match the preceding per-backend baseline. Graphics is unchanged from the
+preceding checkpoint; see the latest renderer-performance report for exact
+scope. ADB has no device, so Android relaunch is not accepted on hardware.
+Physical Leia, broader effect correspondence and sustained performance remain
+open; other builds stay running, Ally stays deferred and the full goal is active.
+Release/preferences/ReShade are unchanged; no push or install.
+
+Previous PC `F3066240...` closes the ordinary SBS MSAA exclusion with true
+per-eye 2/4/8 sample coverage and retained final-palette resolution. Independent
+numeric coverage/color and ownership/failure tests pass on three adapter/API
+routes; both NVIDIA APIs prove visible OFF/ON differences and exact mono
+fallback after right-eye resolve failure. Six CPU suites and ordinary embedded
+K/M/K preview pass. Automatic span clearing remains unchanged. See the newest
+renderer-performance checkpoint for hashes and precise scope. Physical
+Leia/Android, broader native effect correspondence and sustained performance
+remain open; Ally troubleshooting stays deferred and the full goal is active.
+Other compiler jobs remain running; release/settings/ReShade are unchanged.
+
+Previous PC `33103828...` selects the dedicated span/mask clearer automatically
+for large or sample-mask batches, retaining the old dispatch for small draws.
+Three adapter/API routes pass 192 recycled cases each; six CPU suites and
+160 exact D3D12/Vulkan app images pass. Both full clipping/stereo oracles and
+embedded K/M/K preview (96 evaluations / 24 held uses) pass.
+The older serial-bounds experiment remains separate and is not enabled by
+this rollout. See the newest renderer-performance checkpoint for exact hashes,
+policy, evidence and scope. Prior forced-clear timing gains are not yet a
+measurement of the new automatic threshold. Ordinary SBS MSAA remains
+unsupported; older selected-AA image captures do not prove actual activation.
+The broader goal remains active, with physical Leia/Android and remaining
+native effect correspondence/sustained performance open. Ally remains deferred.
+Release and saved configurations are unchanged.
+
+Previous PC `90488E3F...` keeps native SDK liquid/new-geometry reactivity on the
+GPU instead of resetting the entire eye. Actual retained water coverage/depth
+is gathered across every selected AA sample; valid dry motion stays distinct.
+Both models/all modes pass real SDK component and retained four-format owner
+checks, including water/lava, protected ink, held source, failure/reconnect
+retirement and frame-end bookkeeping. Ordinary SDK, all 23 menus/loading, four
+CPU suites and four off/incompatible/no-panel/backend-fallback cases pass.
+See the newest stereo checkpoint for exact scope. Fluid/world/post/secondary
+parity, physical Leia, sustained SBS performance and Android relaunch remain
+open. Release/settings and the separate mono shutdown warning are unchanged;
+the full goal remains active and Ally troubleshooting remains user-deferred.
+
+Previous PC `BFBBF140...` adds the previously missing native SDK frame-end hook
+pair after the complete OpenXR eye/producer work drains. Real SDK/component,
+four-format/cartridge/desktop owners, 875 exact-once cleanups and four injected
+cleanup retries pass without SDK errors/warnings. Retries retain accepted images
+and never reevaluate or collect in-flight work. Ordinary SDK/plain-menu/CPU/
+no-panel checks pass; the newest stereo checkpoint records exact scope/hashes.
+This does not finish native liquid/secondary parity, physical Leia, sustained
+SBS performance or Android device relaunch. The mono shutdown warning remains;
+release/settings unchanged and the full goal remains active.
+
+Previous PC `233633B5...` wires actual native D3D12 DLSS/DLSS 4.5 into retained
+calibrated eye ownership and PC settings, with real lower SDK input rasters and
+exact full-panel ink. Cartridge/four-format owner checks cover both models,
+all modes, AA/rays/effects, moving/frozen source, later-eye cancellation/reset
+and SDK desktop reconnect. Process-monotonic tokens fix duplicated constants
+after owner replacement. Current FSR/ordinary SDK/plain-menu/CPU/fallback checks
+pass; exact scope is in STEREO-DISPLAY-UPGRADE.md. This is not sustained speed,
+physical Leia, liquid/secondary parity or Android actual-device relaunch proof.
+The mono SDK shutdown warning and full-goal gaps remain. Release/settings are
+unchanged.
+
+Previous PC `0C99E5AC...` adds Crossview and the fork's single-player Deck priority.
+CPU, actual D3D12/Vulkan stereo/fallback and native motion checks pass. Native
+raster line motion now uses accepted source endpoints while preserving its
+original coverage. No broad speed or physical-panel claim is added. The newest
+stereo checkpoint records scope; remaining native/physical/performance work is
+not complete. Release and settings remain unchanged.
+
+Previous PC `286B78B1...` implements genuine lower-resolution per-eye native
+FSR1, with full-panel protected ink and overlays. Four-format D3D12/Vulkan
+components/owners, six CPU suites, SDK/menu/loading and ordinary SBS/fallback
+checks pass with unchanged release/settings. This adds filtering and ink passes;
+no broad speed gain or physical/high-resolution acceptance is claimed. Native
+DLSS, liquid parity, actual-device relaunch and sustained GPU/SBS performance
+remain open. Exact scope is in the newest stereo checkpoint.
+
+Previous PC `14E7AD30...` preserves dry native TAA correspondence with water on,
+using per-pixel rejection from the existing GPU liquid buffer. D3D12/Vulkan
+component and retained-owner correctness checks pass; no speed gain is claimed.
+See the latest STEREO-DISPLAY-UPGRADE.md section for exact evidence and remaining
+native/physical-device gaps. Older checkpoints below retain their own hashes.
+Current SDK/menu and ordinary D3D12/Vulkan SBS/fallback checks also pass, with
+unchanged release and saved preferences. No broad speed claim is added.
+
+## October 2 — backend-qualified physical ground resolve
+
+Current PC `6263A372...` resolves enhanced physical ground rays in the same
+SDL environment pass on D3D12. Missing rays and protected pixels keep the old
+semantics; no new readback, upload, submit or fence is added. Vulkan keeps the
+prior separate resolve after mixed timing results. Both current components
+pass 45 exact cases; three rebuilt CPU suites and shader freshness pass.
+Current K/M/K SDK switching passes 96 evaluations / 24 retained previews;
+all 23 Preview-OFF cases and RENDERING loading pass with unchanged preferences.
+The renderer performance report records all 36 paired runs on their original
+F470E68E hash: about 2.5% less D3D12 Corneria median work, not a general SBS lag
+fix. Final D3D12/Vulkan SBS captures and injected mono fallbacks match exactly;
+three actual 120-pair default-policy probes pass without force overrides.
+Remaining native
+enhancement parity, sustained performance, physical Leia and Android-device
+relaunch acceptance stay open. Release is unchanged; Ally is user-deferred.
+Earlier checkpoints retain their own hashes and evidence.
+
+## October 2 — native RT-OFF water and Auto ramp
+
+Current PC `925102D7...` adds GPU world-space water wave shading and fixes native
+Auto water's excluded palette class. Endpoints remain live, clock-independent
+metadata; ray-replaced floors skip disposable decorative waves. No extra
+submits/readbacks or CPU wave rendering is introduced. Both four-format
+D3D12/Vulkan components, cartridge-backed Original/EX frames and retained
+game owners pass, including RT-OFF animation/retry and existing optical,
+AA, protected-opacity and real-queue lifecycle references. Two rebuilt CPU
+suites and shader freshness pass; exact logs/hashes are in the newest stereo
+checkpoint. Current SDK K/M/K passes 96 evaluations / 24 retained previews;
+all 23 Preview-OFF cases and the RENDERING loading gate pass with unchanged
+preferences. This is not geometric displacement, liquid correspondence,
+RT-OFF optical transport, native upscaler parity or broad FPS acceptance.
+Previous Intel/NVIDIA timings and unchanged experimental defaults still have
+their separate executable scope. Release/preferences are unchanged; physical
+Leia/Android remain open, and Ally troubleshooting remains user-deferred.
+
+## October 2 — measured GPU intervals and native queue submission
+
+Current PC `49C2FA30...` adds optional bounded Vulkan scene/host-submit timings,
+with no new normal rendering waits/readbacks or default policy change. Exact
+fence retirement, cancellation and empty-scene timestamp closure are verified
+by current NVIDIA/Intel Vulkan joined/parallel ownership and independent-image
+fixtures; there are no final query drops/errors. Current SDK K/M/K passes 96
+evaluations / 24 retained previews; three rebuilt selected CPU suites pass.
+All 23 current Preview-OFF cases and the RENDERING loading gate pass with
+unchanged preferences; exact logs are in the performance checkpoint.
+
+Preceding `0A78D5E1...` probes distinguish Intel Vulkan's roughly 33-ms host
+`vkQueueSubmit` cost from its 6–7-ms main-eye GPU intervals. Command finalization
+and cleanup are tiny; joining submissions did not remove the stall. The ray-off
+material path still stalls. Actual NVIDIA Vulkan has a much smaller submission
+cost and different CPU/GPU balance. These individual instrumented observations
+are not sustained FPS, occupancy, a general speedup or evidence that all
+backends are CPU-bound. Windows AUTO already routes Intel to D3D12; the forced
+Vulkan result must not be presented as the default route. Details, raw logs,
+failed diagnostic attempts and exact hashes are in RENDERER-PERFORMANCE-OCT1.md.
+Further work should target route-specific native material/scene dispatches and
+dependencies. Full enhancement/performance and physical Leia/Android acceptance
+remain open. Release/preferences are unchanged; Ally remains user-deferred.
+
+## October 2 — ray setup reuse measured; submission cost remains open
+
+Current diagnostic PC is `630671F5...`, with checker `5E40B45F...`. The bounded
+device-specific AS size cache reuses only exact immutable driver answers;
+geometry, AS buffers and eye outputs remain private. All six ordinary default/
+opt-in-cache suites and all three 120-sample focused suites pass on actual
+NVIDIA D3D12, NVIDIA Vulkan and Intel Vulkan, including revisited counts and
+peer release/recreation. Current SDK K/M/K passes 96 evaluations / 24 retained
+previews. All 23 current Preview-OFF cases and the RENDERING loading gate pass,
+as do three rebuilt selected CPU suites and three script parsers.
+
+Both this cache and immutable PSO sharing stay OFF: each completed 24-run
+two-scene matrix has mixed medians, not a consistent speed win. Corrected AS
+timers stop before logging; earlier apparent millisecond warm queries included
+the log prefix and are rejected. Actual warm queries take microseconds; cache
+hits remove redundant first-use preparations, not the sustained bottleneck.
+Preceding `9D98BF51...` deferred profiles locate Intel's median 34.5-ms native
+stereo submission time, versus 2.5-ms encoding. These host intervals do not
+separate GPU back-pressure from driver/CPU causes. Testing submission batching
+on this enhanced/ray-traced scene is the next safe measurement, without dropping
+an eye, geometry or effects. Exact hashes, protocols and scope are in
+RENDERER-PERFORMANCE-OCT1.md. Release/preferences are unchanged; broader native
+enhancement/performance and physical Leia/Android acceptance remain open. No
+Android device is attached. Ally troubleshooting remains user-deferred.
+
+## October 2 — SBS uses the active stereo caster pair
+
+Preceding PC `16D3040D...` fixes a mono-only caster readiness check that caused
+CPU caster uploads on every frame of the sampled SBS scene. The check now
+requires complete geometry in both current stereo eyes, or the completed mono
+batch after a mono fallback. Actual Intel Vulkan and NVIDIA D3D12/Vulkan each
+pass 32 complete stereo GPU-caster frames and five exact immediate-reference
+images. Intel's repeat uses opt-in stable hit selection; NVIDIA uses ordinary
+PSOs. Injected failure after the left eye rebuilds GPU mono shadows/reflections.
+No geometry, eye, effect or precision is removed. All 24 quiet visible 2x
+old/new trials finish: sampled Intel medians improve 1.49–5.73%; NVIDIA is
+mixed (−2.08% to +1.27%), with worsened tails. Multi-second reference stalls
+are retained and cache state is not controlled. These are two-scene host-work
+distributions, not broad FPS acceptance.
+
+The experimental looped depth resolver passes expanded 120-sample checks but
+still has costly cold CPU/memory use and worsened sampled median frame work;
+it stays OFF. Identity diagnostics do not prove duplicate driver compilation,
+and no shared pipeline cache was added at that checkpoint. Exact hashes, earlier checkpoints and
+measurement limits are in RENDERER-PERFORMANCE-OCT1.md. Release/preferences
+remain untouched; native Linux, physical Leia/Android and broad performance
+acceptance remain open. Ally troubleshooting remains user-deferred.
+Current DLSS K/M/K (96 evaluations / 24 reused previews), all 23 Preview-OFF
+cases, RENDERING loading, three actual-adapter ordinary ray suites and expanded
+120-sample focused suites also pass. Forced mono fallback matches all five
+immediate-reference images. This does not close hardware/whole-goal gates.
+
+## October 2 — sampled Intel stability passes; cost gate remains open
+
+Preceding diagnostic `9F7AD791...` inlines only the experimental portable depth
+helpers. All 88 focused samples pass on each of actual Intel Vulkan and both
+NVIDIA backends. Two isolated sequential Intel 2x/full-SBS reflected-water
+runs now match all 224 input records, 64 native output hashes, dumped raw
+buffers and five captures. Geometry precision, bounds and returned native
+depth stay unchanged. This is one sampled scene, not all-scene acceptance.
+
+The ordinary PSOs still exclude this resolver; stable hits stay OFF by
+default. The first live process has substantial post-capture CPU/memory
+cost. A smaller vector-ABI attempt fails DXIL validation and is discarded.
+All 24 quiet visible 2x OFF/ON timings finish: median-of-trial work changes
+−0.28% to +4.29% across the two sampled scenes and two adapter/backend pairs;
+some tails worsen. These are host-work distributions, not displayed FPS or
+all-scene acceptance. The ordinary Intel path also has a cold/post-render
+cost, so that concern is not attributed solely to the new resolver.
+Current ordinary NVIDIA D3D12/Vulkan each pass five exact full-SBS water
+captures against the preserved baseline, and ordinary ray component suites
+pass on all three actual adapters. Two selected CPU suites and script parser
+checks pass. Historical SDK/menu evidence stays tied to its earlier hash.
+Release and settings remain untouched. Full enhancement/device/performance
+scope is open, and Ally work stays user-deferred. Exact hashes and scope are
+in RENDERER-PERFORMANCE-OCT1.md.
+
+## October 2 — hit refinement stays experimental after Intel failures
+
+Checkpoint PC `2628AD56...` isolates proposed tie refinement in five separate,
+lazy-created experimental ray PSOs. Ordinary shader binaries do not contain
+the extra query or binary64 depth arithmetic, and the experiment stays OFF.
+A broad returned-depth tie resolver produced an exact Intel water repeat but
+failed the one-ULP displaced-plane regression. An identical-vertices-only
+resolver passed component checks yet left 22/64 live output hashes different.
+The precise-depth version compiles and passes 88 focused samples on each
+NVIDIA backend, but fails Intel's first identical-face sample and live capture.
+No failing result is accepted as a tolerance, fallback or completed fix.
+
+Current ordinary NVIDIA D3D12/Vulkan each pass five exact full-SBS water
+captures against the preserved baseline; arithmetic/stereo CPU checks and
+ordinary ray component suites on all three actual adapter/backend pairs pass.
+The performance report records hashes, all failed controls, focused test
+scope and the separately logged ordinary component runs. No new quiet ray-hit
+timing claim is made; previous timings remain tied to CB42012F. Release and
+preferences stay unchanged. Sustained GPU/SBS performance, enhancement parity
+and physical Leia/Android acceptance remain open; Ally troubleshooting remains
+user-deferred.
+
+## October 2 — Intel ray-output diagnostics; no quality/default change
+
+The preceding diagnostic `7A4F0366...` adds opt-in input/output snapshots and raw hit
+diagnostics. Identical CPU and resident input fingerprints accompany different
+native ray output before SDL import/composition. First-eye/second-eye raw input
+bytes also match. Primary triangle IDs vary on overlapping faces, while the
+distance-mode repeat is exact; some normal-X output hashes vary too. This
+narrows the live gate but does not explain every water pixel. A canonical
+normal experiment still fails the repeat and remains OFF. No tolerance,
+geometry precision, intersection bound or production readback policy changes.
+The unchanged default passes five exact full-SBS reflected-water captures on
+each NVIDIA backend, all three actual-adapter ray component checks and two
+selected CPU suites. Those component references do not close the live gate.
+
+The performance report records all intermediate diagnostic hashes, raw files
+and failed controls. Its 72 hidden plus 72 visible quiet comparisons measure
+the preceding CB42012F arithmetic executable, not this diagnostic. The release
+and preferences remain unchanged. Full enhancement/device/performance scope
+remains open; Ally troubleshooting stays deferred.
+
+## October 2 — fixed-limb binary64 arithmetic, with a live reflection gate
+
+Current diagnostic `CB42012F...` removes variable product/extraction loops
+from the shared multiplier using exact 32-bit limb arithmetic. Precision,
+rounding, projection, clipping and shader ABI are unchanged. Host bit oracles,
+actual NVIDIA D3D12/Vulkan and Intel Vulkan arithmetic comparisons, independent
+stereo/queued/guide references, native ray geometry and 32 Original plus 32 EX
+model comparisons per adapter pass. Both dedicated-GPU application suites
+pass 30 exact full-SBS presentations; all five Intel non-water cases pass
+25 exact captures. All affected generated artifacts,
+including the VR ray source stamp, follow the shared source.
+
+The Intel water application comparison finds a mismatch, and an unchanged
+baseline repeat also differs from itself. This pre-existing live reflection
+nondeterminism remains a real open gate, not an accepted error allowance.
+All 72 quiet three-trial old/new timings finish on actual NVIDIA D3D12/Vulkan
+and Intel Vulkan at 1x/2x. Venom median work falls 14.83–22.98%; NVIDIA Vulkan
+and 2x Corneria improve too. Small 1x D3D12/Intel Corneria changes are within
+trial variation; Intel's 1x p95 and candidate Corneria maxima are worse, and
+half-second D3D12 stalls persist. These are hidden-window host timings, not
+displayed FPS or GPU timestamps; neither broad performance nor release
+acceptance is established. The final arithmetic checker repeats all six
+old/new adapter checks successfully. `RENDERER-PERFORMANCE-OCT1.md` records
+exact hashes, all timing cells, failed evidence and the `fp64-multiply-*`
+artifacts under D:.
+
+The unchanged CB42012F diagnostic passes actual K/M/K SDK switching
+(96 evaluations / 24 retained previews), all 23 Preview-OFF cases and the
+RENDERING loading capture. A targeted D3D12 trace reproduces the roughly
+half-second hidden-window outliers in presentation, not scene encoding or
+retirement. Visible counterparts have 36/21 ms maxima; SDK-disabled hidden
+Corneria still reproduces 499/488 ms spikes. This points to hidden/occluded
+presentation behavior, not an established gameplay/SDK stall. The performance
+report keeps these traced diagnostics separate from quiet timing trials;
+the helper now records explicit visible mode for a separate comparison.
+
+The separate 72-process visible quiet matrix also finishes with hashes,
+preferences, actual adapters and complete native pairs verified. Median host
+work falls 7.67–27.06% across the sampled Corneria/Venom 1x/2x cells; D3D12
+2x p95 is slightly worse. None reproduces the half-second hidden-window spike;
+all raw trials/maxima remain separate from hidden results. This is measured
+two-scene SBS progress, not displayed FPS, all-device or release acceptance.
+Exact cells and evidence paths are in the performance report.
+
+Parallel encoding and earlier experiments stay off by default. The release
+and preferences are unchanged. The full goal stays active: sustained GPU/SBS
+performance, remaining enhancement parity, physical Leia/reconnect and
+Android-device GPU relaunch remain open; Ally troubleshooting stays deferred.
+
+## October 2 — shared legacy row-table race fixed
+
+Current diagnostic `CDDE775F...` prepares shared CPU row bins once before
+parallel eye encoding. The initial worker candidate could race two vector
+rebuilds against uploads; an intermittent D3D12 mixed-layer test fails while
+its serial baseline passes. Source arrays are now immutable during both
+encoders, without duplicating them or changing projection/quality/fences.
+GPU-binned chunks retain their original GPU path. Parallel remains opt-in.
+
+The corrected checker explicitly selects and logs its actual adapter. NVIDIA
+D3D12/Vulkan and Intel(R) Graphics Vulkan each pass independent eye/guide,
+failure/retry and queued-pair checks plus 96 changing mixed-model/legacy
+transitions. The strengthened 12 queued shared-underlay pairs pass all three
+adapters, a D3D12 repeat and serial baseline; earlier two extra stress repeats
+also pass. Native per-eye ray geometry,
+shadow/reflection references and vertex expansion pass both dedicated-GPU
+backends. The two selected CPU suites, non-SDL syntax and six helper parsers
+pass. Final D3D12/Vulkan application suites each pass 30 identical full-SBS
+presentations without fallback. Actual K/M/K switching passes 96 SDK
+evaluations / 24 retained previews; all 23 Preview-OFF cases plus RENDERING
+loading pass on the unchanged CDDE775F executable. Component hashes are
+DBBF0E57 / E9CFD462. Evidence uses `parallel-stereo-immutable-rows-*` on D:;
+`RENDERER-PERFORMANCE-OCT1.md` records scope, failed evidence and exact hashes.
+
+Earlier 72 timings belong to `14EA53D3...`, not this fixed diagnostic, and
+cannot establish promotion after its broader correctness failure. The release
+stays `828D98F4...`; preferences remain A2B8BDBA / E0F794E8. No release copy,
+publication, device deployment or WSL recreation occurs. The full goal stays active:
+sustained GPU/SBS performance, physical Leia/reconnect, Android-device GPU
+relaunch and remaining enhancement parity are open. Ally remains user-deferred.
+
+## October 2 — initial parallel eye-encoding measurements
+
+The earlier current-folder diagnostic `14EA53D3...` adds persistent right-eye command
+encoding alongside the left. Each SDL command stays on its acquiring thread;
+both encodes are validated before ordered submission. Failed pairs publish
+neither eye, join/cancel the worker and retain normal fence ownership. Serial
+split remains the default; there is no unsafe ordered-reuse shortcut.
+Independent ownership/coverage/guide, failure/retry, mode-switch and queued
+pair checks pass on D3D12/Vulkan. The standalone checker did not consume its
+low-power flag or log adapter identity, so its `intel` filename is not
+accepted as integrated-GPU evidence; the follow-up above records the corrected rerun.
+The separate timing harness selects and logs its actual adapter. D3D12 and Vulkan
+full-SBS suites each pass 30 byte-identical presentations across six cases,
+including reflected water, banked grass, motion blur, MSAA and the native EX
+menu. Both independent eyes present without replay or MSAA fallback. All 72
+quiet three-trial 1x/2x timings complete on recorded actual NVIDIA D3D12/Vulkan
+and Intel Vulkan adapters. D3D12 Venom median work improves 5.46%/6.11%, but
+NVIDIA Vulkan is essentially neutral and Intel 1x Corneria regresses 4.45%.
+Other trials vary; raw outliers are retained. Serial split remains default,
+without a backend/vendor heuristic. `RENDERER-PERFORMANCE-OCT1.md` records
+the exact matrix, candidate hash, method and limitations. The verified release
+and preferences are unchanged; the full goal remains active.
+
+## October 2 — compact clipping remains experimental
+
+The current diagnostic executable (`7D014006...`) has a bounded small-face
+clipping experiment; the original generic shader remains the default. Actual
+Vulkan SBS captures match the reference, but D3D12 reflected-water tests
+exposed repeated device loss despite passing standalone oracles. D3D12 and
+unexecuted Metal are excluded; the final D3D12 exclusion check passes without
+replay and matches the successful reference. All 48 quiet 1x/2x Vulkan timing
+runs complete on actual NVIDIA and Intel adapters. NVIDIA changes are below
+0.4%; Intel median work improves in these two stages, but variation and one
+worse p95 do not establish a safe general default. Compact clipping remains
+opt-in. `RENDERER-PERFORMANCE-OCT1.md` records timings, scope and failed evidence.
+The verified release and saved configurations are unchanged.
+
+Final gated regressions pass: generic/compact clipping references on the
+supported adapters, real and queued animated model comparisons, actual
+Standard/4.5/Standard SDK evaluations, all 23 Preview-OFF menu cases, the
+RENDERING loading capture and both selected input/stereo CPU suites. This
+does not finish sustained GPU/SBS performance, physical Leia/reconnect,
+Android-device relaunch or remaining enhancement parity. The full goal
+remains active; Ally troubleshooting remains user-deferred.
+
+## October 2 — span-clear experiment remains disabled
+
+The current-folder diagnostic candidate (`5716E204...`) adds an opt-in partial
+span clear without changing geometry, coverage or painter order. Poisoned
+recycled-buffer checks, independent clipping/model references and actual SBS
+comparisons pass. Two complete three-trial timing matrices cover 1x and 2x.
+Corneria improves, but Intel 2x Venom median work regresses 7.15%, with a worse
+long-frame tail. The original full clear remains the default; the verified
+release stays `828D98F4...` and was not replaced by this experiment.
+`RENDERER-PERFORMANCE-OCT1.md` records exact binary scope, timings, rejected
+fixtures, validation and limitations. No broad FPS improvement is claimed.
+
+Final candidate regressions pass: actual standard/4.5/standard DLSS evaluation,
+all 23 Preview-OFF plain-menu cases, the separate RENDERING loading capture
+and both selected CPU suites. Saved configurations and the release executable
+remain unchanged.
+
+This leaves the full goal active: sustained GPU/SBS performance, Android-device
+GPU relaunch, physical Leia/reconnect and remaining enhancement parity are
+still open. Ally troubleshooting remains user-deferred.
+
+## October 2 — compositor recovery verified and locally installed
+
+Partial compositor initialization now rolls back its pipelines, texture and
+device identity so the same owner can retry safely. Both shader modes recover
+from an injected failure on NVIDIA D3D12/Vulkan and Intel Vulkan without
+restarting the device. This is not proof of the reported Android boot cause.
+
+The separate edge/pixel shader experiment stays off by default: quiet paired
+timings regress dedicated-GPU medians and do not establish a safe general
+speedup. The original unified compositor and split-eye submission remain the
+normal policies. `RENDERER-PERFORMANCE-OCT1.md` records the measurements and limits.
+
+Each adapter passes 36 raw guide cases and 5,677,056 exact bytes. Final D3D12
+and Vulkan executable suites each pass 30 identical full-SBS captures across
+six cases, including MSAA and the native EX menu. Independent CPU composition
+references, two selected CPU suites, non-SDL syntax and shader freshness pass.
+All 23 Preview-OFF cases and the RENDERING loading presentation pass.
+
+Both local PC folders contain SHA-256
+`828D98F478FAADE2D0B30FC6732CBC1E3038A83AB2BA7B0E1BBE42BEBDB9201C`.
+Current and installed release each pass K/M/K SDK switching (96 evaluations /
+24 retained previews). Only the EXE was copied; preferences remain A2B8BDBA /
+E0F794E8. The prior release is recoverable at
+`D:/SFE-validation/composite-previous-release-908BABE0-oct2.exe`.
+Final evidence uses `composite-final-*` and `composite-installed-*` on D:.
+No publication, device deployment or WSL recreation occurred.
+
+Sustained GPU/SBS performance, physical Leia/reconnect, Android-device relaunch
+and remaining enhancement parity are still open. Ally troubleshooting remains
+user-deferred. Windows Vulkan verification is not Linux hardware acceptance;
+the full goal remains active.
+
+## October 1 — SBS correctness and cost-reporting checkpoint
+
+The normal split-eye submission policy is unchanged. A joined-pair prototype
+retains independent outputs, shared-fence lifetime and atomic cancellation,
+but quiet same-binary comparisons regress the dedicated-GPU aggregates and
+give mixed integrated-GPU results. It remains explicitly opt-in, not a shipped
+performance fix. `RENDERER-PERFORMANCE-OCT1.md` records all 24 timing runs,
+exact executable scope, rejected first traces and measured limitations.
+
+SBS slow-frame costs now come from both actual eyes rather than stale mono
+counters. Optional per-model host traces are bounded and deferred until shutdown
+so per-draw Windows stderr writes do not distort the workload. They distinguish
+packing, preparation, upload and encoding; they are not GPU timestamps.
+
+Both final D3D12/Vulkan stereo components pass independent CPU coverage and
+exact color/surface/depth/motion references, cancellation/retry, resize, empty
+clears, borrowed retirement and 12 changing queued pairs. Both native ray
+regressions pass. Actual executable captures pass 20 byte-identical full-SBS
+presentations per backend across original scenery, enhanced water/sky with
+RT/reflections/bloom, banked 3x grass, and Venom motion blur. Two selected CPU
+suites and the non-SDL source syntax check pass.
+
+Both local PC folders now contain
+`908BABE0F8B1EC9323945DFF5FF57B7211659EAC387D7E77B197BCC44CC2E280`.
+The current-folder build passes K/M/K SDK switching (96 evaluations / 24 retained
+previews), all 23 Preview-OFF cases and the RENDERING indicator. Only the EXE
+was copied; settings remain A2B8BDBA / E0F794E8. Previous release `73EDE4A7...`
+is backed up at `D:/SFE-validation/gpu-sbs-previous-release-73EDE4A7-oct1.exe`.
+Logs on D: use `gpu-sbs-final-buffer-*`; no publication/device deployment occurred.
+The installed release-folder SDK retest also passes 96 evaluations / 24 retained
+previews (`gpu-sbs-final-buffer-installed-dlss-oct1.log` on D:).
+
+This does not close sustained GPU/SBS performance, Android-device GPU relaunch,
+physical Leia/reconnect, remaining native liquid correspondence/displacement,
+centre/history classification, stronger liquid light/fog coverage or secondary/
+upscaler parity. The full goal remains active; Ally troubleshooting remains
+user-deferred. Windows Vulkan checks are not Linux Vulkan hardware acceptance.
+
+## October 1 — liquid-owned depth/styles verified and locally installed
+
+The native liquid guide merge now selects actual water rather than submerged
+raster models before styles and depth consumers. Compact surface-only output
+avoids unused hidden-world traces; active shutter layers retain the full layout.
+Ownership-only MSAA keeps both float targets across samples and includes them
+in resident allocation bounds. No production image readback/submission/wait
+is added. Independent full/compact style and AO/DOF references pass D3D12/Vulkan;
+hardware layout/depth/normal checks, both full blur suites, five selected CPU
+suites and shader freshness pass. D3D12/Vulkan retained owners pass 2,702,643 /
+2,726,307 assertions. Display dispatch is mocked; this is Windows native-ray
+interop, not Linux Vulkan ray execution or physical Leia acceptance.
+
+Both local PC folders contain `73EDE4A7...`. It passes actual K/M/K SDK switching
+and all 23 plain-menu cases plus loading presentation; preferences are unchanged.
+The prior release `63F29CF3...` is backed up on D:.
+Installed-folder K/M/K also passes (96 SDK evaluations / 24 retained previews).
+Exact logs and validation limits are in the newest `STEREO-DISPLAY-UPGRADE.md`
+checkpoint. No broad FPS gain, physical platform acceptance or full goal
+completion is claimed. Liquid correspondence/displacement, centre/history and
+secondary/upscaler parity, stronger liquid light/fog coverage, physical Leia,
+Android-device relaunch and sustained GPU/SBS performance remain open.
+
+## October 1 — liquid shutter layers verified and locally installed
+
+Native water now supplies optional resident hidden-liquid colour and visible
+normal/depth alongside its unchanged primary ray image. The active native
+shutter composes ray-finished water under moving actors, uses liquid rather
+than submerged-model depth, and discards the submerged rigid velocity. Dry
+motion/protected ink/alpha and invalid-guide fallback remain intact. Storage
+is part of complete retained eye/MSAA bounds; failure clears layer metadata.
+This adds no production CPU image readback, submission or wait.
+
+D3D12/Vulkan full blur components pass 19,761,157 checks each; both underlay
+compositors, actual DXR layer/depth/normal checks, CPU layout validation and
+shader freshness pass. Vulkan/D3D12 real-queue owners pass 1,978,585 / 1,958,327
+assertions. Physical display dispatch remains mocked.
+`STEREO-DISPLAY-UPGRADE.md` records exact logs and verification limits.
+Four selected CPU suites and the rebuilt shared DXR regression pass; the latter
+retains its prior one-pixel 4x CPU difference (maximum channel error 20).
+
+Current/release executable `63F29CF3...` passes actual K/M/K SDK switching and
+all 23 plain-menu cases plus loading presentation; the installed release also
+passes K/M/K (96 evaluations / 24 retained previews). The prior `3CB14B61...`
+executable has a recoverable backup on D:.
+Current/release preferences are unchanged. No publication/device deployment
+or general GPU/SBS performance improvement is claimed.
+
+Liquid velocity/displacement, water-aware AO/DOF/fog/style ownership, remaining
+native secondary/upscaler parity, physical Leia/reconnect, Android-device
+relaunch acceptance and sustained performance remain open. The renderer
+picker is connected; further Ally troubleshooting is user-deferred. The full
+goal is active, not narrowed to these water changes.
+
+## October 1 — native water/refraction release installed
+
+Both local PC executable folders now contain SHA-256
+`3CB14B61D3CAB28660AB6A049C9BBC7D7CA613B567D391B524A8F8F7368BFB30`.
+The preceding E2B4DC87 binary remains recoverable at
+`D:/SFE-validation/native-water-previous-current-E2B4DC87-oct1.exe`.
+Only the executable was replaced; current/release preference hashes remain
+A2B8BDBA / E0F794E8. No WSL recreation, device install, push or publication.
+
+The native Windows water receiver supports retained per-eye planes, actual
+submerged-geometry transmission, Beer absorption, Fresnel scenery reflection,
+caustics and Reflections OFF. Exact affine position/normal/direction transforms
+handle source Q15 matrices and nonuniform scales. Protected UI/emissive ink and
+alpha remain intact. Empty analytic worlds need no fake caster or scenery cube
+with reflections OFF. A dedicated lazy water shader and coverage-only opacity
+checks isolate its work from unrelated paths, without added production CPU
+eye images, readback, submissions or waits. This is not a measured FPS gain.
+
+Final D3D12/Vulkan real-queue owners pass RGBA/BGRA linear/sRGB, independent
+optics/AA references (same two-code tolerance), transmitted-object versus bed,
+bank/response/scales, clock/palette/caustics, protected opacity, model mirror
+transport, all SSAA/TAA/MSAA qualities, held frames and in-flight lifecycle.
+They report 1,934,085 / 1,952,421 assertions. Six selected host suites and
+shader freshness pass. The shared DXR regression also passes, with a retained
+one-pixel 4x CPU discrepancy (maximum channel error 20), not blanket exact
+parity. Actual Original/EX assembly/raster checks cover 94 owned frames /
+45 distinct-eye frames per backend, not independent full cartridge ray output.
+
+The final candidate and installed folder both pass K/M/K with 96 actual SDK
+evaluations / 24 retained previews; final Preview-OFF/loading checks pass all
+23 cases. Earlier F92664B6 candidate logs separately verify all eight embedded
+modes without loose DLLs and seven recovery cases per backend. Those results
+are not relabeled as final-hash runs. `STEREO-DISPLAY-UPGRADE.md` records all
+log paths and the independent reference correction/failure-cleanup history.
+
+Next parity work: refraction-aware effect/depth ownership and shutter/world
+underlay correspondence. RT-OFF native water shading, geometric displacement,
+further secondary styles, native neural/FSR integration, physical Leia/reconnect,
+Android-device acceptance and broader GPU/SBS performance also remain open.
+These are Windows DXR/D3D12 and Vulkan interop checks, not Linux/Metal ray or
+physical-display acceptance. Ally diagnosis remains deferred; goal is active.
+
+## October 1 — native mirror/gold release installed; current-tree DLSS packaged
+
+Verified native mirror/gold receiver transport now covers actual calibrated
+eyes, distinct conductor gold, retained bank/plane/scenery, secondary metal
+bounces, empty native worlds and SSAA/TAA/MSAA. Both real-queue D3D12/Vulkan
+interop owners, four-format compositor/basic-ground regressions, Original/EX
+cartridge capture/receiver checks, six selected CPU suites and shader freshness
+pass. `STEREO-DISPLAY-UPGRADE.md` records the precise scope and remaining gaps.
+
+The first rebuilt current-tree executable (`915C70E9...`) failed K/M/K because
+that tree had no embedded-runtime configuration and loaded an old loose
+adapter lacking model-selection ABI v2. It was not installed as the release.
+The current tree now embeds the existing verified production package from
+`build/dlss-embedded-stage/dlss`, matching release packaging; no new DLL download,
+DLSS5/ReShade embedding or hardware-support claim is involved. A missing model
+ABI is now diagnosed as a runtime limitation rather than an unsupported GPU.
+
+Installed `build/release` and `build/current` executable SHA-256:
+`E2B4DC87E4C0494B8DD23BEB35E12BE121ADF8997A549601119B56F8CFD9BDF0`.
+It passes K/M/K (96 actual evaluations / 24 retained preview frames), a standalone
+package check without loose DLLs (all eight modes, OFF on both backends),
+23 Preview-OFF/loading cases and all seven real-process recovery cases per
+backend. All 32 Original/EX × standard/4.5 × four modes × selected 1x/2x cases
+pass 1,024 real SDK evaluations, with selected output scale retained (no forced
+6x). Flat-renderer water/mirror/gold hardware-dispatch smokes also pass both
+backends, plus combined model/ground mirror reruns. One initial combined D3D12
+run exceeded the harness's 60-second cutoff and subsequently finished; its
+log is retained, and these smokes are not startup/performance certification.
+The preceding `3C104DE2...` executable is recoverable at
+`D:/SFE-validation/native-metal-previous-release-oct1.exe`. Only the executable
+was replaced. The final installed-folder K/M/K check passes 96 actual SDK
+evaluations and 24 retained preview frames on that same executable hash
+(`D:/SFE-validation/native-metal-installed-dlss-oct1.log`).
+Evidence is under `D:/SFE-validation/native-metal-*`; user preference hashes
+remain E0F794E8 / A2B8BDBA.
+
+Water/refraction, displaced surfaces, additional correspondence/secondary
+styles, native upscaler parity, physical Leia/Android acceptance and broader
+GPU/SBS performance remain open. This is not general FPS improvement or goal
+completion. Ally diagnosis remains deferred. No WSL recreation, device
+installation, remote push or publication was performed.
+
+## October 1 — GPU recovery release and Android packaging verified
+
+Installed `build/release/starfox_pc.exe` SHA-256 is
+`3C104DE218605C989F542D4CC7EB6295385D8804B73C1D0DD9B0634A1ED8161F`.
+Its preceding `60C8BCAD...` executable is retained once at
+`D:/SFE-validation/gpu-recovery-previous-release-oct1.exe`.
+An unavailable launch journal now prevents unsafe GPU initialization. Presenter
+initialization failures update and save the effective Software mode instead of
+advertising GPU and retrying it every frame. Software recovery preserves an
+unrelated directory at the journal path and the user's assets/settings.
+The existing journal already covered the entire GPU session and shutdown;
+this checkpoint does not claim to have introduced that lifecycle protection.
+
+Seven real-process recovery cases pass on each D3D12/Vulkan backend, including
+an injected renderer failure, blocked journal, successful GPU retry, forced
+close after a confirmed native GPU frame and next-launch recovery without
+reinstall. Ten selected host/packaging suites, 23 Preview-OFF/loading cases,
+and installed-release K/M/K (96 SDK evaluations / 24 retained frames) pass.
+The installed scale/quality matrix has now finished all 32 Original/EX ×
+standard/4.5 × four modes × selected 1x/2x cases: 1,024 SDK evaluations,
+selected/output scale preserved and no automatic 6x. The D3D12/Vulkan
+`format-1`, `water-bloom` and `lava-exposure` stereo cases each pass five
+direct/snapshot captures and five forced-left-eye-failure mono captures.
+These are output/recovery regressions, not claimed FPS gains.
+Evidence is under `D:/SFE-validation/gpu-recovery-*-oct1`.
+
+The Android ARM64 app's missing backdrop-237 link failure is fixed by using
+the shared 38-backdrop CMake catalogue and deriving its split-source range.
+Explicit `:app:assembleRelease` and the package verifier pass. The unsigned
+APK is `platform/android/app/build/outputs/apk/release/app-release-unsigned.apk`,
+SHA-256 `0FDE5A02967120F37B6D830DE3EBC50E71BE2F0C1884C905D2DB212E5DEEBF6D`.
+No Android device was connected; compilation/package checks do not prove
+physical-device recovery or performance. The unqualified root Gradle task
+was interrupted when it began an unsolicited Quest build; the subsequent
+explicit Android app task completed successfully. No Quest build is claimed.
+
+Release/current preference hashes remain E0F794E8 / A2B8BDBA;
+`build/current/starfox_pc.exe` remains A3051C7A. No device installation,
+publication, remote push or WSL recreation was performed. The full goal remains
+active: native Leia water/reflective ground and hardware acceptance, broader
+GPU/SBS performance and remaining native effect parity are still open. Ally
+diagnosis stays deferred at the user's request.
+
+## October 1 — native ground-surface release installed
+
+Installed local `build/release/starfox_pc.exe` has SHA-256
+`60C8BCAD0B2566393012DAF14B14440B9266FFC3212B12CE37F2E649A2FF2436`.
+The previous `879BD987...` executable is recoverable at
+`D:/SFE-validation/native-ground-surfaces-previous-release-879BD987-oct1.exe`.
+Native Leia floor packets now retain material, world origin, clock, brightness
+and motion settings once for both eyes and reflection faces. Optional shaders
+evaluate red-sand variation, gradient pulse and the shared molten wave-normal,
+crust/heat/bubble equations on the GPU. Auto lava is restricted to EX 6-6;
+manual lava remains available. Basic gradient packets retain the inexpensive
+ordinary shader. Optional shader selection is constant-time after homogeneous
+packet validation; unused ordinary variants are not eagerly prepared.
+
+This is surface-shading parity, not displaced terrain: the native floor is
+still geometrically flat. Water, mirror/gold ground transport, native liquid
+silhouette/depth displacement and physical Leia acceptance remain open.
+No new production readback, submission or fence wait is introduced.
+
+Final D3D12 and Vulkan checks pass all four output formats: per format/backend,
+125,964 basic-gradient rays and 510,804 surface rays match independent scalar
+references, with protected sky/foreground and opacity checks. All 16 real
+colour/receiver/surface/motion entry-point and 1/2/4/8-sample combinations pass.
+Five selected CPU suites pass. Final evidence is in
+`D:/SFE-validation/native-ground-surfaces-final-*-oct1.log` and
+`native-ground-surfaces-cpu-oct1.log`. Final-library Original 1-1/2-3 and EX
+6-6/7-5/Venom 4-5 owner checks pass on both backends (79 owned native frames and
+45 distinct-eye frames per backend); captures/logs are under
+`native-ground-surfaces-final-{ex,original}-*-oct1`. The preceding `F912C8F3...`
+captures remain separately identified, not relabelled as final checks.
+All 32 actual SDK scale/mode cases pass 1,024 evaluations and retained previews;
+K/M/K passes 96 evaluations / 24 retained frames. All 23 Preview-OFF cases and
+the RENDERING indicator pass. Installed-folder K/M/K passes again on the same
+hash. Evidence is under `native-ground-surfaces-{dlss-scales,model-toggle,
+plain-menu,installed-model-toggle}-oct1` on D:. Release/current preferences
+remain E0F794E8 / A2B8BDBA, and the current executable remains A3051C7A.
+No FPS improvement or physical-device result is claimed. No device update,
+publication, commit/push or WSL recreation occurred; Ally diagnosis is deferred.
+
+## October 1 — presenter pipeline and retirement candidate (not installed)
+
+Candidate `D:/SFE-validation/native-temporal-bin/starfox_pc.exe` has SHA-256
+`D2FD741B015014603E43439481FDE6B646CA67573A3824853D209291BB4C0A3A`.
+The installed release remains the `879BD987...` checkpoint below.
+Pinned Windows SDL presenter graphics pipelines now use the same joined,
+event-responsive preparation mechanism as presenter shaders. Optional startup
+phase timings distinguish shader/pipeline creation, window synchronization,
+asset loading and teardown. Destruction-only GPU fence waits join before any
+borrowed fence/resource is released; ordinary per-frame synchronization is
+unchanged. No thread detachment, skipped wait or premature resource release is
+used. Actual SDL fence waits may retire internal backend work under SDL's lock.
+
+All four dedicated/integrated D3D12/Vulkan presenter fixtures pass 24,576 exact
+pixel checks each, failure/version fallback and retained input checks, plus a
+real submitted fence's joined completion. Evidence is in
+`D:/SFE-validation/presenter-retirement-*-oct1.log`; two preparation CPU suites
+also pass. All 32 actual SDK scale/mode cases, K/M/K model history switching,
+23 Preview-OFF cases and the RENDERING indicator pass on this hash. Evidence
+is under `D:/SFE-validation/presenter-retirement-*`. This candidate was
+superseded by the native ground-surface candidate above, not installed.
+
+The intermediate `0685491A...` pipeline candidate passes the injected eight-
+second pipeline responsiveness checks on default, integrated and no-SDK paths.
+Disabling the owner event pump fails the unchanged two-second limit in that
+exact pipeline phase. Its default four startup profiles pass, but integrated
+saved-preview preparation times out at 60 seconds while still responding to
+Windows messages. That timeout is not a completed preview/FPS acceptance run.
+Evidence: `presenter-pipeline-{responsive-*,normal-*}-oct1` on D:.
+
+The Ally tester confirms that selecting 60 FPS boots successfully. At the
+user's request, further Ally troubleshooting is deferred; this workaround is
+not a verified 120-FPS fix. Intermediate integrated local Start/exit probes
+finished their intro captures but failed the responsiveness limit during
+resource release, both with and without the SDK. They are retained as failures,
+not physical Ally results. No more Ally probes are planned for this checkpoint.
+The remaining work returns to native Leia parity and GPU/SBS performance.
+No executable installation, device update, publication or WSL recreation is
+included in this candidate checkpoint.
+
+## October 1 — native joint particle exposure installed
+
+Local release hash is `879BD987A2B8A37D9AD9FD2463FBF70ECF201AC04AF8CCB8B104D89E17FB3938`. Exhaust,
+weather, sparks and opaque debris now share native geometry's physical shutter,
+using resident per-eye current/prior projections and reconstructed depth/
+coverage rather than compositing over an averaged model image. New or ambiguous
+source points remain current-only, and the FX finish does not draw them twice.
+No production CPU point projection/readback or new submission/wait is added.
+The additional pipelines and payload are lazy/optional; the ordinary flat path
+retains its normal resource bindings.
+
+D3D12/Vulkan four-format scalar projection/shutter references and actual
+retained game-owner checks pass all AA combinations, single-pass emissions,
+protected ink/alpha, rejected presentation, active-particle queue stalls and
+cancellation. Seven selected CPU suites pass. The newest stereo-display
+checkpoint records exact checks, logs and limitations. This is a native Leia
+correctness/parity step, not an ordinary GPU/SBS FPS improvement or physical
+Leia/Linux-RT/Android/ROG acceptance. Analytic terrain/liquids/materials,
+additional correspondence, secondary-hit styling and native upscaler parity
+remain open, as do broader performance and device requirements.
+
+All 32 actual SDK scale/mode cases, K/M/K, 23 Preview-OFF cases, the loading
+indicator pass on this hash. Candidate-location slow-bootstrap responsiveness
+passes, but the exact installed-folder check hits a 2,141-ms owner-thread stall
+after presenter preparation. K/M/K passes in the installed folder; full startup
+acceptance remains open. The newest stereo checkpoint records both results.
+The prior 2BE878CE release is backed up as
+`D:/SFE-validation/native-joint-particle-previous-release-2BE878CE-oct1.exe`.
+Release preferences remain E0F794E8; current-folder preferences were preserved
+at the observed A2B8BDBA hash, not replaced. Current executables, devices and
+publications are unchanged. No WSL installation or commit/push occurred.
+
+## October 1 — responsive SDL presenter-shader bootstrap installed
+
+Local release hash is `2BE878CEC73D67137E606DD9203CAE13456CDBAD51F686B6B9BEE852E9EADED6`.
+SDL's own presenter shaders now use the joined, event-responsive preparation
+worker on pinned Windows desktop builds. The previous hooks covered the game's
+shaders but not this earlier bootstrap phase. SDL device/window creation,
+window claiming, command recording/submission and presentation stay on their
+owner thread; no externally created device or hidden renderer is substituted.
+The hook is private/opt-in in SDL, enabled by our Windows runtime. Unsupported
+hook versions and absent hooks retain SDL's original synchronous behavior.
+
+Four actual presenter suites (NVIDIA/Intel, D3D12/Vulkan) pass error propagation,
+exceptions, failure/retry, event preservation and 9,216 exact pixels each.
+An injected eight-second bootstrap delay passes Windows responsiveness checks
+on default and forced-Intel D3D12; disabling preparation pumping fails the
+same two-second limit in that exact phase. This is an injected stress check,
+not an eight-second real compiler measurement or physical ROG acceptance.
+Four ordinary Intel startup/exit profiles, all 32 actual SDK scale/mode cases,
+K/M/K history switching, 23 plain-menu cases and the RENDERING indicator pass.
+The exact installed executable also passes delayed startup and K/M/K.
+
+Evidence is under `D:/SFE-validation/sdl-presenter-*`; details and remaining
+synchronous phases are in the renderer report. Saved preferences remain
+`E0F794E81E64295A34AC93043E4B8D123EA7481C9937CDB13C7784FF072B95B4`.
+The recoverable previous executable is
+`D:/SFE-validation/sdl-presenter-previous-release-1D9634FD-oct1.exe`.
+build/current, devices and published releases are unchanged. Native Leia
+feature parity/physical validation, GPU/SBS performance, Android saved-GPU
+relaunch and ROG physical startup acceptance remain open; the goal is active.
+
+## October 1 — bounded wide-output correction installed
+
+Local release hash is `1D9634FDBFA65A7F3B22F371CA2E938F63FA8ABEC0179A2F4D9F38455A5F0802`.
+Explicit 6x ultrawide DLSS/4.5 now evaluates successfully without automatic
+scale promotion. Exact resampling ownership and legal multi-row motion/merge
+dispatches pass D3D12/Vulkan GPU oracles; all 16 real SDK wide-output cases,
+held-preview, plain-menu/loading and model-switch regressions pass. The PC
+DLSS status records scope, unchanged settings and the recoverable prior binary.
+Default-path timings show substantial trial noise, not a general FPS fix.
+Upload/raster experiments remain off by default after mixed measurements.
+Native parity and physical Leia/Android/ROG acceptance remain open; the full
+goal is not complete.
+
+## October 1 — independent DLSS render-upscale selection
+
+Local release executable is now `524DD82F13A48BFFFFE6C37911A258B1C0FDE005A6FB5FA716FF0C370727A343`.
+DLSS/4.5 no longer automatically raises the actual render target to a
+display-derived scale. Actual SDK, output-size, held-preview and lifecycle
+checks pass; `PC-DLSS-STATUS.md` records scope and the existing wider-output limit.
+Model-upload reuse is independently validated but remains opt-in pending broader
+timing, as recorded in the renderer report. Native parity, GPU/SBS performance
+and physical Leia/Android/ROG acceptance remain open; the goal is not complete.
+
+## October 1 — reported PC/Android slowdown investigation
+
+See [the renderer report](RENDERER-PERFORMANCE-OCT1.md) for reproducible
+dedicated/integrated measurements, CPU submission costs and the independently
+checked shared row-tile experiment. It regresses Intel SBS and remains off by
+default. Reflection menu prerequisites are now explicit; this is not a new
+reflection backend or a completed performance fix. Android device performance
+and the wider goal remain open.
+
 ## Intel continuous clipping and exact billboard projection — September 23
 
 The forced Intel D3D12 crash at the first continuous-clip dispatch is avoided

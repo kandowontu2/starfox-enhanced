@@ -1,6 +1,7 @@
 #include "starfox/render/gpu_colour_warp.hpp"
 #if defined(STARFOX_SDL_GPU_EFFECTS)
 #include <SDL3/SDL.h>
+#include "starfox/render/gpu_preparation.hpp"
 #include "shaders/generated/colour_warp_portable.hpp"
 #include "shaders/generated/warp_material_portable.hpp"
 #include "shaders/generated/warp_expand_portable.hpp"
@@ -44,7 +45,7 @@ struct GpuColourWarp::Impl {
             info.code_size=spirv?bytes[i]:dxil?native_bytes[i]:std::strlen(metal[i]);info.entrypoint=(spirv||dxil)?"main":"main0";
             info.num_readonly_storage_buffers=reads[i];info.num_readwrite_storage_buffers=writes[i];info.num_uniform_buffers=1;
             info.threadcount_x=threads[i];info.threadcount_y=info.threadcount_z=1;
-            pipelines[i]=SDL_CreateGPUComputePipeline(device,&info);require(pipelines[i]);
+            pipelines[i]=create_gpu_compute_pipeline(device,&info);require(pipelines[i]);
         }
     }
     void allocate(unsigned i,std::uint32_t bytes){

@@ -1,12 +1,16 @@
 #include "raster_jitter.hlsli"
-StructuredBuffer<uint> cpuPixels : register(t0,space0);
-StructuredBuffer<uint> nativePixels : register(t1,space0);
-StructuredBuffer<float4> nativeSurfaces : register(t2,space0);
-StructuredBuffer<uint> palette : register(t3,space0);
-StructuredBuffer<uint> latePixels : register(t4,space0);
-StructuredBuffer<uint> backgroundPixels : register(t5,space0);
-StructuredBuffer<float> nativeDepth : register(t6,space0);
-StructuredBuffer<float4> nativeMotion : register(t7,space0);
+#include "native_pixel.hlsli"
+Texture2D<float4> nativeMsaa : register(t0,space0);
+Texture2D<float4> lateMsaa : register(t1,space0);
+Texture2D<float4> backgroundMsaa : register(t2,space0);
+StructuredBuffer<uint> cpuPixels : register(t3,space0);
+StructuredBuffer<uint> nativePixels : register(t4,space0);
+StructuredBuffer<float4> nativeSurfaces : register(t5,space0);
+StructuredBuffer<uint> palette : register(t6,space0);
+StructuredBuffer<uint> latePixels : register(t7,space0);
+StructuredBuffer<uint> backgroundPixels : register(t8,space0);
+StructuredBuffer<float> nativeDepth : register(t9,space0);
+StructuredBuffer<float4> nativeMotion : register(t10,space0);
 [[vk::image_format("rgba8")]] RWTexture2D<float4> rgba : register(u0,space1);
 RWStructuredBuffer<uint> pixels : register(u1,space1);
 RWStructuredBuffer<float4> surfaces : register(u2,space1);
@@ -25,7 +29,16 @@ cbuffer Settings : register(b0,space2) {
     uint lateWidth,lateHeight,backgroundWidth,backgroundHeight;
     uint uniformCpuEnabled,uniformCpuValue,stripeCpuEnabled,stripeCpuValue;
     uint stripeLeft0,stripeRight0,stripeLeft1,stripeRight1;
+    uint hasNativeMsaa,hasLateMsaa,hasBackgroundMsaa,msaaPadding;
 };
+float4 paletteColor(uint value) {
+    uint color=palette[value&255];uint3 rgb=uint3(color&255,(color>>8)&255,(color>>16)&255);
+    if(sourceScale>1 && (value&0x80000000U)!=0) {
+        uint other=palette[(value>>8)&255];rgb=(rgb+uint3(other&255,(other>>8)&255,(other>>16)&255)+1)/2;
+    }
+    return float4(rgb,color>>24)/255.0;
+}
+float4 over(float4 front,float4 back) {return front+back*(1-front.a);}
 uint cpuAt(uint index) {
     if(uniformCpuEnabled) return uniformCpuValue;
     if(stripeCpuEnabled) {
@@ -86,14 +99,19 @@ uint composedValue(uint2 at,uint cpu,uint2 sampleAt,uint2 sampleExtent,uint2 nat
         if(all(source>=0) && all(source<int2(sourceReferenceWidth,sourceReferenceHeight)/int(sourceScale))) {
             uint2 p=mosaic>1?sourceSample(source,sub,sampleAt,sampleExtent):nativeSample;
             uint native=nativePixels[p.y*sourceWidth+p.x];
-            if((native&255u) && (!worldOnly || ((native>>8)&255u)!=1u || (native&0x10000000u))) value=native&0x1000ffffu;
+            if(((native&255u) || (sourceScale>1 && (native&0x80000000u))) && (!worldOnly || nativeTag(native)!=1u || (native&0x10000000u))) value=native&0x9800ffffu;
         }
     }
     return value;
 }
 [numthreads(8,8,1)]
 void main(uint3 id:SV_DispatchThreadID) {
+#if !defined(STARFOX_COMPOSITE_PIXEL_ONLY)
+#if defined(STARFOX_COMPOSITE_EDGE_ONLY)
+    if(true) {
+#else
     if(!phase) {
+#endif
         if(id.y || id.x>1) return;
         if(repairMargins) {edgeColours[id.x]=backgroundAt(uint2(marginOrigin*scale,0),uint2(width,height))&255u;return;}
         uint counts[256];for(uint c=0;c<256;++c) counts[c]=0;
@@ -111,6 +129,8 @@ void main(uint3 id:SV_DispatchThreadID) {
         uint best=0;for(uint c=1;c<256;++c) if(counts[c]>counts[best]) best=c;
         edgeColours[id.x]=best;return;
     }
+#endif
+#if !defined(STARFOX_COMPOSITE_EDGE_ONLY)
     if(id.x>=outputWidth || id.y>=outputHeight) return;
     uint2 outputAt=id.xy;
     id.xy=id.xy*uint2(width,height)/uint2(outputWidth,outputHeight);
@@ -137,7 +157,7 @@ void main(uint3 id:SV_DispatchThreadID) {
     // pinhole correspondence and is intentionally left unknown.
     if(inSource && mosaic==1 && logical.x>=clipLeft && logical.x<clipRight
         && logical.y>=clipTop && logical.y<clipBottom && !(cpu&0x80000000u)) {
-        if((nativeMeta&255u) && (!worldOnly || ((nativeMeta>>8)&255u)!=1u || (nativeMeta&0x10000000u))) {
+        if(((nativeMeta&255u) || (sourceScale>1 && (nativeMeta&0x80000000u))) && (!worldOnly || nativeTag(nativeMeta)!=1u || (nativeMeta&0x10000000u))) {
             if(hasDepth) depth=nativeDepth[nativeIndex];
             if(hasMotion) {
                 temporal=nativeMotion[nativeIndex];
@@ -162,7 +182,8 @@ void main(uint3 id:SV_DispatchThreadID) {
     // its palette owner handles mosaic remapping. CPU foreground coverage is
     // authoritative: HUD pixels can share the model's palette index and must
     // not inherit its normals merely because the indexed colours coincide.
-    if(hasSurfaces && inSource && !(cpu&0x80000000u)) {
+    if(hasSurfaces && inSource && !(cpu&0x80000000u)
+        && logical.x>=clipLeft && logical.x<clipRight && logical.y>=clipTop && logical.y<clipBottom) {
         flags|=nativeMeta&0x01ff0000;
         normal=nativeSurfaces[nativeIndex];
     }
@@ -174,8 +195,8 @@ void main(uint3 id:SV_DispatchThreadID) {
     if(hasLate) {
         uint2 p=outputAt*uint2(lateWidth,lateHeight)/uint2(outputWidth,outputHeight);
         uint late=latePixels[p.y*lateWidth+p.x];
-        if((late&0x04000000u) && (!worldOnly || ((late>>8)&255u)!=1u || (late&0x10000000u))) {
-            value=late&0x1000ffffu;
+        if((late&0x04000000u) && (!worldOnly || nativeTag(late)!=1u || (late&0x10000000u))) {
+            value=late&0x9800ffffu;
             flags&=0x02000000u;normal=0;
             depth=0;temporal=0;
         }
@@ -185,9 +206,52 @@ void main(uint3 id:SV_DispatchThreadID) {
         depth=0;temporal=0;
     }
     uint outputIndex=outputAt.y*outputWidth+outputAt.x;
-    pixels[outputIndex]=value|flags;surfaces[outputIndex]=normal;
+    pixels[outputIndex]=nativeIndexAndTag(value)|(value&0x18000000u)|flags;surfaces[outputIndex]=normal;
     if(hasDepth) geometryDepth[outputIndex]=depth;
     if(hasMotion) motion[outputIndex]=temporal;
     uint colour=palette[value&255];
-    rgba[outputAt]=float4(colour&255,(colour>>8)&255,(colour>>16)&255,colour>>24)/255.0;
+    uint3 rgb=uint3(colour&255,(colour>>8)&255,(colour>>16)&255);
+    if(sourceScale>1 && (value&0x80000000u)) {
+        uint other=palette[(value>>8)&255];
+        rgb=(rgb+uint3(other&255,(other>>8)&255,(other>>16)&255)+1)/2;
+    }
+    float4 resolved=float4(rgb,colour>>24)/255.0;
+    if(hasNativeMsaa || hasLateMsaa || hasBackgroundMsaa) {
+        uint base=cpu&65535;
+        if(worldOnly && nativeTag(base)==1) base=0;
+        resolved=paletteColor(base);
+        if(hasBackground && !(cpu&0xc0000000u)) {
+            uint2 at=outputAt*uint2(backgroundWidth,backgroundHeight)/uint2(outputWidth,outputHeight);
+            if(hasBackgroundMsaa) resolved=over(backgroundMsaa.Load(int3(at,0)),resolved);
+            else {uint bg=backgroundPixels[at.y*backgroundWidth+at.x];if(bg&0x04000000U) resolved=paletteColor(bg&0x1800ffffU);}
+        }
+        if(marginOrigin && repairMargins && !(cpu&0xc0000000u)
+            && (logical.x<int(marginOrigin) || logical.x>=int(marginOrigin+marginWidth))
+            && !(backgroundAt(id.xy/scale*scale,uint2(width,height))&255u)) resolved=paletteColor(edgeColours[0]);
+        if(inSource && logical.x>=clipLeft && logical.y>=clipTop && logical.x<clipRight && logical.y<clipBottom && !(cpu&0x80000000U)) {
+            int2 sampleSource=source;
+            if(mosaic>1) sampleSource=int2(mosaicAt(logical.x,originX),mosaicAt(logical.y,originY))-int2(offsetX,offsetY);
+            if(all(sampleSource>=0) && all(sampleSource<int2(sourceReferenceWidth,sourceReferenceHeight)/int(sourceScale))) {
+                uint2 at=mosaic>1?sourceSample(sampleSource,sub,outputAt,uint2(outputWidth,outputHeight)):nativeSample;
+                uint ink=nativePixels[at.y*sourceWidth+at.x];
+                if(!worldOnly || nativeTag(ink)!=1 || (ink&0x10000000U)) {
+                    if(hasNativeMsaa) resolved=over(nativeMsaa.Load(int3(at,0)),resolved);
+                    else if((ink&255U) || (sourceScale>1 && (ink&0x80000000U))) resolved=paletteColor(ink);
+                }
+            }
+        }
+        if(marginOrigin && !repairMargins && (logical.x<int(marginOrigin) || logical.x>=int(marginOrigin+marginWidth)))
+            resolved=paletteColor(edgeColours[matchRightMargin?1:(logical.x<int(marginOrigin)?0:1)]);
+        if(hasLate) {
+            uint2 at=outputAt*uint2(lateWidth,lateHeight)/uint2(outputWidth,outputHeight);
+            uint ink=latePixels[at.y*lateWidth+at.x];
+            if(!worldOnly || nativeTag(ink)!=1 || (ink&0x10000000U)) {
+                if(hasLateMsaa) resolved=over(lateMsaa.Load(int3(at,0)),resolved);
+                else if(ink&0x04000000U) resolved=paletteColor(ink);
+            }
+        }
+        if(cpu&0x20000000U) resolved=paletteColor(cpu&65535);
+    }
+    rgba[outputAt]=resolved;
+#endif
 }

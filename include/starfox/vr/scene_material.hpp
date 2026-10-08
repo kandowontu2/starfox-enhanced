@@ -1,5 +1,5 @@
 #pragma once
-#include "starfox/vr/vulkan_scene_pipeline.hpp"
+#include "starfox/vr/scene_types.hpp"
 #include "starfox/render/face_material.hpp"
 #include "starfox/render/palette.hpp"
 namespace starfox::vr {

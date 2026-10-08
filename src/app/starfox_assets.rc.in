@@ -36,6 +36,7 @@
 234 RCDATA "@CMAKE_CURRENT_SOURCE_DIR@/assets/enhanced-backdrops/deep-space-v1.bmp"
 235 RCDATA "@CMAKE_CURRENT_SOURCE_DIR@/assets/enhanced-backdrops/orbital-ocean-surface-v1.bmp"
 236 RCDATA "@CMAKE_CURRENT_SOURCE_DIR@/assets/enhanced-backdrops/orbital-lava-surface-v1.bmp"
+237 RCDATA "@CMAKE_CURRENT_SOURCE_DIR@/assets/enhanced-backdrops/kazaru-volcanic-hills-v1.bmp"
 #define IDR_STARFOX_SYMBOLS 102
 #define IDR_STARFOX_EX_PATCH 108
 #define IDR_STARFOX_EX_SYMBOLS 109

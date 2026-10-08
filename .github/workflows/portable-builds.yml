@@ -32,6 +32,7 @@ jobs:
           cmake -S . -B build/asset-builder -G Ninja `
             -DCMAKE_BUILD_TYPE=Release `
             -DSTARFOX_BUILD_TESTS=OFF `
+            -DSTARFOX_ENABLE_LEIASR=ON `
             -DSTARFOX_PACKAGE_MSU1_MUSIC=OFF
           cmake --build build/asset-builder --target starfox_pc starfox_asset_builder
       - name: Verify standalone Windows imports
@@ -69,13 +70,58 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'DLSS adapter configure failed' }
           cmake --build build/dlss-release --config Release --target starfox_dlss_native
           if ($LASTEXITCODE -ne 0) { throw 'DLSS adapter build failed' }
+      - name: Embed verified DLSS 4.5 runtime
+        shell: pwsh
+        run: |
+          $staging = Join-Path $env:RUNNER_TEMP 'starfox-dlss-embed'
+          ./tools/package_dlss.ps1 -SdkDirectory $env:STARFOX_RELEASE_DLSS_SDK `
+            -Adapter build/dlss-release/Release/starfox_dlss_native.dll -Destination $staging
+          cmake -S . -B build/asset-builder "-DSTARFOX_DLSS_RUNTIME_DIRECTORY=$staging/dlss"
+          if ($LASTEXITCODE -ne 0) { throw 'Embedded DLSS configure failed' }
+          cmake --build build/asset-builder --target starfox_pc
+          if ($LASTEXITCODE -ne 0) { throw 'Embedded DLSS runtime build failed' }
+      - name: Build optional direct SR Platform adapter
+        shell: pwsh
+        run: |
+          ./tools/build_leia_sr.ps1 -BuildDirectory build/leia-sr-msvc -OutputDirectory build/asset-builder
+          if ($LASTEXITCODE -ne 0) { throw 'SR Platform adapter build failed' }
+          cmake --build build/asset-builder --target starfox_leia_sr_check
+          if ($LASTEXITCODE -ne 0) { throw 'SR Platform checker build failed' }
+          $imports = (& objdump.exe -p build/asset-builder/starfox_leia_sr.dll | Out-String)
+          if ($imports -notmatch 'starfox_leia_sr_status' -or
+              $imports -notmatch 'starfox_leia_sr_get_api' -or
+              $imports -match 'DLL Name: (SimulatedReality|Dimenco|opencv|glog|LeapC)') {
+            throw 'SR Platform diagnostic exports or optional delay-load contract invalid'
+          }
+          $checkerImports = (& objdump.exe -p build/asset-builder/starfox_leia_sr_check.exe | Out-String)
+          if ($checkerImports -match 'libgcc_s_|libstdc\+\+|libwinpthread') {
+            throw 'SR Platform checker depends on a MinGW runtime DLL'
+          }
+          & build/asset-builder/starfox_leia_sr_check.exe --expect-unavailable
+          if ($LASTEXITCODE -ne 0) { throw 'SR adapter/owned texture checks failed' }
       - name: Package runtime and builder
         shell: pwsh
         run: |
           $runtime = 'StarFoxEnhanced-0.0.8-windows-x64'
           cmake --install build/asset-builder --prefix $runtime
-          ./tools/package_dlss.ps1 -SdkDirectory $env:STARFOX_RELEASE_DLSS_SDK `
-            -Adapter build/dlss-release/Release/starfox_dlss_native.dll -Destination $runtime
+          if ($LASTEXITCODE -ne 0) { throw 'Runtime install failed' }
+          ./tools/package_displayxr.ps1 -OutputDirectory $runtime
+          ./tools/package_displayxr.ps1 -OutputDirectory $runtime -VerifyOnly
+          python tests/test_displayxr_package.py --package $runtime
+          if ($LASTEXITCODE -ne 0) { throw 'DisplayXR optional package regression failed' }
+          if (!(Test-Path "$runtime/licenses/dlss/nvngx_dlss.license.txt")) {
+            throw 'Embedded DLSS redistribution notices missing'
+          }
+          if (!(Test-Path "$runtime/licenses/displayxr/LICENSE.txt") -or
+              !(Test-Path "$runtime/licenses/displayxr/NOTICE.txt")) {
+            throw 'DisplayXR interface redistribution notices missing'
+          }
+          if (!(Test-Path "$runtime/starfox_leia_sr.dll") -or
+              !(Test-Path "$runtime/licenses/leia-sr/SR-SDK-LICENSE.txt") -or
+              !(Test-Path "$runtime/starfox_leia_sr_check.exe") -or
+              !(Test-Path "$runtime/Diagnose-Leia-SR.cmd")) {
+            throw 'SR Platform adapter, checker, instructions or notices missing'
+          }
           Compress-Archive -Path "$runtime/*" -DestinationPath "$runtime.zip"
           $builder = 'StarFoxAssetBuilder-0.0.8-windows-x64'
           New-Item -ItemType Directory -Force $builder | Out-Null
@@ -353,14 +399,11 @@ jobs:
             | jq -e '.CADisableMinimumFrameDurationOnPhone == true' >/dev/null
           [[ " $(lipo -archs "${binary}") " == *" arm64 "* ]]
           package="StarFoxEnhanced-0.0.8-ios-arm64-unsigned"
-          mkdir -p "${package}/Payload"
-          cp -R "${app}" "${package}/Payload/"
-          cp platform/apple/IOS_INSTALL.md "${package}/README.md"
-          ditto -c -k --sequesterRsrc --keepParent "${package}" "${package}.zip"
+          python3 tools/package_ios.py --app "${app}" --output "${package}.ipa"
       - uses: actions/upload-artifact@v4
         with:
           name: StarFoxEnhanced-0.0.8-ios-arm64-unsigned
-          path: StarFoxEnhanced-0.0.8-ios-arm64-unsigned.zip
+          path: StarFoxEnhanced-0.0.8-ios-arm64-unsigned.ipa
           if-no-files-found: error
       - name: Add to GitHub release
         if: github.event_name == 'push' || inputs.release_tag != ''
@@ -371,7 +414,7 @@ jobs:
         run: |
           tag="${REQUESTED_TAG:-${GITHUB_REF_NAME}}"
           gh release upload "${tag}" \
-            StarFoxEnhanced-0.0.8-ios-arm64-unsigned.zip --clobber
+            StarFoxEnhanced-0.0.8-ios-arm64-unsigned.ipa --clobber
 
   android-arm64:
     if: ${{ !inputs.quest_only }}
@@ -659,9 +702,183 @@ jobs:
           files: StarFoxEnhanced-0.0.8-vita.zip
           draft: true
 
+  linux-vr-host-tests:
+    if: ${{ !inputs.quest_only }}
+    name: Linux host VR regression tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned SDL build requirements
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config python3 \
+            libasound2-dev libpulse-dev libx11-dev libxext-dev \
+            libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev \
+            libxss-dev libxtst-dev libxkbcommon-dev libgl1-mesa-dev \
+            libgles2-mesa-dev libegl1-mesa-dev libdbus-1-dev libudev-dev \
+            libvulkan1 mesa-vulkan-drivers
+          mapfile -t lavapipe_icds < <(find /usr/share/vulkan/icd.d -maxdepth 1 \
+            -type f -name 'lvp_icd*.json' -print | sort)
+          if [ "${#lavapipe_icds[@]}" -eq 0 ]; then
+            echo "Mesa Lavapipe ICD JSON was not installed"
+            exit 1
+          fi
+          echo "VK_ICD_FILENAMES=${lavapipe_icds[0]}" >> "$GITHUB_ENV"
+          echo "Native Vulkan timestamp regression uses ${lavapipe_icds[0]}"
+      - name: Build PCVR and run asset-free shared regressions
+        shell: bash
+        run: |
+          cmake -S . -B "$RUNNER_TEMP/starfox-frame-host-vr" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSTARFOX_BUILD_RUNTIME=ON \
+            -DSTARFOX_BUILD_VR=ON \
+            -DSTARFOX_BUILD_TESTS=ON \
+            -DBUILD_TESTING=ON \
+            -DSTARFOX_REQUIRE_LAVAPIPE_TIMESTAMP_TEST=ON \
+            -DSTARFOX_BUILD_TOOLS=OFF \
+            -DSTARFOX_EMBED_RUNTIME_ASSETS=OFF \
+            -DSTARFOX_PACKAGE_MSU1_MUSIC=OFF
+          cmake --build "$RUNNER_TEMP/starfox-frame-host-vr" \
+            --target starfox_pcvr starfox_desktop_paths_tests starfox_vr_application_tests \
+              starfox_vr_game_input_check starfox_vr_cockpit_input_check starfox_vr_cockpit_geometry_check starfox_vr_rumble_parity_check \
+              starfox_vr_presentation_check starfox_vr_input_check starfox_vr_camera_check \
+              starfox_vr_swapchain_check starfox_vr_session_check starfox_vr_device_check \
+              starfox_vr_targets_check starfox_vr_runtime_tests starfox_vr_timestamp_check \
+              starfox_vr_profile_output_check \
+              starfox_vr_packet_check starfox_vr_decal_check starfox_vr_mesh_check \
+              starfox_vr_standard_check \
+              starfox_rumble_sequencer_tests \
+            --parallel 2
+          ctest --test-dir "$RUNNER_TEMP/starfox-frame-host-vr" --output-on-failure \
+            -R '^starfox_(pcvr_help|vr_profile_cli|vr_profile_output_check|desktop_paths_tests|vr_application_tests|vr_presentation_check|vr_input_check|vr_cockpit_input_check|vr_cockpit_geometry_check|vr_cockpit_depth_check|vr_cockpit_assets|vr_camera_check|vr_swapchain_check|vr_session_check|vr_device_check|vr_targets_check|vr_packet_check|vr_decal_check|vr_mesh_check|vr_standard_check|vr_runtime_tests|vr_timestamp_math|vr_timestamp_query|vr_timestamp_query_required|rumble_sequencer_tests|steam_frame_cmake_guards)$'
+          "$RUNNER_TEMP/starfox-frame-host-vr/starfox_pcvr" --help
+
+  steam-frame-arm64:
+    if: ${{ !inputs.quest_only }}
+    name: Sniper sysroot ARM64 baseline, OpenXR player, and package
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install host cross-build tools
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang lld llvm cmake ninja-build python3 curl tar coreutils \
+            binutils pkg-config zip
+      - name: Cross-build and validate clean Frame package
+        env:
+          STARFOX_CMAKE_DEBUG_TRY_COMPILE: "1"
+        shell: bash
+        run: |
+          chmod +x tools/build_steam_frame.sh tools/package/LAUNCH-STEAM-FRAME.sh
+          tools/build_steam_frame.sh . \
+            "$RUNNER_TEMP/starfox-steam-frame-build" \
+            "$RUNNER_TEMP/starfox-steam-frame-package"
+      - name: Archive validated Steam Frame runtime
+        shell: bash
+        run: |
+          cd "$RUNNER_TEMP/starfox-steam-frame-package"
+          zip -qr "$GITHUB_WORKSPACE/StarFoxEnhanced-0.0.8-steam-frame-arm64.zip" .
+          unzip -t "$GITHUB_WORKSPACE/StarFoxEnhanced-0.0.8-steam-frame-arm64.zip"
+      - name: Preserve cross-build diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: StarFoxEnhanced-steam-frame-configure-failure
+          path: |
+            ${{ runner.temp }}/starfox-steam-frame-build/sysroot-link-normalization.json
+            ${{ runner.temp }}/starfox-steam-frame-build/sniper-sysroot/.starfox-sysroot-link-normalization.json
+            ${{ runner.temp }}/starfox-steam-frame-build/flat/CMakeCache.txt
+            ${{ runner.temp }}/starfox-steam-frame-build/flat/CMakeFiles/CMakeConfigureLog.yaml
+            ${{ runner.temp }}/starfox-steam-frame-build/flat/CMakeFiles/CMakeError.log
+            ${{ runner.temp }}/starfox-steam-frame-build/flat/CMakeFiles/CMakeScratch/
+            ${{ runner.temp }}/starfox-steam-frame-build/steam-frame-vr/CMakeCache.txt
+            ${{ runner.temp }}/starfox-steam-frame-build/steam-frame-vr/CMakeFiles/CMakeConfigureLog.yaml
+            ${{ runner.temp }}/starfox-steam-frame-build/steam-frame-vr/CMakeFiles/CMakeError.log
+            ${{ runner.temp }}/starfox-steam-frame-build/steam-frame-vr/CMakeFiles/CMakeScratch/
+          if-no-files-found: warn
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: StarFoxEnhanced-0.0.8-steam-frame-arm64
+          # Keep Linux executable permissions inside the release ZIP.
+          path: StarFoxEnhanced-0.0.8-steam-frame-arm64.zip
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: StarFoxEnhanced-0.0.8-steam-frame-hardware-diagnostics
+          path: ${{ runner.temp }}/starfox-steam-frame-build/diagnostics/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload Steam Frame release package
+        if: github.event_name == 'push' || inputs.release_tag != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.release_tag || github.ref_name }}
+          files: StarFoxEnhanced-0.0.8-steam-frame-arm64.zip
+          draft: true
+
+  ps5-homebrew:
+    if: ${{ !inputs.quest_only }}
+    name: PS5 native RADV homebrew title
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # PS5 launcher backgrounds must be DDS payloads, not LFS pointers.
+          lfs: true
+      - name: Test PS5 policies and SDL patcher
+        shell: bash
+        run: |
+          g++ -std=c++20 -O2 -I include tests/ps5_port_tests.cpp \
+            -o "$RUNNER_TEMP/starfox-ps5-port-tests"
+          "$RUNNER_TEMP/starfox-ps5-port-tests"
+          python3 tests/test_ps5_sdl_patch.py
+      - name: Build and package native PS5 title
+        env:
+          STARFOX_PS5_TITLE_ID: PPSA99764
+        shell: bash
+        run: |
+          # Build paths are relative to /src inside the pinned Docker image.
+          bash tools/build_ps5.sh . build/ps5 "$RUNNER_TEMP/StarFoxEnhanced-ps5"
+          title="$RUNNER_TEMP/StarFoxEnhanced-ps5/$STARFOX_PS5_TITLE_ID"
+          for required in eboot.bin sce_module/libc.prx sce_sys/param.json \
+            sce_sys/icon0.png sce_sys/pic0.dds sce_sys/pic1.dds; do
+            test -s "$title/$required"
+          done
+          if find "$RUNNER_TEMP/StarFoxEnhanced-ps5" -type f \
+            \( -iname '*.sfc' -o -iname '*.smc' -o -iname 'Starfox-Assets.BIN' \
+               -o -iname 'Starfox-MSU1.PAK' \) -print -quit | grep -q .; then
+            echo 'Private game assets must not be included in the PS5 release.' >&2
+            exit 1
+          fi
+          cd "$RUNNER_TEMP"
+          zip -qr "$GITHUB_WORKSPACE/StarFoxEnhanced-0.0.8-ps5.zip" StarFoxEnhanced-ps5
+          unzip -t "$GITHUB_WORKSPACE/StarFoxEnhanced-0.0.8-ps5.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: StarFoxEnhanced-0.0.8-ps5
+          path: StarFoxEnhanced-0.0.8-ps5.zip
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload PS5 release package
+        if: github.event_name == 'push' || inputs.release_tag != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.release_tag || github.ref_name }}
+          files: StarFoxEnhanced-0.0.8-ps5.zip
+          draft: true
+
   release-checksums:
     name: Release package checksums
-    needs: [windows-x64, windows-x86, xbox-uwp-x64, linux-x64, macos-universal, ios-device, android-arm64, quest-arm64, windows-pcvr, switch-homebrew, vita-homebrew]
+    needs: [windows-x64, windows-x86, xbox-uwp-x64, linux-x64, macos-universal, ios-device, android-arm64, quest-arm64, windows-pcvr, switch-homebrew, vita-homebrew, linux-vr-host-tests, steam-frame-arm64, ps5-homebrew]
+    # Implicit success() keeps incomplete/failed platform runs in draft.
     if: ${{ !inputs.quest_only && (github.event_name == 'push' || inputs.release_tag != '') }}
     runs-on: ubuntu-latest
     steps:
@@ -677,7 +894,15 @@ jobs:
         shell: bash
         run: |
           cd packages
-          sha256sum *.zip *.apk > SHA256SUMS.txt
+          test -s StarFoxEnhanced-0.0.8-ps5.zip
+          test -s StarFoxEnhanced-0.0.8-steam-frame-arm64.zip
+          shopt -s nullglob
+          assets=( *.zip *.apk *.ipa )
+          if ((${#assets[@]} == 0)); then
+            echo 'No verified release packages were produced.' >&2
+            exit 1
+          fi
+          sha256sum "${assets[@]}" > SHA256SUMS.txt
           tag="${REQUESTED_TAG:-${GITHUB_REF_NAME}}"
           gh release upload "${tag}" SHA256SUMS.txt --clobber
           gh release edit "${tag}" --draft=false

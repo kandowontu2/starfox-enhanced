@@ -52,6 +52,39 @@ int main() {
         scene.add({{-100,-100,100},{100,-100,100},{0,100,100}});
         scene.build();
         VulkanHardwareRt rays;
+        {
+            Scene casters;
+            casters.add({{-12,-12,20},{12,-12,20},{0,12,20}});casters.build();
+            for(unsigned quality:{1U,2U,3U}) for(double tilt:{-.25,0.,.25}) {
+                Camera underlay_camera{37,23,30,18.5,11.5,26};underlay_camera.quality=quality;
+                const ReceiverPlane plane{{0,0,40},{tilt,.125,1}};
+                std::vector<std::uint8_t> expected;
+                render_mask(casters,underlay_camera,{0,0,-1},plane,expected,nullptr,true,true);
+                if(!rays.render_shadows(device,casters,underlay_camera,{0,0,-1},plane,nullptr,true))
+                    throw std::runtime_error(rays.status());
+                const auto result=rays.shadow_output();
+                SDL_GPUTransferBufferCreateInfo info{SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD,unsigned(expected.size()*4),0};
+                auto* transfer=SDL_CreateGPUTransferBuffer(device,&info);
+                auto* command=SDL_AcquireGPUCommandBuffer(device);
+                if(!transfer || !command) throw std::runtime_error(SDL_GetError());
+                auto* copy=SDL_BeginGPUCopyPass(command);
+                SDL_GPUBufferRegion source{static_cast<SDL_GPUBuffer*>(result.buffer),0,info.size};
+                SDL_GPUTransferBufferLocation target{transfer,0};
+                SDL_DownloadFromGPUBuffer(copy,&source,&target);SDL_EndGPUCopyPass(copy);
+                auto* fence=SDL_SubmitGPUCommandBufferAndAcquireFence(command);
+                if(!fence || !SDL_WaitForGPUFences(device,true,&fence,1)) throw std::runtime_error(SDL_GetError());
+                auto* data=static_cast<const std::uint32_t*>(SDL_MapGPUTransferBuffer(device,transfer,false));
+                if(!data) throw std::runtime_error(SDL_GetError());
+                bool same=true;
+                for(unsigned i=0;i<expected.size();++i) same&=data[i]==expected[i];
+                SDL_UnmapGPUTransferBuffer(device,transfer);SDL_ReleaseGPUFence(device,fence);
+                SDL_ReleaseGPUTransferBuffer(device,transfer);
+                if(!same) throw std::runtime_error("Vulkan ground-only receiver differs from CPU");
+                if(rays.render_shadows(device,casters,underlay_camera,{0,0,-1},{},nullptr,true)
+                    || rays.shadow_output().buffer) throw std::runtime_error("Vulkan underlay retained no-plane output");
+            }
+            std::cout<<"Vulkan ground-only receivers: all qualities, tilted planes and invalidation passed\n";
+        }
         const Camera camera{64,64,64,32,32};
         dispatched=rays.render_shadows(device,scene,camera,{0,0,1},{});
         if(dispatched) {
@@ -265,6 +298,19 @@ int main() {
             RayWater water;water.time=1.f;water.reflection_strength=1.f;
             const ReceiverPlane water_plane{{0,.1,0},{0,1,0}};
             water.material=1;
+            {
+                const ReceiverPlane hidden_plane{{0,100,0},{0,1,0}};
+                if(!rays.render_reflections(device,gpu_geometry,camera,palette,palette[0],1,0.f,0,
+                        hidden_plane,&bg,&water)) throw std::runtime_error(rays.status());
+                if((read_reflection_center()>>24)!=255) throw std::runtime_error("Underlay fixture has no foreground model");
+                if(!rays.render_reflections(device,gpu_geometry,camera,palette,palette[0],1,0.f,0,
+                        hidden_plane,&bg,&water,true)) throw std::runtime_error(rays.status());
+                if((read_reflection_center()>>24)!=254) throw std::runtime_error("Ground-only reflection retained foreground model");
+                if(rays.render_reflections(device,gpu_geometry,camera,palette,palette[0],1,0.f,0,
+                        {},&bg,&water,true) || rays.reflection_output().buffer)
+                    throw std::runtime_error("Invalid ground-only reflection retained output");
+                std::cout<<"Vulkan reflected underlay: model exclusion and invalidation passed\n";
+            }
             if(!rays.render_reflections(device,gpu_geometry,camera,palette,palette[0],1,0.f,0,
                     water_plane,&bg,&water)) throw std::runtime_error(rays.status());
             const auto enhanced_mirror_center=read_reflection_center();
@@ -310,8 +356,10 @@ int main() {
             std::cout<<"Ray-water / gold ground center RGBA: 0x"<<std::hex
                 <<water_center<<" / 0x"<<moving_water_center
                 <<" / 0x"<<gold_center<<std::dec<<'\n';
-            dispatched=dispatched && (lava_center>>24)==253
-                && lava_center!=moving_lava_center;
+            dispatched=dispatched && (lava_center>>24)==254
+                && lava_center!=moving_lava_center
+                && (lava_center&255u)>((lava_center>>8)&255u)
+                && ((lava_center>>8)&255u)>((lava_center>>16)&255u);
             std::cout<<"Ray-lava surface center RGBA: 0x"<<std::hex
                 <<lava_center<<" / 0x"<<moving_lava_center<<std::dec<<'\n';
         }

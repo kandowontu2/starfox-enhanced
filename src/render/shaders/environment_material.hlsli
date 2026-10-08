@@ -1,3 +1,4 @@
+#include "../../../include/starfox/render/lava_surface.inc"
 float environmentHash(int a,int b) {
     uint n=uint(a)*1597334677u ^ uint(b)*3812015801u;
     n^=n>>16;n*=2246822519u;n^=n>>13;return float(n&65535u)/65535.f;
@@ -30,11 +31,11 @@ float3 backdropStyle(float3 c,float2 uv,uint style,float time) {
 float3 environmentColour(float3 c,uint kind,float x,float y,uint4 m,float4 v,float slope,float brightness) {
     v.x+=slope*x;
     const float3 authored=c;
-    bool lava_surface=false;
+    bool is_lava=false;
     const float t=v[3];float detail=0;float3 tint=float3(1,1,1);
     if(kind<=5 && m[0]) {
         if(m[0]>1) kind=m[0]-1;
-        lava_surface=kind==9;
+        is_lava=kind==9;
         const float distance=max(kind==9?16.f:4.f,y-v[0]);
         float u=x*24.f/distance+v[1]*.015625f,z=2048.f/distance+v[2]*.015625f;
         if(m[1]==1) u+=sin(z*.17f+t)*.6f;
@@ -53,40 +54,10 @@ float3 environmentColour(float3 c,uint kind,float x,float y,uint4 m,float4 v,flo
             detail=broad*.025f;
         }
         if(kind==9) {
-            float drift=z*.08f-t*.13f;
-            float warp=environment_noise(u*.07f,drift)*2.f-1.f;
-            float qx=u*.20f+warp*.95f+sin(drift*1.6f)*.40f;
-            float qz=z*.16f-t*.30f+warp*.30f;
-            float coarse=environment_noise(qx,qz);
-            float fine=environment_noise(qx*2.8f+11.f,qz*2.8f-4.f);
-            // Match the water material's travelling broad-wave projection.
-            // Noise breaks up crests without replacing the waves with static crust.
-            float phase=z*.42f+sin(u*.09f)*2.f-t*.8f+warp*.22f;
-            float swell=sin(phase);
-            float cross=sin(z*.22f-u*.11f+t*.45f+warp*.18f);
-            float hot=saturate(.49f+swell*.32f+cross*.13f
-                +(coarse-.5f)*.12f+(fine-.5f)*.04f*near);
-            float horizon_blend=saturate((y-v[0])/48.f);
-            float heat=lerp(.16f,hot*hot*(3.f-2.f*hot),horizon_blend);
-            float ember=saturate((heat-.67f)*3.1f);
-            float wave_highlight=(pow(max(0.f,swell),8.f)*.75f
-                +pow(max(0.f,cross),12.f)*.20f)*near*horizon_blend;
-            float2 cell=floor(float2(u,z)*.11f);
-            float seed=environmentHash(int(cell.x),int(cell.y));
-            float bubble=0.f;
-            if(seed>.94f) {
-                float2 offset=frac(float2(u,z)*.11f)
-                    -float2(.25f+.5f*environmentHash(int(cell.x)+19,int(cell.y)),
-                        .25f+.5f*environmentHash(int(cell.x),int(cell.y)+29));
-                float phase=frac(t*.18f+seed*5.f);
-                float radius=.035f+phase*.18f;
-                bubble=(exp(-pow((length(offset)-radius)*19.f,2.f))*.50f
-                    +exp(-dot(offset,offset)*65.f)*(1.f-phase)*.45f)*near;
-            }
-            float exposure=clamp(max(dot(c,float3(.3f,.59f,.11f))/150.f,brightness*.75f),.12f,1.35f);
-            c=exposure*float3(22.f+220.f*heat+28.f*ember+42.f*wave_highlight+100.f*bubble,
-                4.f+38.f*heat+54.f*ember+43.f*wave_highlight+105.f*bubble,
-                2.f+3.f*heat+13.f*ember+8.f*wave_highlight+42.f*bubble);
+            float footprint=max(384.f/distance,(32768.f+abs(x)*384.f)/(distance*distance));
+            LavaSample surface=lava_surface(x*384.f/distance+v[1],32768.f/distance+v[2],t,footprint);
+            LavaColour molten=lava_shade(surface,-x/256.f,-distance/256.f,-1.f);
+            c=float3(molten.r,molten.g,molten.b)*(255.f*saturate(brightness));
         }
         { // Auto and an explicit selection share the same material response.
             const float light=(c[0]*.3f+c[1]*.59f+c[2]*.11f);
@@ -119,7 +90,7 @@ float3 environmentColour(float3 c,uint kind,float x,float y,uint4 m,float4 v,flo
     } else return c;
     // Multiplicative radiance preserves fades, black and authored brightness.
     for(uint i=0;i<3;++i) c[i]=clamp(c[i]*(tint[i]+detail),0.f,255.f);
-    if(lava_surface) {
+    if(is_lava) {
         // Ownership is already limited to the authored ground class. Keep a
         // narrow anti-aliased seam at the actual sloped horizon, then cover
         // the whole floor instead of leaving a half-screen red underlay.

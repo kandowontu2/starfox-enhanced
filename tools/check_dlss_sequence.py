@@ -28,8 +28,10 @@ def bmp(path):
     return rows
 
 
-def measure(prefix, first, last, region=(.25, .125, .75, 1/3)):
-    frames = [bmp(Path(f'{prefix}.frame-{i}.bmp')) for i in range(first, last + 1)]
+def measure(prefix, first, last, region=(.25, .125, .75, 1/3), step=1):
+    if step < 1 or last < first + step:
+        raise ValueError('Need at least two frames with a positive step')
+    frames = [bmp(Path(f'{prefix}.frame-{i}.bmp')) for i in range(first, last + 1, step)]
     changes = []
     for old, new in zip(frames, frames[1:]):
         if len(old) != len(new) or len(old[0]) != len(new[0]):
@@ -53,13 +55,15 @@ if __name__ == '__main__':
     parser.add_argument('prefix', nargs='+')
     parser.add_argument('--first', type=int, default=16)
     parser.add_argument('--last', type=int, default=32)
+    parser.add_argument('--step', type=int, default=1,
+                        help='Capture frame interval; capture_lava uses 4 by default')
     parser.add_argument('--region', type=float, nargs=4, default=(.25, .125, .75, 1/3),
                         metavar=('LEFT', 'TOP', 'RIGHT', 'BOTTOM'),
                         help='Normalized region; defaults to upper-center background')
     args = parser.parse_args()
-    if args.first < 1 or args.last <= args.first:
+    if args.first < 1 or args.step < 1 or args.last < args.first + args.step:
         parser.error('Need at least two positive frame numbers')
     l, t, r, b = args.region
     if not (0 <= l < r <= 1 and 0 <= t < b <= 1):
         parser.error('Region must be nonempty and within 0..1')
-    print(json.dumps([measure(p, args.first, args.last, args.region) for p in args.prefix], indent=2))
+    print(json.dumps([measure(p, args.first, args.last, args.region, args.step) for p in args.prefix], indent=2))

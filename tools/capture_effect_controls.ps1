@@ -1,4 +1,6 @@
-param([string]$OutputDirectory='tmp/effect-controls-proof',[switch]$TwoD)
+param([string]$OutputDirectory='tmp/effect-controls-proof',[switch]$TwoD,[switch]$Global,[switch]$Fog,
+    [string]$Binary='build/current/starfox_pc.exe',[switch]$Bottom,[double]$CameraBank=0,
+    [ValidateSet('GPU','SOFTWARE')][string]$Renderer='GPU')
 $ErrorActionPreference='Stop'
 $proof=[IO.Path]::GetFullPath($OutputDirectory)
 New-Item -ItemType Directory -Force -Path $proof | Out-Null
@@ -13,7 +15,7 @@ try {
         STARFOX_TEST_STATE_ACTIONS='10:6'
         STARFOX_TEST_UNPACED='1';STARFOX_TEST_VSYNC='0';STARFOX_TEST_PRESENTATION_FPS='60'
         STARFOX_TEST_TIMING_MODE='ORIGINAL';STARFOX_TEST_EXPERIENCE='ORIGINAL'
-        STARFOX_TEST_DISPLAY_MODE='16_9';STARFOX_TEST_RENDER_SCALE='2';STARFOX_TEST_RENDERER='GPU'
+        STARFOX_TEST_DISPLAY_MODE='16_9';STARFOX_TEST_RENDER_SCALE='2';STARFOX_TEST_RENDERER=$Renderer
         STARFOX_TEST_EFFECT='1';STARFOX_TEST_MATERIAL='57';STARFOX_TEST_MANIPULATION='51'
         STARFOX_TEST_WORLD_EFFECT='0';STARFOX_TEST_RAY_TRACING='0';STARFOX_TEST_REFLECTIVE_SURFACES='0'
         STARFOX_TEST_RTX_LIGHTING='0';STARFOX_TEST_BLOOM='0';STARFOX_TEST_BLOOM_2D='0'
@@ -29,8 +31,19 @@ try {
         $settings.STARFOX_TEST_EFFECT='0';$settings.STARFOX_TEST_MATERIAL='0';$settings.STARFOX_TEST_MANIPULATION='0'
         $settings.STARFOX_TEST_ENVIRONMENT_0='1';$settings.STARFOX_TEST_ENVIRONMENT_3='1'
     }
+    if($Global) {
+        $settings.STARFOX_TEST_EFFECT='0';$settings.STARFOX_TEST_MATERIAL='0';$settings.STARFOX_TEST_MANIPULATION='0';
+        $settings.STARFOX_TEST_ENVIRONMENT_0='0';$settings.STARFOX_TEST_ENVIRONMENT_3='0';
+        $settings.STARFOX_TEST_PRESSES='20:0x0800,30:0x0080';
+        if($Bottom){$settings.STARFOX_TEST_PRESSES+=',40:0x0800'}
+        if($Fog){
+            $settings.STARFOX_TEST_PRESSES+=',40:0x0400,50:0x0400,60:0x0400,70:0x0400,80:0x0100'
+            $settings.STARFOX_TRACE_GPU='1'
+        }
+    }
+    if($CameraBank -ne 0){$settings.STARFOX_TEST_CAMERA_BANK="$CameraBank";$settings.STARFOX_TRACE_GPU='1'}
     foreach($key in $settings.Keys){Set-Item -LiteralPath "Env:$key" -Value $settings[$key]}
-    $run=Start-Process build/current/starfox_pc.exe -ArgumentList 'upstream-ultrastarfox/SF.SFC upstream-ultrastarfox/SYMBOLS.TXT LEVEL1_1' -WindowStyle Hidden -PassThru -RedirectStandardError "$proof/menu.log"
+    $run=Start-Process $Binary -ArgumentList 'upstream-ultrastarfox/SF.SFC upstream-ultrastarfox/SYMBOLS.TXT LEVEL1_1' -WindowStyle Hidden -PassThru -RedirectStandardError "$proof/menu.log"
     $handle=$run.Handle
     if(!$run.WaitForExit(60000)){throw "Capture still running: $($run.Id)"}
     if($run.ExitCode -ne 0 -or !(Test-Path "$proof/menu.bmp")){throw 'Menu capture failed'}

@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <span>
 namespace starfox::render {
 struct GridLattice;
 struct NativeProjectionPoint {
@@ -60,6 +61,8 @@ public:
         // Current raster jitter in pixels; previous projection is unjittered.
         float jitter_x{},jitter_y{},previous_near{},padding{};
     };
+    static_assert(sizeof(MotionSurfaceSettings)==112);
+    static bool valid_motion_surface_settings(const MotionSurfaceSettings&) noexcept;
     // Borrowed float4 XY previous-current (pixels), linear Z, validity. Invalid
     // depth/history/behind-camera points are explicitly invalid, not zero MV.
     void* enqueue_motion_surface(void* device,void* command,void* camera_depth,
@@ -131,14 +134,20 @@ public:
     // Invalid pose indices become invisible points. Continuous/subpixel poses
     // are not represented by this source-word interface.
     void* enqueue_transformed(void* device,void* command,void* vertices,
-        std::uint32_t count,void* poses,std::uint32_t pose_count,void** camera_points=nullptr);
+        std::uint32_t count,void* poses,std::uint32_t pose_count,void** camera_points=nullptr,
+        std::span<const NativeTransformPose> inline_poses={});
+    // Optional inline poses replace (not supplement) the storage buffer: pass
+    // poses=nullptr and exactly pose_count records, at most one native/six
+    // continuous. SDL copies them into this command's constants immediately.
+    // No cross-command CPU pointer, extra transfer buffer or submission.
     // Optional camera_points receives the borrowed native camera/vanish buffer
     // for near clipping, or null on failure. Same lifetime as projected output.
     // Fractional camera and screen coordinates. Camera.w/screen.w is -1 for
     // invalid poses, otherwise camera.w=1 and screen.w is the front flag.
     // Separate from word visibility: its signed-word rules must not be used.
     void* enqueue_continuous(void* device,void* command,void* vertices,
-        std::uint32_t count,void* poses,std::uint32_t pose_count,void** residual_points=nullptr,bool lossless_camera=false);
+        std::uint32_t count,void* poses,std::uint32_t pose_count,void** residual_points=nullptr,bool lossless_camera=false,
+        std::span<const ContinuousTransformPose> inline_poses={});
     // Optional residual output: two float4 records per point, camera then
     // screen payload. Camera W=-1 is invalid; W=1 stores screen XY high
     // followed by XY low floats; W=2 stores raw binary64 X low/high then

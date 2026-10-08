@@ -28,17 +28,20 @@ void write_u32(std::ofstream& output, std::uint32_t value) {
 } // namespace
 
 void composite_transparent_layer(const Framebuffer& source,
-    Framebuffer& destination, const LayerCompositeSettings& settings) noexcept {
+    Framebuffer& destination, const LayerCompositeSettings& settings) {
+    const auto pairs=source.dither_pairs();
+    const bool carry_pairs=!pairs.empty() && source.draw_scale()>1 && destination.draw_scale()>1;
+    if(carry_pairs && !destination.command_buffer()) destination.enable_dither_pairs(true);
     const auto mosaic_enabled = settings.mosaic_layer_mask != 0U
         && (settings.mosaic & settings.mosaic_layer_mask) != 0U;
     const auto mosaic_size = static_cast<std::int32_t>(
         (settings.mosaic >> 4U) + 1U);
     if(auto* commands=destination.command_buffer()) {
         RasterCommand c;const int scale=destination.draw_scale();
-        c.left=std::max({0,settings.offset_x,settings.clip_left})*scale;
-        c.top=std::max({0,settings.offset_y,settings.clip_top})*scale;
-        c.right=std::min({int(destination.width()),settings.offset_x+int(source.width()),settings.clip_right})*scale;
-        c.bottom=std::min({int(destination.height()),settings.offset_y+int(source.height()),settings.clip_bottom})*scale;
+        c.left=std::max<std::int32_t>({0,settings.offset_x,settings.clip_left})*scale;
+        c.top=std::max<std::int32_t>({0,settings.offset_y,settings.clip_top})*scale;
+        c.right=std::min<std::int32_t>({int(destination.width()),settings.offset_x+int(source.width()),settings.clip_right})*scale;
+        c.bottom=std::min<std::int32_t>({int(destination.height()),settings.offset_y+int(source.height()),settings.clip_bottom})*scale;
         if(c.left>=c.right || c.top>=c.bottom) return;
         c.textured=5;c.texture_offset=commands->snapshot(source.pixels());
         c.u_mask=source.stored_width();c.v_mask=source.stored_height();
@@ -47,6 +50,11 @@ void composite_transparent_layer(const Framebuffer& source,
         c.reserved0=mosaic_enabled?mosaic_size:1;c.tag=std::uint32_t(PixelLayer::three_d);
         c.dither=source.layer_tags_enabled();
         if(c.dither) c.reserved1=commands->snapshot(source.layer_tags());
+        if(carry_pairs) {
+            std::vector<std::uint8_t> bytes;bytes.reserve(pairs.size()*2);
+            for(auto pair:pairs) {bytes.push_back(std::uint8_t(pair));bytes.push_back(std::uint8_t(pair>>8));}
+            c.colour_base=commands->snapshot(bytes)+1;
+        }
         commands->add(c);return;
     }
     if (!mosaic_enabled
@@ -57,8 +65,8 @@ void composite_transparent_layer(const Framebuffer& source,
         // for every source pixel. This is particularly important for Render
         // Upscale: the old generic path repeated that machinery nine times
         // per logical pixel at 3x even though no resampling was required.
-        auto source_left = std::max(0, -settings.offset_x);
-        auto source_top = std::max(0, -settings.offset_y);
+        auto source_left = std::max<std::int32_t>(0, -settings.offset_x);
+        auto source_top = std::max<std::int32_t>(0, -settings.offset_y);
         auto source_right = std::min(
             static_cast<std::int32_t>(source.width()),
             static_cast<std::int32_t>(destination.width())
@@ -123,9 +131,10 @@ void composite_transparent_layer(const Framebuffer& source,
                         + stored_offset_x);
             for (auto x = stored_source_left; x < stored_source_right; ++x) {
                 const auto colour = source_pixels[source_index];
-                if (colour != 0U) {
+                if (colour != 0U || (carry_pairs && (pairs[source_index]&256))) {
                     destination_pixels[destination_index] = colour;
                     destination.mark_written(destination_index);
+                    if(carry_pairs && (pairs[source_index]&256)) destination.set_dither_alternate(destination_index,std::uint8_t(pairs[source_index]));
                     if (transfer_tags) {
                         destination_tags[destination_index] = source_tagged
                             ? source_tags[source_index] : geometry_tag;
@@ -196,7 +205,8 @@ void composite_transparent_layer(const Framebuffer& source,
                     const auto source_stored_y = source_origin_y + source_row;
                     const auto colour = source.get_stored(
                         source_stored_x, source_stored_y);
-                    if (colour == 0U) continue;
+                    const auto pair=carry_pairs?pairs[std::size_t(source_stored_y)*source.stored_width()+source_stored_x]:0;
+                    if (colour == 0U && !(pair&256)) continue;
                     // Carry the source layer across the composite. Super FX
                     // layers hold both projected geometry and cartridge HUD
                     // art, so the tag has to follow the pixel rather than the
@@ -206,6 +216,7 @@ void composite_transparent_layer(const Framebuffer& source,
                         : PixelLayer::three_d;
                     destination.set_stored(destination_origin_x + column,
                         destination_origin_y + row, colour, layer);
+                    if(pair&256) destination.set_dither_alternate(std::size_t(destination_origin_y+row)*destination.stored_width()+destination_origin_x+column,std::uint8_t(pair));
                 }
             }
         }

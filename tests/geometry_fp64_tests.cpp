@@ -1,4 +1,5 @@
 #include "../src/render/shaders/geometry_fp64.hlsli"
+#include "../src/render/shaders/geometry_fp64_div_radix16.hlsli"
 #include <bit>
 #include <cmath>
 #include <iostream>
@@ -49,6 +50,16 @@ int main() try {
     std::uint64_t divisions=0;
     std::uint64_t products=0;
     std::uint64_t lossy_pairs=0,transport_samples=0;
+    const auto check_u32_product=[](std::uint32_t a,std::uint32_t b) {
+        if(bits(sf_u32_product(a,b))!=std::uint64_t(a)*b)
+            throw std::runtime_error("Portable full-width uint32 product/carry mismatch");
+    };
+    for(std::uint32_t a:{0U,1U,0xffffU,0x10000U,0x7fffffffU,0x80000000U,0xffff0000U,0xffffffffU})
+        for(std::uint32_t b:{0U,1U,0xffffU,0x10000U,0x7fffffffU,0x80000000U,0xffff0000U,0xffffffffU})
+            check_u32_product(a,b);
+    for(unsigned i=0;i<1000000;++i) {
+        const auto a=random(),b=random();check_u32_product(a,b);
+    }
     for(unsigned angle=0;angle<65536;++angle) {
         const double radians=angle*2*std::numbers::pi/65536.;
         for(double value:{std::sin(radians),std::cos(radians)}) {
@@ -78,8 +89,23 @@ int main() try {
             ? std::bit_cast<std::uint64_t>(double(reference)) : bits(sf_invalid());
         if(bits(sf_div(split(a),split(b)))!=expected)
             throw std::runtime_error("Portable binary64 division mismatch");
+        if(bits(sf_div_radix16(split(a),split(b)))!=expected)
+            throw std::runtime_error("Radix16 binary64 division mismatch");
         ++divisions;
     };
+    // Limb carries, sticky-only low bits and rounding across both possible
+    // product leading bits. Native double is the oracle, not the old shader.
+    for(std::uint64_t x:{0ULL,1ULL,0xffffULL,0x10000ULL,0xffffffffULL,
+        0x100000000ULL,0x7ffffffffffffULL,0x8000000000000ULL,
+        0xffffffffffffeULL,0xfffffffffffffULL})
+        for(std::uint64_t y:{0ULL,1ULL,0xffffULL,0x10000ULL,0xffffffffULL,
+            0x100000000ULL,0x7ffffffffffffULL,0x8000000000000ULL,
+            0xffffffffffffeULL,0xfffffffffffffULL}) {
+            const auto a=std::bit_cast<double>((1023ULL<<52)|x);
+            const auto b=std::bit_cast<double>((1023ULL<<52)|y);
+            check_mul(a,b);check_mul(-a,b);check_mul(a,-b);
+            check_div(a,b);check_div(-a,b);check_div(a,-b);
+        }
     const auto check=[&](double a,double b) {
         volatile double sum=a+b,difference=a-b;
         const auto expected=[](double value) {
@@ -141,8 +167,14 @@ int main() try {
     for(double a:{0.,-0.,1.,-1.})for(double b:{0.,-0.,1.,-1.,3.}) {check_div(a,b);check_mul(a,b);}
     if(sf_valid(sf_add(sf_make(1,0),split(1.))))throw std::runtime_error("Subnormal input accepted");
     if(sf_valid(sf_add(sf_make(0,0x7ff00000U),split(1.))))throw std::runtime_error("Infinite input accepted");
+    // Invalid input semantics must match, not merely finite random quotients.
+    for(const auto a:{sf_make(1,0),sf_make(0,0x7ff00000U),sf_make(1,0x7ff80000U),split(1.),split(-0.)})
+        for(const auto b:{sf_make(1,0),sf_make(0,0x7ff00000U),sf_make(1,0x7ff80000U),split(1.),split(-0.)})
+            if(bits(sf_div_radix16(a,b))!=bits(sf_div(a,b)))
+                throw std::runtime_error("Radix16 invalid/signed-zero division contract mismatch");
     std::cout<<checked<<" portable binary64 add/sub pairs match host bits\n";
-    std::cout<<divisions<<" portable binary64 divisions match host bits\n";
+    std::cout<<divisions<<" reference and radix16 binary64 divisions match independent host bits\n";
     std::cout<<products<<" portable binary64 products match host bits\n";
+    std::cout<<"1000064 full-width uint32 products match host bits\n";
     std::cout<<lossy_pairs<<" of "<<transport_samples<<" geometry-range doubles lose bits in two-float transport; three-float reconstruction exact\n";
 } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}

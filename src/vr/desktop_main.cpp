@@ -1,12 +1,23 @@
 #include "starfox/vr/application.hpp"
+#include "starfox/vr/diagnostic_log.hpp"
 #include "starfox/audio/msu1_pack.hpp"
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <cmath>
 #include <csignal>
 #include <iostream>
+#include <fstream>
 #include <string>
 #include <vector>
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 namespace {
 volatile std::sig_atomic_t interrupted=0;
@@ -88,6 +99,7 @@ int main(int argc,char** argv) try {
                 "--enhanced-sky: start with Enhanced Sky on (also in 2D Options); unsupported families remain native.\n"
                 "Requires a Vulkan-capable GPU and an active OpenXR headset runtime.\n"
                 "Default bundle: beside this executable. Saves/settings: vr-data beside this executable.\n"
+                "Diagnostics: vr-data/vr-session.log and vr-session.previous.log (8 MiB each).\n"
                 "Generate your own BIN with starfox_asset_builder; no cartridge is bundled.\n";
             return 0;
         }
@@ -99,6 +111,39 @@ int main(int argc,char** argv) try {
         else if(option=="--data-dir") data=std::filesystem::absolute(argv[++i]);
         else msu=argv[++i];
     }
+    // Only app-owned diagnostics are rotated; assets, preferences and saves are
+    // never replaced here. An unavailable destination leaves console output on.
+    std::ofstream diagnostic_file;
+    std::error_code log_error;
+    std::filesystem::create_directories(data,log_error);
+    if(!log_error) {
+        const auto path=data/"vr-session.log";
+        bool may_replace=true;
+        if(std::filesystem::exists(path,log_error) && std::filesystem::is_regular_file(path,log_error)) {
+#if defined(_WIN32)
+            // MinGW copy_file can reject an existing backup even with the
+            // overwrite flag. Use the OS's explicit overwrite semantics.
+            if(!CopyFileW(path.c_str(),(data/"vr-session.previous.log").c_str(),FALSE))
+                log_error.assign(static_cast<int>(GetLastError()),std::system_category());
+#else
+            std::filesystem::copy_file(path,data/"vr-session.previous.log",
+                std::filesystem::copy_options::overwrite_existing,log_error);
+#endif
+            if(log_error) {
+                may_replace=false;
+                std::cerr<<"Could not retain previous PCVR diagnostic: "<<log_error.message()<<'\n';
+            }
+        }
+        if(may_replace && !log_error) diagnostic_file.open(path,std::ios::out|std::ios::trunc);
+    }
+    if(!diagnostic_file.is_open()) std::cerr<<"Persistent PCVR diagnostics unavailable; console logging remains active.\n";
+    starfox::vr::BoundedDiagnosticLog diagnostic_log(diagnostic_file);
+    starfox::vr::ScopedDiagnosticTee output(std::cout,diagnostic_log),errors(std::cerr,diagnostic_log);
+    diagnostic_log.line("Star Fox Enhanced PCVR development session");
+    std::cout<<"PCVR session start_unix_ms="
+        <<std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count()
+        <<" data_directory="<<data<<'\n';
+    try {
     if(!std::filesystem::is_regular_file(bundle)) {
         std::cerr<<"Missing asset bundle: "<<bundle<<"\n"
             "Use starfox_asset_builder to prepare your own Starfox-Assets.BIN, then place it beside this executable or pass --bundle PATH.\n";
@@ -131,7 +176,14 @@ int main(int argc,char** argv) try {
     if(!msu.empty()) {arguments.emplace_back("--msu");arguments.push_back(msu);}
     std::vector<char*> pointers;
     for(auto& arg:arguments) pointers.push_back(arg.data());
-    return starfox::vr::run_application(int(pointers.size()),pointers.data(),host);
+    const auto result=starfox::vr::run_application(int(pointers.size()),pointers.data(),host);
+    std::cout<<"PCVR native return_code="<<result<<'\n';
+    return result;
+    } catch(const std::exception& error) {
+        std::cerr<<"PCVR could not start/run: "<<error.what()<<'\n';return 1;
+    } catch(...) {
+        std::cerr<<"PCVR failed with a non-standard native exception\n";return 1;
+    }
 } catch(const std::exception& error) {
     std::cerr<<"PCVR could not start: "<<error.what()<<'\n';return 1;
 }

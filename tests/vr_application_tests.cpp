@@ -1,4 +1,6 @@
 #include "starfox/vr/application.hpp"
+#include "starfox/vr/diagnostic_log.hpp"
+#include <sstream>
 #include "starfox/vr/cartridge_save.hpp"
 #include "starfox/vr/packet_route.hpp"
 #include "starfox/state/files.hpp"
@@ -6,6 +8,58 @@
 #include <stdexcept>
 #include <iostream>
 int main() try {
+    {
+        using starfox::vr::BoundedDiagnosticLog;
+        std::ostringstream output;
+        BoundedDiagnosticLog log(output,80);
+        if(!log.line("begin") || !log.line("scene=gameplay") || log.written()!=output.str().size())
+            throw std::runtime_error("VR diagnostic lines were not retained");
+        const std::string large(1000,'x');
+        if(log.line(large) || !log.stopped() || output.str().size()>80)
+            throw std::runtime_error("VR diagnostic exceeded its size cap");
+        const auto stopped=output.str();
+        for(unsigned i=0;i<10000;++i) if(log.line("after cap"))
+            throw std::runtime_error("Stopped diagnostic accepted more data");
+        if(output.str()!=stopped) throw std::runtime_error("Stopped diagnostic kept growing");
+        std::ostringstream exact;BoundedDiagnosticLog edge(exact,2);
+        if(!edge.line("x") || edge.line("") || exact.str()!="x\n")
+            throw std::runtime_error("Diagnostic boundary lost its newline or exceeded the cap");
+        std::ostringstream disabled;BoundedDiagnosticLog zero(disabled,0);
+        if(zero.line("") || !disabled.str().empty()) throw std::runtime_error("Zero-size diagnostic wrote data");
+        std::ostringstream broken;broken.setstate(std::ios::badbit);
+        BoundedDiagnosticLog failed(broken);
+        if(failed.line("error") || !failed.stopped()) throw std::runtime_error("Failed diagnostic was not disabled");
+        std::cout<<"Bounded/flushed VR diagnostics tolerate full and failed destinations\n";
+    }
+    {
+        using namespace starfox::vr;
+        std::ostringstream retained,console;
+        BoundedDiagnosticLog log(retained);
+        auto* original=console.rdbuf();
+        {
+            ScopedDiagnosticTee tee(console,log);
+            console<<std::unitbuf<<"scene="<<42<<'\n'<<"unfinished";
+            if(retained.str()!="scene=42\n" || console.str()!="scene=42\nunfinished")
+                throw std::runtime_error("PCVR tee split flushed insertions or changed console output");
+        }
+        if(console.rdbuf()!=original || retained.str()!="scene=42\nunfinished\n")
+            throw std::runtime_error("PCVR tee lost a partial line or failed to restore the console");
+        std::ostringstream capped_output,capped_console;
+        BoundedDiagnosticLog capped(capped_output,32);
+        {
+            ScopedDiagnosticTee tee(capped_console,capped);
+            capped_console<<std::string(20000,'x')<<'\n'<<"still running\n";
+        }
+        if(capped_output.str().size()>32 || !capped.stopped()
+            || capped_console.str()!=std::string(20000,'x')+"\nstill running\n")
+            throw std::runtime_error("PCVR diagnostic cap interrupted console output");
+        std::ostringstream broken,healthy_console;broken.setstate(std::ios::badbit);
+        BoundedDiagnosticLog failed(broken);
+        {ScopedDiagnosticTee tee(healthy_console,failed);healthy_console<<"not fatal\n";}
+        if(healthy_console.str()!="not fatal\n" || !healthy_console.good() || !failed.stopped())
+            throw std::runtime_error("Failed PCVR file destination interrupted the console");
+        std::cout<<"PCVR tee preserves console, partial lines, restoration and failed/full logging\n";
+    }
     {
         using namespace starfox::vr;
         SceneVertex vertex{};

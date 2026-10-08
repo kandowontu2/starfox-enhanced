@@ -27,6 +27,9 @@ struct GpuBackgroundSettings {
     std::array<std::uint32_t,2> terrain_source_rows{};
     std::array<std::uint32_t,2> logical_viewport{}; // optional independent raster dimensions
     std::array<float,2> raster_jitter{};
+    // Logical-pixel source offset for distant BG2 artwork only. Authored
+    // terrain rows retain their ground projection; HUD layers never use it.
+    float stereo_sky_source_x{};
     const EnvironmentEffects* reflection_environment{}; // borrowed during reflection submission only
 };
 class GpuBackground {

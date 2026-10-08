@@ -2,6 +2,7 @@
 #include <cmath>
 #if defined(STARFOX_SDL_GPU_EFFECTS)
 #include <SDL3/SDL.h>
+#include "starfox/render/gpu_preparation.hpp"
 #include "shaders/generated/ray_geometry_portable.hpp"
 #include "shaders/generated/ray_materials_portable.hpp"
 #include <cstring>
@@ -38,7 +39,7 @@ struct GpuRayGeometry::Impl {
         info.entrypoint=(spv||dxil)?"main":"main0";
         info.num_readonly_storage_buffers=3;info.num_readwrite_storage_buffers=1;info.num_uniform_buffers=1;
         info.threadcount_x=64;info.threadcount_y=info.threadcount_z=1;
-        pipeline=SDL_CreateGPUComputePipeline(device,&info);require(pipeline);
+        pipeline=create_gpu_compute_pipeline(device,&info);require(pipeline);
     }
 #endif
 };
@@ -75,7 +76,7 @@ void* GpuRayGeometry::enqueue_materials(void* device,void* command,void* topolog
             info.entrypoint=(spv||dxil)?"main":"main0";
             info.num_readonly_storage_buffers=5;info.num_readwrite_storage_buffers=1;info.num_uniform_buffers=1;
             info.threadcount_x=64;info.threadcount_y=info.threadcount_z=1;
-            impl_->material_pipeline=SDL_CreateGPUComputePipeline(impl_->device,&info);Impl::require(impl_->material_pipeline);
+            impl_->material_pipeline=create_gpu_compute_pipeline(impl_->device,&info);Impl::require(impl_->material_pipeline);
         }
         const auto bytes=triangles*64U;
         if(!target && impl_->material_capacity<bytes) {
