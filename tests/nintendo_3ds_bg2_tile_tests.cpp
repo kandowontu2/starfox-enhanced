@@ -301,18 +301,153 @@ void mode1_panorama_atlas() {
         require(owner.work().decodes==before.decodes+1,"Mode-1 atlas reused stale uniform-character geometry");
     }
 }
+void rejected_plan_cache() {
+    // Exercise both planners, finite terrain, water, infinity and screen
+    // batches. These declines occur inside planning, not the cheap policy gate.
+    for(unsigned number=0;number<12;++number) {
+        auto ppu=fixture(number);
+        PpuBatch batch;batch.expand_horizontal=true;batch.passes.push_back({PpuLayer::bg2});
+        const bool complete=number%3!=0;
+        if(number%3==1) {batch.space=PicaSpace::scenery;batch.landscape_receiver=true;}
+        if(number%3==2) {
+            ppu->background_mode=1;batch.space=PicaSpace::scenery;
+            batch.water_receiver=batch.compact_strips=true;
+        }
+        if(number&4) ppu->bg2_horizontal_offsets_enabled=true;
+        if(number&8) ppu->bg2_scanline_scroll_enabled=true;
+        if(number%3==1) {
+            ppu->bg2_vertical_offsets_enabled=true;
+            for(unsigned column=0;column<32;++column) {
+                ppu->vram[0x5f40+column*2]=std::uint8_t(16+column/4);
+                ppu->vram[0x5f41+column*2]=0x40;
+            }
+        }
+        const auto plan=plan_frame(1,true,ScreenUse::world);
+        constexpr unsigned budget=96,guard=40;
+        PicaBg2Tiles owner;
+        require(!owner.prepare(ppu,batch,plan,15,0,budget,guard,complete),"Decline fixture unexpectedly fit tile budget");
+        require(owner.planning_attempts()==1,"Decline fixture bypassed the real tile planner");
+        auto cosmetic=std::make_shared<simulation::SnesPpuState>(*ppu);
+        cosmetic->cgram[17]^=31;cosmetic->oam[0]^=7;cosmetic->bg1_scroll_x^=1;
+        allocations=0;count_allocations=true;
+        bool declined=true;
+        for(unsigned i=0;i<2048;++i)
+            declined&=!owner.prepare(cosmetic,batch,plan,i%16,i%32,budget,guard,complete);
+        count_allocations=false;
+        require(declined && allocations==0 && owner.planning_attempts()==1,
+            "Identical declined topology reran planning/allocated on a palette/OBJ presentation");
+        require(owner.work().decodes==0 && owner.work().colour_updates==0,
+            "Cached decline published an incomplete atlas");
+        // Validation must remain live even when the same decline is cached.
+        auto invalid_plan=plan;invalid_plan.eye_count=1;
+        bool invalid_eye=false,invalid_guard=false,invalid_colour=false;
+        try {static_cast<void>(owner.prepare(ppu,batch,invalid_plan,15,0,budget,guard,complete));}
+        catch(const std::invalid_argument&) {invalid_eye=true;}
+        try {static_cast<void>(owner.prepare(ppu,batch,plan,15,0,budget,pica_raster_max_width,complete));}
+        catch(const std::invalid_argument&) {invalid_guard=true;}
+        try {static_cast<void>(owner.prepare(ppu,batch,plan,16,0,budget,guard,complete));}
+        catch(const std::invalid_argument&) {invalid_colour=true;}
+        require(invalid_eye && invalid_guard && invalid_colour,"Cached decline bypassed public validation");
+        for(unsigned mutation=0;mutation<20;++mutation) {
+            PicaBg2Tiles cached,fresh;
+            require(!cached.prepare(ppu,batch,plan,15,0,budget,guard,complete),"Invalidation fixture unexpectedly fit");
+            auto changed=std::make_shared<simulation::SnesPpuState>(*ppu);
+            auto policy=batch;unsigned next_guard=guard,next_budget=budget;bool next_complete=complete;
+            switch(mutation) {
+            case 0:++changed->bg2_scroll_x;break;
+            case 1:++changed->bg2_scroll_y;break;
+            case 2:changed->bg2_screen_base^=0x400;break;
+            case 3:changed->bg2_screen_size^=1;break;
+            case 4:changed->bg2_tile_size_16=!changed->bg2_tile_size_16;break;
+            case 5:changed->bg2_horizontal_offsets_enabled=!changed->bg2_horizontal_offsets_enabled;
+                changed->bg2_horizontal_offsets[100]^=1;break;
+            case 6:changed->bg2_scanline_scroll_enabled=!changed->bg2_scanline_scroll_enabled;
+                changed->bg2_scanline_scroll_y[100]^=1;break;
+            case 7:changed->bg2_vertical_offsets_enabled=!changed->bg2_vertical_offsets_enabled;
+                changed->vram[0x5f40]^=1;break;
+            case 8:changed->vram[(changed->bg2_screen_base*2)&65535]^=1;break;
+            case 9:policy.passes[0].priority=0;break;
+            case 10:policy.passes[0].scroll=std::array<std::int16_t,2>{-7,257};break;
+            case 11:next_guard+=16;break;
+            case 12:next_budget=pica_vertex_limit;break;
+            case 13:next_complete=!complete;
+                if(batch.water_receiver || batch.landscape_receiver) continue;
+                break;
+            case 14:changed->bg2_character_base^=0x100;
+                if(!complete) {changed->bg2_vertical_offsets_enabled=true;}
+                break;
+            case 15:changed->main_screen=0;break;
+            case 16:changed->vram[(changed->bg2_character_base*2)&65535]^=255;
+                if(!complete && !changed->bg2_vertical_offsets_enabled) continue;
+                break;
+            case 17:changed->bg2_horizontal_offsets[100]^=1;
+                if(!changed->bg2_horizontal_offsets_enabled) continue;
+                break;
+            case 18:changed->bg2_scanline_scroll_y[100]^=1;
+                if(!changed->bg2_scanline_scroll_enabled) continue;
+                break;
+            case 19:changed->vram[0x5f40]^=1;
+                if(!changed->bg2_vertical_offsets_enabled) continue;
+                break;
+            }
+            const auto actual=cached.prepare(changed,policy,plan,7,3,next_budget,next_guard,next_complete);
+            const auto expected=fresh.prepare(changed,policy,plan,7,3,next_budget,next_guard,next_complete);
+            require(cached.planning_attempts()==2,"Topology, source coverage or budget change reused a stale decline");
+            require(bool(actual)==bool(expected),"Cached decline changed fresh owner's accept/fallback decision");
+            if(actual) {
+                const unsigned width=400+2*std::max(next_guard,policy.space==PicaSpace::scenery?pica_scenery_guard(plan):32);
+                require(sample(*actual,width,(400-int(width))/2)==sample(*expected,width,(400-int(width))/2),
+                    "Revalidated tile plan differs from fresh owner pixels/ownership");
+            }
+        }
+        // Only the latest rejected snapshot may be held; never accumulate a
+        // source history or keep it alive after the owner itself retires.
+        std::weak_ptr<const simulation::SnesPpuState> first=ppu;
+        ppu.reset();cosmetic.reset();
+        auto replacement=fixture(number);replacement->bg2_scroll_x^=1;
+        if(batch.water_receiver) replacement->background_mode=1;
+        require(!owner.prepare(replacement,batch,plan,15,0,budget,guard,complete),"Replacement decline unexpectedly fit");
+        require(first.expired(),"Rejected tile cache retained more than its single current source");
+    }
+    // Declines must not invalidate successful borrowed views, and a later
+    // successful large-budget prepare must retire the rejected source.
+    auto good=fixture(0),bad=fixture(1);
+    PpuBatch batch;batch.expand_horizontal=true;batch.passes.push_back({PpuLayer::bg2});
+    const auto plan=plan_frame(1,true,ScreenUse::world);PicaBg2Tiles owner;
+    const auto saved=owner.prepare(good,batch,plan,15,0,pica_vertex_limit);
+    require(bool(saved),"Successful borrowed-view fixture failed");
+    const auto pixels=sample(*saved,464,-32);
+    require(!owner.prepare(bad,batch,plan,15,0,96),"Borrowed-view rejection fixture unexpectedly fit");
+    const auto attempts=owner.planning_attempts();
+    for(unsigned i=0;i<32;++i) require(!owner.prepare(bad,batch,plan,15,0,96),"Cached failure published artwork");
+    require(owner.planning_attempts()==attempts && sample(*saved,464,-32)==pixels,
+        "Cached failure reran planning or corrupted successful borrowed views");
+    std::weak_ptr<const simulation::SnesPpuState> declined_source=bad;bad.reset();
+    require(bool(owner.prepare(good,batch,plan,15,0,pica_vertex_limit)) && declined_source.expired(),
+        "Successful preparation retained an obsolete rejected snapshot");
+}
 }
 // Only count native owner preparation, not fixture creation or pixel oracles.
-void* operator new(std::size_t count) {
+// Keep the allocation hooks as actual calls. Inlining their malloc/free bodies
+// makes GCC diagnose ordinary matching new/delete as mismatched free at O3.
+#if defined(__GNUC__) || defined(__clang__)
+#define STARFOX_TEST_ALLOC_NOINLINE __attribute__((noinline))
+#elif defined(_MSC_VER)
+#define STARFOX_TEST_ALLOC_NOINLINE __declspec(noinline)
+#else
+#define STARFOX_TEST_ALLOC_NOINLINE
+#endif
+STARFOX_TEST_ALLOC_NOINLINE void* operator new(std::size_t count) {
     if(count_allocations) ++allocations;
     if(auto* memory=std::malloc(std::max(count,std::size_t{1}))) return memory;
     throw std::bad_alloc{};
 }
-void* operator new[](std::size_t count) {return ::operator new(count);}
-void operator delete(void* memory) noexcept {std::free(memory);}
-void operator delete[](void* memory) noexcept {std::free(memory);}
-void operator delete(void* memory,std::size_t) noexcept {std::free(memory);}
-void operator delete[](void* memory,std::size_t) noexcept {std::free(memory);}
+STARFOX_TEST_ALLOC_NOINLINE void* operator new[](std::size_t count) {return ::operator new(count);}
+STARFOX_TEST_ALLOC_NOINLINE void operator delete(void* memory) noexcept {std::free(memory);}
+STARFOX_TEST_ALLOC_NOINLINE void operator delete[](void* memory) noexcept {std::free(memory);}
+STARFOX_TEST_ALLOC_NOINLINE void operator delete(void* memory,std::size_t) noexcept {std::free(memory);}
+STARFOX_TEST_ALLOC_NOINLINE void operator delete[](void* memory,std::size_t) noexcept {std::free(memory);}
+#undef STARFOX_TEST_ALLOC_NOINLINE
 int main() try {
     for(unsigned number=0;number<64;++number) {
         const auto ppu=fixture(number);const auto unchanged=*ppu;
@@ -326,7 +461,7 @@ int main() try {
         }
         require(ppu->vram==unchanged.vram && ppu->cgram==unchanged.cgram && ppu->oam==unchanged.oam,"Native tile planning mutated cartridge memory");
     }
-    rejection_and_reuse();painter_integration();constant_vertical_offsets();rolled_offsets_and_carry();water_offsets_and_edges();mode1_panorama_atlas();
+    rejection_and_reuse();painter_integration();constant_vertical_offsets();rolled_offsets_and_carry();water_offsets_and_edges();mode1_panorama_atlas();rejected_plan_cache();
     std::cout<<"Native BG2 tile planner/atlas: "<<checks<<" exact pixel, palette, ownership, HDMA, flips, budget and fallback checks PASS\n";
     return 0;
 } catch(const std::exception& error) {count_allocations=false;std::cerr<<error.what()<<'\n';return 1;}

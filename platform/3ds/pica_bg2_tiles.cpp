@@ -25,6 +25,10 @@ bool same_geometry(const simulation::SnesPpuState& a,const simulation::SnesPpuSt
             && same_range(a,b,a.bg2_character_base*2,32768)))
         && same_range(a,b,a.bg2_screen_base*2,pages*2048);
 }
+bool same_plan_source(const simulation::SnesPpuState& a,const simulation::SnesPpuState& b,bool complete) {
+    return same_geometry(a,b) && (!complete || (a.bg2_character_base==b.bg2_character_base
+        && same_range(a,b,a.bg2_character_base*2,32768)));
+}
 }
 std::optional<PicaFrame> PicaBg2Tiles::prepare(std::shared_ptr<const simulation::SnesPpuState> source,
     const PpuBatch& batch,const FramePlan& plan,unsigned brightness,unsigned subtract,unsigned vertex_budget,
@@ -52,23 +56,38 @@ std::optional<PicaFrame> PicaBg2Tiles::prepare(std::shared_ptr<const simulation:
     unsigned width=batch.expand_horizontal && pass.extend_horizontal?top_width+2*guard:256;
     const auto scroll=pass.scroll.value_or(std::array{source->bg2_scroll_x,source->bg2_scroll_y});
     bool decode=!source_ || batch!=batch_ || complete_roll_!=complete_plan
-        || !same_geometry(*source_,*source) || (complete_plan && (source_->bg2_character_base!=source->bg2_character_base
-            || !same_range(*source_,*source,source->bg2_character_base*2,32768)));
+        || !same_plan_source(*source_,*source,complete_plan);
     // Slider-only presentations may need less guard than an already decoded
     // frame. Retain sufficient coverage, as PicaRaster does, rather than
     // alternating source traversals while the game's PPU remains unchanged.
     if(!decode) width=std::max(width,width_);
     decode=decode || width_!=width;
+    // Validate the public eye/guard contract above even on a cached decline.
+    // Palette, brightness and OBJ changes cannot make the tile topology fit;
+    // its raster fallback still consumes those changes independently.
+    if(rejected_ && rejected_->batch==batch && rejected_->width==width
+        && rejected_->vertex_budget==vertex_budget && rejected_->complete==complete_plan
+        && same_plan_source(*rejected_->source,*source,complete_plan)) return {};
+    const auto reject=[&]() -> std::optional<PicaFrame> {
+        // Finish the potentially allocating batch copy before replacing the
+        // single failure entry. Never mutate successful borrowed frame data.
+        RejectedPlan next{source,batch,width,vertex_budget,complete_plan};
+        rejected_=std::move(next);
+        return {};
+    };
     std::vector<Bg2TileRect> rectangles;
     // Mode 1 panorama HDMA uses the source's clamped bridge margins too,
     // but keeps the existing infinity projection; it is not a water plane.
     const auto planner=complete_plan?plan_rolled_bg2_tiles:plan_bg2_tiles;
-    if(decode && !planner(*source,scroll[0],scroll[1],width,int((width-256)/2),pass.priority,
-        rectangles,std::min(4096U,vertex_budget/6))) return {};
+    if(decode) {
+        ++planning_attempts_;
+        if(!planner(*source,scroll[0],scroll[1],width,int((width-256)/2),pass.priority,
+            rectangles,std::min(4096U,vertex_budget/6))) return reject();
+    }
     const auto& rects=decode?rectangles:rectangles_;
     const unsigned edge_quads=batch.space==PicaSpace::scenery?unsigned(std::count_if(rects.begin(),rects.end(),
         [](const auto& rect){return rect.y==0 || rect.y+rect.height==224;})):0;
-    if((rects.size()+edge_quads)*6>vertex_budget) return {};
+    if((rects.size()+edge_quads)*6>vertex_budget) return reject();
     std::vector<std::uint16_t> keys;
     if(decode) {
         keys.reserve(rects.size());
@@ -78,7 +97,7 @@ std::optional<PicaFrame> PicaBg2Tiles::prepare(std::shared_ptr<const simulation:
     const auto& active_keys=decode?keys:keys_;
     // A bounded compact atlas avoids replacing a half-MiB LCD layer with a
     // full 2-MiB all-characters/all-palettes allocation on Original 3DS.
-    if(active_keys.size()>1024) return {};
+    if(active_keys.size()>1024) return reject();
     const unsigned atlas_width=256,atlas_height=std::max(8U,unsigned((active_keys.size()+31)/32)*8);
     const bool rekey=decode && keys!=keys_;
     const bool recolour=!source_ || rekey || brightness_!=brightness || subtract_!=subtract
@@ -155,6 +174,7 @@ std::optional<PicaFrame> PicaBg2Tiles::prepare(std::shared_ptr<const simulation:
     if(decode) {rectangles_.swap(rectangles);++work_.decodes;}
     if(decode) {vertices_.swap(vertices);keys_.swap(keys);batch_=std::move(*next_batch);}
     if(recolour) {pixels_.swap(pixels);++work_.colour_updates;}
+    rejected_.reset();
     source_=std::move(source);width_=width;
     complete_roll_=complete_plan;
     brightness_=brightness;subtract_=subtract;
