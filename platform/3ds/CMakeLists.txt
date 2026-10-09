@@ -189,6 +189,13 @@ if(STARFOX_3DS_BUILD_NATIVE)
             starfox_3ds_game_core_check starfox_3ds_test_player)
         if(TARGET ${target})
             target_compile_options(${target} PRIVATE -fstack-usage)
+            # The native toolchain defaults Release to O2. Keep its ARM ABI,
+            # floating-point semantics and diagnostic stack reports, while
+            # optimizing the complete actual native source graph at O3.
+            # This is not Ofast/fast-math, and does not enable IPO implicitly.
+            if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+                target_compile_options(${target} PRIVATE $<$<CONFIG:Release>:-O3>)
+            endif()
             if(STARFOX_3DS_ENABLE_IPO AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
                 get_target_property(target_type ${target} TYPE)
                 if(target_type STREQUAL "EXECUTABLE")
