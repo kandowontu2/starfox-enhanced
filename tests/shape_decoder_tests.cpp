@@ -1,0 +1,1059 @@
+#include "starfox/assets/rom.hpp"
+#include "starfox/assets/shape_decoder.hpp"
+#include "starfox/render/dust_renderer.hpp"
+#include "starfox/render/grid_projection.hpp"
+#include "starfox/render/shadow_scene.hpp"
+#include "starfox/render/framebuffer.hpp"
+#include "starfox/render/software_renderer.hpp"
+
+#include <algorithm>
+#include <cstdint>
+#include <cstdlib>
+#include <iostream>
+#include <vector>
+
+namespace {
+
+void require(bool condition, const char* message) {
+    if (!condition) {
+        std::cerr << "FAILED: " << message << '\n';
+        std::exit(1);
+    }
+}
+
+std::size_t offset(std::uint32_t address) {
+    return static_cast<std::size_t>((address >> 16U) & 0x7fU) * 0x8000U
+        + static_cast<std::size_t>(address & 0x7fffU);
+}
+
+void put8(std::vector<std::uint8_t>& rom, std::uint32_t& address, std::uint8_t value) {
+    rom[offset(address++)] = value;
+}
+
+void put16(std::vector<std::uint8_t>& rom, std::uint32_t& address, std::uint16_t value) {
+    put8(rom, address, static_cast<std::uint8_t>(value & 0xffU));
+    put8(rom, address, static_cast<std::uint8_t>(value >> 8U));
+}
+
+starfox::assets::RomImage make_rom() {
+    std::vector<std::uint8_t> bytes(0x20000);
+    auto header = std::uint32_t{0x008100};
+    put16(bytes, header, 0x8000);
+    put8(bytes, header, 0x01);
+    put16(bytes, header, 0x8100);
+    put16(bytes, header, 0);
+    put8(bytes, header, 0);
+    put16(bytes, header, 10);
+    put16(bytes, header, 10);
+    put16(bytes, header, 10);
+    put16(bytes, header, 10);
+    put16(bytes, header, 10);
+    put16(bytes, header, 0x8200);
+    put16(bytes, header, 0x8100);
+    put16(bytes, header, 0x8100);
+    put16(bytes, header, 0x8100);
+    put16(bytes, header, 0x8100);
+
+    auto points = std::uint32_t{0x018000};
+    put8(bytes, points, 4);
+    put8(bytes, points, 3);
+    put8(bytes, points, static_cast<std::uint8_t>(-20));
+    put8(bytes, points, static_cast<std::uint8_t>(-10));
+    put8(bytes, points, 0);
+    put8(bytes, points, 20);
+    put8(bytes, points, static_cast<std::uint8_t>(-10));
+    put8(bytes, points, 0);
+    put8(bytes, points, 0);
+    put8(bytes, points, 20);
+    put8(bytes, points, 0);
+    put8(bytes, points, 12);
+
+    auto faces = std::uint32_t{0x018100};
+    put8(bytes, faces, 48);
+    put8(bytes, faces, 1);
+    put8(bytes, faces, 0);
+    put8(bytes, faces, 2);
+    put8(bytes, faces, 1);
+    put8(bytes, faces, 60); // BSPInit
+    put8(bytes, faces, 40); // BSP node
+    put8(bytes, faces, 0);
+    put16(bytes, faces, 8); // node face list at $8111
+    put8(bytes, faces, 4);  // alternate control at $810e
+    put8(bytes, faces, 68); // fallthrough leaf
+    put16(bytes, faces, 15);
+    put8(bytes, faces, 68); // alternate leaf
+    put16(bytes, faces, 14);
+
+    put8(bytes, faces, 20); // node face list at $8111
+    put8(bytes, faces, 3);
+    put8(bytes, faces, 0);
+    put8(bytes, faces, 14);
+    put8(bytes, faces, 0);
+    put8(bytes, faces, 0);
+    put8(bytes, faces, 127);
+    put8(bytes, faces, 0);
+    put8(bytes, faces, 2);
+    put8(bytes, faces, 1);
+    put8(bytes, faces, 0xff);
+    put8(bytes, faces, 20); // empty fallthrough leaf at $811c
+    put8(bytes, faces, 0xff);
+    put8(bytes, faces, 20); // empty alternate leaf at $811e
+    put8(bytes, faces, 0xff);
+
+    auto colours = std::uint32_t{0x038200};
+    for (std::uint16_t index = 0; index < 15; ++index) {
+        put16(bytes, colours, static_cast<std::uint16_t>(
+            0x3f00U | (index << 4U) | index));
+    }
+    auto animated_colour = std::uint32_t{0x03821c};
+    put16(bytes, animated_colour, 0x8300U); // COLANIM $038300
+    auto colour_frames = std::uint32_t{0x038300};
+    put8(bytes, colour_frames, 2);
+    put16(bytes, colour_frames, 0x3f11U);
+    put16(bytes, colour_frames, 0x3f22U);
+    return starfox::assets::RomImage{std::move(bytes)};
+}
+
+starfox::assets::RomImage make_animated_rom() {
+    std::vector<std::uint8_t> bytes(0x20000);
+    auto header = std::uint32_t{0x008100};
+    put16(bytes, header, 0x8000);
+    put8(bytes, header, 0x01);
+    put16(bytes, header, 0x8100);
+    put16(bytes, header, 0);
+    put8(bytes, header, 0);
+    for (int field = 0; field < 5; ++field) {
+        put16(bytes, header, 10);
+    }
+    put16(bytes, header, 0x8200);
+    for (int pointer = 0; pointer < 4; ++pointer) {
+        put16(bytes, header, 0x8100);
+    }
+
+    auto points = std::uint32_t{0x018000};
+    put8(bytes, points, 4); // one static prefix vertex
+    put8(bytes, points, 1);
+    put8(bytes, points, 0);
+    put8(bytes, points, 0);
+    put8(bytes, points, 0);
+    put8(bytes, points, 28); // Frames 2
+    put8(bytes, points, 2);
+    put16(bytes, points, 3);  // entry $8007 -> frame $800b
+    put16(bytes, points, 12); // entry $8009 -> frame $8016
+
+    put8(bytes, points, 4); // frame 0
+    put8(bytes, points, 2);
+    put8(bytes, points, static_cast<std::uint8_t>(-20));
+    put8(bytes, points, static_cast<std::uint8_t>(-10));
+    put8(bytes, points, 0);
+    put8(bytes, points, 20);
+    put8(bytes, points, static_cast<std::uint8_t>(-10));
+    put8(bytes, points, 0);
+    put8(bytes, points, 32); // jump to shared EndPoints
+    put16(bytes, points, 9);
+
+    put8(bytes, points, 4); // frame 1
+    put8(bytes, points, 2);
+    put8(bytes, points, static_cast<std::uint8_t>(-10));
+    put8(bytes, points, static_cast<std::uint8_t>(-20));
+    put8(bytes, points, 0);
+    put8(bytes, points, 10);
+    put8(bytes, points, static_cast<std::uint8_t>(-20));
+    put8(bytes, points, 0);
+    put8(bytes, points, 12);
+
+    auto faces = std::uint32_t{0x018100};
+    put8(bytes, faces, 48);
+    put8(bytes, faces, 1);
+    put8(bytes, faces, 0);
+    put8(bytes, faces, 1);
+    put8(bytes, faces, 2);
+    put8(bytes, faces, 20);
+    put8(bytes, faces, 3);
+    put8(bytes, faces, 0);
+    put8(bytes, faces, 14);
+    put8(bytes, faces, 0);
+    put8(bytes, faces, 0);
+    put8(bytes, faces, 127);
+    put8(bytes, faces, 0);
+    put8(bytes, faces, 2);
+    put8(bytes, faces, 1);
+    put8(bytes, faces, 0xfe);
+    put8(bytes, faces, 0);
+
+    auto colours = std::uint32_t{0x038200};
+    for (std::uint16_t index = 0; index < 15; ++index) {
+        put16(bytes, colours, static_cast<std::uint16_t>(
+            0x3f00U | (index << 4U) | index));
+    }
+    return starfox::assets::RomImage{std::move(bytes)};
+}
+
+starfox::assets::RomImage make_empty_controller_rom() {
+    std::vector<std::uint8_t> bytes(0x8000);
+    // A source ShapeHdr whose point and face pointers are both zero denotes
+    // a strategy-only controller rather than a visible model.
+    auto header = std::uint32_t{0x008100};
+    for (std::size_t byte = 0; byte < 28U; ++byte) put8(bytes, header, 0U);
+    return starfox::assets::RomImage{std::move(bytes)};
+}
+
+} // namespace
+
+int main() {
+    const auto parsed_symbols = starfox::assets::SymbolMap::parse(
+        "EXAMPLE $123456\r\nignored report row\r\nexample $00abcd\r\n");
+    require(parsed_symbols.find("example").size() == 2
+            && parsed_symbols.find("EXAMPLE")[0] == 0x123456U
+            && parsed_symbols.find("example")[1] == 0x00abcdU,
+        "memory-backed symbol parsing diverged from file parsing");
+
+    const auto rom = make_rom();
+    require(rom.read8(0x2d0000U) == 0U,
+        "transient banked-null LoROM read did not behave as open bus");
+    const starfox::assets::ShapeDecoder decoder{rom};
+    const auto shape = decoder.decode(0x008100, "triangle");
+    {
+        auto bytes=rom.bytes();
+        bytes[offset(0x01810a)]=0x84;
+        bytes[offset(0x01818e)]=64; // BSPEND, unsigned forward branch >127.
+        const starfox::assets::RomImage long_bsp_rom{std::move(bytes)};
+        const starfox::assets::ShapeDecoder long_bsp_decoder{long_bsp_rom};
+        const auto branched=long_bsp_decoder.decode(0x008100);
+        require(branched.bsp_nodes[0].alternate_address==0x01818e,
+            "BSP alternate byte was incorrectly sign extended");
+    }
+    {
+        auto bytes=rom.bytes();
+        // A compact child has no colour table. Poison the historical fallback
+        // and relocate ID_0_C so both standalone and parent-inherited decoding
+        // must choose the correct table before reading colour animations.
+        std::copy_n(bytes.begin()+offset(0x008100),28,bytes.begin()+offset(0x008200));
+        bytes[offset(0x008207)]=255;
+        auto old=std::uint32_t{0x038213};put16(bytes,old,0x8000);
+        auto table=std::uint32_t{0x03a000};
+        for(unsigned i=0;i<32;++i) put16(bytes,table,0x3f11);
+        auto override_table=std::uint32_t{0x03a100};
+        for(unsigned i=0;i<32;++i) put16(bytes,override_table,0x3f22);
+        const starfox::assets::RomImage compact_rom{std::move(bytes)};
+        const auto compact_symbols=starfox::assets::SymbolMap::parse("ID_0_C $03a000\n");
+        const starfox::assets::ShapeDecoder compact_decoder{compact_rom,compact_symbols};
+        const auto standalone=compact_decoder.decode(0x008200);
+        require(standalone.header.compact && standalone.colour_words[0]==0x3f11,
+            "compact preview ignored relocated default material");
+        auto parent=shape.header;parent.colour_pointer=0xa100;parent.shift=3;
+        const auto child=compact_decoder.decode_lod(parent,0x8200);
+        require(child.header.shift==3 && child.colour_words[0]==0x3f22,
+            "compact LOD did not inherit parent material before decoding");
+        const auto overridden=compact_decoder.decode_lod(parent,0x8200,0xa000);
+        require(overridden.colour_words[0]==0x3f11,"LOD material override lost precedence");
+    }
+    require(shape.vertices.size() == 3, "point stream did not decode three vertices");
+    require(shape.faces.size() == 1, "face stream did not decode one face");
+    require(shape.bsp_nodes.size() == 1, "BSP node was not preserved");
+    require(shape.bsp_leaves.size() == 2, "BSP leaves were not preserved");
+    require(shape.faces[0].vertex_indices.size() == 3, "face vertex count is wrong");
+    require(shape.colour_words.size() == 15, "colour table range is wrong");
+    require(shape.colour_materials[14].animation_frames
+                == std::vector<std::uint16_t>{0x3f11U, 0x3f22U},
+            "COLANIM table was not preserved losslessly");
+
+    const auto empty_rom = make_empty_controller_rom();
+    const auto empty = starfox::assets::ShapeDecoder{empty_rom}.decode(
+        0x008100, "controller");
+    require(empty.vertices.empty() && empty.faces.empty(),
+            "zero-geometry controller header was rejected as an invalid model");
+
+    starfox::render::Framebuffer framebuffer{224, 192};
+    starfox::render::SurfaceBuffer surfaces{224, 192};
+    starfox::render::SoftwareRenderer renderer{{180.0, false, 0}};
+    renderer.draw(shape, {}, framebuffer, true, &surfaces);
+    starfox::render::shadows::Scene shadow_scene;
+    starfox::render::Framebuffer caster_capture{224, 192};
+    renderer.draw(shape, {}, caster_capture, true, nullptr, &shadow_scene);
+    require(shadow_scene.triangle_count() > 0U,
+        "renderer did not export actual model faces for shadow occlusion");
+    starfox::render::shadows::Scene collected;
+    renderer.collect_shadow_casters(shape,{},collected);
+    require(collected.triangle_count()==shadow_scene.triangle_count(),
+        "standalone caster collection changed triangle count");
+    for(std::size_t i=0;i<collected.triangle_count();++i) {
+        const auto& a=collected.triangles()[i];const auto& b=shadow_scene.triangles()[i];
+        const auto same=[](auto x,auto y){return x.x==y.x && x.y==y.y && x.z==y.z;};
+        require(same(a.a,b.a) && same(a.b,b.b) && same(a.c,b.c),
+            "standalone caster collection changed triangle vertices/order");
+    }
+    require(caster_capture.pixels() == framebuffer.pixels(),
+        "shadow geometry collection changed the original raster");
+    collected.clear();collected.capture_reflection_materials(true);
+    renderer.draw(shape,{},caster_capture,true,nullptr,&collected);
+    require(caster_capture.pixels()==framebuffer.pixels(),"reflection material capture changed raster colours");
+    require(collected.triangle_count()==shadow_scene.triangle_count(),"reflection materials changed shadow geometry");
+    require(std::any_of(collected.triangles().begin(),collected.triangles().end(),
+        [](const auto& triangle){return triangle.reflection_valid;}),"CPU reflection materials were not collected");
+    std::size_t coloured_pixels = 0;
+    std::size_t surface_pixels = 0;
+    for (std::uint32_t y = 0U; y < framebuffer.height(); ++y) {
+        for (std::uint32_t x = 0U; x < framebuffer.width(); ++x) {
+            coloured_pixels += framebuffer.get(x, y) != 0U;
+            const auto& surface = surfaces.get(x, y);
+            surface_pixels += surface.valid
+                && surface.palette_index == framebuffer.get(x, y);
+        }
+    }
+    require(coloured_pixels > 50, "decoded shape did not render a visible polygon");
+    auto word_shape = shape;
+    word_shape.header.shift = 4;
+    word_shape.word_coordinates.assign(word_shape.vertices.size(), true);
+    for (auto& frame : word_shape.frames)
+        frame.word_coordinates.assign(frame.vertices.size(), true);
+    for (const auto multiplier : {1.0, 2.0, 4.0}) {
+        starfox::render::RenderPose pose;
+        pose.scale = multiplier;
+        starfox::render::Framebuffer word_frame{224, 192};
+        renderer.draw(word_shape, pose, word_frame, true);
+        require(std::equal(framebuffer.pixels().begin(), framebuffer.pixels().end(),
+                    word_frame.pixels().begin()),
+            "Word coordinates received header shift or big-head scaling");
+    }
+    require(surface_pixels == coloured_pixels,
+            "rendered polygon did not retain per-pixel surface metadata");
+
+    constexpr std::uint32_t test_render_scale = 3U;
+    starfox::render::Framebuffer scaled_framebuffer{
+        224, 192, test_render_scale};
+    starfox::render::SurfaceBuffer scaled_surfaces{
+        224 * test_render_scale, 192 * test_render_scale};
+    starfox::render::RenderSettings scaled_settings;
+    scaled_settings.focal_length = 180.0;
+    scaled_settings.render_scale = test_render_scale;
+    const starfox::render::SoftwareRenderer scaled_renderer{scaled_settings};
+    scaled_renderer.draw(
+        shape, {}, scaled_framebuffer, true, &scaled_surfaces);
+    require(scaled_framebuffer.width() == 224U
+                && scaled_framebuffer.height() == 192U
+                && scaled_framebuffer.stored_width() == 672U
+                && scaled_framebuffer.stored_height() == 576U,
+            "render scale changed the logical raster dimensions");
+    std::size_t scaled_coloured_pixels{};
+    std::size_t scaled_surface_pixels{};
+    for (std::uint32_t y = 0U; y < scaled_framebuffer.stored_height(); ++y) {
+        for (std::uint32_t x = 0U; x < scaled_framebuffer.stored_width(); ++x) {
+            const auto colour = scaled_framebuffer.get_stored(x, y);
+            scaled_coloured_pixels += colour != 0U;
+            const auto& surface = scaled_surfaces.get(x, y);
+            scaled_surface_pixels += surface.valid
+                && surface.palette_index == colour;
+        }
+    }
+    require(scaled_coloured_pixels > coloured_pixels * 6U,
+            "scaled scan conversion did not add polygon edge resolution");
+    require(scaled_surface_pixels == scaled_coloured_pixels,
+            "scaled polygon surface metadata diverged from its raster");
+
+    // A two-point source face must retain one logical pixel of thickness
+    // after supersampling, rather than becoming a hairline at 4x.
+    auto line_shape = shape;
+    line_shape.bsp_root_address = 0U;
+    line_shape.faces.front().visibility_index = -1;
+    line_shape.faces.front().vertex_indices.resize(2);
+    std::size_t native_line_pixels = 0;
+    for (std::uint32_t scale = 1; scale <= 4; ++scale) {
+        starfox::render::RenderSettings line_settings;
+        line_settings.focal_length = 180.0;
+        line_settings.render_scale = scale;
+        starfox::render::Framebuffer line_frame{224U, 192U, scale};
+        starfox::render::SoftwareRenderer{line_settings}.draw(line_shape, {}, line_frame, true);
+        const auto pixels = static_cast<std::size_t>(std::count_if(
+            line_frame.pixels().begin(), line_frame.pixels().end(),
+            [](auto colour) { return colour != 0; }));
+        if (scale == 1) native_line_pixels = pixels;
+        require(native_line_pixels > 0, "wireframe fixture rendered no line");
+        require(pixels >= native_line_pixels * scale * scale * 3 / 4,
+            "supersampled wireframe lost logical thickness");
+        auto last_pixels = pixels;
+        for (std::uint8_t thickness = 2; thickness <= 4; ++thickness) {
+            line_settings.wireframe_thickness = thickness;
+            line_frame.clear(0);
+            starfox::render::SoftwareRenderer{line_settings}.draw(line_shape, {}, line_frame, true);
+            const auto thick_pixels = static_cast<std::size_t>(std::count_if(
+                line_frame.pixels().begin(), line_frame.pixels().end(),
+                [](auto colour) { return colour != 0; }));
+            require(thick_pixels > last_pixels,
+                "wireframe thickness setting did not increase line coverage");
+            last_pixels = thick_pixels;
+        }
+    }
+
+    // COLSMOOTH's $c000 flag pair is not a two-nibble dither descriptor.
+    // Audit every exposed scale because the erroneous black nibble was subtle
+    // at native resolution and became a large checkerboard in 10x reports.
+    auto smooth_descriptor_shape = shape;
+    smooth_descriptor_shape.bsp_root_address = 0U;
+    smooth_descriptor_shape.faces.front().visibility_index = -1;
+    const auto smooth_colour =
+        smooth_descriptor_shape.faces.front().colour_id;
+    smooth_descriptor_shape.colour_words[smooth_colour] = 0xc909U;
+    smooth_descriptor_shape.colour_materials[
+        smooth_colour].animation_frames.clear();
+    auto solid_reference_shape = smooth_descriptor_shape;
+    solid_reference_shape.colour_words[smooth_colour] = 0x3f99U;
+    for (std::uint32_t scale = 1U; scale <= 10U; ++scale) {
+        starfox::render::RenderSettings audit_settings;
+        audit_settings.focal_length = 180.0;
+        audit_settings.render_scale = scale;
+        const starfox::render::SoftwareRenderer audit_renderer{
+            audit_settings};
+        starfox::render::Framebuffer smooth_frame{224U, 192U, scale};
+        starfox::render::Framebuffer solid_frame{224U, 192U, scale};
+        audit_renderer.draw(
+            smooth_descriptor_shape, {}, smooth_frame, true);
+        audit_renderer.draw(
+            solid_reference_shape, {}, solid_frame, true);
+        require(smooth_frame.pixels() == solid_frame.pixels(),
+            "COLSMOOTH produced a checkerboard at a Render Upscale setting");
+    }
+
+    // High-FPS geometry can cross a depth/light boundary between completed
+    // 20 Hz source frames. MOBJ retains the source band and source matrix for
+    // that interval; presentation interpolation must not dim the face early.
+    auto source_lit_shape = solid_reference_shape;
+    source_lit_shape.colour_words[smooth_colour] = 0x0000U;
+    source_lit_shape.has_diffuse_shade_tables = true;
+    for (std::size_t depth = 0U;
+         depth < source_lit_shape.diffuse_shade_tables.size(); ++depth) {
+        for (auto& material : source_lit_shape.diffuse_shade_tables[depth]) {
+            for (std::size_t intensity = 0U;
+                 intensity < material.size(); ++intensity) {
+                // Band zero preserves the light intensity (identity source
+                // matrix -> intensity 9; interpolated flipped-Z matrix -> 6).
+                // Later bands use distinct constants so this one raster also
+                // catches an early depth-band transition.
+                const auto colour = static_cast<std::uint8_t>(depth == 0U
+                    ? intensity + 6U : depth + 1U);
+                material[intensity] = static_cast<std::uint8_t>(
+                    colour | (colour << 4U));
+            }
+        }
+    }
+    starfox::render::RenderPose source_lighting_pose;
+    source_lighting_pose.z = 1'100.0;
+    source_lighting_pose.depth_thresholds = {1'000, 2'000, 3'000};
+    source_lighting_pose.use_rotation_matrix = true;
+    source_lighting_pose.rotation_matrix = {
+        32'767, 0, 0,
+        0, 32'767, 0,
+        0, 0, -32'767,
+    };
+    source_lighting_pose.source_depth = 900.0;
+    source_lighting_pose.source_lighting_matrix = {
+        32'767, 0, 0,
+        0, 32'767, 0,
+        0, 0, 32'767,
+    };
+    source_lighting_pose.use_source_lighting_state = true;
+    starfox::render::Framebuffer source_lighting_frame{224U, 192U};
+    renderer.draw(source_lit_shape, source_lighting_pose,
+        source_lighting_frame, true);
+    require(std::any_of(source_lighting_frame.pixels().begin(),
+                source_lighting_frame.pixels().end(),
+                [](std::uint8_t pixel) { return pixel == 9U; })
+            && std::none_of(source_lighting_frame.pixels().begin(),
+                source_lighting_frame.pixels().end(),
+                [](std::uint8_t pixel) {
+                    return pixel == 2U || pixel == 6U;
+                }),
+        "interpolated presentation dimmed lighting before the source frame");
+
+    auto reverse_winding_shape = shape;
+    reverse_winding_shape.bsp_root_address = 0U;
+    reverse_winding_shape.faces.front().visibility_index = -1;
+    std::reverse(reverse_winding_shape.faces.front().vertex_indices.begin(),
+        reverse_winding_shape.faces.front().vertex_indices.end());
+    starfox::render::Framebuffer reverse_winding_frame{
+        224, 192, test_render_scale};
+    scaled_renderer.draw(
+        reverse_winding_shape, {}, reverse_winding_frame, true);
+    require(std::any_of(reverse_winding_frame.pixels().begin(),
+                reverse_winding_frame.pixels().end(),
+                [](auto pixel) { return pixel != 0U; }),
+            "Render Upscale dropped a polygon with reversed raster winding");
+
+    auto reverse_textured_shape = reverse_winding_shape;
+    const auto reverse_texture_colour =
+        reverse_textured_shape.faces.front().colour_id;
+    reverse_textured_shape.colour_words[reverse_texture_colour] = 0x4000U;
+    reverse_textured_shape.colour_materials[
+        reverse_texture_colour].animation_frames.clear();
+    reverse_textured_shape.textures = {{
+        0x4000U, 0U, 3U, 3U,
+        {{{0U, 0U}, {3U, 0U}, {0U, 3U}, {3U, 3U}}},
+        std::vector<std::uint8_t>(16U, 7U),
+    }};
+    starfox::render::Framebuffer reverse_textured_frame{
+        224, 192, test_render_scale};
+    scaled_renderer.draw(
+        reverse_textured_shape, {}, reverse_textured_frame, true);
+    require(std::any_of(reverse_textured_frame.pixels().begin(),
+                reverse_textured_frame.pixels().end(),
+                [](auto pixel) { return pixel == 7U; }),
+            "Render Upscale dropped a textured face with reversed winding");
+
+    auto stable_upscale_shape = shape;
+    starfox::render::RenderPose source_endpoint_pose;
+    source_endpoint_pose.use_rotation_matrix = true;
+    source_endpoint_pose.rotation_matrix = {
+        32'760, 257, 0,
+        -257, 32'760, 0,
+        0, 0, 32'767,
+    };
+    source_endpoint_pose.z = 512.0;
+    starfox::render::Framebuffer source_endpoint_frame{
+        224, 192, test_render_scale};
+    scaled_renderer.draw(stable_upscale_shape, source_endpoint_pose,
+        source_endpoint_frame, true);
+    auto interpolated_endpoint_pose = source_endpoint_pose;
+    interpolated_endpoint_pose.subpixel_projection = true;
+    starfox::render::Framebuffer interpolated_endpoint_frame{
+        224, 192, test_render_scale};
+    scaled_renderer.draw(stable_upscale_shape, interpolated_endpoint_pose,
+        interpolated_endpoint_frame, true);
+    require(source_endpoint_frame.pixels()
+                == interpolated_endpoint_frame.pixels(),
+            "Render Upscale snapped polygon edges on a source-frame boundary");
+
+    auto stable_visibility_shape = shape;
+    stable_visibility_shape.bsp_root_address = 0U;
+    auto& stable_visibility_vertices = stable_visibility_shape.frames.empty()
+        ? stable_visibility_shape.vertices
+        : stable_visibility_shape.frames.front().vertices;
+    const auto visibility_vertex = static_cast<std::uint8_t>(
+        stable_visibility_vertices.size());
+    stable_visibility_vertices.insert(stable_visibility_vertices.end(), {
+        {42, -63, -60}, {41, 64, 71}, {42, 5, 11},
+    });
+    stable_visibility_shape.visibilities = {{visibility_vertex,
+        static_cast<std::uint8_t>(visibility_vertex + 1U),
+        static_cast<std::uint8_t>(visibility_vertex + 2U)}};
+    stable_visibility_shape.faces.front().visibility_index = 0;
+    // These auxiliary visibility points straddle a rounding boundary while
+    // the actual triangle remains broad. Before the fix, upscale rasterization
+    // drew the face fractionally but the completed source frame culled it with
+    // a different, integer-projected winding.
+    source_endpoint_pose.rotation_matrix = {
+        32'767, -139, -996,
+        -4, 32'767, -604,
+        -464, -439, 32'767,
+    };
+    scaled_renderer.draw(stable_visibility_shape, source_endpoint_pose,
+        source_endpoint_frame, true);
+    interpolated_endpoint_pose = source_endpoint_pose;
+    interpolated_endpoint_pose.subpixel_projection = true;
+    scaled_renderer.draw(stable_visibility_shape, interpolated_endpoint_pose,
+        interpolated_endpoint_frame, true);
+    require(source_endpoint_frame.pixels()
+                == interpolated_endpoint_frame.pixels(),
+            "Render Upscale changed face visibility on a source-frame boundary");
+
+    auto tangent_visibility_shape = shape;
+    tangent_visibility_shape.bsp_root_address = 0U;
+    auto& tangent_vertices = tangent_visibility_shape.frames.empty()
+        ? tangent_visibility_shape.vertices
+        : tangent_visibility_shape.frames.front().vertices;
+    const auto tangent_vertex = static_cast<std::uint8_t>(
+        tangent_vertices.size());
+    tangent_vertices.insert(tangent_vertices.end(), {
+        {-10, -10, -512}, {10, -10, -512}, {0, 10, -512},
+    });
+    tangent_visibility_shape.visibilities = {{tangent_vertex,
+        static_cast<std::uint8_t>(tangent_vertex + 1U),
+        static_cast<std::uint8_t>(tangent_vertex + 2U)}};
+    tangent_visibility_shape.faces.front().visibility_index = 0;
+    auto tangent_pose = source_endpoint_pose;
+    tangent_pose.rotation_matrix = {
+        32'767, 0, 0,
+        0, 32'767, 0,
+        0, 0, 32'767,
+    };
+    tangent_pose.z = 512.0 * 32'767.0 / 32'768.0;
+    starfox::render::Framebuffer tangent_frame{
+        224, 192, test_render_scale};
+    scaled_renderer.draw(tangent_visibility_shape, tangent_pose,
+        tangent_frame, true);
+    require(std::any_of(tangent_frame.pixels().begin(),
+                tangent_frame.pixels().end(),
+                [](auto pixel) { return pixel != 0U; }),
+        "Render Upscale dropped a face at a camera-plane tangent");
+
+    starfox::render::Framebuffer source_overlay{2U, 2U};
+    starfox::render::Framebuffer scaled_composite{2U, 2U, 3U};
+    source_overlay.set(1, 1, 9U);
+    starfox::render::composite_transparent_layer(
+        source_overlay, scaled_composite, {});
+    for (std::uint32_t y = 3U; y < 6U; ++y) {
+        for (std::uint32_t x = 3U; x < 6U; ++x) {
+            require(scaled_composite.get_stored(x, y) == 9U,
+                    "native overlay did not fill its scaled destination cell");
+        }
+    }
+    starfox::render::Framebuffer high_resolution_overlay{2U, 2U, 3U};
+    starfox::render::Framebuffer high_resolution_composite{4U, 2U, 3U};
+    high_resolution_overlay.set(1, 1, 9U);
+    high_resolution_overlay.set_stored(5U, 5U, 11U);
+    starfox::render::LayerCompositeSettings high_resolution_settings;
+    high_resolution_settings.offset_x = 1;
+    starfox::render::composite_transparent_layer(high_resolution_overlay,
+        high_resolution_composite, high_resolution_settings);
+    require(high_resolution_composite.get_stored(6U, 3U) == 9U
+                && high_resolution_composite.get_stored(8U, 5U) == 11U
+                && high_resolution_composite.get_stored(5U, 5U) == 0U,
+            "equal-scale Render Upscale composite lost sub-pixel geometry");
+    starfox::render::Framebuffer wireframe{224, 192};
+    starfox::render::RenderPose wireframe_pose;
+    wireframe_pose.wireframe_mode = 1U;
+    renderer.draw(shape, wireframe_pose, wireframe);
+    const auto wireframe_pixels = std::count_if(wireframe.pixels().begin(),
+        wireframe.pixels().end(), [](std::uint8_t pixel) { return pixel != 0U; });
+    require(wireframe_pixels > 0U && wireframe_pixels < coloured_pixels,
+            "EX hlines23 wireframe path did not replace polygon interiors");
+    starfox::render::Framebuffer missing_polys{224, 192};
+    auto missing_polys_pose = wireframe_pose;
+    missing_polys_pose.wireframe_mode = 2U;
+    renderer.draw(shape, missing_polys_pose, missing_polys);
+    require(missing_polys.pixels() == framebuffer.pixels(),
+            "EX M_WIREMODE 2 changed a polygon without an asymmetric edge");
+
+    auto ex_effect_shape = shape;
+    ex_effect_shape.bsp_root_address = 0U;
+    ex_effect_shape.frames.clear();
+    ex_effect_shape.vertices = {
+        {0, -30, 0}, {-30, 0, 0}, {0, 30, 0}, {30, 30, 0},
+    };
+    ex_effect_shape.faces[0].visibility_index = -1;
+    ex_effect_shape.faces[0].vertex_indices = {0, 1, 2, 3};
+    starfox::render::Framebuffer ex_effect_fill{224, 192};
+    renderer.draw(ex_effect_shape, {}, ex_effect_fill);
+    const auto ex_effect_fill_count = std::count_if(
+        ex_effect_fill.pixels().begin(), ex_effect_fill.pixels().end(),
+        [](std::uint8_t pixel) { return pixel != 0U; });
+
+    starfox::render::RenderPose missing_edge_pose;
+    missing_edge_pose.wireframe_mode = 2U;
+    starfox::render::Framebuffer missing_edge_frame{224, 192};
+    renderer.draw(ex_effect_shape, missing_edge_pose, missing_edge_frame);
+    const auto missing_edge_count = std::count_if(
+        missing_edge_frame.pixels().begin(), missing_edge_frame.pixels().end(),
+        [](std::uint8_t pixel) { return pixel != 0U; });
+    require(missing_edge_count > 0U
+                && missing_edge_count < ex_effect_fill_count,
+            "EX M_WIREMODE 2 missed its left-only edge continuation");
+
+    starfox::render::RenderPose cel_pose;
+    cel_pose.cel_mode = true;
+    starfox::render::Framebuffer cel_frame{224, 192};
+    renderer.draw(ex_effect_shape, cel_pose, cel_frame);
+    const auto cel_count = std::count_if(cel_frame.pixels().begin(),
+        cel_frame.pixels().end(), [](std::uint8_t pixel) { return pixel != 0U; });
+    require(cel_count > 0U && cel_count < ex_effect_fill_count,
+            "EX NAN cel mode did not omit the source span endpoints");
+
+    starfox::render::RenderPose wave_pose;
+    wave_pose.wave_mode = true;
+    wave_pose.wave_offset = 3;
+    wave_pose.animation_frame = 5U;
+    starfox::render::Framebuffer wave_frame{224, 192};
+    renderer.draw(ex_effect_shape, wave_pose, wave_frame);
+    require(wave_frame.pixels() != ex_effect_fill.pixels(),
+            "EX NAN wave mode did not displace polygon scanlines");
+
+    starfox::render::RenderPose wobble_one_pose;
+    wobble_one_pose.wobble_mode = 1U;
+    starfox::render::Framebuffer wobble_one_frame{224, 192};
+    renderer.draw(ex_effect_shape, wobble_one_pose, wobble_one_frame);
+    const auto wobble_one_count = std::count_if(
+        wobble_one_frame.pixels().begin(), wobble_one_frame.pixels().end(),
+        [](std::uint8_t pixel) { return pixel != 0U; });
+    require(wobble_one_count > 0U
+                && wobble_one_count < ex_effect_fill_count,
+            "EX NAN wobble mode 1 did not repeat its trapezoid on one row");
+
+    starfox::render::RenderPose wobble_two_pose;
+    wobble_two_pose.wobble_mode = 2U;
+    starfox::render::Framebuffer wobble_two_frame{224, 192};
+    renderer.draw(ex_effect_shape, wobble_two_pose, wobble_two_frame);
+    const auto wobble_two_count = std::count_if(
+        wobble_two_frame.pixels().begin(), wobble_two_frame.pixels().end(),
+        [](std::uint8_t pixel) { return pixel != 0U; });
+    require(wobble_two_count > 0U
+                && wobble_two_count < ex_effect_fill_count,
+            "EX NAN wobble mode 2 did not use its blank-span scan loop");
+
+    starfox::render::RenderPose colour_warp_pose;
+    colour_warp_pose.colour_warp = true;
+    colour_warp_pose.projected_points_address = 0x0b9fU;
+    starfox::render::Framebuffer colour_warp_frame{224, 192};
+    renderer.draw(ex_effect_shape, colour_warp_pose, colour_warp_frame);
+    require(colour_warp_frame.pixels() != ex_effect_fill.pixels(),
+            "EX COLOR WARP did not bypass the model colour table");
+    starfox::render::Framebuffer repeated_colour_warp_frame{224, 192};
+    renderer.draw(ex_effect_shape, colour_warp_pose,
+        repeated_colour_warp_frame);
+    require(repeated_colour_warp_frame.pixels()
+                == colour_warp_frame.pixels(),
+            "EX COLOR WARP changed between presentations of one source state");
+
+    const auto dust_symbols = starfox::assets::SymbolMap::parse(
+        "STAR_COLS $018300\n");
+    const starfox::render::DustRenderer dust_renderer{rom, dust_symbols};
+    const starfox::timing::RenderTransform grid_camera{};
+    const starfox::simulation::MatrixQ15 identity_matrix{
+        32'767, 0, 0,
+        0, 32'767, 0,
+        0, 0, 32'767,
+    };
+    starfox::simulation::DustSystem viewport_dust;
+    {
+        starfox::render::DustRenderer::DustFrame wrapped;
+        wrapped.points={{-32768,32767,0}};
+        wrapped.camera.x=32767.5;wrapped.camera.y=-32768.25;wrapped.camera.z=65536.5;
+        const auto packed=starfox::render::DustRenderer::pack_dust_points(wrapped);
+        require(packed.size()==1 && packed[0]==std::array<double,4>{.5,-.75,-.5,0},
+            "dust input packing changed fractional word wrapping");
+        wrapped.camera.x=std::numeric_limits<double>::infinity();
+        bool rejected=false;
+        try { (void)starfox::render::DustRenderer::pack_dust_points(wrapped); }
+        catch(const std::invalid_argument&) {rejected=true;}
+        require(rejected,"dust packing accepted a non-finite camera");
+    }
+    viewport_dust.tick({0, 0, 0}, identity_matrix, true);
+    starfox::render::Framebuffer centered_dust{224, 192};
+    dust_renderer.draw(viewport_dust, 120U, grid_camera, identity_matrix,
+        centered_dust);
+    require(std::any_of(centered_dust.pixels().begin(), centered_dust.pixels().end(),
+                [](std::uint8_t pixel) { return pixel != 0U; }),
+        "viewport dust fixture must contain visible stars");
+    for (const auto width : {224U, 398U, 796U}) {
+        starfox::render::Framebuffer viewport_frame{width, 192};
+        const auto ui_offset = static_cast<int>((width - 224U) / 2U);
+        const auto offset_x = 64 + ui_offset - static_cast<int>(width / 2U);
+        dust_renderer.draw(viewport_dust, 120U, grid_camera, identity_matrix,
+            viewport_frame, offset_x, -48);
+        auto snapshot=dust_renderer.prepare_dust(viewport_dust,120,grid_camera,identity_matrix);
+        snapshot.offset_x=offset_x;snapshot.offset_y=-48;
+        starfox::render::Framebuffer replayed_dust{width,192};
+        starfox::render::DustRenderer::draw_dust_frame(snapshot,replayed_dust);
+        require(replayed_dust.pixels()==viewport_frame.pixels(),"owned dust snapshot changed viewport pixels");
+        auto recycled=viewport_dust;
+        const auto retained=dust_renderer.prepare_dust(recycled,120,grid_camera,identity_matrix);
+        const auto original_points=retained.points;
+        recycled.tick({5000,5000,5000},identity_matrix,true);
+        require(retained.points==original_points,
+            "dust snapshot did not retain source points");
+        // Compare the shared visible interior, avoiding clipping at either
+        // framebuffer edge. Controls use native (64,48), not (112,96).
+        for (int y = 2; y < 142; ++y) {
+            for (int x = 2; x < 172; ++x) {
+                require(viewport_frame.pixels()[y * width + x + ui_offset]
+                        == centered_dust.pixels()[(y + 48) * 224 + x + 48],
+                    "Controls stars must project about their viewport at every aspect ratio");
+            }
+        }
+    }
+    starfox::render::Framebuffer grid_points{224, 192};
+    for(unsigned width:{224U,400U,796U}) for(double x:{-32768.,0.,32767.}) {
+        auto probe=grid_camera;probe.x=x;
+        starfox::render::Framebuffer expected{width,192},projected_pixels{width,192};
+        dust_renderer.draw_grid(probe,identity_matrix,expected);
+        const auto projected=starfox::render::project_source_grid(probe,identity_matrix,width,192);
+        require(projected.count<=225,"Projected source grid exceeded lattice capacity");
+        for(std::size_t i=0;i<projected.count;++i) {
+            const auto& point=projected.points[i];
+            projected_pixels.set(point.x,point.y,126);
+            if(point.depth<512) projected_pixels.set(point.x-1,point.y+1,126);
+        }
+        require(expected.pixels()==projected_pixels.pixels(),"Reusable grid projection differs from independent dot renderer");
+    }
+    dust_renderer.draw_grid(grid_camera, identity_matrix, grid_points);
+    starfox::render::Framebuffer grid_lines{224, 192};
+    dust_renderer.draw_grid_lines(
+        grid_camera, identity_matrix, 17U, grid_lines);
+    require(std::count_if(grid_lines.pixels().begin(), grid_lines.pixels().end(),
+                [](std::uint8_t pixel) { return pixel != 0U; })
+            > std::count_if(grid_points.pixels().begin(), grid_points.pixels().end(),
+                [](std::uint8_t pixel) { return pixel != 0U; }),
+            "EX GRID LINES did not connect the source ground points");
+    starfox::render::Framebuffer repeated_grid_lines{224, 192};
+    dust_renderer.draw_grid_lines(
+        grid_camera, identity_matrix, 17U, repeated_grid_lines);
+    require(repeated_grid_lines.pixels() == grid_lines.pixels(),
+            "EX GRID LINES changed during repeated high-FPS presentations");
+    const auto grid_snapshot=dust_renderer.prepare_grid_lines(grid_camera,identity_matrix,17,224,192);
+    auto shifted_grid_camera=grid_camera;shifted_grid_camera.x+=37;
+    const auto shifted_snapshot=dust_renderer.prepare_grid_lines(shifted_grid_camera,identity_matrix,17,224,192);
+    require(shifted_snapshot.start==grid_snapshot.start,
+            "interpolated grid presentation changed source-frame start");
+    require(grid_snapshot.projected.count>0,"grid history fixture has no endpoint");
+    const auto last_grid_point=grid_snapshot.projected.points[grid_snapshot.projected.count-1];
+    const auto next_snapshot=dust_renderer.prepare_grid_lines(grid_camera,identity_matrix,18,224,192);
+    require(next_snapshot.start==std::array<std::int16_t,2>{static_cast<std::int16_t>(last_grid_point.x-1),last_grid_point.y},
+            "grid history advanced on a repeated presentation instead of the source frame");
+    starfox::render::Framebuffer alternate_frame{224, 192};
+    starfox::render::RenderPose alternate_pose;
+    alternate_pose.colour_frame = 1;
+    renderer.draw(shape, alternate_pose, alternate_frame);
+    require(framebuffer.pixels() != alternate_frame.pixels(),
+            "renderer did not select the requested colour-animation frame");
+    auto exploding_shape = shape;
+    exploding_shape.bsp_root_address = 0U;
+    exploding_shape.faces[0].visibility_index = -1;
+    exploding_shape.faces[0].normal = {12, -8, 0};
+    starfox::render::RenderPose explosion_pose;
+    explosion_pose.explosion_progress = 8U;
+    starfox::render::Framebuffer explosion_frame{224, 192};
+    renderer.draw(exploding_shape, explosion_pose, explosion_frame);
+    starfox::render::Framebuffer intact_frame{224, 192};
+    renderer.draw(exploding_shape, {}, intact_frame);
+    require(explosion_frame.pixels() != intact_frame.pixels(),
+            "afexp model did not separate its faces as al_count advanced");
+    starfox::render::Framebuffer shadow_frame{224, 192};
+    starfox::render::RenderPose shadow_pose;
+    shadow_pose.force_colour = true;
+    shadow_pose.forced_colour = 0x09U;
+    renderer.draw(shape, shadow_pose, shadow_frame);
+    require(std::find(shadow_frame.pixels().begin(), shadow_frame.pixels().end(), 9U)
+                != shadow_frame.pixels().end(),
+            "ordinary shadow did not use the source palette colour");
+    require(std::none_of(shadow_frame.pixels().begin(), shadow_frame.pixels().end(),
+                [](std::uint8_t pixel) { return pixel != 0U && pixel != 9U; }),
+            "ordinary shadow retained a model material");
+
+    auto clipped_shape = shape;
+    clipped_shape.bsp_root_address = 0;
+    clipped_shape.frames.clear();
+    clipped_shape.vertices = {
+        {-20, -10, -10},
+        {20, -10, 10},
+        {0, 20, 10},
+    };
+    clipped_shape.faces[0].visibility_index = -1;
+    starfox::render::RenderPose near_pose;
+    near_pose.z = 0.0;
+    near_pose.force_colour = true;
+    near_pose.forced_colour = 0x05U;
+    starfox::render::Framebuffer clipped_frame{224, 192};
+    renderer.draw(clipped_shape, near_pose, clipped_frame);
+    require(std::any_of(clipped_frame.pixels().begin(), clipped_frame.pixels().end(),
+                [](std::uint8_t pixel) { return pixel != 0U; }),
+            "untextured polygon crossing z=0 was not clipped and drawn");
+
+    auto clipped_line = clipped_shape;
+    clipped_line.vertices[0] = {0, 0, -10};
+    clipped_line.vertices[1] = {0, 0, 10};
+    clipped_line.faces[0].vertex_indices = {0, 1};
+    starfox::render::Framebuffer clipped_line_frame{224, 192};
+    renderer.draw(clipped_line, near_pose, clipped_line_frame);
+    require(std::any_of(clipped_line_frame.pixels().begin(),
+                clipped_line_frame.pixels().end(),
+                [](std::uint8_t pixel) { return pixel != 0U; }),
+            "line crossing z=0 was not clipped and drawn");
+
+    auto tapered_beam = clipped_shape;
+    tapered_beam.header.shift = 7U;
+    tapered_beam.vertices = {
+        {0, 0, 0}, {-1, 0, -10}, {0, 0, 0},
+        {1, 0, -10}, {0, -2, -10}, {0, 2, -10},
+    };
+    starfox::render::RenderPose beam_pose;
+    beam_pose.x = -350.0;
+    beam_pose.z = 900.0;
+    beam_pose.force_colour = true;
+    beam_pose.forced_colour = 0x05U;
+    beam_pose.collapse_to_axis_line = true;
+    starfox::render::Framebuffer beam_frame{224, 192};
+    renderer.draw(tapered_beam, beam_pose, beam_frame);
+    const auto beam_pixels = std::count_if(beam_frame.pixels().begin(),
+        beam_frame.pixels().end(), [](std::uint8_t pixel) { return pixel != 0U; });
+    require(beam_pixels > 8U && beam_pixels <= 224U,
+            "near-camera tapered beam expanded beyond its centre axis");
+
+    auto clipped_texture = clipped_shape;
+    const auto texture_colour = clipped_texture.faces[0].colour_id;
+    clipped_texture.colour_words[texture_colour] = 0x4000U;
+    clipped_texture.colour_materials[texture_colour].animation_frames.clear();
+    clipped_texture.textures.push_back({
+        0x4000U,
+        0,
+        1,
+        1,
+        {{{0, 0}, {1, 0}, {1, 1}, {0, 1}}},
+        {1, 1, 1, 1},
+    });
+    starfox::render::Framebuffer clipped_texture_frame{224, 192};
+    auto texture_near_pose = near_pose;
+    texture_near_pose.force_colour = false;
+    renderer.draw(clipped_texture, texture_near_pose, clipped_texture_frame);
+    require(std::none_of(clipped_texture_frame.pixels().begin(),
+                clipped_texture_frame.pixels().end(),
+                [](std::uint8_t pixel) { return pixel != 0U; }),
+            "texture map crossing z=0 was drawn instead of source-discarded");
+
+    auto bottom_clipped_shape = shape;
+    bottom_clipped_shape.bsp_root_address = 0;
+    bottom_clipped_shape.frames.clear();
+    bottom_clipped_shape.vertices = {
+        {-20, 90, 0},
+        {0, 110, 0},
+        {20, 90, 0},
+    };
+    bottom_clipped_shape.faces[0].visibility_index = -1;
+    bottom_clipped_shape.faces[0].vertex_indices = {0, 1, 2};
+    starfox::render::RenderPose bottom_pose;
+    bottom_pose.z = 256.0;
+    bottom_pose.force_colour = true;
+    bottom_pose.forced_colour = 0x55U;
+    starfox::render::Framebuffer bottom_clipped_frame{224, 192};
+    starfox::render::SoftwareRenderer source_projection{{256.0, false, 0}};
+    source_projection.draw(
+        bottom_clipped_shape, bottom_pose, bottom_clipped_frame);
+    require(std::any_of(bottom_clipped_frame.pixels().begin() + 191U * 224U,
+                bottom_clipped_frame.pixels().end(),
+                [](std::uint8_t pixel) { return pixel == 5U; }),
+            "exclusive source bottom clip dropped scanline 191");
+
+    auto expanded_side_shape = shape;
+    expanded_side_shape.bsp_root_address = 0;
+    expanded_side_shape.frames.clear();
+    expanded_side_shape.vertices = {
+        {112, -20, 0},
+        {140, 0, 0},
+        {112, 20, 0},
+    };
+    expanded_side_shape.faces[0].visibility_index = -1;
+    expanded_side_shape.faces[0].vertex_indices = {0, 2, 1};
+    starfox::render::RenderPose expanded_side_pose;
+    expanded_side_pose.z = 256.0;
+    expanded_side_pose.vanish_x = 128.0;
+    expanded_side_pose.vanish_y = 96.0;
+    expanded_side_pose.force_colour = true;
+    expanded_side_pose.forced_colour = 0x05U;
+    expanded_side_pose.use_rotation_matrix = true;
+    expanded_side_pose.rotation_matrix = {
+        32'767, 0, 0,
+        0, 32'767, 0,
+        0, 0, 32'767,
+    };
+    starfox::render::Framebuffer expanded_side_frame{256, 192};
+    source_projection.draw(
+        expanded_side_shape, expanded_side_pose, expanded_side_frame);
+    auto expanded_pixels = std::size_t{};
+    auto leaked_pixels = std::size_t{};
+    for (std::uint32_t y = 0; y < expanded_side_frame.height(); ++y) {
+        for (std::uint32_t x = 0; x < expanded_side_frame.width(); ++x) {
+            if (expanded_side_frame.get(x, y) != 5U) continue;
+            ++expanded_pixels;
+            leaked_pixels += x < 224U;
+        }
+    }
+    require(expanded_pixels > 100U,
+            "model crossing the expanded right column was not drawn");
+    require(leaked_pixels == 0U,
+            "expanded right-column edge wrapped into the original viewport");
+
+    auto superwide_side_shape = expanded_side_shape;
+    superwide_side_shape.vertices = {
+        {360, -20, 0},
+        {400, 0, 0},
+        {360, 20, 0},
+    };
+    auto superwide_side_pose = expanded_side_pose;
+    superwide_side_pose.vanish_x = 400.0;
+    starfox::render::Framebuffer superwide_side_frame{800, 224};
+    source_projection.draw(
+        superwide_side_shape, superwide_side_pose, superwide_side_frame);
+    auto superwide_pixels = std::size_t{};
+    auto superwide_wrapped_pixels = std::size_t{};
+    for (std::uint32_t y = 0; y < superwide_side_frame.height(); ++y) {
+        for (std::uint32_t x = 0; x < superwide_side_frame.width(); ++x) {
+            if (superwide_side_frame.get(x, y) != 5U) continue;
+            ++superwide_pixels;
+            superwide_wrapped_pixels += x < 700U;
+        }
+    }
+    require(superwide_pixels > 100U,
+            "model in the 32:9 outer column was not drawn");
+    require(superwide_wrapped_pixels == 0U,
+            "32:9 outer-column edge wrapped into the centred viewport");
+
+    auto expanded_top_shape = shape;
+    expanded_top_shape.bsp_root_address = 0;
+    expanded_top_shape.frames.clear();
+    expanded_top_shape.vertices = {
+        {-20, -120, 0},
+        {0, -100, 0},
+        {20, -120, 0},
+    };
+    expanded_top_shape.faces[0].visibility_index = -1;
+    expanded_top_shape.faces[0].vertex_indices = {0, 1, 2};
+    auto expanded_top_pose = expanded_side_pose;
+    expanded_top_pose.vanish_x = 200.0;
+    expanded_top_pose.vanish_y = 112.0;
+    starfox::render::Framebuffer expanded_top_frame{400, 224};
+    source_projection.draw(
+        expanded_top_shape, expanded_top_pose, expanded_top_frame);
+    require(std::any_of(expanded_top_frame.pixels().begin(),
+                expanded_top_frame.pixels().begin() + 16U * 400U,
+                [](std::uint8_t pixel) { return pixel == 5U; }),
+            "model crossing the two added top rows was still clipped");
+
+    auto source_line_shape = shape;
+    source_line_shape.bsp_root_address = 0;
+    source_line_shape.frames.clear();
+    source_line_shape.vertices = {{-12, 4, 0}, {-8, 6, 0}};
+    source_line_shape.faces[0].visibility_index = -1;
+    source_line_shape.faces[0].vertex_indices = {0, 1};
+    starfox::render::Framebuffer source_line_frame{224, 192};
+    source_projection.draw(source_line_shape, bottom_pose, source_line_frame);
+    require(source_line_frame.get(100, 100) == 5U
+                && source_line_frame.get(101, 100) == 5U
+                && source_line_frame.get(102, 101) == 5U
+                && source_line_frame.get(103, 101) == 5U
+                && source_line_frame.get(104, 102) == 5U
+                && source_line_frame.get(101, 101) == 0U,
+            "source mline half-slope tie rule diverged");
+
+    auto sprite_face_shape = shape;
+    sprite_face_shape.bsp_root_address = 0;
+    sprite_face_shape.frames.clear();
+    sprite_face_shape.vertices = {{0, 0, 0}};
+    sprite_face_shape.faces[0].visibility_index = -1;
+    sprite_face_shape.faces[0].vertex_indices = {0};
+    sprite_face_shape.faces[0].sprite = true;
+    const auto sprite_colour = sprite_face_shape.faces[0].colour_id;
+    sprite_face_shape.colour_words[sprite_colour] = 0x4000U;
+    sprite_face_shape.colour_materials[sprite_colour].animation_frames.clear();
+    sprite_face_shape.textures = {{
+        0x4000U, 0U, 31U, 31U, {}, std::vector<std::uint8_t>(32U * 32U, 7U)}};
+    starfox::render::RenderPose sprite_face_pose;
+    sprite_face_pose.z = 256.0;
+    starfox::render::Framebuffer sprite_face_frame{224, 192};
+    source_projection.draw(
+        sprite_face_shape, sprite_face_pose, sprite_face_frame);
+    require(std::count(sprite_face_frame.pixels().begin(),
+                sprite_face_frame.pixels().end(), 7U) == 32 * 32
+                && sprite_face_frame.get(96, 80) == 7U
+                && sprite_face_frame.get(127, 111) == 7U
+                && sprite_face_frame.get(128, 112) == 0U,
+            "source angle-zero 8.8 sprite-face scaler diverged");
+
+    const auto animated_rom = make_animated_rom();
+    const starfox::assets::ShapeDecoder animated_decoder{animated_rom};
+    const auto animated = animated_decoder.decode(0x008100, "animated_triangle");
+    require(animated.frames.size() == 2, "animated point table frame count is wrong");
+    require(animated.declared_frame_count == 2, "declared frame count was not preserved");
+    require(animated.frames[0].vertices.size() == 3,
+            "static point prefix was not included in animation frame");
+    require(animated.frames[0].vertices[1] != animated.frames[1].vertices[1],
+            "animation frames decoded to the same point set");
+    std::cout << "All shape decoder tests passed.\n";
+    return 0;
+}

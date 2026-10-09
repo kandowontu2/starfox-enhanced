@@ -1,0 +1,278 @@
+#include "starfox/render/framebuffer.hpp"
+#include "starfox/render/palette.hpp"
+
+#include <array>
+#include <fstream>
+#include <stdexcept>
+
+namespace starfox::render {
+namespace {
+
+std::int32_t mosaic_coordinate(
+    std::int32_t coordinate, std::int32_t size) noexcept {
+    auto remainder = coordinate % size;
+    if (remainder < 0) remainder += size;
+    return coordinate - remainder;
+}
+
+void write_u16(std::ofstream& output, std::uint16_t value) {
+    output.put(static_cast<char>(value & 0xffU));
+    output.put(static_cast<char>((value >> 8U) & 0xffU));
+}
+
+void write_u32(std::ofstream& output, std::uint32_t value) {
+    write_u16(output, static_cast<std::uint16_t>(value & 0xffffU));
+    write_u16(output, static_cast<std::uint16_t>((value >> 16U) & 0xffffU));
+}
+
+} // namespace
+
+void composite_transparent_layer(const Framebuffer& source,
+    Framebuffer& destination, const LayerCompositeSettings& settings) {
+    const auto pairs=source.dither_pairs();
+    const bool carry_pairs=!pairs.empty() && source.draw_scale()>1 && destination.draw_scale()>1;
+    if(carry_pairs && !destination.command_buffer()) destination.enable_dither_pairs(true);
+    const auto mosaic_enabled = settings.mosaic_layer_mask != 0U
+        && (settings.mosaic & settings.mosaic_layer_mask) != 0U;
+    const auto mosaic_size = static_cast<std::int32_t>(
+        (settings.mosaic >> 4U) + 1U);
+    if(auto* commands=destination.command_buffer()) {
+        RasterCommand c;const int scale=destination.draw_scale();
+        c.left=std::max<std::int32_t>({0,settings.offset_x,settings.clip_left})*scale;
+        c.top=std::max<std::int32_t>({0,settings.offset_y,settings.clip_top})*scale;
+        c.right=std::min<std::int32_t>({int(destination.width()),settings.offset_x+int(source.width()),settings.clip_right})*scale;
+        c.bottom=std::min<std::int32_t>({int(destination.height()),settings.offset_y+int(source.height()),settings.clip_bottom})*scale;
+        if(c.left>=c.right || c.top>=c.bottom) return;
+        c.textured=5;c.texture_offset=commands->snapshot(source.pixels());
+        c.u_mask=source.stored_width();c.v_mask=source.stored_height();
+        c.u=settings.offset_x;c.v=settings.offset_y;c.du=source.draw_scale();c.dv=scale;
+        c.even=std::uint32_t(settings.mosaic_origin_x);c.odd=std::uint32_t(settings.mosaic_origin_y);
+        c.reserved0=mosaic_enabled?mosaic_size:1;c.tag=std::uint32_t(PixelLayer::three_d);
+        c.dither=source.layer_tags_enabled();
+        if(c.dither) c.reserved1=commands->snapshot(source.layer_tags());
+        if(carry_pairs) {
+            std::vector<std::uint8_t> bytes;bytes.reserve(pairs.size()*2);
+            for(auto pair:pairs) {bytes.push_back(std::uint8_t(pair));bytes.push_back(std::uint8_t(pair>>8));}
+            c.colour_base=commands->snapshot(bytes)+1;
+        }
+        commands->add(c);return;
+    }
+    if (!mosaic_enabled
+        && source.draw_scale() == destination.draw_scale()) {
+        // Equal-scale layers are already aligned pixel-for-pixel in stored
+        // space. Walk their contiguous storage directly instead of paying
+        // logical clipping, coordinate multiplication and an SxS nested loop
+        // for every source pixel. This is particularly important for Render
+        // Upscale: the old generic path repeated that machinery nine times
+        // per logical pixel at 3x even though no resampling was required.
+        auto source_left = std::max<std::int32_t>(0, -settings.offset_x);
+        auto source_top = std::max<std::int32_t>(0, -settings.offset_y);
+        auto source_right = std::min(
+            static_cast<std::int32_t>(source.width()),
+            static_cast<std::int32_t>(destination.width())
+                - settings.offset_x);
+        auto source_bottom = std::min(
+            static_cast<std::int32_t>(source.height()),
+            static_cast<std::int32_t>(destination.height())
+                - settings.offset_y);
+        if (settings.clip_left != std::numeric_limits<std::int32_t>::min()) {
+            source_left = std::max(
+                source_left, settings.clip_left - settings.offset_x);
+        }
+        if (settings.clip_top != std::numeric_limits<std::int32_t>::min()) {
+            source_top = std::max(
+                source_top, settings.clip_top - settings.offset_y);
+        }
+        if (settings.clip_right != std::numeric_limits<std::int32_t>::max()) {
+            source_right = std::min(
+                source_right, settings.clip_right - settings.offset_x);
+        }
+        if (settings.clip_bottom != std::numeric_limits<std::int32_t>::max()) {
+            source_bottom = std::min(
+                source_bottom, settings.clip_bottom - settings.offset_y);
+        }
+        if (source_left >= source_right || source_top >= source_bottom) return;
+        const auto scale = source.draw_scale();
+        const auto stored_source_left = static_cast<std::size_t>(source_left)
+            * scale;
+        const auto stored_source_top = static_cast<std::size_t>(source_top)
+            * scale;
+        const auto stored_source_right = static_cast<std::size_t>(source_right)
+            * scale;
+        const auto stored_source_bottom = static_cast<std::size_t>(source_bottom)
+            * scale;
+        const auto stored_offset_x = static_cast<std::int64_t>(
+            settings.offset_x) * scale;
+        const auto stored_offset_y = static_cast<std::int64_t>(
+            settings.offset_y) * scale;
+        const auto& source_pixels = source.pixels();
+        auto& destination_pixels = destination.pixels();
+        // This path writes the pixel storage directly, so it owns the tag
+        // transfer too. Without it the destination keeps whatever layer last
+        // wrote those cells -- in gameplay, the cartridge background under the
+        // Super FX world -- and a 2D filter would then treat projected
+        // geometry as cartridge art.
+        auto& destination_tags = destination.layer_tags();
+        const auto& source_tags = source.layer_tags();
+        const auto transfer_tags = destination.layer_tags_enabled()
+            && destination_tags.size() == destination_pixels.size();
+        const auto source_tagged = source.layer_tags_enabled()
+            && source_tags.size() == source_pixels.size();
+        constexpr auto geometry_tag =
+            static_cast<std::uint8_t>(PixelLayer::three_d);
+        for (auto y = stored_source_top; y < stored_source_bottom; ++y) {
+            auto source_index = y * source.stored_width()
+                + stored_source_left;
+            auto destination_index = static_cast<std::size_t>(
+                static_cast<std::int64_t>(y) + stored_offset_y)
+                    * destination.stored_width()
+                + static_cast<std::size_t>(
+                    static_cast<std::int64_t>(stored_source_left)
+                        + stored_offset_x);
+            for (auto x = stored_source_left; x < stored_source_right; ++x) {
+                const auto colour = source_pixels[source_index];
+                if (colour != 0U || (carry_pairs && (pairs[source_index]&256))) {
+                    destination_pixels[destination_index] = colour;
+                    destination.mark_written(destination_index);
+                    if(carry_pairs && (pairs[source_index]&256)) destination.set_dither_alternate(destination_index,std::uint8_t(pairs[source_index]));
+                    if (transfer_tags) {
+                        destination_tags[destination_index] = source_tagged
+                            ? source_tags[source_index] : geometry_tag;
+                    }
+                }
+                ++source_index;
+                ++destination_index;
+            }
+        }
+        return;
+    }
+    for (std::uint32_t y = 0; y < source.height(); ++y) {
+        for (std::uint32_t x = 0; x < source.width(); ++x) {
+            const auto destination_x = static_cast<std::int32_t>(x)
+                + settings.offset_x;
+            const auto destination_y = static_cast<std::int32_t>(y)
+                + settings.offset_y;
+            if (destination_x < settings.clip_left
+                || destination_x >= settings.clip_right
+                || destination_y < settings.clip_top
+                || destination_y >= settings.clip_bottom) {
+                continue;
+            }
+
+            auto source_x = static_cast<std::int32_t>(x);
+            auto source_y = static_cast<std::int32_t>(y);
+            if (mosaic_enabled) {
+                const auto logical_x = destination_x
+                    - settings.mosaic_origin_x;
+                const auto logical_y = destination_y
+                    - settings.mosaic_origin_y;
+                source_x = mosaic_coordinate(logical_x, mosaic_size)
+                    + settings.mosaic_origin_x - settings.offset_x;
+                source_y = mosaic_coordinate(logical_y, mosaic_size)
+                    + settings.mosaic_origin_y - settings.offset_y;
+                if (source_x < 0 || source_y < 0
+                    || source_x >= static_cast<std::int32_t>(source.width())
+                    || source_y >= static_cast<std::int32_t>(source.height())) {
+                    continue;
+                }
+            }
+            // Clipping and mosaic stay on the source raster grid, matching
+            // the PPU. Only the transfer itself runs at the stored scale so a
+            // higher-resolution 3D layer keeps its detail through the pass.
+            const auto source_scale = source.draw_scale();
+            const auto destination_scale = destination.draw_scale();
+            if (destination_x < 0 || destination_y < 0) continue;
+            const auto source_origin_x =
+                static_cast<std::uint32_t>(source_x) * source_scale;
+            const auto source_origin_y =
+                static_cast<std::uint32_t>(source_y) * source_scale;
+            const auto destination_origin_x =
+                static_cast<std::uint32_t>(destination_x)
+                * destination_scale;
+            const auto destination_origin_y =
+                static_cast<std::uint32_t>(destination_y)
+                * destination_scale;
+            for (std::uint32_t row = 0; row < destination_scale; ++row) {
+                const auto source_row = std::min(source_scale - 1U,
+                    ((row * 2U + 1U) * source_scale)
+                        / (destination_scale * 2U));
+                for (std::uint32_t column = 0;
+                     column < destination_scale; ++column) {
+                    const auto source_column = std::min(source_scale - 1U,
+                        ((column * 2U + 1U) * source_scale)
+                            / (destination_scale * 2U));
+                    const auto source_stored_x = source_origin_x + source_column;
+                    const auto source_stored_y = source_origin_y + source_row;
+                    const auto colour = source.get_stored(
+                        source_stored_x, source_stored_y);
+                    const auto pair=carry_pairs?pairs[std::size_t(source_stored_y)*source.stored_width()+source_stored_x]:0;
+                    if (colour == 0U && !(pair&256)) continue;
+                    // Carry the source layer across the composite. Super FX
+                    // layers hold both projected geometry and cartridge HUD
+                    // art, so the tag has to follow the pixel rather than the
+                    // call site.
+                    const auto layer = source.layer_tags_enabled()
+                        ? source.layer_stored(source_stored_x, source_stored_y)
+                        : PixelLayer::three_d;
+                    destination.set_stored(destination_origin_x + column,
+                        destination_origin_y + row, colour, layer);
+                    if(pair&256) destination.set_dither_alternate(std::size_t(destination_origin_y+row)*destination.stored_width()+destination_origin_x+column,std::uint8_t(pair));
+                }
+            }
+        }
+    }
+}
+
+void write_bmp(const Framebuffer& framebuffer, const std::filesystem::path& path) {
+    write_bmp(framebuffer, path, preview_palette());
+}
+
+void write_bmp(
+    const Framebuffer& framebuffer,
+    const std::filesystem::path& path,
+    std::span<const Rgba8> palette) {
+    if (palette.empty()) {
+        throw std::invalid_argument{"bitmap palette is empty"};
+    }
+    if (!path.parent_path().empty()) {
+        std::filesystem::create_directories(path.parent_path());
+    }
+    std::ofstream output{path, std::ios::binary};
+    if (!output) {
+        throw std::runtime_error{"unable to create bitmap: " + path.string()};
+    }
+
+    const auto row_bytes = ((framebuffer.width() * 3U) + 3U) & ~3U;
+    const auto pixel_bytes = row_bytes * framebuffer.height();
+    output.write("BM", 2);
+    write_u32(output, 54U + pixel_bytes);
+    write_u16(output, 0);
+    write_u16(output, 0);
+    write_u32(output, 54);
+    write_u32(output, 40);
+    write_u32(output, framebuffer.width());
+    write_u32(output, framebuffer.height());
+    write_u16(output, 1);
+    write_u16(output, 24);
+    write_u32(output, 0);
+    write_u32(output, pixel_bytes);
+    write_u32(output, 2'835);
+    write_u32(output, 2'835);
+    write_u32(output, 0);
+    write_u32(output, 0);
+
+    const std::array<char, 3> padding{};
+    for (std::uint32_t y = framebuffer.height(); y-- > 0;) {
+        for (std::uint32_t x = 0; x < framebuffer.width(); ++x) {
+            const auto pixel = framebuffer.get(x, y);
+            const auto colour = palette[std::min<std::size_t>(
+                pixel, palette.size() - 1U)];
+            output.put(static_cast<char>(colour.b));
+            output.put(static_cast<char>(colour.g));
+            output.put(static_cast<char>(colour.r));
+        }
+        output.write(padding.data(), static_cast<std::streamsize>(row_bytes - framebuffer.width() * 3U));
+    }
+}
+
+} // namespace starfox::render

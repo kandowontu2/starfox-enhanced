@@ -1,0 +1,51 @@
+STAR FOX ENHANCED - DEVELOPMENT PREVIEW
+
+This is a local test package, not a published release. No ROM, prepared game
+assets, music pack, NVIDIA DLL or unsigned rendering add-on is included.
+
+WINDOWS
+Extract the whole ZIP into a writable folder. Open Windows/starfox_pc.exe.
+Supply your supported, unmodified retail Star Fox/Starwing ROM as described
+in Windows/README.md. The game builds Starfox-Assets.BIN locally.
+The included starfox_asset_builder.exe can also prepare that BIN for Quest.
+Do not share your ROM or generated BIN with other players.
+
+QUEST 3
+Sideload Quest/Starfox-Enhanced-Quest.apk using your usual trusted tool, or:
+  adb install -r Starfox-Enhanced-Quest.apk
+Use install -r to preserve existing application data; do not uninstall first.
+Open Star Fox Enhanced from Unknown Sources. Wake both controllers if Horizon
+OS displays a controllers-required prompt. Import your own ROM/prepared BIN
+when asked. If the picker is unavailable, copy Starfox-Assets.BIN manually to:
+  /sdcard/Android/data/com.starfox.enhanced.quest/files/Starfox-Assets.BIN
+Then relaunch. For example:
+  adb push Starfox-Assets.BIN /sdcard/Android/data/com.starfox.enhanced.quest/files/Starfox-Assets.BIN
+No PC-only NVIDIA ray-tracing option is provided on Quest.
+
+VR SETUP AND RESET
+PREVIEW: OFF/ON appears on the main, 2D and 3D setup pages (default Off).
+Startup previews a separate silent Corneria checkpoint; in-game options show
+your frozen scene. Changes to model/world effects are visible immediately.
+Hold both triggers, then click both thumbsticks to reset to startup. This
+discards the current unsaved session, not saved data. Release the sticks before
+trying again; holding the chord will not repeatedly reset the app.
+
+PC SHORTCUTS
+F1: in-game options (experience stays locked).
+Ctrl+F1 / Ctrl+F2: save / load the selected state slot.
+Ctrl+F3: select a state slot.
+Options > Cheats: God Mode, Level Select, Single/Dual/Beam laser,
+Infinite Bombs, Infinite Boost and Infinite Lives.
+3D Output: Off / Half SBS / Full SBS.
+Ray Tracing defaults Off and requires a supported hardware backend.
+It applies to model screens including Training, title, Continue and Controls,
+not just campaign gameplay. A ground receiver is used only when defined by
+the scene. GPU model/caster routing supports both mono and SBS rendering.
+
+IMPORTANT LIMITS
+DLSS/neural realism is NOT operational yet. The GPU depth/motion work is a
+prerequisite, not completed DLSS frame evaluation.
+Quest/Index visual and comfort acceptance, physical Steam Deck controls and
+Android-specific visual/navigation checks remain outstanding. Local tests
+and a successful launch do not replace headset playtesting.
+This preview is not a claim that every open issue or every scene is resolved.

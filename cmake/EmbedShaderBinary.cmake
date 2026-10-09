@@ -1,0 +1,18 @@
+# Encode the compiler-produced bytes only, without DXC's large IR listing.
+# This is a build artifact transform, not a shader optimizer or source rewrite.
+if(NOT DEFINED INPUT OR NOT DEFINED OUTPUT OR NOT DEFINED VARIABLE)
+    message(FATAL_ERROR "INPUT, OUTPUT and VARIABLE are required")
+endif()
+if(NOT VARIABLE MATCHES "^[A-Za-z_][A-Za-z_0-9]*$")
+    message(FATAL_ERROR "Invalid embedded shader variable")
+endif()
+file(READ "${INPUT}" shader_hex HEX)
+if(shader_hex STREQUAL "")
+    message(FATAL_ERROR "Empty compiled shader")
+endif()
+string(REGEX REPLACE "([0-9a-fA-F][0-9a-fA-F])" "0x\\1," shader_bytes "${shader_hex}")
+string(REPEAT "0x[0-9a-fA-F][0-9a-fA-F]," 16 shader_line)
+string(REGEX REPLACE "(${shader_line})" "\\1\n" shader_bytes "${shader_bytes}")
+get_filename_component(shader_output_dir "${OUTPUT}" DIRECTORY)
+file(MAKE_DIRECTORY "${shader_output_dir}")
+file(WRITE "${OUTPUT}" "#pragma once\nalignas(4) const unsigned char ${VARIABLE}[] = {\n${shader_bytes}\n};\n")

@@ -1,0 +1,182 @@
+#include "starfox/render/palette.hpp"
+
+#include <algorithm>
+#include <cstring>
+#include <stdexcept>
+
+namespace starfox::render {
+namespace {
+void resolve_material_pairs(const Framebuffer& source,std::span<std::uint8_t> rgba,
+    std::span<const Rgba8> palette,std::size_t first,std::size_t end) {
+    const auto pairs=source.dither_pairs();
+    if(source.draw_scale()<=1 || pairs.empty()) return;
+    const auto& tags=source.layer_tags();
+    for(auto i=first;i<end;++i) {
+        if(!(pairs[i]&256) || (source.layer_tags_enabled() && tags[i]!=std::uint8_t(PixelLayer::three_d))) continue;
+        const auto& other=palette[std::min<std::size_t>(pairs[i]&255,palette.size()-1)];
+        rgba[i*4]=std::uint8_t((unsigned(rgba[i*4])+other.r+1)/2);
+        rgba[i*4+1]=std::uint8_t((unsigned(rgba[i*4+1])+other.g+1)/2);
+        rgba[i*4+2]=std::uint8_t((unsigned(rgba[i*4+2])+other.b+1)/2);
+    }
+}
+
+constexpr std::array<Rgba8, 16> kPreviewPalette{{
+    {0, 0, 0},       {48, 48, 60},    {112, 28, 32},  {38, 70, 150},
+    {188, 72, 24},   {24, 130, 132},  {82, 20, 26},   {35, 52, 120},
+    {118, 46, 132},  {38, 110, 52},   {82, 82, 92},   {118, 118, 128},
+    {156, 156, 166}, {202, 202, 210}, {238, 238, 242}, {255, 255, 255},
+}};
+
+Rgba8 decode_bgr555(std::uint16_t word) noexcept {
+    const auto expand = [](std::uint16_t value) {
+        const auto five = static_cast<std::uint8_t>(value & 0x1fU);
+        return static_cast<std::uint8_t>((five << 3U) | (five >> 2U));
+    };
+    return {expand(word), expand(word >> 5U), expand(word >> 10U), 255};
+}
+
+Rgba8 apply_brightness(Rgba8 colour, std::uint8_t brightness) noexcept {
+    const auto scale = [brightness](std::uint8_t component) {
+        return static_cast<std::uint8_t>(
+            (static_cast<std::uint16_t>(component) * brightness) / 15U);
+    };
+    return {scale(colour.r), scale(colour.g), scale(colour.b), colour.a};
+}
+
+} // namespace
+
+std::span<const Rgba8, 16> preview_palette() noexcept {
+    return kPreviewPalette;
+}
+
+Palette16 decode_bgr555_palette(
+    const std::array<std::uint16_t, 16>& words) noexcept {
+    Palette16 result{};
+    for (std::size_t index = 0; index < words.size(); ++index) {
+        result[index] = decode_bgr555(words[index]);
+    }
+    return result;
+}
+
+Palette256 decode_bgr555_palette(
+    const std::array<std::uint16_t, 256>& words) noexcept {
+    Palette256 result{};
+    for (std::size_t index = 0; index < words.size(); ++index) {
+        result[index] = decode_bgr555(words[index]);
+    }
+    return result;
+}
+
+Palette16 apply_snes_brightness(
+    std::span<const Rgba8, 16> palette,
+    std::uint8_t brightness) noexcept {
+    brightness = std::min<std::uint8_t>(brightness, 15U);
+    Palette16 result{};
+    for (std::size_t index = 0; index < result.size(); ++index) {
+        result[index] = apply_brightness(palette[index], brightness);
+    }
+    return result;
+}
+
+Palette256 apply_snes_brightness(
+    std::span<const Rgba8, 256> palette,
+    std::uint8_t brightness) noexcept {
+    brightness = std::min<std::uint8_t>(brightness, 15U);
+    Palette256 result{};
+    for (std::size_t index = 0; index < result.size(); ++index) {
+        result[index] = apply_brightness(palette[index], brightness);
+    }
+    return result;
+}
+
+void expand_rgba(const Framebuffer& source, std::vector<std::uint8_t>& destination) {
+    expand_rgba(source, destination, preview_palette());
+}
+
+void expand_rgba(
+    const Framebuffer& source,
+    std::vector<std::uint8_t>& destination,
+    std::span<const Rgba8> palette) {
+    if (palette.empty()) {
+        throw std::invalid_argument{"framebuffer palette is empty"};
+    }
+    const auto byte_count = source.pixels().size() * 4U;
+    destination.resize(byte_count);
+    auto* output = destination.data();
+    if (palette.size() >= 256U) {
+        // Render Upscale can expand several million indexed pixels per
+        // presentation. Pack the palette once, then copy one RGBA word per
+        // pixel instead of issuing four dependent byte stores. The fixed-size
+        // memcpy calls compile to an unaligned word load/store while remaining
+        // safe and byte-order neutral on every supported target.
+        static_assert(sizeof(Rgba8) == sizeof(std::uint32_t));
+        std::array<std::uint32_t, 256U> packed_palette{};
+        for (std::size_t index = 0; index < packed_palette.size(); ++index) {
+            std::memcpy(&packed_palette[index], &palette[index],
+                sizeof(packed_palette[index]));
+        }
+        for (const auto pixel : source.pixels()) {
+            std::memcpy(output, &packed_palette[pixel],
+                sizeof(packed_palette[pixel]));
+            output += sizeof(packed_palette[pixel]);
+        }
+    } else {
+        for (const auto pixel : source.pixels()) {
+            const auto& colour = palette[std::min<std::size_t>(
+                pixel, palette.size() - 1U)];
+            *output++ = colour.r;
+            *output++ = colour.g;
+            *output++ = colour.b;
+            *output++ = colour.a;
+        }
+    }
+    resolve_material_pairs(source,destination,palette,0,source.pixels().size());
+}
+
+void expand_rgba(
+    const Framebuffer& source,
+    std::vector<std::uint8_t>& destination,
+    std::span<const Rgba8> palette,
+    RowWorkers& workers) {
+    if (palette.empty()) {
+        throw std::invalid_argument{"framebuffer palette is empty"};
+    }
+    const auto stored_width = source.stored_width();
+    const auto stored_height = source.stored_height();
+    // Small indexed frames are cheaper to expand locally than to wake and
+    // synchronize the presentation pool. Keep larger upscale buffers parallel.
+    // This also avoids creating the pool for an otherwise serial presentation.
+    if (source.pixels().size() <= 256U * 1024U) {
+        expand_rgba(source, destination, palette);
+        return;
+    }
+    destination.resize(source.pixels().size() * 4U);
+    if (stored_width == 0U || stored_height == 0U) return;
+
+    static_assert(sizeof(Rgba8) == sizeof(std::uint32_t));
+    std::array<std::uint32_t, 256U> packed_palette{};
+    for (std::size_t index = 0; index < packed_palette.size(); ++index) {
+        const auto& colour = palette[std::min<std::size_t>(
+            index, palette.size() - 1U)];
+        std::memcpy(&packed_palette[index], &colour,
+            sizeof(packed_palette[index]));
+    }
+
+    const auto* pixels = source.pixels().data();
+    auto* output = destination.data();
+    workers.parallel_rows(stored_height,
+        [&](std::uint32_t first_row, std::uint32_t last_row) {
+            for (auto y = first_row; y < last_row; ++y) {
+                const auto row = static_cast<std::size_t>(y) * stored_width;
+                const auto* input = pixels + row;
+                auto* target = output + row * 4U;
+                for (std::uint32_t x = 0; x < stored_width; ++x) {
+                    std::memcpy(target + x * 4U, &packed_palette[input[x]],
+                        sizeof(std::uint32_t));
+                }
+            }
+            resolve_material_pairs(source,destination,palette,std::size_t(first_row)*stored_width,std::size_t(last_row)*stored_width);
+        });
+}
+
+} // namespace starfox::render

@@ -1,0 +1,32 @@
+if(NOT DEFINED CHECKER OR NOT EXISTS "${CHECKER}")
+    message(FATAL_ERROR "The input-only Fortuna checker is required")
+endif()
+execute_process(COMMAND "${CHECKER}" --help RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+if(NOT result EQUAL 0 OR NOT output MATCHES "MAX_PHASES: 1..36000"
+    OR NOT output MATCHES "ordinary joypad inputs only" OR NOT output MATCHES "NOT hardware acceptance")
+    message(FATAL_ERROR "Incorrect input-only diagnostic scope: ${output}${error}")
+endif()
+foreach(bound IN ITEMS 0 36001 -1 1.5 36000x 4294967296)
+    execute_process(COMMAND "${CHECKER}" --bundle-original missing-private-BIN "${bound}" target
+        RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+    if(NOT result EQUAL 1 OR NOT error MATCHES "MAX_PHASES must be a whole number from 1 through 36000")
+        message(FATAL_ERROR "Invalid input-only bound reached private data: ${output}${error}")
+    endif()
+endforeach()
+execute_process(COMMAND "${CHECKER}" --bundle-original missing-private-BIN 36000 invalid
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+if(NOT result EQUAL 1 OR NOT error MATCHES "POLICY must be center, sweep or target")
+    message(FATAL_ERROR "Invalid policy reached private data: ${output}${error}")
+endif()
+foreach(policy IN ITEMS center sweep target)
+    execute_process(COMMAND "${CHECKER}" --bundle-original missing-private-BIN 36000 "${policy}"
+        RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+    if(NOT result EQUAL 1 OR NOT error MATCHES "Cannot open companion BIN")
+        message(FATAL_ERROR "Valid policy failed before validated decoder: ${output}${error}")
+    endif()
+endforeach()
+execute_process(COMMAND "${CHECKER}" --bundle-ex missing-private-BIN 36000 target
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+if(NOT result EQUAL 1 OR NOT error MATCHES "Usage: check_3ds_fortuna_inputs")
+    message(FATAL_ERROR "Input-only route accepted EX: ${output}${error}")
+endif()
