@@ -291,15 +291,9 @@ GameAdvance GameSession::advance(std::int64_t time,input::ButtonMask held,bool f
             if(game_.logic_tick_ready()) {
                 const bool runtime=game_.runtime_options_open(),paused=game_.paused();
                 auto controls=GameMenu::filter(game_,input_.consume());
-                std::optional<std::uint16_t> native_rate;
-                if(game_.in_setup_menu() && game_.pregame_page()==simulation::PregamePage::main
-                    && game_.pregame_selection()==2
-                    && !(controls.pressed&(input::up|input::down|input::start))
-                    && (controls.pressed&(input::a|input::b|input::select|input::left|input::right))) {
-                    // Native LCD supports 30/60 presentation, not the desktop
-                    // rate list. Still execute the ordinary source raster/tick.
-                    native_rate=game_.presentation_fps()==60?30:60;
-                }
+                const auto previous_output_rate=game_.presentation_fps();
+                const bool native_fps_menu=game_.in_setup_menu()
+                    && game_.pregame_page()==simulation::PregamePage::main;
                 const auto editor=game_.in_setup_menu()
                     ?GameMenu::editor(game_.pregame_page(),game_.pregame_selection(),controls)
                     :GameMenuEditor::none;
@@ -324,13 +318,15 @@ GameAdvance GameSession::advance(std::int64_t time,input::ButtonMask held,bool f
                     STARFOX_3DS_FRAME_PHASE(logic);
                     return game_.tick(controls);
                 }();++result.logic_ticks;
-                // Keep the source menu action and its click/audio writes. The
-                // host only replaces its desktop-only output-rate result.
-                if(native_rate && game_.in_setup_menu() && game_.pregame_page()==simulation::PregamePage::main
-                    && game_.pregame_selection()==2) game_.set_presentation_fps(*native_rate);
-                // Simultaneous navigation/action can enter the FPS row inside
-                // the shared tick, without matching the pre-tick selection.
-                // Never publish its desktop-only rate to the native LCD gate.
+                // Let the source own navigation, Start and confirmation/axis
+                // release guards. Replace only an output-rate change it really
+                // applied, not an action guessed from the pre-tick cursor or
+                // raw pressed bits. The native LCD's list is just 30/60.
+                // A combined Start/action may also leave runtime options in
+                // this tick, after the source has already changed its FPS row.
+                if(native_fps_menu && game_.presentation_fps()!=previous_output_rate)
+                    game_.set_presentation_fps(previous_output_rate==60?30:60);
+                // State/import bounds remain independent of menu activation.
                 const auto output_rate=game_.presentation_fps();
                 if(output_rate!=30 && output_rate!=60) game_.set_presentation_fps(output_rate<=30?30:60);
                 // The native eye projector has a bounded 64-world-unit range,

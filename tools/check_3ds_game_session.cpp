@@ -457,7 +457,7 @@ void natural_death_restart(const assets::RomImage& rom,const assets::SymbolMap& 
             }
             const auto state=game.save_state(),apu=session.audio().save_state();
             StereoSettings settings;settings.separation=64;settings.convergence=16;settings.strength=2;
-            for(const auto optics:std::array<std::pair<float,bool>,3>{{{0,true},{1,true},{1,false}}}) {
+            for(const auto& optics:std::array<std::pair<float,bool>,3>{{{0,true},{1,true},{1,false}}}) {
                 const auto eye=session.presentation(optics.first,optics.second,settings);
                 require(eye.current==native.current && eye.previous==native.previous && eye.raster==native.raster,
                     "Death/restart eye projection changed the completed source tick");
@@ -693,6 +693,97 @@ struct MenuDriver {
         require(session.game().pregame_selection()==id,"Actual menu navigation did not reach requested source row");
     }
 };
+void fps_navigation_parity(const assets::RomImage& rom,const assets::SymbolMap& symbols) {
+    constexpr std::array<input::ButtonMask,4> navigation{0,input::up,input::down,input::ButtonMask(input::up|input::down)};
+    unsigned fixtures{};
+    for(bool runtime:{false,true})for(unsigned rate:{30U,60U})for(auto nav:navigation) {
+        std::vector<std::int16_t> pcm;
+        const auto map=runtime?"LEVEL1_1":"BOOT";
+        GameSessionOptions options;options.preferences=GamePreferences{};
+        options.preferences->render_fps=static_cast<std::uint8_t>(rate);
+        GameSession session(rom,symbols,[&](auto samples){pcm.insert(pcm.end(),samples.begin(),samples.end());},map,{},options);
+        SourceOracle source(rom,symbols,map);
+        // SD defaults invoke source-side setters, including EX's pending
+        // laser/cartridge writes. Match those actual user choices in the
+        // independent owner before comparing any input action.
+        source.game.set_god_mode(false);source.game.set_default_laser(0);source.game.set_language(0);
+        source.game.set_selected_level(0);source.game.set_stereo_separation(16);source.game.set_stereo_convergence(1024);
+        source.game.set_presentation_fps(static_cast<std::uint16_t>(rate));
+        require(session.game().save_state()==source.game.save_state(),"FPS fixture initialized different source/SD preferences");
+        std::int64_t time{};session.advance(time,0);
+        const auto compare=[&] {
+            require(session.game().save_state()==source.game.save_state(),"Native FPS action changed independent source state");
+            require(session.audio().save_state()==source.spc.save_state() && pcm==source.pcm,
+                "Native FPS action changed source SPC handshakes or PCM");
+        };
+        if(runtime) {
+            require(session.toggle_runtime_options() && source.game.toggle_runtime_options(),"FPS fixture could not open actual runtime options");
+            source.input.reset();session.advance(++time,0);compare();
+        }
+        const auto step=[&](input::ButtonMask held) {
+            time+=50'000'000;source.input.sample(held);
+            const auto result=session.advance(time,held);
+            require(result.video_phases>0 && result.video_phases<=3,"FPS action lost ordinary source raster timing");
+            for(unsigned phase=0;phase<result.video_phases;++phase) {
+                const auto before=source.game.presentation_fps();
+                if(!runtime)source.raster();
+                else {
+                    const bool was_runtime=source.game.runtime_options_open();
+                    source.game.present_frame();
+                    if(source.game.logic_tick_ready()) {
+                        const auto tick=source.game.tick(source.input.consume());
+                        if(!was_runtime)source.pending.insert(source.pending.end(),tick.audio_port_writes.begin(),tick.audio_port_writes.end());
+                        static_cast<void>(source.game.map().take_msu_register_writes());
+                    }
+                    if(!source.game.runtime_options_open() && ++source.phase%3==0) {
+                        source.spc.render_stems_logic_tick(source.pending);source.pending.clear();
+                        std::vector<std::int16_t> samples;
+                        audio::mix_stems(source.spc.last_music_samples(),source.spc.last_effect_samples(),
+                            source.game.music_volume(),source.game.sfx_volume(),samples);
+                        source.pcm.insert(source.pcm.end(),samples.begin(),samples.end());
+                        source.game.synchronize_apu_output_ports(source.spc.output_ports());
+                    }
+                }
+                // Independent direct-source owner plus the native two-rate
+                // policy. Do not call the production input/rate interceptor.
+                if(source.game.presentation_fps()!=before)source.game.set_presentation_fps(before==30?60:30);
+            }
+            compare();return result;
+        };
+        const auto tap=[&](input::ButtonMask held) {step(held);step(0);};
+        const auto select=[&](unsigned id) {
+            const auto order=simulation::pregame_menu_order(source.game.pregame_page());
+            for(std::size_t row=0;source.game.pregame_selection()!=id && row<order.size();++row)tap(input::down);
+            require(source.game.pregame_selection()==id,"FPS fixture could not navigate to actual source row");
+        };
+        const auto order=simulation::pregame_menu_order(simulation::PregamePage::main);
+        const auto target=std::size_t(std::find(order.begin(),order.end(),2U)-order.begin());
+        const auto origin=nav?order[(target+((nav&input::up)?1U:order.size()-1U))%order.size()]:2U;
+        select(origin);tap(input::ButtonMask(nav|input::a));
+        unsigned expected=rate==30?60:30;
+        require(session.game().pregame_selection()==2 && session.game().presentation_fps()==expected,
+            "Direction+confirm did not toggle the destination native FPS row");
+        for(auto action:{input::a,input::b,input::select,input::left,input::right}) {
+            tap(action);expected=expected==30?60:30;
+            require(session.preferences().render_fps==expected,"Native FPS action did not use the same 30/60 list");
+        }
+        step(input::right);expected=expected==30?60:30;
+        require(session.game().presentation_fps()==expected,"Horizontal neutral tap lost FPS action");
+        step(input::ButtonMask(input::left|input::right));step(input::left);
+        require(session.game().presentation_fps()==expected,"Held horizontal direction bypassed source neutral-release guard");
+        step(0);tap(input::left);expected=expected==30?60:30;
+        require(session.game().presentation_fps()==expected,"Released horizontal direction could not toggle FPS again");
+        tap(input::ButtonMask(input::up|input::a));
+        require(session.game().pregame_selection()==1 && session.game().presentation_fps()==expected,
+            "Leaving FPS row applied a rate change to the old row");
+        select(2);step(input::ButtonMask(input::a|input::start));
+        expected=expected==30?60:30;
+        require(session.game().presentation_fps()==expected && !session.game().runtime_options_open(),
+            "Combined FPS/Start action lost source ordering or leaked a desktop rate on menu exit");
+        ++fixtures;
+    }
+    std::cout<<"  Native FPS: "<<fixtures<<" setup/runtime 30/60 fixtures, destination navigation, all actions, horizontal neutral release, old-row departure and combined Start ordering; exact source/SPC/PCM checked\n";
+}
 void actual_menu(const assets::RomImage& rom,const assets::SymbolMap& symbols,const std::filesystem::path& captures) {
     GameSessionOptions native;native.preferences=GamePreferences{};
     native.preferences->hud_layout.widgets[unsigned(HudWidget::shield)].x=20;
@@ -726,8 +817,8 @@ void actual_menu(const assets::RomImage& rom,const assets::SymbolMap& symbols,co
     controls.tap(input::select);require(session.game().presentation_fps()==30,"Select leaked a desktop-only native target");
     controls.tap(input::left);require(session.game().presentation_fps()==60,"Left did not toggle native 30/60 target");
     controls.tap(input::up);controls.tap(input::down|input::a);
-    require(session.game().pregame_selection()==2 && session.game().presentation_fps()==60,
-        "Simultaneous menu navigation/action leaked a desktop rate into the native render gate");
+    require(session.game().pregame_selection()==2 && session.game().presentation_fps()==30,
+        "Simultaneous menu navigation/action did not toggle the native render target");
     controls.select(14);controls.tap(input::a);
     require(session.game().pregame_page()==simulation::PregamePage::options,"Source Options action not used");observe();
     controls.select(1);controls.tap(input::a);
@@ -1358,11 +1449,12 @@ int main(int argc,char** argv) {
         const bool carrier_route=argc==4 && std::string_view(argv[3])=="--attack-carrier-source-route";
         const bool runtime_editors=argc==4 && std::string_view(argv[3])=="--runtime-editor-parity";
         const bool editor_chords=argc==4 && std::string_view(argv[3])=="--editor-chords";
+        const bool fps_chords=argc==4 && std::string_view(argv[3])=="--fps-chords";
         const bool death_route=argc==4 && std::string_view(argv[3])=="--death-source-route";
         const bool continue_yes=argc==4 && std::string_view(argv[3])=="--continue-yes-source-route";
         const bool continue_no=argc==4 && std::string_view(argv[3])=="--continue-no-source-route";
-        if(argc!=3 && !states_only && !capabilities_only && !sweep && !fortuna_route && !corneria_route && !carrier_route && !runtime_editors && !editor_chords && !death_route && !continue_yes && !continue_no && !(argc==5 && std::string_view(argv[3])=="--capture"))
-            throw std::invalid_argument("Usage: game_session_check ROM SYMBOLS [--capture DIRECTORY | --states-only | --capabilities-only | --stage-sweep | --fortuna-source-route | --corneria-source-route | --attack-carrier-source-route | --runtime-editor-parity | --editor-chords | --death-source-route | --continue-yes-source-route | --continue-no-source-route]");
+        if(argc!=3 && !states_only && !capabilities_only && !sweep && !fortuna_route && !corneria_route && !carrier_route && !runtime_editors && !editor_chords && !fps_chords && !death_route && !continue_yes && !continue_no && !(argc==5 && std::string_view(argv[3])=="--capture"))
+            throw std::invalid_argument("Usage: game_session_check ROM SYMBOLS [--capture DIRECTORY | --states-only | --capabilities-only | --stage-sweep | --fortuna-source-route | --corneria-source-route | --attack-carrier-source-route | --runtime-editor-parity | --editor-chords | --fps-chords | --death-source-route | --continue-yes-source-route | --continue-no-source-route]");
         const auto rom=assets::RomImage::load(argv[1]);const auto symbols=assets::SymbolMap::load(argv[2]);
         if(continue_yes || continue_no) {
             natural_death_restart(rom,symbols,continue_yes);
@@ -1386,6 +1478,10 @@ int main(int argc,char** argv) {
             editor_navigation_parity(rom,symbols);
             std::cout<<"3DS native editor chords: "<<checks<<" checks passed; source parity, not physical device acceptance\n";return 0;
         }
+        if(fps_chords) {
+            fps_navigation_parity(rom,symbols);
+            std::cout<<"3DS native FPS chords: "<<checks<<" checks passed; source parity, not physical device acceptance\n";return 0;
+        }
         if(sweep) {stage_sweep(rom,symbols);std::cout<<"3DS stage/flow parity: "<<checks<<" checks passed\n";return 0;}
         if(capabilities_only) {
             native_capability_restore(rom,symbols);
@@ -1398,6 +1494,7 @@ int main(int argc,char** argv) {
         parity(rom,symbols,"BOOT");parity(rom,symbols,"LEVEL1_1");handoff(rom,symbols);
         presentation_cadence(rom,symbols);
         native_capability_restore(rom,symbols);
+        fps_navigation_parity(rom,symbols);
         actual_menu(rom,symbols,argc==5?std::filesystem::path(argv[4]):std::filesystem::path{});
         actual_disk_handoff(rom,symbols);
         actual_settings_reset(rom,symbols);
