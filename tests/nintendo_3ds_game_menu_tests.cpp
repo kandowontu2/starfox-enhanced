@@ -57,9 +57,52 @@ void settings_reset_contract() {
     hold.update(true,chord,far-SettingsResetHold::duration);
     require(hold.update(true,chord,far),"Long uptime overflowed the hold timer");
 }
+void menu_capability_chords() {
+    using simulation::PregamePage;
+    const auto enabled=[](PregamePage page,unsigned id,bool runtime) {
+        const auto in=[&](std::initializer_list<unsigned> ids){return std::find(ids.begin(),ids.end(),id)!=ids.end();};
+        switch(page) {
+        case PregamePage::main:return (id==0 && !runtime) || in({1,2,14,15,16,20,21,47});
+        case PregamePage::options:return in({0,1,3,5,6,7,8,9,11,12});
+        case PregamePage::cheats:return true;
+        case PregamePage::two_d:case PregamePage::three_d:case PregamePage::global:return id==23;
+        case PregamePage::stereo:return in({1,2,4,5});
+        }
+        throw std::runtime_error("Invalid menu test page");
+    };
+    // Every source-owned row and wrap, both runtime/setup contexts, all action
+    // buttons, and Up+Down priority. Held/released/navigation/Start must remain
+    // unchanged; a disabled target cannot mutate ignored graphics settings.
+    unsigned blocked=0,allowed=0;
+    constexpr std::array<input::ButtonMask,4> navigation{0,input::up,input::down,input::ButtonMask(input::up|input::down)};
+    constexpr std::array<input::ButtonMask,6> actions{input::a,input::select,input::left,input::right,input::b,
+        input::ButtonMask(input::a|input::select|input::left|input::right|input::b)};
+    for(auto page:{PregamePage::main,PregamePage::options,PregamePage::cheats,PregamePage::two_d,
+        PregamePage::three_d,PregamePage::global,PregamePage::stereo}) {
+        const auto order=simulation::pregame_menu_order(page);
+        for(bool runtime:{false,true})for(std::size_t row=0;row<order.size();++row)
+            for(auto nav:navigation)for(auto action:actions) {
+                    const auto target=nav?order[(row+((nav&input::up)?order.size()-1U:1U))%order.size()]:order[row];
+                    input::TickInput original;original.held=input::ButtonMask(nav|action|input::start);
+                    original.pressed=original.held;original.released=input::x;
+                    auto expected=original;
+                    if(!enabled(page,target,runtime)) {
+                        auto mask=input::ButtonMask(input::a|input::select|input::left|input::right);
+                        if(page==PregamePage::main)mask|=input::b;
+                        expected.pressed=input::ButtonMask(expected.pressed&~mask);++blocked;
+                    }else ++allowed;
+                    const auto actual=GameMenu::filter(page,order[row],runtime,original);
+                    require(actual.held==expected.held && actual.pressed==expected.pressed
+                        && actual.released==expected.released,
+                        "Same-tick native menu navigation bypassed capability gate or changed source input semantics");
+                }
+    }
+    require(blocked && allowed,"Menu capability test lacks disabled and enabled destination coverage");
+}
 }
 int main() try {
     settings_reset_contract();
+    menu_capability_chords();
     const auto rom=public_font_fixture();
     const auto symbols=assets::SymbolMap::parse("MSCALECHARS $008000\nMARIOMSGS $008020\nFONT0WID $008100\nFONT0TRN $008200\nFONT0FON $008300\nFACEDATA $009000\n");
     GameMenu menu(rom,symbols);

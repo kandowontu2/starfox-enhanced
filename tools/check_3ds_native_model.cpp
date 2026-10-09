@@ -1,9 +1,14 @@
 #include "starfox/platform/nintendo_3ds/game_models.hpp"
 #include "starfox/platform/nintendo_3ds/game_session.hpp"
+#include "starfox/platform/nintendo_3ds/game_state.hpp"
+#include "starfox/assets/bps.hpp"
 #include "starfox/compat/bit_cast.hpp"
+#include "starfox/state/container.hpp"
 #include <algorithm>
+#include <array>
 #include <limits>
 #include <iostream>
+#include <vector>
 
 namespace {
 using namespace starfox;
@@ -106,6 +111,122 @@ void exact_geometry(const GameSession& session,const GamePresentation& source,Ga
     require(session.game().save_state()==vm && session.audio().save_state()==spc,
         "Preparing either viewer eye changed cartridge or SPC state");
 }
+void restored_viewer_geometry(GameSession& source,GameSession& restored,
+    GameModels& source_models,GameModels& restored_models) {
+    require(source.game().save_state()==restored.game().save_state(),"Restored viewer changed VM state");
+    require(source.audio().save_state()==restored.audio().save_state(),"Restored viewer changed SPC state");
+    const auto a=source.presentation(1,true),b=restored.presentation(1,true);
+    require(a.raster->native_model.has_value() && b.raster->native_model.has_value(),
+        "Save/load lost the active dedicated native viewer");
+    require(*a.raster->ppu==*b.raster->ppu && a.raster->brightness==b.raster->brightness,
+        "Restored viewer lost source raster/palette/fade");
+    const auto af=source_models.prepare(a),bf=restored_models.prepare(b);
+    require(std::ranges::equal(af.vertices,bf.vertices) && same_draws(af.draws,bf.draws),
+        "Restored viewer changed primitive/material stream");
+    require(af.textures.size()==bf.textures.size(),"Restored viewer changed texture count");
+    for(unsigned i=0;i<af.textures.size();++i) {
+        const auto& x=af.textures[i];const auto& y=bf.textures[i];
+        require(x.width==y.width && x.height==y.height && x.pitch==y.pitch && x.repeat==y.repeat
+            && std::ranges::equal(x.pixels,y.pixels),"Restored viewer changed texture colours");
+    }
+}
+void check_viewer_state(const assets::RomImage& rom,const assets::SymbolMap& symbols,unsigned checkpoint) {
+    std::array<std::vector<std::int16_t>,2> pcm;
+    unsigned sink_owner=0;
+    // The restored owner deliberately inherits the platform sink. Select its
+    // comparison destination outside the cartridge, never through VM writes.
+    GameSession source(rom,symbols,[&](auto block) {
+        auto& output=pcm[sink_owner];output.insert(output.end(),block.begin(),block.end());
+    },"CONTINUE");
+    GameModels source_models(rom,symbols);source.advance(0,0);
+    for(unsigned phase=1;phase<=checkpoint;++phase) source.advance(timestamp(phase),0);
+    require(source.game().flow_state()==simulation::GameFlowState::continue_choice
+        && source.presentation(0,false).raster->native_model,"Source Continue viewer missing");
+    const auto archive=source.save_state();
+    const auto vm=source.game().save_state(),spc=source.audio().save_state();
+    for(auto& output:pcm) output.clear();
+    auto restored=source.restored_state(archive);
+    require(pcm[0].empty() && pcm[1].empty(),"Preparing state replacement emitted unwanted PCM");
+    require(source.save_state()==archive && source.game().save_state()==vm
+        && source.audio().save_state()==spc,"Preparing restored owner mutated live viewer");
+    require(restored->save_state()==archive,"Viewer state archive did not round-trip exactly");
+    auto restored_models=std::make_unique<GameModels>(restored->rom(),restored->symbols());
+    restored_viewer_geometry(source,*restored,source_models,*restored_models);
+    // Loading intentionally rebases host time. Use the public focus API to
+    // rebase the comparison owner too, preserving VM/SPC and partial APU phase.
+    source.advance(timestamp(checkpoint)+1,0,false);
+    const auto origin=timestamp(checkpoint)+1'000'000'000;
+    source.advance(origin,0,true);
+    require(source.save_state()==archive,"Reference focus rebase mutated saved viewer state");
+    restored->advance(0,0);
+    for(unsigned step=1;step<=60;++step) {
+        for(auto& output:pcm) output.clear();
+        const auto held=step<=8?input::right_shoulder:input::left;
+        sink_owner=0;source.advance(origin+timestamp(step),held);
+        sink_owner=1;restored->advance(timestamp(step),held);
+        require(pcm[0]==pcm[1],"Restored viewer changed consecutive PCM bytes or block cadence");
+        restored_viewer_geometry(source,*restored,source_models,*restored_models);
+    }
+    const auto saved=restored->save_state();
+    const auto prepared=restored_models->prepare(restored->presentation(0,false));
+    const std::vector<PicaVertex> vertices(prepared.vertices.begin(),prepared.vertices.end());
+    const std::vector<PicaDraw> draws(prepared.draws.begin(),prepared.draws.end());
+    // Host Home/sleep clock contract, not physical APT service acceptance.
+    restored->advance(timestamp(61),input::right_shoulder,false);
+    restored->advance(60'000'000'000LL,input::right_shoulder,false);
+    require(restored->save_state()==saved,"Suspension advanced viewer VM or SPC");
+    const auto after=restored_models->prepare(restored->presentation(1,true));
+    require(std::ranges::equal(after.vertices,vertices) && same_draws(after.draws,draws),
+        "Suspension replaced completed native viewer geometry");
+    restored->advance(61'000'000'000LL,0,true);
+    require(restored->save_state()==saved,"Focus regain caught up suspended viewer or SPC");
+    // Failed outer checks and late VM/SPC component decode must not retire the
+    // active viewer, change its published snapshot, or send boot/preroll PCM.
+    const auto retained_raster=restored->presentation(1,true).raster;
+    const auto crc=assets::crc32(restored->rom().bytes());
+    for(unsigned fault=0;fault<4;++fault) {
+        for(auto& output:pcm) output.clear();
+        auto damaged=saved;
+        if(fault==0) damaged.back()^=1;
+        else if(fault==1) damaged.pop_back();
+        else {
+            auto fields=decode_game_state(saved,crc);
+            if(fault==2) fields.game=state::pack(0x47414d01U,crc,{});
+            else fields.audio=state::pack(0x53504301U,0,{});
+            damaged=encode_game_state(fields,crc);
+        }
+        bool refused=false;
+        try {static_cast<void>(restored->restored_state(damaged));}
+        catch(const std::exception&) {refused=true;}
+        require(refused,"Damaged Continue state was accepted");
+        require(restored->save_state()==saved && restored->presentation(1,true).raster==retained_raster,
+            "Refused Continue load changed the live owner or raster");
+        require(pcm[0].empty() && pcm[1].empty(),"Refused Continue load emitted PCM");
+        restored_viewer_geometry(source,*restored,source_models,*restored_models);
+    }
+    auto roundtrip=restored->restored_state(saved);
+    auto roundtrip_models=std::make_unique<GameModels>(roundtrip->rom(),roundtrip->symbols());
+    restored_viewer_geometry(*restored,*roundtrip,*restored_models,*roundtrip_models);
+    // Follow the native handoff: retire the old decoder/views before the old
+    // ROM/symbol/VM owner, then continue the replacement, not both owners alive.
+    restored_models.reset();
+    restored=std::move(roundtrip);
+    restored_models=std::move(roundtrip_models);
+    const auto continued_origin=origin+10'000'000'000;
+    source.advance(origin+timestamp(61),0,false);
+    source.advance(continued_origin,0,true);
+    restored->advance(0,0);
+    require(source.save_state()==saved && restored->save_state()==saved,
+        "Retired-owner continuation changed the saved source before input");
+    for(unsigned step=1;step<=24;++step) {
+        for(auto& output:pcm) output.clear();
+        const auto held=step<=8?input::left_shoulder:input::right;
+        sink_owner=0;source.advance(continued_origin+timestamp(step),held);
+        sink_owner=1;restored->advance(timestamp(step),held);
+        require(pcm[0]==pcm[1],"Retired viewer owner changed PCM cadence or samples");
+        restored_viewer_geometry(source,*restored,source_models,*restored_models);
+    }
+}
 void check_continue(const assets::RomImage& rom,const assets::SymbolMap& symbols) {
     GameSession session(rom,symbols,[](auto){},"CONTINUE");
     GameModels models(session.rom(),session.symbols());
@@ -158,7 +279,7 @@ void check_continue(const assets::RomImage& rom,const assets::SymbolMap& symbols
         phase==182?input::down:phase==184?input::b:0);
     require(session.game().flow_state()!=simulation::GameFlowState::continue_choice
         && !session.presentation(0,false).raster->native_model,"Leaving Continue did not retire the viewer snapshot");
-    std::cout<<"Continue: 60 actual zoom/rotation frames, mono/stereo plans, exact stream/material, immutable/transactional state and source NO cleanup\n";
+    std::cout<<"Continue: 60 actual zoom/rotation frames, varying slider/hardware requests (front-end policy remains mono), exact stream/material, immutable/transactional state and source NO cleanup\n";
 }
 void check_ex_viewer(const assets::RomImage& rom,const assets::SymbolMap& symbols) {
     if(symbols.find("SPECWEPCNTONE").empty()) return;
@@ -190,6 +311,8 @@ int main(int argc,char** argv) try {
     if(argc!=3) throw std::invalid_argument("Usage: check_3ds_native_model ROM SYMBOLS");
     const auto rom=assets::RomImage::load(argv[1]);const auto symbols=assets::SymbolMap::load(argv[2]);
     check_continue(rom,symbols);check_ex_viewer(rom,symbols);
+    for(unsigned phase:{120U,121U,122U}) check_viewer_state(rom,symbols,phase);
+    std::cout<<"Continue state: three partial-audio checkpoints, 60 replay plus 24 retired-owner frames each, four damaged-save refusals, exact VM/SPC/PCM/geometry/colours and focus rebase\n";
     std::cout<<checks<<" native viewer host checks passed; not ARM/PICA or hardware acceptance\n";
     return 0;
 } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}

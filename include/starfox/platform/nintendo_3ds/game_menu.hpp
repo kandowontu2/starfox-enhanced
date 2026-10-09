@@ -28,6 +28,10 @@ public:
     // Do not let unimplemented desktop controls change a setting that PICA
     // ignores. Navigation/back/Start still use the source menu implementation.
     [[nodiscard]] static input::TickInput filter(const simulation::GameSimulation&,input::TickInput);
+    // Pure capability filter for the observed source state. Resolve the same
+    // tick's navigation before gating activation; do not create menu state.
+    [[nodiscard]] static input::TickInput filter(simulation::PregamePage,unsigned selection,
+        bool runtime,input::TickInput);
     // Rebuild only when the observed page/values change, never per eye/slider.
     bool update(const GameMenuState&);
     [[nodiscard]] PicaFrame frame(const FramePlan&) const;

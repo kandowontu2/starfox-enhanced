@@ -131,9 +131,23 @@ GameMenuState GameMenu::capture(const simulation::GameSimulation& game) {
     return result;
 }
 input::TickInput GameMenu::filter(const simulation::GameSimulation& game,input::TickInput input) {
-    if(!game.in_setup_menu() || supported(game.pregame_page(),game.pregame_selection(),game.runtime_options_open())) return input;
+    if(!game.in_setup_menu()) return input;
+    return filter(game.pregame_page(),game.pregame_selection(),game.runtime_options_open(),input);
+}
+input::TickInput GameMenu::filter(PregamePage page,unsigned selection,bool runtime,input::TickInput input) {
+    if(input.pressed&(input::up|input::down)) {
+        // tick_pregame_menu navigates BEFORE applying A/Select/horizontal.
+        // Checking only the old row lets a simultaneous navigation+confirm
+        // enable an unsupported desktop feature from an enabled neighbour.
+        const auto order=simulation::pregame_menu_order(page);
+        const auto current=std::size_t(std::find(order.begin(),order.end(),selection)-order.begin());
+        if(order.empty() || current==order.size()) throw std::invalid_argument("Invalid source menu selection");
+        const auto delta=(input.pressed&input::up)?order.size()-1U:1U;
+        selection=order[(current+delta)%order.size()];
+    }
+    if(supported(page,selection,runtime)) return input;
     auto changes=input::ButtonMask(input::a|input::select|input::left|input::right);
-    if(game.pregame_page()==PregamePage::main) changes|=input::b;
+    if(page==PregamePage::main) changes|=input::b;
     input.pressed=static_cast<input::ButtonMask>(input.pressed&~changes);
     return input;
 }

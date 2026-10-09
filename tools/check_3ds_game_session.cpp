@@ -10,6 +10,8 @@
 #include "starfox/assets/bps.hpp"
 #include "starfox/platform/nintendo_3ds/game_models.hpp"
 #include "starfox/platform/nintendo_3ds/game_layers.hpp"
+#include "starfox/platform/nintendo_3ds/game_dots.hpp"
+#include "starfox/platform/nintendo_3ds/game_effects.hpp"
 #include "starfox/platform/nintendo_3ds/pica_composite.hpp"
 #include "starfox/platform/nintendo_3ds/presentation_clock.hpp"
 #include "fortuna_route_inputs.hpp"
@@ -321,6 +323,203 @@ void natural_source_route(const assets::RomImage& rom,const assets::SymbolMap& s
         }
     }
     throw std::runtime_error(std::string("Natural ")+name+" route bound exhausted without boss/results/map completion");
+}
+void natural_death_restart(const assets::RomImage& rom,const assets::SymbolMap& symbols,
+    std::optional<bool> continue_yes={}) {
+    // Ordinary stationary flight, no god preference, source-memory writes,
+    // checkpoint import or synthetic death. The independent cartridge/SPC
+    // owner sees precisely the same input and every source raster.
+    std::cout.setf(std::ios::unitbuf);
+    std::vector<std::int16_t> pcm;
+    unsigned phases=0,ticks=0,blocks=0,windows=0,compositions=0;
+    GameSession session(rom,symbols,[&](auto samples) {
+        require(samples.size()==AudioPcm::samples,"Death-route native PCM extent changed");
+        pcm.insert(pcm.end(),samples.begin(),samples.end());++blocks;
+    },"LEVEL1_1");
+    SourceOracle source(rom,symbols,"LEVEL1_1");
+    std::optional<std::uint32_t> flags;
+    for(auto address:symbols.find("GAMEFLAGS")) if(address>>16==0 || address>>16==0x7e) {flags=address;break;}
+    require(flags.has_value(),"Death-route source GAMEFLAGS is missing");
+    require(session.game().save_state()==source.game.save_state()
+        && session.audio().save_state()==source.spc.save_state(),"Death-route initial cartridge/SPC state differs");
+    require(!session.game().god_mode() && !session.game().infinite_lives(),"Death-route enabled survival cheats");
+    GameModels models(rom,symbols);GameDots dots(rom,symbols);GameLayers layers;
+    GameEffects effects;PicaComposite composite;
+    unsigned damaged=0,dying=0,circles=0,black=0,restored=0,bright=0,peak_bytes=0,full_health=0;
+    unsigned deaths=0,game_over=0,continue_screen=0,continue_bright=0,choice=0,confirm=0,returned=0,return_bright=0;
+    unsigned arrival_bright=0,arrival_confirm=0;
+    bool previous_dead=false,route_seen=false;
+    std::optional<std::uint32_t> option;
+    if(continue_yes) {
+        for(auto address:symbols.find("FOXY_OPTION"))if(address>>16==0 || address>>16==0x7e) {option=address;break;}
+        require(option.has_value(),"Natural Continue route has no source option RAM");
+    }
+    session.advance(0,0);
+    // Keep the original single-death 18,000-phase gate unchanged. These are
+    // separate complete natural-reserve-exhaustion routes with a fixed bound;
+    // no lives/health, flow, audio bank or checkpoint is written by the test.
+    const unsigned bound=continue_yes?60000U:18000U;
+    for(unsigned phase=1;phase<=bound;++phase) {
+        input::ButtonMask held=0;
+        if(choice && phase>=choice && phase<choice+6)held=*continue_yes?input::up:input::down;
+        if(confirm && phase>=confirm && phase<confirm+6)held=input::start;
+        if(arrival_confirm && phase>=arrival_confirm && phase<arrival_confirm+6)held=input::start;
+        source.input.sample(held);
+        const auto step=session.advance(timestamp(phase),held);
+        phases+=step.video_phases;ticks+=step.logic_ticks;
+        require(!step.time_clamped && !step.requested_experience && !step.requested_preview
+            && !step.requested_settings_reset,"Natural death route changed native owner or clamped its clock");
+        source.raster();
+        const auto& game=session.game();
+        const auto native=session.presentation(0,true);
+        // A bus read updates the cartridge open-bus latch even through its
+        // const API. Diagnostic observations must use the non-mutating RAM
+        // peek; source and native timelines otherwise stop being comparable.
+        const auto raw_flags=game.map().peek_ram_byte(*flags);
+        require(raw_flags.has_value(),"Death-route GAMEFLAGS is not mapped RAM");
+        const bool dead=(*raw_flags&0x42U)!=0;
+        if(game.flow_state()==simulation::GameFlowState::gameplay && dead && !previous_dead)++deaths;
+        previous_dead=dead;
+        const auto meter=game.peek_meter_state();
+        // The historically named M_DAMAGE is remaining shield/health, not
+        // accumulated damage. The source meter caps it at player_health_max;
+        // a fresh ship may have40 health while its displayed full gauge is36.
+        // Observe a populated full meter before accepting a decrease/restart.
+        const unsigned health=std::min(meter.damage,meter.player_health_max);
+        if(meter.enabled && !dead && health==meter.player_health_max)full_health=health;
+        if(full_health && meter.damage<full_health && !damaged)damaged=phase;
+        if(damaged && dead && !dying)dying=phase;
+        if(dying && dead && native.raster->circle.active && native.raster->circle.radius
+            && (native.raster->circle.affected_layers&63))++circles;
+        if(dying && !native.raster->brightness && !black)black=phase;
+        if(black && !dead && game.flow_state()==simulation::GameFlowState::gameplay
+            && native.raster->brightness==15 && meter.enabled && health==full_health) {
+            if(!restored)restored=phase;
+            ++bright;
+        }else bright=0;
+        if(continue_yes) {
+            if(game.flow_state()==simulation::GameFlowState::game_over && !game_over) {
+                require(damaged && dying && circles && black && deaths>1,
+                    "Natural game-over omitted real reserve-consuming deaths/circles/fade");
+                require(!native.raster->circle.active,"Final death circle leaked into GAME OVER");
+                game_over=phase;
+            }
+            if(game.flow_state()==simulation::GameFlowState::continue_choice) {
+                require(game_over,"Continue screen appeared without natural GAME OVER");
+                if(!continue_screen)continue_screen=phase;
+                if(!choice && native.raster->brightness==15)++continue_bright;
+                if(continue_bright>=30 && !choice) {choice=phase+1;confirm=choice+12;}
+                if(choice && phase==choice+10) {
+                    const auto selected=game.map().peek_ram_byte(*option);
+                    require(selected && *selected==(*continue_yes?0U:0xffU),
+                        "Ordinary Continue UP/DOWN did not select the requested source option");
+                }
+            }
+            if(confirm && phase>=confirm+6) {
+                route_seen|=game.flow_state()==simulation::GameFlowState::planet_travel;
+                // MAIN/PLANETSEQ waits in .rotateforabit for a NEW button
+                // press after Continue returns to stage zero. Do not change
+                // the player to auto-launch or fabricate an arrival flag.
+                // Let the real source consume an ordinary fresh START after
+                // its returned map is fully visible for thirty rasters. If
+                // travel is not actually ready it refuses that press, and
+                // the unchanged full-route recovery requirement still fails.
+                if(*continue_yes && game.flow_state()==simulation::GameFlowState::planet_travel
+                    && native.raster->brightness==15) {
+                    if(!arrival_confirm && ++arrival_bright>=30)arrival_confirm=phase+1;
+                }else if(!arrival_confirm)arrival_bright=0;
+                const bool terminal=*continue_yes
+                    ?game.flow_state()==simulation::GameFlowState::gameplay && route_seen && !dead
+                        && meter.enabled && health==full_health && game.objects().is_active(game.player())
+                    :game.flow_state()==simulation::GameFlowState::title;
+                if(terminal && native.raster->brightness==15) {
+                    if(!returned)returned=phase;
+                    ++return_bright;
+                }else return_bright=0;
+            }
+        }
+        const bool finished=continue_yes?return_bright>=120:bright>=120;
+        // Inspect every live death-effect phase, plus consecutive exact
+        // source/audio windows. Maximum supported optics and original-model
+        // mono use the same immutable completed source, never two ticks.
+        const bool frontend=continue_yes && game_over && (!returned || return_bright<120);
+        if(phase%60==0 || (dying && (!restored || dead)) || frontend || finished) {
+            if(phase%60==0 || finished) {
+                require(phases==phase && ticks==source.ticks && blocks==source.blocks,
+                    "Death/restart changed source raster/logic/SPC cadence");
+                require(game.save_state()==source.game.save_state(),"Natural death/restart cartridge state differs");
+                require(session.audio().save_state()==source.spc.save_state() && pcm==source.pcm,
+                    "Natural death/restart changed SPC handshakes or consecutive PCM");
+                require(*native.raster->ppu==source.game.map().ppu_state()
+                    && native.raster->brightness==source.game.map().display_brightness(),
+                    "Natural death/restart replaced or delayed source raster/fade");
+                pcm.clear();source.pcm.clear();++windows;
+            }
+            const auto state=game.save_state(),apu=session.audio().save_state();
+            StereoSettings settings;settings.separation=64;settings.convergence=16;settings.strength=2;
+            for(const auto optics:std::array<std::pair<float,bool>,3>{{{0,true},{1,true},{1,false}}}) {
+                const auto eye=session.presentation(optics.first,optics.second,settings);
+                require(eye.current==native.current && eye.previous==native.previous && eye.raster==native.raster,
+                    "Death/restart eye projection changed the completed source tick");
+                const auto geometry=models.prepare(eye),ink=dots.prepare(eye);
+                const auto fx=effects.prepare(eye);
+                const auto occupied=geometry.vertices.size()+ink.vertices.size()+fx.colour.vertices.size()+fx.window.vertices.size();
+                require(occupied<=pica_vertex_limit,"Death effects exceeded complete native scene geometry budget");
+                const auto artwork=layers.prepare(eye,unsigned(pica_vertex_limit-occupied));
+                const auto frame=composite.prepare(eye.plan,
+                    std::array{artwork.before_models,ink,geometry,artwork.after_models,fx.colour,fx.window},
+                    eye.dashboard,artwork.clear);
+                validate_pica_frame(frame,eye.dashboard);++compositions;
+                unsigned bytes=512U*256U*4U;
+                for(const auto image:frame.textures)bytes+=pica_resident_texture_bytes(image);
+                peak_bytes=std::max(peak_bytes,bytes);
+                require(bytes<=pica_texture_budget,"Natural death/restart exceeded padded scene/lower-LCD residency");
+                if(dying && dead && native.raster->circle.active && native.raster->circle.radius
+                    && (native.raster->circle.affected_layers&63))
+                    require(!fx.colour.draws.empty() && !fx.colour.draws.front().clip,
+                        "Natural death circle was omitted or inherited the Controls demo clip");
+                for(const auto& draw:fx.colour.draws)
+                    require(draw.space==PicaSpace::screen && !draw.depth_test && !draw.depth_write,
+                        "Death colour math entered finite model depth instead of screen-layer coverage");
+                require(optics.second || !eye.plan.stereo,"Original-model death route fabricated a stereo eye");
+            }
+            require(game.save_state()==state && session.audio().save_state()==apu,
+                "Death/restart composition or slider reads mutated source/SPC");
+        }
+        if(phase%600==0 || finished) {
+            std::cout<<"Death/restart phase="<<phase<<" damage="<<damaged<<" dying="<<dying
+                <<" circles="<<circles<<" black="<<black<<" restored="<<restored<<" bright="<<bright
+                <<" health="<<unsigned(meter.damage)<<'/'<<full_health<<'\n';
+            if(continue_yes)std::cout<<"Natural Continue "<<(*continue_yes?"YES":"NO")<<" deaths="<<deaths
+                <<" game-over="<<game_over<<" continue="<<continue_screen<<" choice="<<choice<<" confirm="<<confirm
+                <<" returned="<<returned<<" bright="<<return_bright<<" route-seen="<<route_seen
+                <<" arrival-confirm="<<arrival_confirm
+                <<" flow="<<unsigned(game.flow_state())<<'\n';
+        }
+        if(finished) {
+            require(damaged && dying && circles && black && restored,
+                "Natural death/restart lacked damage, live circle, black fade or recovery");
+            if(continue_yes) {
+                require(game_over && continue_screen && choice && confirm && returned,
+                    "Natural Continue route omitted full reserve exhaustion/prompt/input/recovery");
+                require(!*continue_yes || arrival_confirm,
+                    "Continue YES omitted the source-required fresh map confirmation");
+                std::cout<<"3DS natural GAME OVER -> Continue "<<(*continue_yes?"YES -> route/gameplay":"NO -> title")
+                    <<" PASS: "<<windows<<" consecutive cartridge/SPC/PCM/raster parity windows, "
+                    <<compositions<<" complete supported-eye/mono compositions, peak padded scene/lower textures "<<peak_bytes
+                    <<" bytes. Ordinary stationary flight and source UP/DOWN/START only; no survival cheats or source writes. "
+                    <<"HOST source/resource acceptance, not ARM/PICA pixels or physical audio/FPS acceptance.\n";
+                return;
+            }
+            std::cout<<"3DS natural death/restart PASS: "<<windows<<" consecutive cartridge/SPC/PCM parity windows, "
+                <<compositions<<" complete supported-eye/mono compositions, peak padded scene/lower textures "<<peak_bytes
+                <<" bytes. Ordinary stationary flight, no source mutations or survival cheats. HOST source/resource checks; "
+                "not game-over/continue, ARM/PICA pixels or physical audio/FPS acceptance.\n";
+            return;
+        }
+    }
+    throw std::runtime_error(continue_yes?"Natural game-over/Continue bound exhausted without full bright recovery"
+        :"Natural death/restart bound exhausted without 120 bright recovered gameplay phases");
 }
 void handoff(const assets::RomImage& rom,const assets::SymbolMap& symbols) {
     GameSession session(rom,symbols,[](auto){ });
@@ -1082,9 +1281,20 @@ int main(int argc,char** argv) {
         const bool corneria_route=argc==4 && std::string_view(argv[3])=="--corneria-source-route";
         const bool carrier_route=argc==4 && std::string_view(argv[3])=="--attack-carrier-source-route";
         const bool runtime_editors=argc==4 && std::string_view(argv[3])=="--runtime-editor-parity";
-        if(argc!=3 && !states_only && !capabilities_only && !sweep && !fortuna_route && !corneria_route && !carrier_route && !runtime_editors && !(argc==5 && std::string_view(argv[3])=="--capture"))
-            throw std::invalid_argument("Usage: game_session_check ROM SYMBOLS [--capture DIRECTORY | --states-only | --capabilities-only | --stage-sweep | --fortuna-source-route | --corneria-source-route | --attack-carrier-source-route | --runtime-editor-parity]");
+        const bool death_route=argc==4 && std::string_view(argv[3])=="--death-source-route";
+        const bool continue_yes=argc==4 && std::string_view(argv[3])=="--continue-yes-source-route";
+        const bool continue_no=argc==4 && std::string_view(argv[3])=="--continue-no-source-route";
+        if(argc!=3 && !states_only && !capabilities_only && !sweep && !fortuna_route && !corneria_route && !carrier_route && !runtime_editors && !death_route && !continue_yes && !continue_no && !(argc==5 && std::string_view(argv[3])=="--capture"))
+            throw std::invalid_argument("Usage: game_session_check ROM SYMBOLS [--capture DIRECTORY | --states-only | --capabilities-only | --stage-sweep | --fortuna-source-route | --corneria-source-route | --attack-carrier-source-route | --runtime-editor-parity | --death-source-route | --continue-yes-source-route | --continue-no-source-route]");
         const auto rom=assets::RomImage::load(argv[1]);const auto symbols=assets::SymbolMap::load(argv[2]);
+        if(continue_yes || continue_no) {
+            natural_death_restart(rom,symbols,continue_yes);
+            std::cout<<"3DS natural game-over/Continue source/composition parity: "<<checks<<" checks passed\n";return 0;
+        }
+        if(death_route) {
+            natural_death_restart(rom,symbols);
+            std::cout<<"3DS death/restart source/composition parity: "<<checks<<" checks passed\n";return 0;
+        }
         if(fortuna_route || corneria_route || carrier_route) {
             if(fortuna_route) natural_source_route(rom,symbols,"LEVEL3_3","Fortuna",fortuna_route_diagnostic::Inputs(symbols));
             else if(carrier_route) natural_source_route(rom,symbols,"LEVEL1_1","Corneria 1",attack_carrier_route_diagnostic::Inputs(symbols));
