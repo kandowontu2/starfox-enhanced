@@ -393,7 +393,55 @@ void Spc700Audio::load_state(std::span<const std::uint8_t> bytes) {
 }
 
 void Spc700Audio::render_stems_logic_tick(
-    std::span<const simulation::ApuPortWrite> writes) {
+    std::span<const simulation::ApuPortWrite> writes, StemExecutor* executor) {
+    if (executor) {
+        using namespace starfox::platform::nintendo_3ds;
+        struct Work {
+            Impl* impl;
+            std::vector<std::int16_t>* output;
+            std::span<const simulation::ApuPortWrite> writes;
+            Impl::CommandStream stream;
+#if defined(STARFOX_3DS_PROFILE_FRAMES)
+            FrameProfile profile;
+#endif
+            static void run(void* context) {
+                auto& self = *static_cast<Work*>(context);
+#if defined(STARFOX_3DS_PROFILE_FRAMES)
+                ScopedFrameProfileActivation activation(self.profile);
+                ScopedFramePhase phase(&self.profile,
+                    self.stream == Impl::CommandStream::music ? FramePhase::music : FramePhase::effects);
+#endif
+                self.impl->render(*self.output, self.writes, false, nullptr, self.stream);
+            }
+        };
+#if defined(STARFOX_3DS_PROFILE_FRAMES)
+        auto* parent = active_frame_profile;
+        const auto child = [&] { return parent ? parent->fork() : FrameProfile(nullptr, 0); };
+#endif
+        Work music{music_impl_.get(), &last_music_samples_, writes, Impl::CommandStream::music
+#if defined(STARFOX_3DS_PROFILE_FRAMES)
+            , child()
+#endif
+        };
+        Work effects{effects_impl_.get(), &last_effect_samples_, writes, Impl::CommandStream::effects
+#if defined(STARFOX_3DS_PROFILE_FRAMES)
+            , child()
+#endif
+        };
+#if defined(STARFOX_3DS_PROFILE_FRAMES)
+        const auto merge = [&] {
+            if(parent) { parent->merge_completed(music.profile); parent->merge_completed(effects.profile); }
+        };
+        try { executor->execute({&music, Work::run}, {&effects, Work::run}); }
+        catch(...) { merge(); throw; }
+        merge();
+#else
+        executor->execute({&music, Work::run}, {&effects, Work::run});
+#endif
+        if (last_music_samples_.size() != last_effect_samples_.size())
+            throw std::runtime_error{"SPC music/effect stem size mismatch"};
+        return;
+    }
     {
         STARFOX_3DS_FRAME_PHASE(music);
         music_impl_->render(last_music_samples_,

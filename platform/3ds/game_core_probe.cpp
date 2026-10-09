@@ -1,6 +1,7 @@
 // Actual VM/SPC/HUD link and SD bring-up, NOT the completed game renderer.
 #include "native_display.hpp"
 #include "native_audio.hpp"
+#include "native_stem_executor.hpp"
 #include "companion_manifest.hpp"
 #include "starfox/platform/nintendo_3ds/game_assets.hpp"
 #include "starfox/platform/nintendo_3ds/game_session.hpp"
@@ -87,6 +88,9 @@ private:
 int main() {
     using namespace starfox;
     ctr::NativeDisplay display;
+    // APT is initialized by the display. The joined worker outlives every
+    // source owner, including preview/experience/reset/state replacements.
+    ctr::NativeStemExecutor stem_executor;
     ctr::Canvas top(ctr::top_width),lower;
     std::unique_ptr<ctr::NativeAudio> audio;
     std::unique_ptr<ctr::GameSession> session;
@@ -202,6 +206,7 @@ int main() {
         }
         audio=std::make_unique<ctr::NativeAudio>();
         options.preview_progress=[&](unsigned) {return display.poll().running;};
+        options.stem_executor=&stem_executor;
         session=std::make_unique<ctr::GameSession>(std::move(cartridge.rom),std::move(cartridge.symbols),
             [&](auto pcm){audio->submit(pcm);},map,cartridge_ram[unsigned(experience)],options);
         models=std::make_unique<ctr::GameModels>(session->rom(),session->symbols());

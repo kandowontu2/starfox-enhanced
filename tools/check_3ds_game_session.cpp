@@ -17,6 +17,9 @@
 #include "fortuna_route_inputs.hpp"
 #include "corneria_route_inputs.hpp"
 #include "attack_carrier_route_inputs.hpp"
+#if defined(STARFOX_3DS_CHECK_PARALLEL_AUDIO)
+#include "native_stem_executor.hpp"
+#endif
 #include <bit>
 #include <chrono>
 #include <filesystem>
@@ -28,6 +31,32 @@ using namespace starfox;
 using namespace platform::nintendo_3ds;
 unsigned checks{};
 void require(bool value,const char* message) {++checks;if(!value) throw std::runtime_error(message);}
+#if defined(STARFOX_3DS_CHECK_PARALLEL_AUDIO)
+struct CountingStemExecutor final : audio::StemExecutor {
+    NativeStemExecutor worker;
+    std::uint64_t completed{};
+    CountingStemExecutor() {require(worker.parallel_available(),"Parallel session oracle accidentally used serial fallback");}
+    void execute(audio::StemTask foreground,audio::StemTask background) override {
+        worker.execute(foreground,background);++completed;
+    }
+};
+CountingStemExecutor* checked_stem_executor{};
+GameSessionOptions checked_options(const GameSessionOptions& source={}) {
+    require(checked_stem_executor,"Parallel session executor lifetime missing");
+    auto result=source;result.stem_executor=checked_stem_executor;return result;
+}
+// Stack-only wrapper; owners returned by restored_state remain ordinary
+// GameSession objects and inherit their executor through the production path.
+class CheckedSession final : public GameSession {
+public:
+    CheckedSession(assets::RomImage rom,assets::SymbolMap symbols,PcmSink sink,
+        std::string map="BOOT",std::span<const std::uint8_t> ram={},const GameSessionOptions& options={})
+        :GameSession(std::move(rom),std::move(symbols),std::move(sink),std::move(map),ram,checked_options(options)) {}
+};
+#else
+using CheckedSession=GameSession;
+GameSessionOptions checked_options(const GameSessionOptions& source={}) {return source;}
+#endif
 template<class F> void rejects(F f,const char* message) {
     bool rejected=false;try {f();} catch(const std::exception&) {rejected=true;}
     require(rejected,message);
@@ -87,7 +116,7 @@ void parity(const assets::RomImage& rom,const assets::SymbolMap& symbols,const s
     require(polls>=720 && polls<=14400 && polls%120==0,"Invalid native session parity duration");
     std::vector<std::int16_t> pcm;
     unsigned blocks{},phases{},ticks{},raster_only_updates{};
-    GameSession session(rom,symbols,[&](auto samples) {
+    CheckedSession session(rom,symbols,[&](auto samples) {
         require(samples.size()==AudioPcm::samples,"SPC block is not exactly 50ms of stereo PCM");
         std::array<std::int16_t,AudioPcm::samples> copied{};
         copy_audio_pcm(samples,copied); // Same copy contract as the real NDSP sink.
@@ -233,7 +262,7 @@ void natural_source_route(const assets::RomImage& rom,const assets::SymbolMap& s
     std::vector<std::int16_t> pcm;
     unsigned blocks{},phases{},ticks{};
     GameSessionOptions options;options.preferences=GamePreferences{};options.preferences->god=true;
-    GameSession session(rom,symbols,[&](auto samples) {
+    CheckedSession session(rom,symbols,[&](auto samples) {
         require(samples.size()==AudioPcm::samples,"Natural-route SPC block changed native PCM extent");
         pcm.insert(pcm.end(),samples.begin(),samples.end());++blocks;
     },map,{},options);
@@ -332,7 +361,7 @@ void natural_death_restart(const assets::RomImage& rom,const assets::SymbolMap& 
     std::cout.setf(std::ios::unitbuf);
     std::vector<std::int16_t> pcm;
     unsigned phases=0,ticks=0,blocks=0,windows=0,compositions=0;
-    GameSession session(rom,symbols,[&](auto samples) {
+    CheckedSession session(rom,symbols,[&](auto samples) {
         require(samples.size()==AudioPcm::samples,"Death-route native PCM extent changed");
         pcm.insert(pcm.end(),samples.begin(),samples.end());++blocks;
     },"LEVEL1_1");
@@ -522,7 +551,7 @@ void natural_death_restart(const assets::RomImage& rom,const assets::SymbolMap& 
         :"Natural death/restart bound exhausted without 120 bright recovered gameplay phases");
 }
 void handoff(const assets::RomImage& rom,const assets::SymbolMap& symbols) {
-    GameSession session(rom,symbols,[](auto){ });
+    CheckedSession session(rom,symbols,[](auto){ });
     const auto cartridge=session.cartridge_experience();
     session.advance(0,0);
     require(session.advance(0,input::a).duplicate && session.advance(0,0).duplicate,
@@ -539,7 +568,7 @@ void presentation_cadence(const assets::RomImage& rom,const assets::SymbolMap& s
         std::vector<std::int16_t> pcm;unsigned phases{},blocks{},ticks{},renders{};
         GameSessionOptions options;options.preferences=GamePreferences{};
         options.preferences->render_fps=static_cast<std::uint8_t>(rate);options.preferences->show_fps=true;
-        GameSession session(rom,symbols,[&](auto samples){pcm.insert(pcm.end(),samples.begin(),samples.end());++blocks;},map,{},options);
+        CheckedSession session(rom,symbols,[&](auto samples){pcm.insert(pcm.end(),samples.begin(),samples.end());++blocks;},map,{},options);
         SourceOracle source(rom,symbols,map);
         // Loading SD defaults also applies source-side god/laser/language
         // setters (including cartridge RAM writes and pending laser state).
@@ -586,7 +615,7 @@ void presentation_cadence(const assets::RomImage& rom,const assets::SymbolMap& s
     }
     // A real decoded GAME archive, not a guessed byte offset, supplies the
     // cross-platform rates. The native candidate must bound only that setting.
-    GameSession session(rom,symbols,[](auto){},"LEVEL1_1");session.advance(0,0);session.advance(timestamp(1),0);
+    CheckedSession session(rom,symbols,[](auto){},"LEVEL1_1");session.advance(0,0);session.advance(timestamp(1),0);
     const auto saved=session.save_state();const auto crc=assets::crc32(rom.bytes());
     const auto packet=decode_game_state(saved,crc);
     for(const std::uint16_t rate:{0,20,30,60,90,480,65535}) {
@@ -603,13 +632,33 @@ void presentation_cadence(const assets::RomImage& rom,const assets::SymbolMap& s
         require(session.save_state()==saved,"Candidate output-rate normalization mutated the running owner");
     }
     GameSessionOptions invalid;invalid.preferences=GamePreferences{};invalid.preferences->render_fps=90;
-    rejects([&]{GameSession rejected(rom,symbols,[](auto){},"BOOT",{},invalid);},"Invalid native SD FPS accepted by session");
+    rejects([&]{CheckedSession rejected(rom,symbols,[](auto){},"BOOT",{},invalid);},"Invalid native SD FPS accepted by session");
 }
 void native_capability_restore(const assets::RomImage& rom,const assets::SymbolMap& symbols) {
     // Import a real decoded GAME packet with supported cartridge settings and
     // desktop-only rendering enabled. Do not edit guessed serialized offsets.
-    for(const auto map:{"BOOT","LEVEL1_1"}) {
-        GameSession session(rom,symbols,[](auto){},map);
+    struct Temp {
+        std::filesystem::path path;
+        Temp() {
+            const auto stamp=std::chrono::steady_clock::now().time_since_epoch().count();
+            for(unsigned i=0;i<64;++i) {
+                const auto candidate=std::filesystem::temp_directory_path()
+                    /("sfe-3ds-restored-settings-"+std::to_string(stamp)+"-"+std::to_string(i));
+                if(std::filesystem::create_directory(candidate)) {path=candidate;return;}
+            }
+            throw std::runtime_error("Cannot create isolated restored-settings directory");
+        }
+        ~Temp() {
+            std::error_code ignored;GameStorage disk(path.generic_string(),0x76543210);
+            for(unsigned slot=0;slot<2;++slot) std::filesystem::remove(disk.slot_path(slot),ignored);
+            std::filesystem::remove(path,ignored);
+        }
+    } temp;
+    GameStorage storage(temp.path.generic_string(),0x76543210);static_cast<void>(storage.load());
+    for(const auto map:{"BOOT","LEVEL1_1"}) for(const std::uint16_t live_separation:{1,16,64})
+        for(const std::uint16_t separation:{1,16,64,65,512}) {
+        GameSessionOptions options;options.preferences=GamePreferences{};options.preferences->separation=live_separation;
+        CheckedSession session(rom,symbols,[](auto){},map,{},options);
         session.advance(0,0);session.advance(timestamp(1),0);
         const auto saved=session.save_state();const auto crc=assets::crc32(rom.bytes());
         const auto packet=decode_game_state(saved,crc);
@@ -642,6 +691,8 @@ void native_capability_restore(const assets::RomImage& rom,const assets::SymbolM
         desktop->set_timing_mode(simulation::TimingMode::unlocked_20_fps);
         desktop->set_show_fps(true);desktop->set_presentation_fps(90);
         desktop->set_swap_face_buttons(true);desktop->set_infinite_bombs(true);
+        desktop->set_stereo_separation(separation);
+        require(desktop->stereo_separation()==separation,"Desktop stereo import fixture lost its requested setting");
         auto candidate=packet;candidate.game=desktop->save_state();
         const auto native=session.restored_state(encode_game_state(candidate,crc));
         const auto& game=native->game();
@@ -667,6 +718,24 @@ void native_capability_restore(const assets::RomImage& rom,const assets::SymbolM
             && game.timing_mode()==simulation::TimingMode::unlocked_20_fps
             && game.swap_face_buttons() && game.infinite_bombs(),
             "Native capability normalization erased supported preferences");
+        // Output-device stereo belongs to the live native session, not to
+        // the archived desktop cartridge timeline. Preserve its bounded value
+        // even when the valid GAME payload requests 65..512 world units.
+        const auto expected_separation=session.preferences().separation;
+        require(game.stereo_separation()==expected_separation
+            && native->preferences().separation==expected_separation
+            && native->stereo_settings().separation==float(expected_separation),
+            "Desktop archive replaced live native stereo/settings/checkpoint separation");
+        GameSaveData record;record.experience=native->cartridge_experience();record.preferences=native->preferences();
+        const auto ram=native->cartridge_ram();
+        if(!ram.empty()) {record.ex_rom_crc=crc;record.ex_sram.assign(ram.begin(),ram.end());}
+        const bool changed=!storage.current().found || storage.current().data!=record;
+        require(storage.save(record)==changed,"Restored native preferences could not checkpoint to disk");
+        GameStorage reopened(temp.path.generic_string(),0x76543210);
+        const auto& loaded=reopened.load();
+        require(loaded.found && loaded.writable && loaded.data==record,
+            "Restored native checkpoint lost settings or cartridge SRAM");
+        require(!storage.save(record),"Unchanged restored native preferences rewrote the journal");
         const auto after=decode_game_state(native->save_state(),crc);
         require(game.map().save_state()==desktop->map().save_state() && after.audio==packet.audio
             && after.audio_phase==packet.audio_phase && after.pending_audio==packet.pending_audio
@@ -676,7 +745,7 @@ void native_capability_restore(const assets::RomImage& rom,const assets::SymbolM
         const auto roundtrip=native->restored_state(native->save_state());
         require(roundtrip->save_state()==native->save_state(),"Normalized native state did not round-trip exactly");
     }
-    std::cout<<"  Native capabilities: real BOOT/stage state imports clear desktop-only graphics/audio, preserve supported controls and VM/SPC/grid\n";
+    std::cout<<"  Native capabilities: real BOOT/stage imports preserve native stereo and SD checkpoint, clear desktop-only graphics/audio, preserve supported controls and VM/SPC/grid\n";
 }
 struct MenuDriver {
     GameSession& session;std::int64_t time{};GameAdvance last;
@@ -701,7 +770,7 @@ void fps_navigation_parity(const assets::RomImage& rom,const assets::SymbolMap& 
         const auto map=runtime?"LEVEL1_1":"BOOT";
         GameSessionOptions options;options.preferences=GamePreferences{};
         options.preferences->render_fps=static_cast<std::uint8_t>(rate);
-        GameSession session(rom,symbols,[&](auto samples){pcm.insert(pcm.end(),samples.begin(),samples.end());},map,{},options);
+        CheckedSession session(rom,symbols,[&](auto samples){pcm.insert(pcm.end(),samples.begin(),samples.end());},map,{},options);
         SourceOracle source(rom,symbols,map);
         // SD defaults invoke source-side setters, including EX's pending
         // laser/cartridge writes. Match those actual user choices in the
@@ -787,7 +856,7 @@ void fps_navigation_parity(const assets::RomImage& rom,const assets::SymbolMap& 
 void actual_menu(const assets::RomImage& rom,const assets::SymbolMap& symbols,const std::filesystem::path& captures) {
     GameSessionOptions native;native.preferences=GamePreferences{};
     native.preferences->hud_layout.widgets[unsigned(HudWidget::shield)].x=20;
-    GameSession session(rom,symbols,[](auto){},"BOOT",{},native);MenuDriver controls(session);
+    CheckedSession session(rom,symbols,[](auto){},"BOOT",{},native);MenuDriver controls(session);
     GameMenu menu(rom,symbols);
     const auto observe=[&] {
         const auto before=session.game().save_state(),spc=session.audio().save_state();
@@ -871,7 +940,7 @@ void actual_menu(const assets::RomImage& rom,const assets::SymbolMap& symbols,co
     require(session.cartridge_experience()==simulation::Experience::starfox_ex || source_ram.empty(),
         "Retail generic VM RAM was misidentified as battery-backed SRAM");
     const std::vector<std::uint8_t> saved_ram(source_ram.begin(),source_ram.end());
-    GameSession preview(rom,symbols,[](auto){},"LEVEL1_1",saved_ram,options);MenuDriver preview_controls(preview);
+    CheckedSession preview(rom,symbols,[](auto){},"LEVEL1_1",saved_ram,options);MenuDriver preview_controls(preview);
     require(progress>0 && preview.preferences()==prefs,"Preview lost settings or skipped bounded source preroll");
     require(std::equal(preview.cartridge_ram().begin(),preview.cartridge_ram().end(),saved_ram.begin(),saved_ram.end()),
         "Preview source preroll changed the user's preserved cartridge SRAM");
@@ -896,11 +965,11 @@ void actual_menu(const assets::RomImage& rom,const assets::SymbolMap& symbols,co
     preview_controls.tap(input::start);
     require(preview_controls.last.requested_preview==false && preview_controls.last.start_after_preview,"Preview Start did not request the real BOOT/Start path");
     options.preview=false;options.start_after_preview=true;
-    GameSession started(rom,symbols,[](auto){},"BOOT",{},options);started.advance(0,0);
+    CheckedSession started(rom,symbols,[](auto){},"BOOT",{},options);started.advance(0,0);
     for(unsigned phase=1;phase<=180;++phase) started.advance(timestamp(phase),0);
     require(!started.game().in_setup_menu() && started.preferences()==prefs,"Preview Start failed to launch through source fade/selected level");
     options.preview=true;options.start_after_preview=false;options.preview_progress=[](unsigned){return false;};
-    rejects([&]{GameSession cancelled(rom,symbols,[](auto){},"LEVEL1_1",{},options);},"Cancelled preview was published as a playable owner");
+    rejects([&]{CheckedSession cancelled(rom,symbols,[](auto){},"LEVEL1_1",{},options);},"Cancelled preview was published as a playable owner");
     std::cout<<"  Actual setup: all source pages/rows, font/cache/protected UI, real preview geometry, settings and Start handoff checked\n";
 }
 }
@@ -927,7 +996,7 @@ void actual_disk_handoff(const assets::RomImage& rom,const assets::SymbolMap& sy
     prefs.hud_layout.widgets[unsigned(HudWidget::radio)]={44,12,3,true};
     prefs.hud_layout.widgets[unsigned(HudWidget::portrait)]={108,120,5,false};
     GameSessionOptions options;options.preferences=prefs;
-    GameSession source(rom,symbols,[](auto){},"BOOT",{},options);
+    CheckedSession source(rom,symbols,[](auto){},"BOOT",{},options);
     require(source.preferences()==prefs,"Real cartridge did not accept persisted supported settings");
     const auto vm=source.game().save_state(),spc=source.audio().save_state();
     GameSaveData record;record.experience=source.cartridge_experience();record.preferences=source.preferences();
@@ -939,7 +1008,7 @@ void actual_disk_handoff(const assets::RomImage& rom,const assets::SymbolMap& sy
     GameStorage reopened(temp.path.generic_string(),manifest);
     const auto loaded=reopened.load();require(loaded.found && loaded.data==record,"Reopening lost real cartridge save data");
     options.preferences=loaded.data.preferences;
-    GameSession resumed(rom,symbols,[](auto){},"BOOT",loaded.data.ex_sram,options);
+    CheckedSession resumed(rom,symbols,[](auto){},"BOOT",loaded.data.ex_sram,options);
     require(resumed.preferences()==prefs && resumed.cartridge_experience()==record.experience,
         "Disk settings were not applied to the real native session");
     require(std::equal(resumed.cartridge_ram().begin(),resumed.cartridge_ram().end(),record.ex_sram.begin(),record.ex_sram.end()),
@@ -956,7 +1025,7 @@ void actual_disk_handoff(const assets::RomImage& rom,const assets::SymbolMap& sy
     require(fallback.found && fallback.writable && !fallback.warning.empty() && fallback.data==record,
         "Interrupted actual settings save did not retain the preceding cartridge save");
     options.preferences=fallback.data.preferences;
-    GameSession old_valid(rom,symbols,[](auto){},"BOOT",fallback.data.ex_sram,options);
+    CheckedSession old_valid(rom,symbols,[](auto){},"BOOT",fallback.data.ex_sram,options);
     require(old_valid.preferences()==prefs,"Recovered settings did not rebind the actual native owner");
     std::cout<<"  Disk handoff: actual settings/ROM-bound EX SRAM reopen and interrupted-slot recovery checked\n";
 }
@@ -964,7 +1033,7 @@ void actual_settings_reset(const assets::RomImage& rom,const assets::SymbolMap& 
     constexpr auto chord=input::ButtonMask(input::left_shoulder|input::right_shoulder);
     GameSessionOptions options;
     options.preferences=GamePreferences{simulation::TimingMode::unlocked_20_fps,35,55,2,2,35,true,true,true,true,true,true,32,4096};
-    GameSession menu(rom,symbols,[](auto){},"BOOT",{},options);MenuDriver controls(menu);
+    CheckedSession menu(rom,symbols,[](auto){},"BOOT",{},options);MenuDriver controls(menu);
     controls.select(14);controls.tap(input::a);controls.select(12); // Real Options page.
     const auto prefs=menu.preferences();const auto start=controls.time+1;
     require(!menu.advance(start,chord).requested_settings_reset && menu.settings_reset_hold().active(),"Real setup did not arm mapped reset");
@@ -987,7 +1056,7 @@ void actual_settings_reset(const assets::RomImage& rom,const assets::SymbolMap& 
     require(defaults.experience==simulation::Experience::original && !defaults.preview
         && defaults.ex_sram==record.ex_sram && defaults.ex_rom_crc==record.ex_rom_crc,"Real reset record erased game progress or retained preview/EX setup");
     options.preferences=defaults.preferences;
-    GameSession rebuilt(rom,symbols,[](auto){},"BOOT",bank,options);
+    CheckedSession rebuilt(rom,symbols,[](auto){},"BOOT",bank,options);
     require(rebuilt.preferences()==GamePreferences{} && rebuilt.game().in_setup_menu() && !rebuilt.game().menu_preview(),"Fresh actual BOOT retained settings/preview instead of defaults");
     require(std::equal(bank.begin(),bank.end(),rebuilt.cartridge_ram().begin(),rebuilt.cartridge_ram().end()),"Default source reconstruction discarded real game progress");
     rebuilt.advance(0,0,false);
@@ -1003,7 +1072,7 @@ void actual_settings_reset(const assets::RomImage& rom,const assets::SymbolMap& 
     require(!rebuilt.settings_reset_hold().active(),"Duplicate-time shoulder release did not cancel actual menu hold");
     rebuilt.advance(32'000'000'000LL,chord);rebuilt.advance(31'000'000'000LL,chord);
     require(!rebuilt.settings_reset_hold().active(),"Rewound clock retained a native reset hold");
-    GameSession stage(rom,symbols,[](auto){},"LEVEL1_1");stage.advance(0,chord);
+    CheckedSession stage(rom,symbols,[](auto){},"LEVEL1_1");stage.advance(0,chord);
     require(!stage.game().in_setup_menu(),"Direct-stage reset exclusion fixture is not a real stage");
     for(unsigned frame=1;frame<=120;++frame) {
         const auto next=stage.advance(std::int64_t(frame)*50'000'000,chord);
@@ -1012,7 +1081,7 @@ void actual_settings_reset(const assets::RomImage& rom,const assets::SymbolMap& 
     std::cout<<"  Settings reset: mapped five-second menu chord, pure owner handoff, defaults/game-save preservation, focus/release/clock guards checked\n";
 }
 void actual_controller_remap(const assets::RomImage& rom,const assets::SymbolMap& symbols) {
-    GameSession session(rom,symbols,[](auto){});MenuDriver controls(session);
+    CheckedSession session(rom,symbols,[](auto){});MenuDriver controls(session);
     rejects([&]{session.finish_controller_remap();},"Unrequested controller editor acknowledged");
     controls.select(14);controls.tap(input::a);controls.select(8);
     const auto menu=GameMenu::capture(session.game());
@@ -1052,7 +1121,7 @@ void actual_controller_remap(const assets::RomImage& rom,const assets::SymbolMap
     // Independent real cartridge oracle for custom gameplay bindings. No
     // production mapping helper is used to build the expected logical inputs.
     std::vector<std::int16_t> pcm;
-    GameSession stage(rom,symbols,[&](auto block){pcm.insert(pcm.end(),block.begin(),block.end());},"LEVEL1_1");
+    CheckedSession stage(rom,symbols,[&](auto block){pcm.insert(pcm.end(),block.begin(),block.end());},"LEVEL1_1");
     SourceOracle direct(rom,symbols,"LEVEL1_1");GameBindings custom;
     custom.sources[0]=12;custom.sources[4]=0;custom.sources[5]=255;custom.sources[6]=255;custom.sources[8]=8;custom.sources[9]=9;
     stage.advance(0,0);
@@ -1092,7 +1161,8 @@ void full_state_parity(const assets::RomImage& rom,const assets::SymbolMap& symb
     } temp(crc);
     for(const auto map:{"BOOT","LEVEL1_1"}) for(unsigned partial=0;partial<3;++partial) {
         std::vector<std::int16_t> pcm;
-        auto session=std::make_unique<GameSession>(rom,symbols,[&](auto samples){pcm.insert(pcm.end(),samples.begin(),samples.end());},map);
+        auto session=std::make_unique<GameSession>(rom,symbols,[&](auto samples){pcm.insert(pcm.end(),samples.begin(),samples.end());},map,
+            std::span<const std::uint8_t>{},checked_options());
         SourceOracle oracle(rom,symbols,map);session->advance(0,0);
         const auto before_rasters=30+partial;
         for(unsigned i=1;i<=before_rasters;++i) {session->advance(timestamp(i),0);oracle.raster();}
@@ -1155,7 +1225,7 @@ void full_state_parity(const assets::RomImage& rom,const assets::SymbolMap& symb
     // its shared runtime options animate/navigate. Closing rebases wall time.
     for(unsigned partial=0;partial<3;++partial) {
         std::vector<std::int16_t> pcm;
-        GameSession session(rom,symbols,[&](auto samples){pcm.insert(pcm.end(),samples.begin(),samples.end());},"LEVEL1_1");
+        CheckedSession session(rom,symbols,[&](auto samples){pcm.insert(pcm.end(),samples.begin(),samples.end());},"LEVEL1_1");
         SourceOracle oracle(rom,symbols,"LEVEL1_1");session.advance(0,0);
         for(unsigned i=1;i<=30+partial;++i) {session.advance(timestamp(i),0);oracle.raster();}
         const auto map=session.game().map().save_state(),audio=session.audio().save_state();
@@ -1194,7 +1264,7 @@ void full_state_parity(const assets::RomImage& rom,const assets::SymbolMap& symb
 }
 void editor_resume_parity(const assets::RomImage& rom,const assets::SymbolMap& symbols,bool hud_editor=false) {
     std::vector<std::int16_t> pcm;
-    GameSession session(rom,symbols,[&](auto samples){pcm.insert(pcm.end(),samples.begin(),samples.end());});
+    CheckedSession session(rom,symbols,[&](auto samples){pcm.insert(pcm.end(),samples.begin(),samples.end());});
     SourceOracle source(rom,symbols,"BOOT");
     std::int64_t time{};session.advance(time,0);
     const auto compare=[&] {
@@ -1251,7 +1321,7 @@ void editor_navigation_parity(const assets::RomImage& rom,const assets::SymbolMa
     for(bool runtime:{false,true})for(unsigned target:{3U,8U})for(auto nav:navigation)for(auto modifier:modifiers) {
         std::vector<std::int16_t> pcm;
         const auto map=runtime?"LEVEL1_1":"BOOT";
-        GameSession session(rom,symbols,[&](auto samples){pcm.insert(pcm.end(),samples.begin(),samples.end());},map);
+        CheckedSession session(rom,symbols,[&](auto samples){pcm.insert(pcm.end(),samples.begin(),samples.end());},map);
         SourceOracle source(rom,symbols,map);std::int64_t time{};session.advance(time,0);
         const auto compare=[&] {
             require(session.game().save_state()==source.game.save_state(),"Editor navigation changed independent source state");
@@ -1321,7 +1391,7 @@ void editor_navigation_parity(const assets::RomImage& rom,const assets::SymbolMa
 void runtime_editor_resume_parity(const assets::RomImage& rom,const assets::SymbolMap& symbols,bool hud_editor) {
     for(unsigned partial=0;partial<3;++partial) {
         std::vector<std::int16_t> pcm;
-        GameSession session(rom,symbols,[&](auto samples){pcm.insert(pcm.end(),samples.begin(),samples.end());},"LEVEL1_1");
+        CheckedSession session(rom,symbols,[&](auto samples){pcm.insert(pcm.end(),samples.begin(),samples.end());},"LEVEL1_1");
         SourceOracle source(rom,symbols,"LEVEL1_1");std::int64_t time{};session.advance(time,0);
         const auto compare=[&] {
             require(session.game().save_state()==source.game.save_state(),"Runtime editor changed independent cartridge state");
@@ -1381,7 +1451,7 @@ void runtime_editor_resume_parity(const assets::RomImage& rom,const assets::Symb
         <<" resume: paused Options return and independent VM/SPC/PCM continuation for all three partial audio phases checked\n";
 }
 void actual_hud_customization(const assets::RomImage& rom,const assets::SymbolMap& symbols) {
-    GameSession session(rom,symbols,[](auto){});MenuDriver controls(session);
+    CheckedSession session(rom,symbols,[](auto){});MenuDriver controls(session);
     rejects([&]{session.finish_hud_customization();},"Unrequested HUD editor acknowledged");
     controls.select(14);controls.tap(input::a);controls.select(3);
     const auto menu=GameMenu::capture(session.game());
@@ -1424,23 +1494,27 @@ void actual_hud_customization(const assets::RomImage& rom,const assets::SymbolMa
     for(unsigned raster=1;raster<=6;++raster) session.advance(resumed+1+timestamp(raster),0);
     const auto no_hud=session.presentation(0,false).dashboard;
     GameSessionOptions defaults;defaults.preferences=preferences;
-    GameSession pristine(rom,symbols,[](auto){},"BOOT",{},defaults);
+    CheckedSession pristine(rom,symbols,[](auto){},"BOOT",{},defaults);
     require(std::ranges::equal(no_hud.pixels,pristine.presentation(0,false).dashboard.pixels),"Native layout changed setup-only lower-screen status");
     controls.time=resumed+1+timestamp(6);controls.tap(input::a);
     require(session.hud_customization_pending(),"Customize Screen could not reopen after Apply/release");
     session.finish_hud_customization();require(session.preferences()==edited,"Cancel did not preserve applied native layout");
     GameSessionOptions options;options.preferences=edited;
-    GameSession stage(rom,symbols,[](auto){},"LEVEL1_1",{},options);
+    CheckedSession stage(rom,symbols,[](auto){},"LEVEL1_1",{},options);
     require(stage.preferences()==edited && !stage.hud_customization_pending(),"Native profile lost at actual stage-owner handoff");
     GameHud expected(rom,symbols);expected.set_layout(layout);expected.update(expected.capture(stage.game()));
     require(std::ranges::equal(stage.presentation(1,true).dashboard.pixels,expected.view().pixels),"Native stage did not apply customized HUD to split-screen route");
     options.preferences->hud_layout=malformed;
-    rejects([&]{GameSession bad(rom,symbols,[](auto){},"BOOT",{},options);},"Malformed persisted HUD accepted by game owner");
+    rejects([&]{CheckedSession bad(rom,symbols,[](auto){},"BOOT",{},options);},"Malformed persisted HUD accepted by game owner");
     std::cout<<"  HUD customization: actual source option, paused editor, Apply/Cancel, source-state purity, persistent native layout and stage routing checked\n";
 }
 }
 int main(int argc,char** argv) {
     try {
+#if defined(STARFOX_3DS_CHECK_PARALLEL_AUDIO)
+        CountingStemExecutor parallel_executor;
+        checked_stem_executor=&parallel_executor;
+#endif
         const bool states_only=argc==4 && std::string_view(argv[3])=="--states-only";
         const bool capabilities_only=argc==4 && std::string_view(argv[3])=="--capabilities-only";
         const bool sweep=argc==4 && std::string_view(argv[3])=="--stage-sweep";
@@ -1506,10 +1580,15 @@ int main(int argc,char** argv) {
         runtime_editor_resume_parity(rom,symbols,false);
         runtime_editor_resume_parity(rom,symbols,true);
         full_state_parity(rom,symbols);
-        GameSession failed(rom,symbols,[](auto){throw std::runtime_error("PCM device failed");});
+        CheckedSession failed(rom,symbols,[](auto){throw std::runtime_error("PCM device failed");});
         failed.advance(0,0);rejects([&]{failed.advance(50'000'000,0);},"PCM failure ignored");
         rejects([&]{failed.advance(100'000'000,0);},"Failed source tick retried against partly advanced state");
         rejects([&]{static_cast<void>(failed.presentation(0,true));},"Failed audio/source session presented stale geometry");
         std::cout<<"3DS actual game session: "<<checks<<" checks passed; host source parity, not PICA/NDSP or hardware acceptance\n";
+#if defined(STARFOX_3DS_CHECK_PARALLEL_AUDIO)
+        require(parallel_executor.completed>0,"Full parallel session suite never dispatched the actual worker");
+        std::cout<<"Actual joined parallel SPC blocks: "<<parallel_executor.completed
+            <<"; complete serial-source oracles unchanged, not native/physical performance acceptance\n";
+#endif
     } catch(const std::exception& error) {std::cerr<<"3DS actual game session: "<<error.what()<<'\n';return 1;}
 }

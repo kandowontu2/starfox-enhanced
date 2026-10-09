@@ -43,6 +43,9 @@ struct GameSessionOptions {
     // Pump platform events during the bounded, silent source preview preroll.
     // False cancels loading; no half-initialized owner may be presented.
     std::function<bool(unsigned)> preview_progress;
+    // Borrowed synchronous executor: complete both stems before source port
+    // acknowledgement/state handoff. Platform owner must outlive the session.
+    audio::StemExecutor* stem_executor{};
 };
 // Graphics/SDK-independent native game owner. This is the actual simulation,
 // SPC driver and cartridge HUD, not the asset-free frontend diagnostic. Native
@@ -135,5 +138,6 @@ private:
     bool requested_controller_remap_{};
     bool requested_hud_customization_{};
     CockpitLayout hud_layout_;
+    audio::StemExecutor* stem_executor_{};
 };
 } // namespace starfox::platform::nintendo_3ds
