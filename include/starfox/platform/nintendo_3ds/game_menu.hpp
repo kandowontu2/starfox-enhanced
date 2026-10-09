@@ -21,6 +21,7 @@ struct GameMenuState {
     std::vector<GameMenuRow> rows;
     bool operator==(const GameMenuState&) const=default;
 };
+enum class GameMenuEditor {none,hud,controller};
 class GameMenu {
 public:
     GameMenu(const assets::RomImage&,const assets::SymbolMap&);
@@ -32,6 +33,9 @@ public:
     // tick's navigation before gating activation; do not create menu state.
     [[nodiscard]] static input::TickInput filter(simulation::PregamePage,unsigned selection,
         bool runtime,input::TickInput);
+    // Native editors replace an action on the destination source row, not
+    // navigation itself. Back/Start chords must not open a host editor.
+    [[nodiscard]] static GameMenuEditor editor(simulation::PregamePage,unsigned selection,input::TickInput);
     // Rebuild only when the observed page/values change, never per eye/slider.
     bool update(const GameMenuState&);
     [[nodiscard]] PicaFrame frame(const FramePlan&) const;

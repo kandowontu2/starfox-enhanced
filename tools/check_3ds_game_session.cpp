@@ -1151,6 +1151,82 @@ void editor_resume_parity(const assets::RomImage& rom,const assets::SymbolMap& s
     std::cout<<(hud_editor?"  HUD editor":"  Controller")<<" resume: independent VM/SPC/PCM parity through partial audio phase "<<frozen_phase%3
         <<" and 24 post-editor rasters checked\n";
 }
+void editor_navigation_parity(const assets::RomImage& rom,const assets::SymbolMap& symbols) {
+    // Independent cartridge/SPC owner, normal input only. Exercise both sides
+    // of each native editor and both Up+Down/Back priorities in setup/runtime.
+    constexpr std::array<input::ButtonMask,4> navigation{0,input::up,input::down,input::ButtonMask(input::up|input::down)};
+    constexpr std::array<input::ButtonMask,3> modifiers{0,input::b,input::start};
+    unsigned fixtures{};
+    for(bool runtime:{false,true})for(unsigned target:{3U,8U})for(auto nav:navigation)for(auto modifier:modifiers) {
+        std::vector<std::int16_t> pcm;
+        const auto map=runtime?"LEVEL1_1":"BOOT";
+        GameSession session(rom,symbols,[&](auto samples){pcm.insert(pcm.end(),samples.begin(),samples.end());},map);
+        SourceOracle source(rom,symbols,map);std::int64_t time{};session.advance(time,0);
+        const auto compare=[&] {
+            require(session.game().save_state()==source.game.save_state(),"Editor navigation changed independent source state");
+            require(session.audio().save_state()==source.spc.save_state() && pcm==source.pcm,
+                "Editor navigation lost source handshakes, partial SPC phase or PCM");
+        };
+        if(runtime) {
+            require(session.toggle_runtime_options() && source.game.toggle_runtime_options(),"Editor chord fixture could not open runtime options");
+            source.input.reset();session.advance(++time,0);compare();
+        }
+        const auto step=[&](input::ButtonMask physical,input::ButtonMask expected) {
+            time+=50'000'000;source.input.sample(expected);
+            const auto result=session.advance(time,physical);
+            require(result.video_phases>0 && result.video_phases<=3,"Editor chord lost its ordinary source raster clock");
+            for(unsigned phase=0;phase<result.video_phases;++phase) {
+                if(!runtime)source.raster();
+                else {
+                    source.game.present_frame();
+                    if(source.game.logic_tick_ready())static_cast<void>(source.game.tick(source.input.consume()));
+                }
+            }
+            compare();return result;
+        };
+        const auto tap=[&](input::ButtonMask held) {step(held,held);step(0,0);};
+        const auto select=[&](unsigned id) {
+            const auto order=simulation::pregame_menu_order(session.game().pregame_page());
+            for(std::size_t row=0;session.game().pregame_selection()!=id && row<order.size();++row)tap(input::down);
+            require(session.game().pregame_selection()==id,"Editor chord fixture could not select source row");
+        };
+        select(14);tap(input::a);
+        const auto order=simulation::pregame_menu_order(simulation::PregamePage::options);
+        const auto destination=std::size_t(std::find(order.begin(),order.end(),target)-order.begin());
+        const auto origin=nav?order[(destination+((nav&input::up)?1U:order.size()-1U))%order.size()]:target;
+        select(origin);
+        const bool opens=modifier==0;
+        const auto chord=input::ButtonMask(nav|input::a|modifier);
+        const auto opening=step(chord,opens?nav:chord);
+        require(opening.requested_hud_customization==(opens && target==3)
+            && opening.requested_controller_remap==(opens && target==8),
+            "Same-tick direction/confirm opened the wrong native editor or stole Back/Start");
+        if(opens) {
+            require(session.game().pregame_page()==simulation::PregamePage::options && session.game().pregame_selection()==target,
+                "Native editor froze before source cursor/navigation reached its destination");
+            const auto state=session.game().save_state(),apu=session.audio().save_state();
+            const auto waiting=session.advance(time+1'000'000'000,chord);
+            require(!waiting.video_phases && !waiting.logic_ticks && !waiting.audio_blocks
+                && state==session.game().save_state() && apu==session.audio().save_state(),"Editor chord ticked the frozen cartridge/SPC owner");
+            if(target==3)session.finish_hud_customization();else session.finish_controller_remap();
+            source.input.reset();time+=1'000'000'001;session.advance(time,chord);
+            require(session.game().pregame_selection()==target,"Returning from native editor restored the old source row");
+            source.input.reset();session.advance(++time,0);compare();
+            for(unsigned raster=1;raster<=6;++raster)step(0,0);
+        }
+        // Moving AWAY must act on the new ordinary source row, not reopen the
+        // old editor. Use the controller's supported volume/stereo neighbours.
+        if(opens && nav==0) {
+            const auto away=target==8?input::up:input::down;
+            if(target==3)select(8); // controller -> volume, avoiding disabled desktop controls
+            const auto leaving=step(input::ButtonMask(away|input::a),input::ButtonMask(away|input::a));
+            require(!leaving.requested_controller_remap && !leaving.requested_hud_customization,
+                "Leaving a native editor row opened the old editor");
+        }
+        ++fixtures;
+    }
+    std::cout<<"  Native editor chords: "<<fixtures<<" setup/runtime fixtures, destination/Back/Start/Up priority and exact VM/SPC/PCM navigation/freeze/return checked\n";
+}
 void runtime_editor_resume_parity(const assets::RomImage& rom,const assets::SymbolMap& symbols,bool hud_editor) {
     for(unsigned partial=0;partial<3;++partial) {
         std::vector<std::int16_t> pcm;
@@ -1281,11 +1357,12 @@ int main(int argc,char** argv) {
         const bool corneria_route=argc==4 && std::string_view(argv[3])=="--corneria-source-route";
         const bool carrier_route=argc==4 && std::string_view(argv[3])=="--attack-carrier-source-route";
         const bool runtime_editors=argc==4 && std::string_view(argv[3])=="--runtime-editor-parity";
+        const bool editor_chords=argc==4 && std::string_view(argv[3])=="--editor-chords";
         const bool death_route=argc==4 && std::string_view(argv[3])=="--death-source-route";
         const bool continue_yes=argc==4 && std::string_view(argv[3])=="--continue-yes-source-route";
         const bool continue_no=argc==4 && std::string_view(argv[3])=="--continue-no-source-route";
-        if(argc!=3 && !states_only && !capabilities_only && !sweep && !fortuna_route && !corneria_route && !carrier_route && !runtime_editors && !death_route && !continue_yes && !continue_no && !(argc==5 && std::string_view(argv[3])=="--capture"))
-            throw std::invalid_argument("Usage: game_session_check ROM SYMBOLS [--capture DIRECTORY | --states-only | --capabilities-only | --stage-sweep | --fortuna-source-route | --corneria-source-route | --attack-carrier-source-route | --runtime-editor-parity | --death-source-route | --continue-yes-source-route | --continue-no-source-route]");
+        if(argc!=3 && !states_only && !capabilities_only && !sweep && !fortuna_route && !corneria_route && !carrier_route && !runtime_editors && !editor_chords && !death_route && !continue_yes && !continue_no && !(argc==5 && std::string_view(argv[3])=="--capture"))
+            throw std::invalid_argument("Usage: game_session_check ROM SYMBOLS [--capture DIRECTORY | --states-only | --capabilities-only | --stage-sweep | --fortuna-source-route | --corneria-source-route | --attack-carrier-source-route | --runtime-editor-parity | --editor-chords | --death-source-route | --continue-yes-source-route | --continue-no-source-route]");
         const auto rom=assets::RomImage::load(argv[1]);const auto symbols=assets::SymbolMap::load(argv[2]);
         if(continue_yes || continue_no) {
             natural_death_restart(rom,symbols,continue_yes);
@@ -1305,6 +1382,10 @@ int main(int argc,char** argv) {
             runtime_editor_resume_parity(rom,symbols,false);runtime_editor_resume_parity(rom,symbols,true);
             std::cout<<"3DS runtime editors: "<<checks<<" checks passed; source parity, not physical NDSP pause acceptance\n";return 0;
         }
+        if(editor_chords) {
+            editor_navigation_parity(rom,symbols);
+            std::cout<<"3DS native editor chords: "<<checks<<" checks passed; source parity, not physical device acceptance\n";return 0;
+        }
         if(sweep) {stage_sweep(rom,symbols);std::cout<<"3DS stage/flow parity: "<<checks<<" checks passed\n";return 0;}
         if(capabilities_only) {
             native_capability_restore(rom,symbols);
@@ -1321,6 +1402,7 @@ int main(int argc,char** argv) {
         actual_disk_handoff(rom,symbols);
         actual_settings_reset(rom,symbols);
         actual_controller_remap(rom,symbols);
+        editor_navigation_parity(rom,symbols);
         editor_resume_parity(rom,symbols);
         actual_hud_customization(rom,symbols);
         editor_resume_parity(rom,symbols,true);

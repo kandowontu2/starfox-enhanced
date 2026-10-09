@@ -99,10 +99,34 @@ void menu_capability_chords() {
     }
     require(blocked && allowed,"Menu capability test lacks disabled and enabled destination coverage");
 }
+void native_editor_chords() {
+    using simulation::PregamePage;
+    constexpr std::array<input::ButtonMask,4> navigation{0,input::up,input::down,input::ButtonMask(input::up|input::down)};
+    constexpr std::array<input::ButtonMask,7> actions{0,input::a,input::select,input::ButtonMask(input::a|input::b),
+        input::ButtonMask(input::a|input::start),input::ButtonMask(input::a|input::left),
+        input::ButtonMask(input::a|input::select)};
+    unsigned opened{},ignored{};
+    for(auto page:{PregamePage::main,PregamePage::options,PregamePage::cheats,PregamePage::two_d,
+        PregamePage::three_d,PregamePage::global,PregamePage::stereo}) {
+        const auto order=simulation::pregame_menu_order(page);
+        for(std::size_t row=0;row<order.size();++row)for(auto nav:navigation)for(auto action:actions) {
+            const auto target=nav?order[(row+((nav&input::up)?order.size()-1U:1U))%order.size()]:order[row];
+            input::TickInput input;input.held=input.pressed=input::ButtonMask(nav|action);input.released=input::x;
+            auto expected=GameMenuEditor::none;
+            if(page==PregamePage::options && (action&input::a) && !(action&(input::b|input::start)))
+                expected=target==3?GameMenuEditor::hud:target==8?GameMenuEditor::controller:GameMenuEditor::none;
+            require(GameMenu::editor(page,order[row],input)==expected,
+                "Native editor routed an old row, ignored destination navigation or consumed Back/Start");
+            if(expected==GameMenuEditor::none)++ignored;else ++opened;
+        }
+    }
+    require(opened && ignored,"Native editor table lacks opened and ignored actions");
+}
 }
 int main() try {
     settings_reset_contract();
     menu_capability_chords();
+    native_editor_chords();
     const auto rom=public_font_fixture();
     const auto symbols=assets::SymbolMap::parse("MSCALECHARS $008000\nMARIOMSGS $008020\nFONT0WID $008100\nFONT0TRN $008200\nFONT0FON $008300\nFACEDATA $009000\n");
     GameMenu menu(rom,symbols);

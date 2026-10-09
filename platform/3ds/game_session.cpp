@@ -300,19 +300,20 @@ GameAdvance GameSession::advance(std::int64_t time,input::ButtonMask held,bool f
                     // rate list. Still execute the ordinary source raster/tick.
                     native_rate=game_.presentation_fps()==60?30:60;
                 }
-                if(game_.in_setup_menu() && game_.pregame_page()==simulation::PregamePage::options
-                    && game_.pregame_selection()==3 && (controls.pressed&input::a)
-                    && !(controls.pressed&(input::up|input::down|input::start))) {
-                    requested_hud_customization_=result.requested_hud_customization=true;
-                    controls={};input_.reset();reset_hold_.cancel();
-                }
-                if(game_.in_setup_menu() && game_.pregame_page()==simulation::PregamePage::options
-                    && game_.pregame_selection()==8 && (controls.pressed&input::a)) {
-                    requested_controller_remap_=result.requested_controller_remap=true;
-                    // Consume this host action instead of sending it into the
-                    // cartridge, but finish this raster's ordinary VM/SPC
-                    // cadence before freezing. A partial audio phase survives.
-                    controls={};input_.reset();reset_hold_.cancel();
+                const auto editor=game_.in_setup_menu()
+                    ?GameMenu::editor(game_.pregame_page(),game_.pregame_selection(),controls)
+                    :GameMenuEditor::none;
+                if(editor!=GameMenuEditor::none) {
+                    if(editor==GameMenuEditor::hud)
+                        requested_hud_customization_=result.requested_hud_customization=true;
+                    else requested_controller_remap_=result.requested_controller_remap=true;
+                    // Consume the host action, but send the same tick's Up/Down
+                    // to the source. Otherwise the editor opens on the row we
+                    // left or returns to a cursor that never reached its row.
+                    // Finish the ordinary VM/SPC phase; partial audio survives.
+                    constexpr auto navigation=input::ButtonMask(input::up|input::down);
+                    controls.held&=navigation;controls.pressed&=navigation;controls.released&=navigation;
+                    input_.reset();reset_hold_.cancel();
                 }
                 if(start_after_preview_ && game_.in_setup_menu() && !game_.menu_preview()) {
                     // A single source Start action, not a jump into gameplay or
