@@ -346,12 +346,17 @@ std::optional<PicaFrame> GameScenery::prepare_tiles(const GamePresentation& sour
         const unsigned extra=count>=3?(count-2)*3:0;
         if(extra>vertex_budget-vertices.size()) return {};
         ensure_vertex_space(vertices.size()+extra);
-        for(unsigned corner=1;corner+1<count;++corner) for(unsigned i:{0U,corner,corner+1}) {
+        // A fan repeats its origin and shared edges. Transform each retained
+        // corner once, without changing clipping, arithmetic or fan ordering.
+        std::array<PicaVertex,8> transformed;
+        if(count>=3) for(unsigned i=0;i<count;++i) {
             const auto p=polygon[i];const double z=scale/distance(p);
-            vertices.push_back({{float((p[0]-200)*z/source.plan.focal_x),float((120-p[1])*z/source.plan.focal_y),float(z)},
+            transformed[i]={{float((p[0]-200)*z/source.plan.focal_x),float((120-p[1])*z/source.plan.focal_y),float(z)},
                 {1,1,1,1},{float(a.uv[0]+(c.uv[0]-double(a.uv[0]))*(p[0]-x0)/(x1-x0)),
-                    float(a.uv[1]+(c.uv[1]-double(a.uv[1]))*(p[1]-y0)/(y1-y0))}});
+                    float(a.uv[1]+(c.uv[1]-double(a.uv[1]))*(p[1]-y0)/(y1-y0))}};
         }
+        for(unsigned corner=1;corner+1<count;++corner) for(unsigned i:{0U,corner,corner+1})
+            vertices.push_back(transformed[i]);
     }
     auto& draws=pending_draws_;draws.assign(bg2.draws.begin(),bg2.draws.end());
     // The complete infinity atlas must precede every finite tile, exactly as
@@ -431,13 +436,16 @@ std::optional<PicaFrame> GameScenery::prepare_water_tiles(const GamePresentation
             const unsigned extra=count>=3?(count-2)*3:0;
             if(extra>vertex_budget-vertices.size()) return {};
             ensure_vertex_space(vertices.size()+extra);
-            for(unsigned corner=1;corner+1<count;++corner) for(unsigned i:{0U,corner,corner+1}) {
+            std::array<PicaVertex,8> transformed;
+            if(count>=3) for(unsigned i=0;i<count;++i) {
                 const auto p=polygon[i];const double z=side?distance/(side*(p[1]-120)):0;
                 const Point3 position=side?Point3{float((p[0]-200)*z/source.plan.focal_x),
                     float((120-p[1])*z/source.plan.focal_y),float(z)}:Point3{float(p[0]),float(p[1]),0};
-                vertices.push_back({position,{1,1,1,1},{float(a.uv[0]+(c.uv[0]-double(a.uv[0]))*(p[0]-x0)/(x1-x0)),
-                    float(a.uv[1]+(c.uv[1]-double(a.uv[1]))*(p[1]-y0)/(y1-y0))}});
+                transformed[i]={position,{1,1,1,1},{float(a.uv[0]+(c.uv[0]-double(a.uv[0]))*(p[0]-x0)/(x1-x0)),
+                    float(a.uv[1]+(c.uv[1]-double(a.uv[1]))*(p[1]-y0)/(y1-y0))}};
             }
+            for(unsigned corner=1;corner+1<count;++corner) for(unsigned i:{0U,corner,corner+1})
+                vertices.push_back(transformed[i]);
         }
         if(vertices.size()!=first) {
             PicaDraw next;next.first=first;next.count=unsigned(vertices.size())-first;next.texture=0;next.source_layer=2;
