@@ -702,6 +702,11 @@
       "Bytes": 12539
     },
     {
+      "File": "include/starfox/render/vulkan_hardware_rt.hpp",
+      "Sha256": "57d85474c9ea1a4d7d753134eead1031069f7680089ef325a3ebf725dc23a559",
+      "Bytes": 4969
+    },
+    {
       "File": "include/starfox/render/water_caustics.hpp",
       "Sha256": "2badb510302e30721613861aaaec446611eae8f015576a8530a3e7ae6ecbc7f4",
       "Bytes": 5479
