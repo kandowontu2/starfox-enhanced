@@ -128,6 +128,7 @@ def main():
     names = ['configure-native-component', 'build-native-component']
     if args.sdk == 'macosx':
         names.append('run-native-link-consumer')
+        names.append('run-native-metadata-consumer')
     try:
         configure = ['-S', str(ROOT), '-B', str(build), '-G', 'Ninja',
                      '-DCMAKE_BUILD_TYPE=Release', '-DCMAKE_EXPORT_COMPILE_COMMANDS=ON',
@@ -143,15 +144,15 @@ def main():
             configure.append('-DCMAKE_SYSTEM_NAME=iOS')
         operations.append(sdk.operate(names[0], cmake, configure, args.out, manifest, library, environment))
         operations.append(sdk.operate(names[1], cmake, ['--build', str(build), '--target',
-            'starfox_metal_factory_link_check', '--parallel', '1', '--verbose'], args.out, manifest, library, environment))
+            'starfox_metal_factory_link_check', 'starfox_metal_pipeline_metadata_check', '--parallel', '1', '--verbose'], args.out, manifest, library, environment))
         commands = json.loads((build / 'compile_commands.json').read_text())
-        for file in ('gpu_calibrated_reflection_history.cpp', 'embedded_metal_reflection_programs.cpp', 'check_link.cpp'):
+        for file in ('gpu_calibrated_reflection_history.cpp', 'embedded_metal_reflection_programs.cpp', 'check_link.cpp', 'check_metal_pipeline_metadata.cpp'):
             selected = [c for c in commands if Path(c['file']).name == file]
             if len(selected) != 1 or any(flag not in selected[0]['command'] for flag in
                     ('-O3', '-fno-fast-math', '-ffp-contract=off', '-Wall', '-Wextra', '-Wconversion', '-Werror', '-arch '+arch)):
                 raise RuntimeError('Actual native CMake strict compile recipe differs for '+file)
-            if file != 'check_link.cpp' and any(flag not in selected[0]['command'] for flag in
-                    ('-DSTARFOX_REFLECTION_SOURCE_INDEX_AVAILABLE=1', '-DSTARFOX_REFLECTION_EMBEDDED_METAL=1')):
+            if file in ('gpu_calibrated_reflection_history.cpp', 'embedded_metal_reflection_programs.cpp') and any(flag not in selected[0]['command'] for flag in
+                    ('-DSTARFOX_REFLECTION_SOURCE_INDEX_AVAILABLE=1', '-DSTARFOX_REFLECTION_EMBEDDED_METAL=1', '-DSTARFOX_REFLECTION_METAL_EXACT_WORKGROUP=1')):
                 raise RuntimeError('Actual native factory graph macro missing')
         shutil.copyfile(build / 'compile_commands.json', args.out / 'compile_commands.json')
         assembly_objects = list(build.glob('CMakeFiles/starfox_metal_reflection_history.dir/**/libraries.S.o'))
@@ -170,6 +171,10 @@ def main():
         byte_pass = True
         shutil.copyfile(executable, args.out / 'native-link-consumer')
         shutil.copyfile(build / 'libstarfox_metal_reflection_history.a', args.out / 'libstarfox_metal_reflection_history.a')
+        metadata_executable = (build / ('starfox_metal_pipeline_metadata_check.app/starfox_metal_pipeline_metadata_check'
+            if args.sdk == 'iphoneos' else 'starfox_metal_pipeline_metadata_check')).resolve(strict=True)
+        shutil.copyfile(metadata_executable, args.out / 'native-metadata-consumer')
+        shutil.copyfile(build / '_deps/sdl3-src/src/gpu/metal/SDL_gpu_metal.m', args.out / 'patched-SDL_gpu_metal.m')
         if args.sdk == 'macosx':
             explicit_tools[str(executable)] = sdk.digest(executable)
             operations.append(sdk.operate(names[2], executable, [], args.out, manifest, library, environment))
@@ -177,6 +182,11 @@ def main():
             if output.count('PAYLOAD_PASS ') != 25 or 'ALL25_SDL_PAYLOAD_SELECTION_PASS refusals=625;' not in output or 'ACTUAL_FACTORY_OWNER_LINK_PASS;' not in output:
                 raise RuntimeError('Actual native component owner/full25/refusal consumer incomplete')
             native_pass = True
+            explicit_tools[str(metadata_executable)] = sdk.digest(metadata_executable)
+            operations.append(sdk.operate(names[3], metadata_executable, [], args.out, manifest, library, environment))
+            metadata_output = (args.out / (names[3]+'.stdout.log')).read_text()
+            if metadata_output.count('METAL_EXACT_WORKGROUP_METADATA_PASS; real SDL properties; no GPU or pipeline created') != 1:
+                raise RuntimeError('Real SDL metadata lifecycle/ownership checks failed')
     except Exception as error:
         failure = str(error)
     finally:
@@ -192,6 +202,7 @@ def main():
                   'NinjaSha256': sdk.digest(ninja), 'FinalReadonlyPayloadBytesAccepted': byte_pass,
                   'NativeConsumerAccepted': native_pass, 'Operations': operations, 'Failure': failure,
                   'GpuLaunched': False, 'ProductionAdopted': False,
+                  'ExactWorkgroupMetadataAccepted': args.sdk == 'macosx' and failure is None and native_pass,
                   'BuildSucceeded': failure is None and len(operations) == len(names)}
         (args.out / 'link-receipt.json').write_text(json.dumps(report, indent=2))
         print(json.dumps(report, indent=2))

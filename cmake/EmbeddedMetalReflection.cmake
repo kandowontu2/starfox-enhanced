@@ -23,7 +23,8 @@ function(starfox_add_embedded_metal_reflection_history target embedding_director
     target_compile_features(${target} PUBLIC cxx_std_20)
     target_compile_definitions(${target} PRIVATE
         STARFOX_REFLECTION_SOURCE_INDEX_AVAILABLE=1
-        STARFOX_REFLECTION_EMBEDDED_METAL=1)
+        STARFOX_REFLECTION_EMBEDDED_METAL=1
+        STARFOX_REFLECTION_METAL_EXACT_WORKGROUP=1)
     target_compile_options(${target} PRIVATE
         "$<$<COMPILE_LANGUAGE:CXX>:-O3;-fno-fast-math;-ffp-contract=off;-Wall;-Wextra;-Wconversion;-Werror>")
     target_link_libraries(${target} PRIVATE SDL3::SDL3)

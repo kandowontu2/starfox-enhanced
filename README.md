@@ -1,4 +1,27 @@
-# Temporary complete Metal reflection offline build integration
+# Temporary real SDL Metal exact-workgroup candidate
+
+This source-only candidate connects the exact-original-workgroup descriptor
+hint to the actual SDL Metal compute constructor and the full reflection
+pipeline factory graph. It changes no shader math/source/library bytes,
+precision, bindings, dispatch workgroup or native resource policy. The private
+hint is opt-in; other SDL descriptors retain their automatic threadgroup limit.
+Metal returning a nil pipeline without NSError now explicitly refuses instead
+of constructing a wrapper around a missing GPU resource.
+
+The caller's descriptor and all metadata remain unchanged. A temporary metadata
+group borrows pointer values without duplicating their cleanup ownership and
+remains alive until joined pipeline creation returns. Separate actual real-SDL
+property tests cover values, caller isolation, failure, exceptions, empty/null/
+retired metadata and exactly-once cleanup. They create no GPU or pipeline.
+
+Both SDK jobs are intended to compile/link the full original16-site/25-program
+component and privately patched real SDL implementation. macOS runs the original
+full25/625-refusal/idle-owner consumer plus the metadata lifecycle tests. iOS is
+compile/link only. The separately live R266 GPU test is not replaced or restarted.
+Actual pipeline/dispatch/numerical/frame-cost and game integration/adoption still
+require their full checks. No release or production merge occurs here.
+
+## Earlier source-build history (not this workflow's new execution scope)
 
 Source-only CI branch for Star Fox Enhanced. No ROMs, private game assets,
 credentials or release publication are included.

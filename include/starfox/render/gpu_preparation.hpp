@@ -7,6 +7,9 @@
 #include <cstring>
 #include <cstdlib>
 #include <iostream>
+#if defined(STARFOX_REFLECTION_METAL_EXACT_WORKGROUP)
+#include "starfox/render/sdl_metal_exact_workgroup.hpp"
+#endif
 
 namespace starfox::render {
 
@@ -33,6 +36,13 @@ template<class Create> auto prepare_gpu_resource(Create&& create,const char* kin
 }
 inline SDL_GPUComputePipeline* create_gpu_compute_pipeline(SDL_GPUDevice* device,
     const SDL_GPUComputePipelineCreateInfo* info) {
+#if defined(STARFOX_REFLECTION_METAL_EXACT_WORKGROUP)
+    if(info && info->format==SDL_GPU_SHADERFORMAT_METALLIB) {
+        return with_metal_exact_workgroup(info,[&](const SDL_GPUComputePipelineCreateInfo* candidate) {
+            return prepare_gpu_resource([&] {return SDL_CreateGPUComputePipeline(device,candidate);},"compute");
+        });
+    }
+#endif
     return prepare_gpu_resource([&] {return SDL_CreateGPUComputePipeline(device,info);},"compute");
 }
 inline SDL_GPUGraphicsPipeline* create_gpu_graphics_pipeline(SDL_GPUDevice* device,
