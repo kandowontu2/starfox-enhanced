@@ -1,4 +1,22 @@
-# Temporary source-built real SDL Metal exact-workgroup candidate
+# Temporary actual SDL Metal pipeline probe compilation
+
+This follow-up compiles and links a native actual-SDL full25 pipeline probe
+against the complete reflection component and verified patched real SDL. It
+uses the same payload selector and joined creation helper as the real factory
+graph, preserving all original resources, workgroups, metadata and libraries.
+The probe is NOT executed here. Source-only CI links it for both SDKs, runs only
+the unchanged macOS CPU metadata/full25-selection/idle-owner consumers, and
+never creates a GPU device or publishes a release. iOS is compile/link only.
+
+This workflow reuses the exact original successful complete25 SDK libraries per
+target; R284's separate full50 fresh source-build evidence remains independent.
+Before a future --run-gpu invocation, require the original R266 authoritative
+terminal/evidence and actual retirement, the native observer/resource guards,
+and verified exact component/probe artifacts. Continue after individual pipeline
+errors and require every pipeline plus separate real owner initialization.
+Driver acceptance is not dispatch/numerical/frame-cost or game ABI acceptance.
+
+## Earlier source-built composition history
 
 This follow-up connects the already compiled real-SDL exact-workgroup candidate
 to the offline source-build graph too. Both SDK jobs freshly compile all25

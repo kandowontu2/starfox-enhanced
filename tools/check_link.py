@@ -123,7 +123,7 @@ def main():
         return {key: explicit_tools[key]}
     sdk.pin_sdk_executables = pin_component_tool
     environment = {'SDKROOT': sdk_root}
-    operations, failure, byte_pass, native_pass = [], None, False, False
+    operations, failure, byte_pass, native_pass, pipeline_probe_compiled = [], None, False, False, False
     build = args.out / 'build'
     names = ['configure-native-component', 'build-native-component']
     if args.sdk == 'macosx':
@@ -144,7 +144,8 @@ def main():
             configure.append('-DCMAKE_SYSTEM_NAME=iOS')
         operations.append(sdk.operate(names[0], cmake, configure, args.out, manifest, library, environment))
         operations.append(sdk.operate(names[1], cmake, ['--build', str(build), '--target',
-            'starfox_metal_factory_link_check', 'starfox_metal_pipeline_metadata_check', '--parallel', '1', '--verbose'], args.out, manifest, library, environment))
+            'starfox_metal_factory_link_check', 'starfox_metal_pipeline_metadata_check',
+            'starfox_metal_sdl_pipeline_check', '--parallel', '1', '--verbose'], args.out, manifest, library, environment))
         commands = json.loads((build / 'compile_commands.json').read_text())
         for file in ('gpu_calibrated_reflection_history.cpp', 'embedded_metal_reflection_programs.cpp', 'check_link.cpp', 'check_metal_pipeline_metadata.cpp'):
             selected = [c for c in commands if Path(c['file']).name == file]
@@ -175,6 +176,17 @@ def main():
             if args.sdk == 'iphoneos' else 'starfox_metal_pipeline_metadata_check')).resolve(strict=True)
         shutil.copyfile(metadata_executable, args.out / 'native-metadata-consumer')
         shutil.copyfile(build / '_deps/sdl3-src/src/gpu/metal/SDL_gpu_metal.m', args.out / 'patched-SDL_gpu_metal.m')
+        pipeline_probe = (build / ('starfox_metal_sdl_pipeline_check.app/starfox_metal_sdl_pipeline_check'
+            if args.sdk == 'iphoneos' else 'starfox_metal_sdl_pipeline_check')).resolve(strict=True)
+        probe_constants, probe_address = native_executable_constants(pipeline_probe.read_bytes(), cpu)
+        if probe_constants.count(expected) != 1 or (probe_address + probe_constants.find(expected)) % 16:
+            raise RuntimeError('Actual SDL pipeline probe lacks the complete read-only aligned25 library bundle')
+        if b'ALL25_ACTUAL_SDL_METAL_PIPELINES_PASS;' not in pipeline_probe.read_bytes():
+            raise RuntimeError('Actual native SDL probe entry missing')
+        shutil.copyfile(pipeline_probe, args.out / 'native-sdl-pipeline-probe')
+        pipeline_probe_compiled = True
+        # Compile/link only: this device-creating executable is deliberately
+        # absent from explicit_tools and operations. No --run-gpu here.
         if args.sdk == 'macosx':
             explicit_tools[str(executable)] = sdk.digest(executable)
             operations.append(sdk.operate(names[2], executable, [], args.out, manifest, library, environment))
@@ -202,6 +214,8 @@ def main():
                   'NinjaSha256': sdk.digest(ninja), 'FinalReadonlyPayloadBytesAccepted': byte_pass,
                   'NativeConsumerAccepted': native_pass, 'Operations': operations, 'Failure': failure,
                   'GpuLaunched': False, 'ProductionAdopted': False,
+                  'SdlPipelineProbeCompiled': pipeline_probe_compiled,
+                  'SdlPipelineProbeExecuted': False,
                   'ExactWorkgroupMetadataAccepted': args.sdk == 'macosx' and failure is None and native_pass,
                   'BuildSucceeded': failure is None and len(operations) == len(names)}
         (args.out / 'link-receipt.json').write_text(json.dumps(report, indent=2))

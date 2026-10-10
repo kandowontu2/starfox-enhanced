@@ -1,11 +1,12 @@
-name: Temporary source-built exact-workgroup Apple component (no GPU/release)
+name: Temporary actual SDL pipeline probe compile (no GPU, no release)
 on:
   workflow_dispatch:
 permissions:
   contents: read
+  actions: read
 jobs:
-  metal-source-graph:
-    name: Complete25 source-built patched SDL component / ${{ matrix.sdk }}
+  metal-embedding:
+    name: Complete25 actual SDL probe compile / ${{ matrix.sdk }}
     runs-on: macos-15-intel
     strategy:
       fail-fast: false
@@ -17,28 +18,34 @@ jobs:
           persist-credentials: false
           submodules: false
           lfs: false
-      - name: Build all25 shaders from source, patched SDL component and metadata controls
-        run: python3 tools/check_source_graph.py --build --sdk '${{ matrix.sdk }}' --out '${{ runner.temp }}/source-graph'
-      - name: Preserve actual native source-build evidence
+      - name: Fetch only the original complete25 public SDK shader results
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 38054247676
+          pattern: metal-${{ matrix.sdk }}-*
+          path: ${{ runner.temp }}/sdk-artifacts
+      - name: Build complete factory graph, actual SDL probe and metadata controls (no GPU execution)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/check_link.py --sdk '${{ matrix.sdk }}' --artifacts '${{ runner.temp }}/sdk-artifacts' --out '${{ runner.temp }}/embedding-result'
+      - name: Preserve diagnostics and nonprivate native shader artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: source-component-${{ matrix.sdk }}
+          name: linked-${{ matrix.sdk }}
           path: |
-            ${{ runner.temp }}/source-graph/*.json
-            ${{ runner.temp }}/source-graph/*.log
-            ${{ runner.temp }}/source-graph/build.ninja
-            ${{ runner.temp }}/source-graph/compiler-evidence
-            ${{ runner.temp }}/source-graph/component-libraries.o
-            ${{ runner.temp }}/source-graph/native-link-consumer
-            ${{ runner.temp }}/source-graph/native-metadata-consumer
-            ${{ runner.temp }}/source-graph/patched-SDL_gpu_metal.m
-            ${{ runner.temp }}/source-graph/libstarfox_metal_reflection_history.a
-            ${{ runner.temp }}/source-graph/build/generated-metal/**/*.terminal.json
-            ${{ runner.temp }}/source-graph/build/generated-metal/**/*.prelaunch.json
-            ${{ runner.temp }}/source-graph/build/generated-metal/**/receipt.json
-            ${{ runner.temp }}/source-graph/build/generated-metal/**/*.stdout.log
-            ${{ runner.temp }}/source-graph/build/generated-metal/**/*.stderr.log
-            ${{ runner.temp }}/source-graph/build/generated-metal/**/*.metallib
+            ${{ runner.temp }}/embedding-result/*.o
+            ${{ runner.temp }}/embedding-result/*.terminal.json
+            ${{ runner.temp }}/embedding-result/*.prelaunch.json
+            ${{ runner.temp }}/embedding-result/*.stdout.log
+            ${{ runner.temp }}/embedding-result/*.stderr.log
+            ${{ runner.temp }}/embedding-result/link-receipt.json
+            ${{ runner.temp }}/embedding-result/compile_commands.json
+            ${{ runner.temp }}/embedding-result/native-link-consumer
+            ${{ runner.temp }}/embedding-result/native-metadata-consumer
+            ${{ runner.temp }}/embedding-result/native-sdl-pipeline-probe
+            ${{ runner.temp }}/embedding-result/patched-SDL_gpu_metal.m
+            ${{ runner.temp }}/embedding-result/libstarfox_metal_reflection_history.a
           if-no-files-found: warn
           retention-days: 7
