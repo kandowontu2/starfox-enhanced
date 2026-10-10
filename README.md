@@ -1,10 +1,20 @@
-# Star Fox Enhanced — native Metal optical transport candidate
+# Star Fox Enhanced — native Metal optical and lifecycle candidate
 
 This temporary source-only component adds explicit linear/sRGB reflection
 transport, seamless resident environment cubes and calibrated mirror/gold/copper
 model lobes to the entire native Metal producer and both runtime shaders.
 
 AI/Codex is used for programming, testing and documentation.
+
+The native owner now provides nonblocking completion polling and cleanup,
+with output-image capacity accounting (not available VRAM). Pending/failed
+completion invalidates borrowed outputs but retains all resources and the
+device. A submission without a fence is consumed once; an empty later ordered
+marker certifies completion, never replaying or cancelling the submitted work.
+Blocking cleanup certifies every slot before releasing any allocation. Failed
+waits cannot partially tear down a live owner or free ARC-owned GPU resources.
+Ordinary slot reuse retains its existing wait semantics, now with failed-fence
+recovery; polling/try-cleanup never wait. Consumers own their SDL device lifetime.
 
 Encoding 0 retains the legacy gamma approximation; 1 transports linear colour;
 2 decodes/encodes the canonical sRGB equations. Liquid emission, refraction,
@@ -45,9 +55,8 @@ CI compiles the entire Objective-C++ producer against its real project header
 closure and original public SDL headers, then compiles/links both full runtime
 shadow and reflection shader libraries using the existing Metal3.0 RT language
 recipe and strict O3/FP flags. It retains the original native process/memory
-observer. All seven prior source assembly/contract tests are retained, updated
-only for intentional ABI/call-site additions; three optical-contract checks
-are added. No GPU is executed. This is not an abbreviated
+observer. All ten prior source assembly/contract tests are retained; three
+lifecycle-contract checks are added. No GPU is executed. This is not an abbreviated
 complete25 test suite.
 
 This candidate supplies the native material colour/coverage contract for the

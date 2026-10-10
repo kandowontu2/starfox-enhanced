@@ -753,6 +753,7 @@ struct MetalHardwareRt::Impl {
     GpuBackground reflection_backdrop;
     struct InFlight {
         SDL_GPUFence* fence{};
+        bool unfenced{};
         id<MTLBuffer> cpu_vertices;
         id<MTLBuffer> cpu_materials;
         id<MTLBuffer> enhanced_backdrop;
@@ -768,16 +769,69 @@ struct MetalHardwareRt::Impl {
     GpuReflectionOutput reflection{};
     std::string status{"Metal hardware ray tracing not initialized"};
 
-    ~Impl() {
-        if(!device) return;
-        for(auto& frame:inflight) {
-            if(frame.fence) {
-                SDL_WaitForGPUFences(device,true,&frame.fence,1);
-                SDL_ReleaseGPUFence(device,frame.fence);
-            }
+    bool recover_fence(InFlight& slot) noexcept {
+        if(!slot.unfenced) return true;
+        auto* marker=SDL_AcquireGPUCommandBuffer(device);
+        if(!marker) return false;
+        // Submission consumed the failed command. Never cancel or replay it:
+        // an empty later same-queue marker certifies its earlier native work.
+        slot.fence=SDL_SubmitGPUCommandBufferAndAcquireFence(marker);
+        if(slot.fence) slot.unfenced=false;
+        return !slot.unfenced;
+    }
+    bool complete() noexcept {
+        if(!device) return true;
+        for(auto& slot:inflight)
+            if(!recover_fence(slot) || (slot.fence && !SDL_QueryGPUFence(device,slot.fence))) return false;
+        return true;
+    }
+    void await(InFlight& slot) {
+        if(!recover_fence(slot)) {
+            if(!SDL_WaitForGPUIdle(device)) throw std::runtime_error(SDL_GetError());
+            slot.unfenced=false;
         }
+        if(slot.fence && !SDL_WaitForGPUFences(device,true,&slot.fence,1))
+            throw std::runtime_error(SDL_GetError());
+    }
+    void clear_completed(InFlight& slot,bool release_cached=false) {
+        if(slot.fence) {SDL_ReleaseGPUFence(device,slot.fence);slot.fence=nullptr;}
+        slot.unfenced=false;
+        slot.cpu_vertices=nil;slot.cpu_materials=nil;
+        slot.palette=nil;slot.texels=nil;
+        slot.scratch=nil;slot.acceleration=nil;
+        if(release_cached) {slot.enhanced_backdrop=nil;slot.enhanced_upload={};}
+    }
+    void submit(InFlight& slot,SDL_GPUCommandBuffer* command) {
+        slot.unfenced=true;
+        slot.fence=SDL_SubmitGPUCommandBufferAndAcquireFence(command);
+        if(slot.fence) {slot.unfenced=false;return;}
+        const std::string error=SDL_GetError();
+        (void)recover_fence(slot);
+        throw std::runtime_error(error.empty()?"Metal ray submission returned no completion fence":error);
+    }
+    bool release(bool wait) noexcept {
+        shadow={};reflection={};
+        if(!device) return true;
+        try {
+            // Certify EVERY slot before releasing ANY allocation. A failed
+            // later wait cannot partially destroy another live GPU owner.
+            if(wait) {for(auto& slot:inflight) await(slot);}
+            else if(!complete()) {status="Metal ray cleanup pending";return false;}
+        } catch(const std::exception& error) {
+            try {status=std::string("Metal ray cleanup pending: ")+error.what();} catch(...) {}
+            return false;
+        } catch(...) {
+            try {status="Metal ray cleanup pending: unknown completion failure";} catch(...) {}
+            return false;
+        }
+        for(auto& slot:inflight) clear_completed(slot,true);
         if(output) SDL_ReleaseGPUBuffer(device,output);
         if(reflection_buffer) SDL_ReleaseGPUBuffer(device,reflection_buffer);
+        reflection_backdrop.release_device();
+        output=reflection_buffer=nullptr;output_capacity=reflection_capacity=0;
+        shadow_pipeline=nil;reflection_pipeline=nil;metal=nil;
+        serial=0;device=nullptr;
+        return true;
     }
     void initialize(SDL_GPUDevice* next) {
         if(device==next && shadow_pipeline) return;
@@ -820,14 +874,8 @@ struct MetalHardwareRt::Impl {
         if(!reflection_pipeline) throw std::runtime_error(metal_error(error));
     }
     void wait_slot(InFlight& slot) {
-        if(slot.fence) {
-            if(!SDL_WaitForGPUFences(device,true,&slot.fence,1))
-                throw std::runtime_error(SDL_GetError());
-            SDL_ReleaseGPUFence(device,slot.fence);slot.fence=nullptr;
-        }
-        slot.cpu_vertices=nil;slot.cpu_materials=nil;
-        slot.palette=nil;slot.texels=nil;
-        slot.scratch=nil;slot.acceleration=nil;
+        await(slot);
+        clear_completed(slot);
     }
     void ensure_output(std::uint32_t pixels) {
         if(output && output_capacity>=pixels) return;
@@ -852,7 +900,11 @@ struct MetalHardwareRt::Impl {
 };
 
 MetalHardwareRt::MetalHardwareRt():impl_(std::make_unique<Impl>()) {}
-MetalHardwareRt::~MetalHardwareRt()=default;
+MetalHardwareRt::~MetalHardwareRt() {
+    // A failed wait is not permission to drop ARC-owned GPU-visible storage.
+    // Explicit cleanup lets live callers retain the device and retry instead.
+    if(!impl_->release(true)) (void)impl_.release();
+}
 bool MetalHardwareRt::available(void* raw) const noexcept {
     auto* device=static_cast<SDL_GPUDevice*>(raw);
     if(!device || !SDL_GetGPUDeviceDriver(device)
@@ -1024,9 +1076,8 @@ bool MetalHardwareRt::render_shadows(void* raw,const Scene& scene,
                 impl_->shadow_pipeline.maxTotalThreadsPerThreadgroup),1,1);
             [encoder dispatchThreads:grid threadsPerThreadgroup:group];
             [encoder endEncoding];
-            slot.fence=SDL_SubmitGPUCommandBufferAndAcquireFence(command);
             submitted=true;
-            if(!slot.fence) throw std::runtime_error(SDL_GetError());
+            impl_->submit(slot,command);
         } catch(...) {
             if(!submitted) SDL_CancelGPUCommandBuffer(command);
             throw;
@@ -1279,9 +1330,8 @@ bool MetalHardwareRt::render_reflections(void* raw,
                 impl_->reflection_pipeline.maxTotalThreadsPerThreadgroup),1,1);
             [encoder dispatchThreads:grid threadsPerThreadgroup:group];
             [encoder endEncoding];
-            slot.fence=SDL_SubmitGPUCommandBufferAndAcquireFence(command);
             submitted=true;
-            if(!slot.fence) throw std::runtime_error(SDL_GetError());
+            impl_->submit(slot,command);
         } catch(...) {
             if(!submitted) SDL_CancelGPUCommandBuffer(command);
             throw;
@@ -1299,5 +1349,11 @@ bool MetalHardwareRt::render_reflections(void* raw,
 }
 GpuReflectionOutput MetalHardwareRt::reflection_output() const noexcept {return impl_->reflection;}
 const std::string& MetalHardwareRt::status() const noexcept {return impl_->status;}
-void MetalHardwareRt::release_device() noexcept {impl_.reset(new Impl);}
+bool MetalHardwareRt::native_work_complete() const noexcept {return impl_->complete();}
+std::uint64_t MetalHardwareRt::working_image_bytes() const noexcept {
+    return (impl_->output?std::uint64_t(impl_->output_capacity)*4:0)
+        +(impl_->reflection_buffer?std::uint64_t(impl_->reflection_capacity)*4:0);
+}
+bool MetalHardwareRt::try_release_device() noexcept {return impl_->release(false);}
+void MetalHardwareRt::release_device() noexcept {(void)impl_->release(true);}
 } // namespace starfox::render::shadows

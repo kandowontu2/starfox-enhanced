@@ -181,6 +181,43 @@ class MetalSourceAssemblyTests(unittest.TestCase):
         self.assertIn("float ground_t=abs(denominator)>1e-6f?", shader)
         self.assertIn("SF_VISIBLE_HIT(obstacle,origin,direction,minimum,65536.0f)", shader)
 
+    def test_nonblocking_completion_and_ordered_recovery(self):
+        code = self.implementation
+        complete = code.split("bool complete() noexcept {", 1)[1].split("void await(", 1)[0]
+        self.assertIn("recover_fence(slot)", complete)
+        self.assertIn("SDL_QueryGPUFence(device,slot.fence)", complete)
+        self.assertNotIn("SDL_Wait", complete)
+        recover = code.split("bool recover_fence(", 1)[1].split("bool complete()", 1)[0]
+        self.assertIn("SDL_SubmitGPUCommandBufferAndAcquireFence(marker)", recover)
+        self.assertNotIn("SDL_CancelGPUCommandBuffer", recover)
+        self.assertNotIn("SDL_Wait", recover)
+        submit = code.split("void submit(", 1)[1].split("bool release(", 1)[0]
+        self.assertLess(submit.index("slot.unfenced=true"), submit.index("SDL_SubmitGPUCommandBufferAndAcquireFence(command)"))
+        self.assertIn("(void)recover_fence(slot);", submit)
+        self.assertNotIn("SDL_CancelGPUCommandBuffer", submit)
+        self.assertEqual(code.count("submitted=true;\n            impl_->submit(slot,command);"), 2)
+
+    def test_cleanup_requires_every_slot_before_any_release(self):
+        code = self.implementation
+        release = code.split("bool release(bool wait) noexcept {", 1)[1].split("void initialize(", 1)[0]
+        self.assertLess(release.index("shadow={};reflection={};"), release.index("if(!device)"))
+        self.assertLess(release.index("for(auto& slot:inflight) await(slot);"), release.index("clear_completed(slot,true)"))
+        self.assertLess(release.index("else if(!complete())"), release.index("SDL_ReleaseGPUBuffer"))
+        self.assertIn("shadow_pipeline=nil;reflection_pipeline=nil;metal=nil;", release)
+        self.assertIn("output=reflection_buffer=nullptr;output_capacity=reflection_capacity=0;", release)
+        self.assertIn("serial=0;device=nullptr;", release)
+        self.assertIn("if(!impl_->release(true)) (void)impl_.release();", code)
+        self.assertNotIn("impl_.reset(new Impl)", code)
+        self.assertIn("MetalHardwareRt::try_release_device() noexcept {return impl_->release(false);}", code)
+
+    def test_image_capacity_is_not_claimed_as_available_vram(self):
+        code = self.implementation
+        body = code.split("MetalHardwareRt::working_image_bytes() const noexcept {", 1)[1].split("bool MetalHardwareRt::try_release_device", 1)[0]
+        self.assertIn("std::uint64_t(impl_->output_capacity)*4", body)
+        self.assertIn("std::uint64_t(impl_->reflection_capacity)*4", body)
+        self.assertNotIn("scratch", body)
+        self.assertNotIn("acceleration", body)
+
 
 if __name__ == "__main__":
     unittest.main()

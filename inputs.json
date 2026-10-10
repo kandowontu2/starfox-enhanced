@@ -1,5 +1,5 @@
 {
-  "Scope": "additional-native-linear-colour-resident-environment-model-transport-producer",
+  "Scope": "additional-native-metal-completion-and-resource-lifecycle-producer",
   "Sources": [
     {
       "File": ".gitattributes",
@@ -588,8 +588,8 @@
     },
     {
       "File": "include/starfox/render/metal_hardware_rt.hpp",
-      "Sha256": "d2cf15b4ec49d4ce9363278401e2472c7652b943809281bb55359cdc9695aa39",
-      "Bytes": 2034
+      "Sha256": "b2fd1f5339935ece6cb19ba18cebe1385161feff147ffb5e63a99e6c06f51973",
+      "Bytes": 2590
     },
     {
       "File": "include/starfox/render/metal_material_colour.inc",
@@ -768,13 +768,13 @@
     },
     {
       "File": "README.md",
-      "Sha256": "dbe1a373cca2b23a3918e0c82a4424d27db0c673a906c9926b886c81d1086f68",
-      "Bytes": 3954
+      "Sha256": "336629a468552a351ffafd549ebd801620707aadc881926021b3e4ea6ce4358b",
+      "Bytes": 4604
     },
     {
       "File": "src/render/metal_hardware_rt.mm",
-      "Sha256": "6e347f30bb0a55fa1510f0b08155fa188dd5d3e517a362c5bacdf11402cceb3f",
-      "Bytes": 73611
+      "Sha256": "aaa246952efba61832c0244aadfdd350ac83b36bf089d88815ed410602bfea89",
+      "Bytes": 76380
     },
     {
       "File": "src/render/shaders/metal_native_material_shared.hpp.in",
@@ -788,8 +788,8 @@
     },
     {
       "File": "tests/test_metal_shader_sources.py",
-      "Sha256": "44d54bb0c0c883fd69fab672b4ddbd442ab49ec3ca5b3b232e48dc01d9d65140",
-      "Bytes": 12855
+      "Sha256": "f3fd5ac81c281b29a3f448d3f380fd7b56e30f6849f0d79664f889f9b500258e",
+      "Bytes": 15454
     },
     {
       "File": "tools/check_metal_rt_shaders.py",
@@ -798,8 +798,8 @@
     },
     {
       "File": "tools/check_producer.py",
-      "Sha256": "749dcfb2419c09b44267f78669c5a7e3088b8b1499209387885089f872b1bfb6",
-      "Bytes": 11393
+      "Sha256": "a0aa4b3190d149b450dacf8058f75681c36dc66ea674cf662a8f5c359e809d7b",
+      "Bytes": 11382
     },
     {
       "File": "tools/compile_metal.py",

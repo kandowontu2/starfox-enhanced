@@ -38,6 +38,14 @@ public:
     [[nodiscard]] GpuShadowOutput shadow_output() const noexcept;
     [[nodiscard]] GpuReflectionOutput reflection_output() const noexcept;
     [[nodiscard]] const std::string& status() const noexcept;
+    // No wait/readback. Unfenced submissions acquire a later ordered marker;
+    // a failed submission is never replayed. Consumers retain the SDL device.
+    [[nodiscard]] bool native_work_complete() const noexcept;
+    // Resident output image capacities only, not source/AS/scratch or VRAM.
+    [[nodiscard]] std::uint64_t working_image_bytes() const noexcept;
+    // Both cleanup methods invalidate borrowed outputs. Pending or failed
+    // completion retains every resource and the device for a later retry.
+    bool try_release_device() noexcept;
     void release_device() noexcept;
 
 private:
