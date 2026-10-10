@@ -25,3 +25,10 @@ runtime at link time. This follow-up retains the actual clang++ invocation
 name. That is the only harness-code change; all shader sources, factory sites,
 component sources, descriptors, workgroups, strict flags and resource guards
 are unchanged. The preceding failed native terminals remain preserved.
+
+macOS now passes the real native link and complete payload/idle-owner consumer.
+iOS also builds and links successfully, but that check failed when looking for
+the binary outside its generated .app bundle. This iOS-only follow-up corrects
+the artifact path and repeats the entire original iOS component/SDL build.
+It does not repeat the successful macOS native operation. The shader programs,
+compiled component sources, flags, bindings and original memory guards remain.

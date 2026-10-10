@@ -1,4 +1,4 @@
-name: Temporary native Metal C++ driver linkage fix (no GPU, no release)
+name: Temporary iOS native bundle artifact check (no GPU, no release)
 on:
   workflow_dispatch:
 permissions:
@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        sdk: [macosx, iphoneos]
+        sdk: [iphoneos]
     steps:
       - uses: actions/checkout@v4
         with:

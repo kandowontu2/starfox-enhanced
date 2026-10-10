@@ -162,7 +162,8 @@ def main():
         actual = embedding.native_section(obj.read_bytes(), cpu)
         if actual[:len(expected)] != expected or len(actual)-len(expected) not in range(16) or any(actual[len(expected):]):
             raise RuntimeError('Actual CMake native read-only all25 SDK payload bytes differ')
-        executable = (build / 'starfox_metal_factory_link_check').resolve(strict=True)
+        executable = (build / ('starfox_metal_factory_link_check.app/starfox_metal_factory_link_check'
+            if args.sdk == 'iphoneos' else 'starfox_metal_factory_link_check')).resolve(strict=True)
         final, address = native_executable_constants(executable.read_bytes(), cpu)
         if final.count(expected) != 1 or (address+final.find(expected)) % 16:
             raise RuntimeError('Final native executable lacks the one original complete read-only SDK bundle')
