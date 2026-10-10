@@ -6,7 +6,7 @@ permissions:
 jobs:
   metal-sdk:
     name: Strict complete25 / ${{ matrix.sdk }}
-    runs-on: macos-15
+    runs-on: macos-15-intel
     strategy:
       fail-fast: false
       matrix:
@@ -20,6 +20,9 @@ jobs:
       - name: Inspect actual SDK/compiler availability
         run: |
           xcodebuild -version
+          sysctl hw.memsize
+          vm_stat
+          sysctl vm.swapusage
           xcrun --sdk '${{ matrix.sdk }}' --find metal
           xcrun --sdk '${{ matrix.sdk }}' --find metallib
       - name: Compile and link the exact complete25 source shaders
@@ -32,6 +35,7 @@ jobs:
           path: |
             ${{ runner.temp }}/metal-result/*.metallib
             ${{ runner.temp }}/metal-result/*.terminal.json
+            ${{ runner.temp }}/metal-result/*.prelaunch.json
             ${{ runner.temp }}/metal-result/*.stdout.log
             ${{ runner.temp }}/metal-result/*.stderr.log
             ${{ runner.temp }}/metal-result/receipt.json

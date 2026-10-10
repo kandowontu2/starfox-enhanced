@@ -18,6 +18,10 @@ FLAGS = ["-std=metal3.0", "-O3", "-Werror", "-fno-fast-math", "-ffp-contract=off
 GIB = 1 << 30
 
 
+class Deferred(RuntimeError):
+    """A prelaunch resource refusal, not a failed shader compiler."""
+
+
 def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -59,6 +63,14 @@ def controls(manifest):
         except RuntimeError:
             continue
         raise RuntimeError("Altered/incomplete source control was accepted")
+    owner = {"pid": 42, "birth": [1, 2], "path": "/actual/compiler"}
+    if not same_identity(owner, dict(owner)) or same_identity(owner, None):
+        raise RuntimeError("Native identity positive/null control failed")
+    for key, value in (("pid", 43), ("birth", [1, 3]), ("path", "/other/compiler")):
+        changed = dict(owner)
+        changed[key] = value
+        if same_identity(owner, changed):
+            raise RuntimeError("Changed native identity accepted")
     print("PASS: complete25 actual source pins; missing/duplicate/escaped/changed bytes/entry/size rejected. No SDK compiler launched.")
 
 
@@ -119,9 +131,11 @@ def operate(name, tool, args, out, manifest, library):
     qualify(manifest)
     deadline = time.monotonic() + 300
     before = memory()
+    (out / f"{name}.prelaunch.json").write_text(json.dumps({"name": name, "memory": before,
+        "launch_floor_bytes": 6 * GIB, "native_launched": False}, indent=2), encoding="utf-8")
     while min(before.values()) < 6 * GIB:
         if time.monotonic() >= deadline:
-            raise RuntimeError("Deferred before launch: mapped macOS6GiB launch floors")
+            raise Deferred("Deferred before launch: mapped macOS6GiB launch floors; no native compiler launched")
         time.sleep(5)
         before = memory()
     record = {"name": name, "tool": str(tool), "tool_sha256": digest(tool), "arguments": args,
@@ -134,6 +148,7 @@ def operate(name, tool, args, out, manifest, library):
         record["pid"] = process.pid
         identity = native(process.pid, library)
         record["native_identity"] = identity
+        print(f"Actual SDK {name} PID={process.pid} native_identity={identity}", flush=True)
         try:
             while process.poll() is None:
                 if identity is None:
@@ -157,9 +172,26 @@ def operate(name, tool, args, out, manifest, library):
                     record["stop_memory"] = current
                     break
                 time.sleep(0.25)
+        except Exception as error:
+            record["monitor_failed"] = True
+            record["monitor_error"] = str(error)
+            if process.poll() is None and identity is not None and same_identity(identity, native(process.pid, library)):
+                for child in reversed(tree(identity, library)):
+                    if same_identity(child, native(child["pid"], library)):
+                        os.kill(child["pid"], signal.SIGKILL)
+                record["monitor_stopped"] = True
+            else:
+                # Unknown live identity is not permission to signal another PID.
+                # Leave explicit live-observer failure for CI cleanup; no fake
+                # terminal or blocking unmonitored wait is allowed.
+                record["monitor_stopped"] = False
+            raise
         finally:
             # No elapsed native kill. An observer failure is recorded, not a pass.
-            record["exit_code"] = process.wait()
+            if not record.get("monitor_failed") or record.get("monitor_stopped") or process.poll() is not None:
+                record["exit_code"] = process.wait()
+            else:
+                record["live_at_observer_failure"] = True
             (out / f"{name}.terminal.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
     qualify(manifest)
     if record["resource_stopped"] or record["exit_code"] != 0:
@@ -198,8 +230,10 @@ def main():
             accepted.append({"name": row["Name"], "source_sha256": row["Sha256"], "metallib_sha256": digest(binary), "bytes": binary.stat().st_size})
         except RuntimeError as error:
             failed.append({"name": row["Name"], "error": str(error)})
+            if isinstance(error, Deferred):
+                break
             terminal = args.out / f"{row['Name']}-compile.terminal.json"
-            if terminal.exists() and json.loads(terminal.read_text())["resource_stopped"]:
+            if terminal.exists() and (json.loads(terminal.read_text())["resource_stopped"] or json.loads(terminal.read_text()).get("monitor_failed")):
                 break
     receipt = {"scope": "Actual SDK compilation/link only; not Metal runtime, SDL binding ABI, numerical/optical parity or performance acceptance",
                "sdk": args.sdk, "sdk_version": subprocess.check_output(["xcrun", "--sdk", args.sdk, "--show-sdk-version"], text=True).strip(),
