@@ -24,7 +24,11 @@ class Deferred(RuntimeError):
 
 
 def digest(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    held = hashlib.sha256()
+    with path.open('rb') as stream:
+        for block in iter(lambda: stream.read(1 << 20), b''):
+            held.update(block)
+    return held.hexdigest()
 
 
 def qualify(manifest):
@@ -72,6 +76,14 @@ def controls(manifest):
         changed[key] = value
         if same_identity(owner, changed):
             raise RuntimeError("Changed native identity accepted")
+    allowed = {'/actual/compiler': 'held', '/verified/versioned/compiler': 'held2'}
+    versioned = {**owner, 'path': '/verified/versioned/compiler'}
+    if not authorized_exec(owner, versioned, allowed):
+        raise RuntimeError('Pinned same-incarnation exec control rejected')
+    for changed in ({**versioned, 'pid': 43}, {**versioned, 'birth': [1, 3]},
+                    {**versioned, 'path': '/unverified/compiler'}):
+        if authorized_exec(owner, changed, allowed):
+            raise RuntimeError('Reused PID/birth or unverified exec path accepted')
     for empty in (b'', b'MTLB' + bytes(88), b'MTLB' + bytes(1024)):
         try:
             qualify_metallib(empty, 'actual_kernel')
@@ -134,6 +146,34 @@ def same_identity(left, right):
     return right is not None and all(left[k] == right[k] for k in ("pid", "birth", "path"))
 
 
+def authorized_exec(left, right, allowed):
+    return (right is not None and all(left[k] == right[k] for k in ('pid', 'birth'))
+            and right['path'] in allowed)
+
+
+def pin_sdk_executables(frontend):
+    # Xcode16.4's real launcher execs usr/metal/32023/bin/metal without
+    # changing PID/birth. Freeze existing matching binaries BEFORE launch;
+    # never authorize an arbitrary path merely because it shares a PID.
+    toolchain = frontend.parents[2]
+    if not toolchain.name.endswith('.xctoolchain') or frontend.parent != toolchain / 'usr/bin':
+        raise RuntimeError('Unexpected Xcode SDK toolchain frontend layout')
+    paths = [frontend]
+    version_root = toolchain / 'usr/metal'
+    if version_root.exists():
+        for version in sorted(version_root.iterdir()):
+            candidate = version / 'bin' / frontend.name
+            if version.name.isdecimal() and candidate.is_file():
+                paths.append(candidate)
+    allowed = {}
+    for candidate in paths:
+        real = candidate.resolve(strict=True)
+        if not real.is_relative_to(toolchain.resolve()) or real.name not in (frontend.name, 'air-lld'):
+            raise RuntimeError('SDK executable escaped held toolchain or changed tool')
+        allowed[str(real)] = digest(real)
+    return allowed
+
+
 def qualify_metallib(data, entry):
     # The old resolved air-lld invocation warned that it ignored the input AIR
     # and produced a 92-byte empty MTLB. Reject that actual failure and a missing
@@ -142,7 +182,7 @@ def qualify_metallib(data, entry):
         raise RuntimeError('Empty/invalid Metal library or exact kernel entry missing')
 
 
-def observed_identity(process, expected, library, record):
+def observed_identity(process, expected, library, record, allowed):
     # A libproc query can lose the task while waitpid has not reported its
     # retirement yet. Re-poll the same owned child, never restart or signal an
     # unknown PID. Record both actual identities if a real mismatch remains.
@@ -151,9 +191,16 @@ def observed_identity(process, expected, library, record):
         if process.poll() is not None:
             return None
         if actual is not None:
-            if expected is not None and not same_identity(expected, actual):
+            if actual['path'] not in allowed or (expected is not None and not authorized_exec(expected, actual, allowed)):
                 record['identity_mismatch'] = {'expected': expected, 'actual': actual}
-                raise RuntimeError('Actual owned compiler birth/path changed')
+                raise RuntimeError('Actual compiler incarnation or unverified executable changed')
+            if expected is None or actual['path'] != expected['path']:
+                if digest(Path(actual['path'])) != allowed[actual['path']]:
+                    record['identity_mismatch'] = {'expected': expected, 'actual': actual}
+                    raise RuntimeError('Prelaunch-pinned SDK executable bytes changed')
+                if expected is not None:
+                    record.setdefault('verified_exec_transitions', []).append({'before': expected, 'after': actual,
+                        'executable_sha256': allowed[actual['path']]})
             return actual
         time.sleep(0.05)
     record['identity_mismatch'] = {'expected': expected, 'actual': None}
@@ -162,6 +209,7 @@ def observed_identity(process, expected, library, record):
 
 def operate(name, tool, args, out, manifest, library, sdk_environment):
     qualify(manifest)
+    allowed = pin_sdk_executables(tool)
     deadline = time.monotonic() + 300
     before = memory()
     (out / f"{name}.prelaunch.json").write_text(json.dumps({"name": name, "memory": before,
@@ -177,6 +225,7 @@ def operate(name, tool, args, out, manifest, library, sdk_environment):
     resident_cap = min(6 * GIB, before['available_physical_bytes'] - 3 * GIB)
     record = {"name": name, "tool": str(tool), "tool_realpath": os.path.realpath(tool),
               "tool_sha256": digest(tool), "arguments": args, "sdk_environment": sdk_environment,
+              'prelaunch_pinned_executables': allowed,
               "launch_memory": before, "exit_code": None, "resource_stopped": False,
               "peak_owned_tree_resident_bytes": 0, 'owned_tree_resident_cap_bytes': resident_cap,
               "scope": "Cloud14GiB host-adapted resident cap, not the earlier2GiB recipe or Windows private committed bytes"}
@@ -190,12 +239,13 @@ def operate(name, tool, args, out, manifest, library, sdk_environment):
         print(f"Actual SDK {name} PID={process.pid} native_identity={identity}", flush=True)
         try:
             while process.poll() is None:
-                actual = observed_identity(process, identity, library, record)
+                actual = observed_identity(process, identity, library, record, allowed)
                 if actual is None:
                     break
                 if identity is None:
-                    identity = actual
-                    record['native_identity'] = identity
+                    record['native_identity'] = actual
+                identity = actual
+                record['last_verified_native_identity'] = actual
                 children = tree(identity, library)
                 resident = sum(p["resident"] for p in children)
                 record["peak_owned_tree_resident_bytes"] = max(record["peak_owned_tree_resident_bytes"], resident)
@@ -204,7 +254,7 @@ def operate(name, tool, args, out, manifest, library, sdk_environment):
                     if process.poll() is not None:
                         record['resource_limit_exceeded_at_retirement'] = True
                         break
-                    actual = observed_identity(process, identity, library, record)
+                    actual = observed_identity(process, identity, library, record, allowed)
                     if actual is None:
                         record['resource_limit_exceeded_at_retirement'] = True
                         break
@@ -237,6 +287,8 @@ def operate(name, tool, args, out, manifest, library, sdk_environment):
                 record["live_at_observer_failure"] = True
             (out / f"{name}.terminal.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
     qualify(manifest)
+    if any(digest(Path(path)) != held for path, held in allowed.items()):
+        raise RuntimeError('Held SDK executable bytes changed during operation')
     if record["resource_stopped"] or record.get('resource_limit_exceeded_at_retirement') or record["exit_code"] != 0:
         raise RuntimeError(f"Actual SDK operation failed: {name}; terminal/logs preserved")
     return record

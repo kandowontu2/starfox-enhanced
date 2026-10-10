@@ -35,6 +35,10 @@ remaining programs. All 25 source pins are checked in each job; full compiler
 coverage requires all 50 SDK/program jobs. The SDK target/root and original
 tool name are explicit, linker warnings reject, and each MTLB must contain its
 exact expected kernel token. No empty library is accepted as linked success.
+Xcode's observed launcher-to-versioned-compiler exec is accepted only for
+the same native PID and birth, with the destination binary path and SHA-256
+pinned from the selected toolchain before launch. Transitions are recorded;
+an unverified path, changed binary or reused incarnation still fails.
 
 These MSL 3.0 checks explicitly target macOS 13/iOS 16. They do not raise the
 application's macOS 11/iOS 15 deployment minimums or prove compatibility of
