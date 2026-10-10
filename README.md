@@ -1,201 +1,29 @@
-# Star Fox Enhanced
+# Star Fox Enhanced — native material coverage SDK candidate
 
-A native C++/SDL3 port of [UltraStarFox](https://github.com/Sunlitspace542/ultrastarfox),
-with **Original Star Fox** and **Star Fox EX** experiences, high-frame-rate
-presentation, widescreen support, and optional visual enhancements using Codex AI (5.6 Sol, 6 Astra, 6 Sol).
+This temporary, source-only tree compiles one new material-opacity decoder for
+the macOS and iOS Metal SDKs. It is not a release or a replacement for the
+existing complete 25-program reflection pipeline and its validation suite.
 
-# THIS PROJECT WAS PORTED AND CODED BY AI/CODEX
+The decoder handles the native 64-byte kind-2 solid/dither and kind-3
+RGBA/indexed-atlas material records. It returns only fully opaque texels and
+does not apply material styles, lighting or sRGB conversions. Palette index
+zero can be opaque black; partially transparent texels are ray cutouts.
 
-**AI disclosure:** This project is made with AI assistance, including OpenAI
-Codex and AI tools used for programming, testing, documentation and some visual
-assets.
+The same scalar decoder passed 4,217,088 independent CPU opacity comparisons
+across all 24 existing opacity variants before this SDK check. That result is
+not Metal execution, ray traversal, reflection-colour, game integration or
+performance acceptance. The Metal probe adds a query-count bounds check.
 
-**[Download 0.0.8](https://github.com/kandowontu2/starfox-enhanced/releases/tag/v0.0.8)** ·
-[Changelog](https://github.com/kandowontu2/starfox-enhanced/blob/main/docs/RELEASE-0.0.8.md) ·
-[Settings and controls](https://github.com/kandowontu2/starfox-enhanced/blob/main/docs/SETTINGS-AND-CONTROLS.md) ·
-[Build guide](https://github.com/kandowontu2/starfox-enhanced/blob/main/docs/BUILDING.md) ·
-[Report a bug](https://github.com/kandowontu2/starfox-enhanced/issues)
+`tools/compile_coverage.py` verifies every source byte against `inputs.json`,
+then uses the unchanged native compiler observer from the complete-pipeline
+SDK recipe. Only its source-qualification callback changes to this explicitly
+separate component's complete input inventory. Compiler flags, SDK minimums,
+process ownership, memory floors and resident cap are unchanged.
 
-> This is an alpha release, not a cycle-accurate SNES emulator. A supported,
-> unmodified retail ROM supplied by you is required. No retail ROM is included.
+The manual workflow compiles and links this one kernel per SDK, preserves real
+diagnostics and native-operation receipts, and never executes it on a GPU. It
+does not publish a release, package assets, change main or validate production
+adoption. GPU dispatch and integration remain separate work.
 
-## Get started
-
-1. Download the package for your platform. Desktop users should extract it
-   into a writable folder before launching; no source build is necessary.
-2. Launch the game. On desktop, place your supported `.sfc`/`.smc` ROM beside
-   the executable, or set `STARFOX_RETAIL_ROM` to its path. Mobile apps provide
-   a first-launch file picker.
-3. The game validates your ROM and creates `Starfox-Assets.BIN` locally.
-   On macOS it is saved in your writable application data folder, not inside
-   the `.app` bundle (which may be read-only under Gatekeeper). On other
-   desktop platforms, keep the companion with the application. It may need
-   rebuilding after updates to the embedded assets.
-4. Choose **Original** or **Star Fox EX**, adjust your options, then select
-   **Start Game** from the main menu.
-
-For devices needing prepared assets, the release includes a standalone Windows
-[asset builder](https://github.com/kandowontu2/starfox-enhanced/blob/main/platform/mobile/ASSET_BUILDER.md). It accepts the same ROMs;
-mobile users can also select a ROM directly.
-
-### Supported ROMs
-
-- Star Fox Japan: 1.0 / 1.1
-- Star Fox USA: 1.0 / 1.1 / 1.2
-- Starwing Europe: 1.0 / 1.1
-- Starwing Germany: 1.0
-
-A 512-byte copier header is accepted. Known revisions are checksum-verified
-and canonicalized before the source-built patches are applied. Hacks, betas,
-competition cartridges, Star Fox 2 and unknown revisions are not supported.
-
-## Platforms
-
-| Package | Notes |
-|---|---|
-| Windows x64 / x86 | Extract and run `starfox_pc.exe`. |
-| Linux x64 | Native SDL3 runtime. |
-| macOS universal | Unsigned application for Intel and Apple Silicon. |
-| iOS arm64 | Unsigned device bundle; [signing/sideloading instructions](https://github.com/kandowontu2/starfox-enhanced/blob/main/platform/apple/IOS_INSTALL.md). |
-| Android arm64 | Signed APK; release updates retain the original signing certificate. |
-| Nintendo Switch | Homebrew NRO; [setup and optional forwarder](https://github.com/kandowontu2/starfox-enhanced/blob/main/platform/switch/README.md). |
-| PS Vita | Homebrew VPK; [setup](https://github.com/kandowontu2/starfox-enhanced/blob/main/platform/vita/README.md). |
-| PS5 | Homebrew native title (fake-signed folder); [setup](https://github.com/kandowontu2/starfox-enhanced/blob/main/platform/ps5/README.md). |
-| Xbox UWP x64 | Developer Mode required; [setup](https://github.com/kandowontu2/starfox-enhanced/blob/main/platform/uwp/README.md). |
-| Windows PCVR / Quest 3 | Experimental OpenXR packages; [VR setup](https://github.com/kandowontu2/starfox-enhanced/blob/main/docs/VR-BUILD.md). |
-| Steam Frame (native, ARM64) | Experimental native OpenXR build that runs on the headset itself; [setup and notes](https://github.com/kandowontu2/starfox-enhanced/blob/main/docs/STEAM-FRAME.md). |
-
-Build success does not guarantee identical behavior on every device.
-See the [release notes](https://github.com/kandowontu2/starfox-enhanced/blob/main/docs/RELEASE-0.0.8.md) for verification limits.
-
-An [original 3DS / 3DS XL port](platform/3ds/README.md) is in development,
-with a lower-screen cockpit HUD and slider-controlled stereo planned.
-The current frontend diagnostic is **not a playable game package**.
-
-**Android/Quest upgrades:** release builds retain the recovered original signing
-certificate. No signing-key change or reinstall is required for 0.0.8.
-
-## Features and settings
-
-- **Original and EX:** original routes and frontend flow, plus EX's shipped
-  campaigns, native options and mechanics.
-- **Smooth presentation:** 20–480 FPS choices, defaulting to 60. Game pace is
-  independent of render FPS; Original Speed preserves source-style slowdown.
-- **Display:** 4:3, 16:10, 16:9, 21:9 and 32:9; GPU or software presentation.
-- **Languages:** English, English (Europe), Japanese, German, French and Spanish, including menus
-  and dialogue. EX translations include authored additions.
-- **2D Options:** artwork filtering, 2D Bloom, World Effects and their intensity.
-  The artwork filter also covers textures on 3D polygons.
-- **3D Options:** anti-aliasing, VSync, 1–4× Render Upscale, 3D Bloom, 3D Smoothing,
-  Enhanced Lighting, HDR Effect, Ray Tracing (hardware DXR shadows, default Off),
-  Chromatic Aberration, Model Effects
-  and Model Effect Intensity. HDR Effect is brightness/contrast
-  processing, **not HDR display output**.
-  Ray Tracing replaces original shadows rather than drawing a second set;
-  there is no separate Enhanced Shadows toggle.
-- **Preview:** a fixed reference scene shows graphics changes live. Hold **Tab**
-  to hide the menu temporarily. Preview defaults off each launch.
-- **Customization:** draggable HUD layouts, controller/keyboard remapping,
-  crosshair colors, separate music/SFX volumes, rumble and optional God Mode.
-
-Model and world effects are independent; CEL-DRAWN is model-only and BLUEPRINT
-is world-only. Most visual enhancements are optional. Higher render scales and
-additional effects can increase CPU, GPU and memory use.
-
-Optional Original MSU-1 music requires `Starfox-MSU1.PAK` beside the desktop
-executable (or in the platform's writable storage). It is not included in the
-standard packages. Without it, native SPC music remains available.
-
-See [Settings and controls](https://github.com/kandowontu2/starfox-enhanced/blob/main/docs/SETTINGS-AND-CONTROLS.md) for detailed options,
-EX peripherals, multiplayer and presentation debugging.
-
-## Default controls
-
-| SNES control | Keyboard | Gamepad position |
-|---|---|---|
-| D-pad | Arrow keys | D-pad / left stick |
-| B | Z | South |
-| Y | A | West |
-| A | X | East |
-| X | S | North |
-| L / R | Q / W | Shoulder buttons |
-| Select | Apostrophe (`'`) | Back/View |
-| Start | Enter | Start/Menu |
-
-Button names above follow the SNES layout, not the letters printed on an Xbox
-controller. Remap controls under **Options → Controller**. Menu A actions fire
-once per press; B or Back returns from submenus.
-
-| Shortcut | Action |
-|---|---|
-| Escape | Exit confirmation |
-| Tab in setup | Hide the menu while held |
-| Tab / Ctrl+Tab / Ctrl+Shift+Tab outside setup | 2× / 3× / 5× fast-forward |
-| Ctrl+Shift+R | Reset; remap the final key under Keyboard → Reset |
-| Ctrl+Alt+F12 | Toggle God Mode live |
-| Ctrl+F1 / Ctrl+F2 | Save / load the selected state slot |
-| Ctrl+F3 | Select state slot 0–9; arrows or D-pad, Enter/A to close |
-| F12 on the main setup page | Enable/disable presentation history for this run |
-| F5 / F6 / F7 | Freeze / step forward / step backward with history enabled |
-
-## Saves and upgrades
-
-Windows/Linux desktop builds are portable: keep these files beside the
-executable when moving or upgrading. macOS stores them in its writable user
-application-data folder so an unsigned, Gatekeeper-translocated `.app` can
-import a ROM without writing into its read-only bundle. Older macOS bundle
-settings/saves are copied there on first launch when available.
-
-| File | Purpose |
-|---|---|
-| `Starfox-Assets.BIN` | Locally reconstructed runtime assets |
-| `starfox-ex.srm` | EX cartridge SRAM |
-| `pregame.cfg` | Game and graphics preferences |
-| `input-bindings.cfg` | Keyboard and controller mappings |
-| `hud-layout.cfg` | Per-experience, per-aspect-ratio HUD layouts |
-| `Starfox-MSU1.PAK` | Optional replacement music |
-
-The first normal launch copies missing data from former preference locations;
-existing portable files win, and originals are not deleted. Mobile and console
-builds use writable platform storage instead of their read-only package folders.
-
-## Development and credits
-
-To build, regenerate source assets or run tests, use the
-[build guide](https://github.com/kandowontu2/starfox-enhanced/blob/main/docs/BUILDING.md). The
-[architecture notes](https://github.com/kandowontu2/starfox-enhanced/blob/main/docs/ARCHITECTURE.md) explain the hybrid native/65C816
-boundary: gameplay remains fixed-point while extra presentation frames are
-interpolated. Visual parity remains an ongoing effort.
-
-See [Credits](CREDITS.md) for Nintendo/Argonaut, EX, UltraStarFox and port
-contributors, and [Third-party notices](THIRD_PARTY_NOTICES.md) for dependencies
-and licenses.
-
-## FAQ
-
-Q) The speed on "ORIGINAL" is not lining up exactly with an snes reply.
-
-A) Thats because the speed on the SNES is variable depending on how many models on are screen. The "ORIGINAL" pace is an average speed without overload, as close to original as possible. An "ACCURATE" option may come in the future.
-
-
-Q) THERES XXXXX BUG (AND IVE BEEN REPORTING IT FOR WEEKS)
-
-A) There's a lot to do. A lot. With your patience, it WILL be perfect in time. See the version number? It's accurate.
-
-
-Q) Will you add Starfox 2/SF Contest/Starglider?
-
-A) Starfox 2: yes. SF Contest: maybe. Starglider: maybe.
-
-
-Q) Is AI used in this??
-
-A) Yep. I, however, am not personally installing it on your pc or forcing you to play it.
-
-
-Q) How do I reset settings to default?
-
-A) Hold L+R on the pre-game menu until it resets the settings.
-
-Q) What have you personally tested this on?
-A) Retroid Pocket Flip (60fps with no upscaling effects, less with any), iPhone 17 Pro Max (120fps with 2x upscaling and raytracing), Steam Deck, Quest 3, PC.
+Sources are licensed under GPLv3, like Star Fox Enhanced. The project uses
+AI/Codex assistance for programming, testing and documentation.

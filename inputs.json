@@ -1,0 +1,86 @@
+{
+  "Scope": "one-additional-coverage-kernel",
+  "Entry": "starfox_native_coverage_probe",
+  "Sources": [
+    {
+      "File": ".gitattributes",
+      "Sha256": "705fd4d6451a31d36b3df7de96f83f30ac976c9b4a6d1e51671d8e2f33e2d0da",
+      "Bytes": 8
+    },
+    {
+      "File": ".github/workflows/portable-builds.yml",
+      "Sha256": "cf3075f80c6d61debc2fb49b195138c65d0f0ccb9a3c73b77d9c89fc7fbd0ad4",
+      "Bytes": 1254
+    },
+    {
+      "File": "fixtures/native_indexed_cutout_fixture.hpp",
+      "Sha256": "f33abe9008e43269f06b0e9998e3a0ac1e92aa11f2291cee29301d7e7fa264fc",
+      "Bytes": 10361
+    },
+    {
+      "File": "fixtures/native_reflection_fixture.hpp",
+      "Sha256": "42066c631dc9ddb04895c8e78367a448d416925d474c998de99c35ca455d7f23",
+      "Bytes": 18666
+    },
+    {
+      "File": "fixtures/native_rgba_shadow_fixture.hpp",
+      "Sha256": "a96dc35d8e1ebd12b918b22916454da7aafdf39d4578a718b1be61a9540036ce",
+      "Bytes": 9073
+    },
+    {
+      "File": "fixtures/native_shadow_cutout_fixture.hpp",
+      "Sha256": "0f68e24972ab0f9dca4465570e6b08bad00a6e7c0fa311ff402493a6b0f271b9",
+      "Bytes": 5610
+    },
+    {
+      "File": "fixtures/reflected_liquid_oracle.hpp",
+      "Sha256": "21551eb44bbebd5589e69a31c6338017fa6d148e1808939ce16beb838a8244e9",
+      "Bytes": 4895
+    },
+    {
+      "File": "include/starfox/render/lava_surface.hpp",
+      "Sha256": "aa3714504798e8b2fb6d97c97d0cdaf7b84e32d7fb1803e47855982d9c898c48",
+      "Bytes": 431
+    },
+    {
+      "File": "include/starfox/render/lava_surface.inc",
+      "Sha256": "b8f9fcaffd17ec44ff018f175be3343667fe2fb3328019422b2a768807a74d00",
+      "Bytes": 5622
+    },
+    {
+      "File": "include/starfox/render/metal_native_material_coverage.inc",
+      "Sha256": "69d61c1055f123f1b750eaa95bc3063994f2dbe754316430b41533c8cbe83a86",
+      "Bytes": 2717
+    },
+    {
+      "File": "LICENSE",
+      "Sha256": "39de075567aee9ce9b1a80a15afe2aa74b5c25cd9cb133cfbecbdcc5a5620e58",
+      "Bytes": 490
+    },
+    {
+      "File": "README.md",
+      "Sha256": "8c0f859430a0d8ea5130c4f97f70feb5158dbcc2f16499c2ae57a84b20dfe351",
+      "Bytes": 1706
+    },
+    {
+      "File": "tests/coverage.cpp",
+      "Sha256": "9fcf1e455ff7f19eece9e3964a6bdd5c1412786db0e4bc5af1ce7e1290ea7ead",
+      "Bytes": 4587
+    },
+    {
+      "File": "tests/coverage.metal",
+      "Sha256": "cf453e4a7c43f35665bbc8ee69b329f824fc1786b208a7aaba52303f639f21d6",
+      "Bytes": 715
+    },
+    {
+      "File": "tools/compile_coverage.py",
+      "Sha256": "f85c8d31e2bc85edf096aa7b15875eed7d2731ecaae13c73e22bd81a342a1275",
+      "Bytes": 10031
+    },
+    {
+      "File": "tools/compile_metal.py",
+      "Sha256": "cc770ea2068978eb0eeb381dc3bbf8983b838c2563f2605678272146f632fbb4",
+      "Bytes": 19817
+    }
+  ]
+}
