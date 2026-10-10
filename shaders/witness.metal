@@ -244,7 +244,7 @@ float interval_down(thread const float& x, thread bool& intervalFailed)
     return as_type<float>(as_type<uint>(x) + _3839);
 }
 
-static inline __attribute__((always_inline))
+static __attribute__((noinline))
 float optical_add_bound(thread const float& a, thread const float& b, thread const bool& upper, thread bool& intervalFailed)
 {
     uint _3960 = as_type<uint>(a) & 2147483647u;
@@ -450,7 +450,7 @@ Interval iadd(thread const Interval& a, thread const Interval& b, thread bool& i
     return Interval{ _3721, _3726 };
 }
 
-static inline __attribute__((always_inline))
+static __attribute__((noinline))
 float optical_product_bounds(thread const float& a, thread const float& b, thread bool& intervalFailed, thread float& optical_product_upper)
 {
     uint _3856 = as_type<uint>(a);

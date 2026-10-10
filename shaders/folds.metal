@@ -181,7 +181,7 @@ constant bool _51457 = {};
 constant spvUnsafeArray<uint2, 5> _51458 = spvUnsafeArray<uint2, 5>({ uint2(1u, 0u), uint2(0u, 1u), uint2(1u), uint2(2u, 1u), uint2(1u, 2u) });
 constant spvUnsafeArray<int2, 8> _51459 = spvUnsafeArray<int2, 8>({ int2(500, 0), int2(-500, 0), int2(0, 500), int2(0, -500), int2(612), int2(-612, 612), int2(612, -612), int2(-612) });
 
-static inline __attribute__((always_inline))
+static __attribute__((noinline))
 float optical_add_bound(thread const float& a, thread const float& b, thread const bool& upper, thread bool& intervalFailed)
 {
     float _68530;
@@ -384,7 +384,7 @@ float optical_add_bound(thread const float& a, thread const float& b, thread con
     return _68530;
 }
 
-static inline __attribute__((always_inline))
+static __attribute__((noinline))
 float optical_product_bounds(thread const float& a, thread const float& b, thread bool& intervalFailed, thread float& optical_product_upper)
 {
     float _68716;
@@ -693,7 +693,7 @@ float optical_product_bounds(thread const float& a, thread const float& b, threa
     return _68716;
 }
 
-static inline __attribute__((always_inline))
+static __attribute__((noinline))
 bool fold_classify(thread const spvUnsafeArray<float3, 4>& features, thread const uint& kind, thread bool& positive, thread bool& negative, thread bool& intervalFailed, thread float& optical_product_upper)
 {
     bool _64827;
@@ -6860,7 +6860,7 @@ bool fold_classify(thread const spvUnsafeArray<float3, 4>& features, thread cons
     return _64827;
 }
 
-static inline __attribute__((always_inline))
+static __attribute__((noinline))
 float curved_dd_sin_core(thread const float& ax, thread const float& ay, thread const uint& word)
 {
     float _203 = spvFMul(3.1415927410125732421875, 2.0);
@@ -7239,7 +7239,7 @@ float curved_dd_sin_core(thread const float& ax, thread const float& ay, thread 
     return ((word & 1u) == 0u) ? _50689 : spvFSub(_50688, spvFSub(_50689, _50670));
 }
 
-static inline __attribute__((always_inline))
+static __attribute__((noinline))
 bool fold_inner(thread const float2& _sample, thread const ReflectionRoughFrame& receiver, thread const ReflectionLiquidFrame& liquid, thread const spvUnsafeArray<ReflectionSpecularPlane, 4>& planes, thread const uint4& control, thread const ReflectionSpecularPlane& terminal, thread float3& feature)
 {
     bool _68424;
@@ -32742,7 +32742,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                     if (_52757)
                                     {
                                         uint _52760 = as_type<uint>(_52606);
-                                        _52762 = _52760 == _52760;
+                                        _52762 = _52760 == sfe_identity_uint(_52760);
                                     }
                                     else
                                     {
@@ -32752,7 +32752,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                     if (_52757)
                                     {
                                         uint _52765 = as_type<uint>(_52606);
-                                        _52767 = _52765 == _52765;
+                                        _52767 = _52765 == sfe_identity_uint(_52765);
                                     }
                                     else
                                     {
@@ -33104,7 +33104,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                     if (_52951)
                                     {
                                         uint _52954 = as_type<uint>(_52607);
-                                        _52956 = _52954 == _52954;
+                                        _52956 = _52954 == sfe_identity_uint(_52954);
                                     }
                                     else
                                     {
@@ -33114,7 +33114,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                     if (_52951)
                                     {
                                         uint _52959 = as_type<uint>(_52607);
-                                        _52961 = _52959 == _52959;
+                                        _52961 = _52959 == sfe_identity_uint(_52959);
                                     }
                                     else
                                     {
@@ -33584,7 +33584,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                     if (_53225)
                                     {
                                         uint _53228 = as_type<uint>(_52608);
-                                        _53230 = _53228 == _53228;
+                                        _53230 = _53228 == sfe_identity_uint(_53228);
                                     }
                                     else
                                     {
@@ -33594,7 +33594,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                     if (_53225)
                                     {
                                         uint _53233 = as_type<uint>(_52608);
-                                        _53235 = _53233 == _53233;
+                                        _53235 = _53233 == sfe_identity_uint(_53233);
                                     }
                                     else
                                     {
@@ -34366,7 +34366,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                     if (_53759)
                                     {
                                         uint _53762 = as_type<uint>(_53608);
-                                        _53764 = _53762 == _53762;
+                                        _53764 = _53762 == sfe_identity_uint(_53762);
                                     }
                                     else
                                     {
@@ -34376,7 +34376,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                     if (_53759)
                                     {
                                         uint _53767 = as_type<uint>(_53608);
-                                        _53769 = _53767 == _53767;
+                                        _53769 = _53767 == sfe_identity_uint(_53767);
                                     }
                                     else
                                     {
@@ -34728,7 +34728,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                     if (_53953)
                                     {
                                         uint _53956 = as_type<uint>(_53609);
-                                        _53958 = _53956 == _53956;
+                                        _53958 = _53956 == sfe_identity_uint(_53956);
                                     }
                                     else
                                     {
@@ -34738,7 +34738,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                     if (_53953)
                                     {
                                         uint _53961 = as_type<uint>(_53609);
-                                        _53963 = _53961 == _53961;
+                                        _53963 = _53961 == sfe_identity_uint(_53961);
                                     }
                                     else
                                     {
@@ -35208,7 +35208,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                     if (_54227)
                                     {
                                         uint _54230 = as_type<uint>(_53610);
-                                        _54232 = _54230 == _54230;
+                                        _54232 = _54230 == sfe_identity_uint(_54230);
                                     }
                                     else
                                     {
@@ -35218,7 +35218,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                     if (_54227)
                                     {
                                         uint _54235 = as_type<uint>(_53610);
-                                        _54237 = _54235 == _54235;
+                                        _54237 = _54235 == sfe_identity_uint(_54235);
                                     }
                                     else
                                     {
@@ -35990,7 +35990,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                     if (_54762)
                                     {
                                         uint _54765 = as_type<uint>(_54611);
-                                        _54767 = _54765 == _54765;
+                                        _54767 = _54765 == sfe_identity_uint(_54765);
                                     }
                                     else
                                     {
@@ -36000,7 +36000,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                     if (_54762)
                                     {
                                         uint _54770 = as_type<uint>(_54611);
-                                        _54772 = _54770 == _54770;
+                                        _54772 = _54770 == sfe_identity_uint(_54770);
                                     }
                                     else
                                     {
@@ -36352,7 +36352,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                     if (_54956)
                                     {
                                         uint _54959 = as_type<uint>(_54612);
-                                        _54961 = _54959 == _54959;
+                                        _54961 = _54959 == sfe_identity_uint(_54959);
                                     }
                                     else
                                     {
@@ -36362,7 +36362,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                     if (_54956)
                                     {
                                         uint _54964 = as_type<uint>(_54612);
-                                        _54966 = _54964 == _54964;
+                                        _54966 = _54964 == sfe_identity_uint(_54964);
                                     }
                                     else
                                     {
@@ -36832,7 +36832,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                     if (_55230)
                                     {
                                         uint _55233 = as_type<uint>(_54613);
-                                        _55235 = _55233 == _55233;
+                                        _55235 = _55233 == sfe_identity_uint(_55233);
                                     }
                                     else
                                     {
@@ -36842,7 +36842,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                     if (_55230)
                                     {
                                         uint _55238 = as_type<uint>(_54613);
-                                        _55240 = _55238 == _55238;
+                                        _55240 = _55238 == sfe_identity_uint(_55238);
                                     }
                                     else
                                     {
@@ -37614,7 +37614,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                     if (_55765)
                                     {
                                         uint _55768 = as_type<uint>(_55614);
-                                        _55770 = _55768 == _55768;
+                                        _55770 = _55768 == sfe_identity_uint(_55768);
                                     }
                                     else
                                     {
@@ -37624,7 +37624,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                     if (_55765)
                                     {
                                         uint _55773 = as_type<uint>(_55614);
-                                        _55775 = _55773 == _55773;
+                                        _55775 = _55773 == sfe_identity_uint(_55773);
                                     }
                                     else
                                     {
@@ -37976,7 +37976,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                     if (_55959)
                                     {
                                         uint _55962 = as_type<uint>(_55615);
-                                        _55964 = _55962 == _55962;
+                                        _55964 = _55962 == sfe_identity_uint(_55962);
                                     }
                                     else
                                     {
@@ -37986,7 +37986,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                     if (_55959)
                                     {
                                         uint _55967 = as_type<uint>(_55615);
-                                        _55969 = _55967 == _55967;
+                                        _55969 = _55967 == sfe_identity_uint(_55967);
                                     }
                                     else
                                     {
@@ -38456,7 +38456,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                     if (_56233)
                                     {
                                         uint _56236 = as_type<uint>(_55616);
-                                        _56238 = _56236 == _56236;
+                                        _56238 = _56236 == sfe_identity_uint(_56236);
                                     }
                                     else
                                     {
@@ -38466,7 +38466,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                     if (_56233)
                                     {
                                         uint _56241 = as_type<uint>(_55616);
-                                        _56243 = _56241 == _56241;
+                                        _56243 = _56241 == sfe_identity_uint(_56241);
                                     }
                                     else
                                     {
@@ -39290,7 +39290,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                                     if (_56802)
                                                     {
                                                         uint _56805 = as_type<uint>(_56651);
-                                                        _56807 = _56805 == _56805;
+                                                        _56807 = _56805 == sfe_identity_uint(_56805);
                                                     }
                                                     else
                                                     {
@@ -39300,7 +39300,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                                     if (_56802)
                                                     {
                                                         uint _56810 = as_type<uint>(_56651);
-                                                        _56812 = _56810 == _56810;
+                                                        _56812 = _56810 == sfe_identity_uint(_56810);
                                                     }
                                                     else
                                                     {
@@ -39652,7 +39652,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                                     if (_56996)
                                                     {
                                                         uint _56999 = as_type<uint>(_56652);
-                                                        _57001 = _56999 == _56999;
+                                                        _57001 = _56999 == sfe_identity_uint(_56999);
                                                     }
                                                     else
                                                     {
@@ -39662,7 +39662,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                                     if (_56996)
                                                     {
                                                         uint _57004 = as_type<uint>(_56652);
-                                                        _57006 = _57004 == _57004;
+                                                        _57006 = _57004 == sfe_identity_uint(_57004);
                                                     }
                                                     else
                                                     {
@@ -40132,7 +40132,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                                     if (_57270)
                                                     {
                                                         uint _57273 = as_type<uint>(_56653);
-                                                        _57275 = _57273 == _57273;
+                                                        _57275 = _57273 == sfe_identity_uint(_57273);
                                                     }
                                                     else
                                                     {
@@ -40142,7 +40142,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                                     if (_57270)
                                                     {
                                                         uint _57278 = as_type<uint>(_56653);
-                                                        _57280 = _57278 == _57278;
+                                                        _57280 = _57278 == sfe_identity_uint(_57278);
                                                     }
                                                     else
                                                     {
@@ -40914,7 +40914,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                                     if (_57804)
                                                     {
                                                         uint _57807 = as_type<uint>(_57653);
-                                                        _57809 = _57807 == _57807;
+                                                        _57809 = _57807 == sfe_identity_uint(_57807);
                                                     }
                                                     else
                                                     {
@@ -40924,7 +40924,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                                     if (_57804)
                                                     {
                                                         uint _57812 = as_type<uint>(_57653);
-                                                        _57814 = _57812 == _57812;
+                                                        _57814 = _57812 == sfe_identity_uint(_57812);
                                                     }
                                                     else
                                                     {
@@ -41276,7 +41276,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                                     if (_57998)
                                                     {
                                                         uint _58001 = as_type<uint>(_57654);
-                                                        _58003 = _58001 == _58001;
+                                                        _58003 = _58001 == sfe_identity_uint(_58001);
                                                     }
                                                     else
                                                     {
@@ -41286,7 +41286,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                                     if (_57998)
                                                     {
                                                         uint _58006 = as_type<uint>(_57654);
-                                                        _58008 = _58006 == _58006;
+                                                        _58008 = _58006 == sfe_identity_uint(_58006);
                                                     }
                                                     else
                                                     {
@@ -41756,7 +41756,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                                     if (_58272)
                                                     {
                                                         uint _58275 = as_type<uint>(_57655);
-                                                        _58277 = _58275 == _58275;
+                                                        _58277 = _58275 == sfe_identity_uint(_58275);
                                                     }
                                                     else
                                                     {
@@ -41766,7 +41766,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                                     if (_58272)
                                                     {
                                                         uint _58280 = as_type<uint>(_57655);
-                                                        _58282 = _58280 == _58280;
+                                                        _58282 = _58280 == sfe_identity_uint(_58280);
                                                     }
                                                     else
                                                     {
@@ -42538,7 +42538,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                                     if (_58807)
                                                     {
                                                         uint _58810 = as_type<uint>(_58656);
-                                                        _58812 = _58810 == _58810;
+                                                        _58812 = _58810 == sfe_identity_uint(_58810);
                                                     }
                                                     else
                                                     {
@@ -42548,7 +42548,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                                     if (_58807)
                                                     {
                                                         uint _58815 = as_type<uint>(_58656);
-                                                        _58817 = _58815 == _58815;
+                                                        _58817 = _58815 == sfe_identity_uint(_58815);
                                                     }
                                                     else
                                                     {
@@ -42900,7 +42900,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                                     if (_59001)
                                                     {
                                                         uint _59004 = as_type<uint>(_58657);
-                                                        _59006 = _59004 == _59004;
+                                                        _59006 = _59004 == sfe_identity_uint(_59004);
                                                     }
                                                     else
                                                     {
@@ -42910,7 +42910,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                                     if (_59001)
                                                     {
                                                         uint _59009 = as_type<uint>(_58657);
-                                                        _59011 = _59009 == _59009;
+                                                        _59011 = _59009 == sfe_identity_uint(_59009);
                                                     }
                                                     else
                                                     {
@@ -43380,7 +43380,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                                     if (_59275)
                                                     {
                                                         uint _59278 = as_type<uint>(_58658);
-                                                        _59280 = _59278 == _59278;
+                                                        _59280 = _59278 == sfe_identity_uint(_59278);
                                                     }
                                                     else
                                                     {
@@ -43390,7 +43390,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                                     if (_59275)
                                                     {
                                                         uint _59283 = as_type<uint>(_58658);
-                                                        _59285 = _59283 == _59283;
+                                                        _59285 = _59283 == sfe_identity_uint(_59283);
                                                     }
                                                     else
                                                     {
@@ -44162,7 +44162,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                                     if (_59810)
                                                     {
                                                         uint _59813 = as_type<uint>(_59659);
-                                                        _59815 = _59813 == _59813;
+                                                        _59815 = _59813 == sfe_identity_uint(_59813);
                                                     }
                                                     else
                                                     {
@@ -44172,7 +44172,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                                     if (_59810)
                                                     {
                                                         uint _59818 = as_type<uint>(_59659);
-                                                        _59820 = _59818 == _59818;
+                                                        _59820 = _59818 == sfe_identity_uint(_59818);
                                                     }
                                                     else
                                                     {
@@ -44524,7 +44524,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                                     if (_60004)
                                                     {
                                                         uint _60007 = as_type<uint>(_59660);
-                                                        _60009 = _60007 == _60007;
+                                                        _60009 = _60007 == sfe_identity_uint(_60007);
                                                     }
                                                     else
                                                     {
@@ -44534,7 +44534,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                                     if (_60004)
                                                     {
                                                         uint _60012 = as_type<uint>(_59660);
-                                                        _60014 = _60012 == _60012;
+                                                        _60014 = _60012 == sfe_identity_uint(_60012);
                                                     }
                                                     else
                                                     {
@@ -45004,7 +45004,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                                     if (_60278)
                                                     {
                                                         uint _60281 = as_type<uint>(_59661);
-                                                        _60283 = _60281 == _60281;
+                                                        _60283 = _60281 == sfe_identity_uint(_60281);
                                                     }
                                                     else
                                                     {
@@ -45014,7 +45014,7 @@ kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], d
                                                     if (_60278)
                                                     {
                                                         uint _60286 = as_type<uint>(_59661);
-                                                        _60288 = _60286 == _60286;
+                                                        _60288 = _60286 == sfe_identity_uint(_60286);
                                                     }
                                                     else
                                                     {

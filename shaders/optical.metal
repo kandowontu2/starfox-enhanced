@@ -750,7 +750,7 @@ bool interval_exact_point(thread const Interval& a, thread const float& x)
     return temp_var_logical;
 }
 
-static inline __attribute__((always_inline))
+static __attribute__((noinline))
 float optical_add_bound(thread const float& a, thread const float& b, thread const bool& upper, thread bool& intervalFailed)
 {
     uint aa = as_type<uint>(a) & 2147483647u;
@@ -929,7 +929,7 @@ Interval iadd(thread const Interval& a, thread const Interval& b, thread bool& i
     return _16086;
 }
 
-static inline __attribute__((always_inline))
+static __attribute__((noinline))
 float optical_product_bounds(thread const float& a, thread const float& b, thread bool& intervalFailed, thread float& optical_product_upper)
 {
     uint aa = as_type<uint>(a) & 2147483647u;

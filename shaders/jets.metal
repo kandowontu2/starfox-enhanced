@@ -1060,7 +1060,7 @@ float interval_down(thread const float& x, thread bool& intervalFailed)
     return as_type<float>(as_type<uint>(x) + _15928);
 }
 
-static inline __attribute__((always_inline))
+static __attribute__((noinline))
 float optical_add_bound(thread const float& a, thread const float& b, thread const bool& upper, thread bool& intervalFailed)
 {
     uint _11391 = as_type<uint>(a) & 2147483647u;
@@ -1266,7 +1266,7 @@ Interval iadd(thread const Interval& a, thread const Interval& b, thread bool& i
     return Interval{ _4519, _4524 };
 }
 
-static inline __attribute__((always_inline))
+static __attribute__((noinline))
 float optical_product_bounds(thread const float& a, thread const float& b, thread bool& intervalFailed, thread float& optical_product_upper)
 {
     uint _15931 = as_type<uint>(a);
@@ -1713,7 +1713,7 @@ Interval imul(thread const Interval& a, thread const Interval& b, thread bool& i
     return Interval{ precise::min(precise::min(_11563, _11573), precise::min(_11582, _11593)), precise::max(precise::max(optical_product_upper, _11572), precise::max(_11581, _11592)) };
 }
 
-static inline __attribute__((always_inline))
+static __attribute__((noinline))
 float sqrt_bound(thread const float& a, thread const bool& upper, thread bool& intervalFailed)
 {
     float _21469;
@@ -1841,7 +1841,7 @@ Interval isqrt(thread const Interval& a, thread bool& intervalFailed)
     return Interval{ precise::max(0.0, _16044), _16050 };
 }
 
-static inline __attribute__((always_inline))
+static __attribute__((noinline))
 float quotient_bound(thread const float& a, thread const float& b, thread const bool& upper, thread bool& intervalFailed)
 {
     float _21505;
@@ -1972,7 +1972,7 @@ float quotient_bound(thread const float& a, thread const float& b, thread const 
     return _21505;
 }
 
-static inline __attribute__((always_inline))
+static __attribute__((noinline))
 float interval_divide_pair(thread const float& alo, thread const float& ahi, thread const float& blo, thread const float& bhi, thread bool& intervalFailed, thread float& interval_divide_upper)
 {
     bool _16064;
@@ -3411,7 +3411,7 @@ Interval isin_body(thread const Interval& a, thread bool& intervalFailed, thread
     return Interval{ precise::min(precise::max(_21757.lo, -1.0), 1.0), precise::min(precise::max(_21757.hi, -1.0), 1.0) };
 }
 
-static inline __attribute__((always_inline))
+static __attribute__((noinline))
 float sine_bounds(thread const float& lo, thread const float& hi, thread bool& intervalFailed, thread float& optical_product_upper, thread float& interval_sine_upper)
 {
     Interval param_var_a = Interval{ lo, hi };
@@ -3434,7 +3434,7 @@ OpticalJet jmin(thread const OpticalJet& a, thread const OpticalJet& b)
     return OpticalJet{ Interval{ precise::min(a.v.lo, b.v.lo), precise::min(a.v.hi, b.v.hi) }, Interval{ precise::min(a.dx.lo, b.dx.lo), precise::max(a.dx.hi, b.dx.hi) }, Interval{ precise::min(a.dy.lo, b.dy.lo), precise::max(a.dy.hi, b.dy.hi) } };
 }
 
-static inline __attribute__((always_inline))
+static __attribute__((noinline))
 OpticalJet3 jlava(thread const OpticalJet& x, thread const OpticalJet& z, thread const OpticalJet& t, thread const OpticalJet& footprint, thread bool& intervalFailed, thread float& optical_product_upper, thread float& interval_divide_upper, thread float& interval_sine_upper, thread bool& jetBranchKnown, thread uint& jetFailureSite, thread float4& jetFailureArguments)
 {
     float _18424 = 6.0;
@@ -7940,7 +7940,7 @@ OpticalJet3 jlava(thread const OpticalJet& x, thread const OpticalJet& z, thread
     return OpticalJet3{ OpticalJet{ Interval{ _21448, _21449 }, Interval{ _21450, _21451 }, Interval{ _21452, _21453 } }, OpticalJet{ Interval{ _21442, _21443 }, Interval{ _21444, _21445 }, Interval{ _21446, _21447 } }, OpticalJet{ Interval{ _21436, _21437 }, Interval{ _21438, _21439 }, Interval{ _21440, _21441 } } };
 }
 
-static inline __attribute__((always_inline))
+static __attribute__((noinline))
 OpticalJet3 jet_liquid_normal(thread const ReflectionLiquidFrame& f, thread const OpticalJet3& direction, thread const OpticalJet& _distance, thread const OpticalJet& footprint, thread OpticalJet3& hit, thread bool& intervalFailed, thread float& optical_product_upper, thread float& interval_divide_upper, thread float& interval_sine_upper, thread bool& jetBranchKnown, thread uint& jetFailureSite, thread float4& jetFailureArguments)
 {
     Interval _13445 = Interval{ f.rotation0.x, f.rotation0.x };
@@ -11270,7 +11270,7 @@ bool jet_inside_face(thread const ReflectionSpecularPlane& plane, thread const O
     return _15901;
 }
 
-static inline __attribute__((always_inline))
+static __attribute__((noinline))
 bool optical_jet_forward(thread const float4& box, thread const ReflectionRoughFrame& receiver, thread const ReflectionLiquidFrame& liquid, thread const spvUnsafeArray<ReflectionSpecularPlane, 4>& planes, thread const uint4& control, thread OpticalJetRay& ray, thread bool& intervalFailed, thread float& optical_product_upper, thread float& interval_divide_upper, thread float& interval_sine_upper, thread bool& jetBranchKnown, thread uint& jetFailureSite, thread float4& jetFailureArguments)
 {
     ray.outgoing = OpticalJet3{ OpticalJet{ Interval{ 0.0, 0.0 }, Interval{ 0.0, 0.0 }, Interval{ 0.0, 0.0 } }, OpticalJet{ Interval{ 0.0, 0.0 }, Interval{ 0.0, 0.0 }, Interval{ 0.0, 0.0 } }, OpticalJet{ Interval{ 0.0, 0.0 }, Interval{ 0.0, 0.0 }, Interval{ 0.0, 0.0 } } };

@@ -161,7 +161,7 @@ constant float4 _138945 = {};
 constant spvUnsafeArray<int2, 8> _138946 = spvUnsafeArray<int2, 8>({ int2(-1), int2(0, -1), int2(1, -1), int2(-1, 0), int2(1, 0), int2(-1, 1), int2(0, 1), int2(1) });
 constant spvUnsafeArray<int2, 8> _138947 = spvUnsafeArray<int2, 8>({ int2(500, 0), int2(-500, 0), int2(0, 500), int2(0, -500), int2(612), int2(-612, 612), int2(612, -612), int2(-612) });
 
-static inline __attribute__((always_inline))
+static __attribute__((noinline))
 float curved_dd_sin_core(thread const float& ax, thread const float& ay, thread const uint& word)
 {
     float _38 = spvFMul(3.1415927410125732421875, 2.0);

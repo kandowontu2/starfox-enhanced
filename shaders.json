@@ -63,17 +63,17 @@
       "Name": "optical",
       "Entry": "feature_optical_main",
       "File": "shaders/optical.metal",
-      "Sha256": "6592e781a5abbd12f8eaf3fb3b211702072254001bdda44dbe4d44f8cd089a3d",
+      "Sha256": "78f2c6ea8078e23e32ef68ac8bfbd70e532411ee98c71c59607b24323dcad361",
       "InputSpirvSha256": "66a242a4f39ed0d4d40600281bb1af7225d5e5a67684955de109976c963c23e4",
-      "Bytes": 438609
+      "Bytes": 438585
     },
     {
       "Name": "optical_stream",
       "Entry": "feature_optical_stream_main",
       "File": "shaders/optical_stream.metal",
-      "Sha256": "95358bbb8dac108ab56b2cc250046eebac7be852c518fdfb14945b332da5d1b3",
+      "Sha256": "69dbd519aecc2f3f4b62896d29ceef8cdb77be4c839d4efdb071f7da61428561",
       "InputSpirvSha256": "1934a162d757c64e621bcf4f5c3d1eeb5c8cc306c82151fd5e119989f21228df",
-      "Bytes": 439628
+      "Bytes": 439604
     },
     {
       "Name": "optical_schedule",
@@ -87,17 +87,17 @@
       "Name": "jets",
       "Entry": "feature_jets_main",
       "File": "shaders/jets.metal",
-      "Sha256": "cba0fced7f548c0652badc5dc235e0678051ae04f0aa28975959d787d1c459a2",
+      "Sha256": "b34d2e7ef2873290eaa33dba18eda8b35217c5bec487f9e126b6c41c0682c9ca",
       "InputSpirvSha256": "e7ce75684e42c4f23f96563b67db7223a96914860c131772073a5553ab13af94",
-      "Bytes": 785294
+      "Bytes": 785186
     },
     {
       "Name": "jets_stream",
       "Entry": "feature_jets_stream_main",
       "File": "shaders/jets_stream.metal",
-      "Sha256": "9c21b77f97fc2f6142defb6f6c8ec6ab551d287bd13edd24d528eee10d22a384",
+      "Sha256": "1b2b3f076f52075d0e4842beb1419847aa504c3c6bda77a46069abbdfea11a54",
       "InputSpirvSha256": "ea8a6facf683b80eba37b75f5aa12dd4c83f39137268924b9401c33e1dbe7e82",
-      "Bytes": 784678
+      "Bytes": 784570
     },
     {
       "Name": "roots_clear",
@@ -111,25 +111,25 @@
       "Name": "witness",
       "Entry": "feature_witness_main",
       "File": "shaders/witness.metal",
-      "Sha256": "9da391ec7d651de470af7310d0ee191b3cff7ecd3789ba11eaab7966c71f57c0",
+      "Sha256": "a563baf8dde7b964116bc9ce838cc8fe9e386ea2dfb5ba074a6240b8bbe1a4e3",
       "InputSpirvSha256": "3879d776f563302bb93a3bc39418731dd9cde3a52f23cc013ab233cc54e7450b",
-      "Bytes": 118048
+      "Bytes": 118024
     },
     {
       "Name": "folds",
       "Entry": "feature_folds_main",
       "File": "shaders/folds.metal",
-      "Sha256": "fc8255dc2e4223650da32bc252230901864913fd9291243b71836af4ad973a7f",
+      "Sha256": "934d8ad6cb886eb70f7d7d111a24b3a656f13a40cd867e49b4708a6e8e6b6559",
       "InputSpirvSha256": "97b7a317ed0586f06a1c934944010ec60f09aa25b1bd3e8f3861d514303b0aee",
-      "Bytes": 3148835
+      "Bytes": 3149687
     },
     {
       "Name": "guide",
       "Entry": "feature_guide_main",
       "File": "shaders/guide.metal",
-      "Sha256": "082c079c8237a1ff1f44be683ebaf953958fb24197d27be0df5ece996bdba11d",
+      "Sha256": "162ec651cd19516018f87c72415d12851f9d92bd89da2ec57e36a90beca11ae8",
       "InputSpirvSha256": "ad15e581a11ab159aff8b77000dbe19d97fefbc3d7e4d5e7dc515c2384302048",
-      "Bytes": 6834683
+      "Bytes": 6834671
     },
     {
       "Name": "colour",
@@ -207,10 +207,11 @@
       "Name": "curved_paths",
       "Entry": "reflection_paths_main",
       "File": "shaders/curved_paths.metal",
-      "Sha256": "4f75314875feae616c946b1ab7de57ba93ad2e7a5cde8298224d1e7211175b34",
+      "Sha256": "78343fb8d296ecd556b8fb93f1c44660dd6584616cb994cce28e950c0b5d134c",
       "InputSpirvSha256": "6D961A7F467883BE5BF1FC86182E7EE672D19853F6E7C5283B93BB234B9433EA",
-      "Bytes": 12721203
+      "Bytes": 12721191
     }
   ],
-  "GeneratedSourceFixes": "Retain unused SSA initializers; uint-only identity comparisons; original shared-reference reads after original barrier. Strict compiler flags unchanged."
+  "GeneratedSourceFixes": "Retain unused SSA initializers; uint-only identity comparisons; original shared-reference reads after original barrier. Strict compiler flags unchanged.",
+  "CompilerBoundaryFixes": "Restore only original SPIRV DontInline functions; complete uint-only identity comparisons. Function bodies, bindings, work and strict flags unchanged."
 }

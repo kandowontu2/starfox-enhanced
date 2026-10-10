@@ -40,6 +40,16 @@ the same native PID and birth, with the destination binary path and SHA-256
 pinned from the selected toolchain before launch. Transitions are recorded;
 an unverified path, changed binary or reused incarnation still fails.
 
+This candidate restores static noinline attributes only for functions whose
+held original SPIRV OpFunction has DontInline set. SPIRV-Cross had replaced
+those boundaries with forced inlining, and the actual jets compiler exceeded
+the 6 GiB cap. Function bodies, arguments, all resource slots, work/thread
+counts, O3/strict-float flags and resource limits are unchanged. The remaining
+48 scalar-uint self-comparisons use the existing pure identity helper; no
+floating-point comparison is rewritten. Exact inverse source audits retain
+all original bytes aside from these reviewed annotations/uint expressions.
+Successful SDK linking would still not prove runtime behavior or performance.
+
 These MSL 3.0 checks explicitly target macOS 13/iOS 16. They do not raise the
 application's macOS 11/iOS 15 deployment minimums or prove compatibility of
 this translated candidate with those older systems.
