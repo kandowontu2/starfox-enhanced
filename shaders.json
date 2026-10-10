@@ -1,6 +1,6 @@
 {
   "Schema": 1,
-  "Scope": "Complete25 SDL binding-corrected Metal SDK source candidate; no runtime/numerical/optical/performance acceptance",
+  "Scope": "Complete25 current native candidate translated to SDL-compatible strict Metal source; no SDK/runtime/optics/performance acceptance",
   "TranslatorRepository": "https://github.com/KhronosGroup/SPIRV-Cross",
   "TranslatorCommit": "be71ee8c12cd7dc5ca8fa9581f708c2e8561fe2a",
   "TranslatorSha256": "53B77C49633147C1258464407D5D390020AA5B816A822B283A8B15A5D070378E",
@@ -9,7 +9,7 @@
     "--msl-version",
     "30000"
   ],
-  "NativeCandidateReceiptSha256": "26E260513B15A96A8119DC2C4D1C462030102EB08F539F96D8B973488E66EE51",
+  "NativeCandidateReceiptSha256": "881A3236E5174C293E54D38FCE8269A933E106A50FB68096E39183A1E6EFF6D5",
   "Shaders": [
     {
       "Name": "tiles",
@@ -63,17 +63,17 @@
       "Name": "optical",
       "Entry": "feature_optical_main",
       "File": "shaders/optical.metal",
-      "Sha256": "78f2c6ea8078e23e32ef68ac8bfbd70e532411ee98c71c59607b24323dcad361",
-      "InputSpirvSha256": "66a242a4f39ed0d4d40600281bb1af7225d5e5a67684955de109976c963c23e4",
-      "Bytes": 438585
+      "Sha256": "eb6cb7e0f8ebc6f47ae4c5d23a81b93ea39f2057e4f965cf6f3113950dab125a",
+      "InputSpirvSha256": "534b5aa4cbf0189dece4fc3579946131caf59518e5ecbb2a8fc39a7c1c5c6f37",
+      "Bytes": 443054
     },
     {
       "Name": "optical_stream",
       "Entry": "feature_optical_stream_main",
       "File": "shaders/optical_stream.metal",
-      "Sha256": "69dbd519aecc2f3f4b62896d29ceef8cdb77be4c839d4efdb071f7da61428561",
-      "InputSpirvSha256": "1934a162d757c64e621bcf4f5c3d1eeb5c8cc306c82151fd5e119989f21228df",
-      "Bytes": 439604
+      "Sha256": "31cbcf9b40aa87a3ba47253f78897122d9bce0e191c08b0a8be0a9c4d0511fed",
+      "InputSpirvSha256": "a0437c0544aa8c65d6857b116741172146bd6d3bc5b10ea1c3827e232dc72716",
+      "Bytes": 444077
     },
     {
       "Name": "optical_schedule",
@@ -87,17 +87,17 @@
       "Name": "jets",
       "Entry": "feature_jets_main",
       "File": "shaders/jets.metal",
-      "Sha256": "b34d2e7ef2873290eaa33dba18eda8b35217c5bec487f9e126b6c41c0682c9ca",
-      "InputSpirvSha256": "e7ce75684e42c4f23f96563b67db7223a96914860c131772073a5553ab13af94",
-      "Bytes": 785186
+      "Sha256": "3e78aae6765b44b85a172e19f52369c65d82276d853ae93e227a15cf621cd3d0",
+      "InputSpirvSha256": "4a8dc7af97c26fcfeb62fc142ee13801b6e3b90636ac6eadeb46de944aa2bd06",
+      "Bytes": 789272
     },
     {
       "Name": "jets_stream",
       "Entry": "feature_jets_stream_main",
       "File": "shaders/jets_stream.metal",
-      "Sha256": "1b2b3f076f52075d0e4842beb1419847aa504c3c6bda77a46069abbdfea11a54",
-      "InputSpirvSha256": "ea8a6facf683b80eba37b75f5aa12dd4c83f39137268924b9401c33e1dbe7e82",
-      "Bytes": 784570
+      "Sha256": "eee47a465482d168ef7e1eaeac8f2e4cf2f40d9f410f12db4a9ca6b94aa240c8",
+      "InputSpirvSha256": "2e25308b38d25629242aa3716ba4842e95ac18b07abf2d40329a6278ac6844cf",
+      "Bytes": 788644
     },
     {
       "Name": "roots_clear",
@@ -111,17 +111,17 @@
       "Name": "witness",
       "Entry": "feature_witness_main",
       "File": "shaders/witness.metal",
-      "Sha256": "a563baf8dde7b964116bc9ce838cc8fe9e386ea2dfb5ba074a6240b8bbe1a4e3",
-      "InputSpirvSha256": "3879d776f563302bb93a3bc39418731dd9cde3a52f23cc013ab233cc54e7450b",
-      "Bytes": 118024
+      "Sha256": "54f74d8da09e7f25b67cf889a2082a4339d6ad0f8dc21033ff5e8b886d7cc863",
+      "InputSpirvSha256": "c90f8d8d89bd545f06e719831592ae4d3283dcd1499f41acb1950a1d70c04215",
+      "Bytes": 121966
     },
     {
       "Name": "folds",
       "Entry": "feature_folds_main",
       "File": "shaders/folds.metal",
-      "Sha256": "934d8ad6cb886eb70f7d7d111a24b3a656f13a40cd867e49b4708a6e8e6b6559",
-      "InputSpirvSha256": "97b7a317ed0586f06a1c934944010ec60f09aa25b1bd3e8f3861d514303b0aee",
-      "Bytes": 3149687
+      "Sha256": "f5dc8e285b0c5e05a08e0a32cb0f030a3064dcb1c3d3a57bdaeacabb1d1d5633",
+      "InputSpirvSha256": "718626184ac5ed8310858edcaf14bee3713ce90aabe0e2aefd32058f7e6d05f1",
+      "Bytes": 3489293
     },
     {
       "Name": "guide",
@@ -212,6 +212,5 @@
       "Bytes": 12721191
     }
   ],
-  "GeneratedSourceFixes": "Retain unused SSA initializers; uint-only identity comparisons; original shared-reference reads after original barrier. Strict compiler flags unchanged.",
-  "CompilerBoundaryFixes": "Restore only original SPIRV DontInline functions; complete uint-only identity comparisons. Function bodies, bindings, work and strict flags unchanged."
+  "GeneratedSourceFixes": "Original DontInline boundaries; preserve unused initializers, typed uint-only identity comparisons and post-barrier shared-reference reads. All exact inverses checked."
 }

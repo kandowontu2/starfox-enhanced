@@ -4,6 +4,13 @@ This source-only development snapshot is not a playable build, release or
 production merge. It contains no ROM, asset pack or production Git history.
 Its only trigger is manual dispatch; main, tags and releases remain untouched.
 
+This follow-up translates the current exact sign-corner native candidate.
+It keeps the complete directed interval calculations and original fallbacks;
+only guarded mathematical corner extrema avoid redundant products. Six SPIRV
+programs changed; nineteen regenerate the identical accepted Metal sources.
+Source transformations are exactly reversible, and all 100 changed descriptor,
+workgroup and entry-point controls reject. No runtime speedup is inferred.
+
 The complete 25-program matrix retains all 21 native reflection stages and
 four legacy history/path programs. SPIRV-Cross at
 `be71ee8c12cd7dc5ca8fa9581f708c2e8561fe2a` translated the pinned SPIRV programs
@@ -11,7 +18,7 @@ to MSL 3.0. Resource annotations now use SDL Metal's uniform-first buffer
 layout, retaining the original reserved slots and workgroup dimensions.
 
 Generated-code diagnostic fixes retain all unused SSA initializers and calls,
-marking only unused return values. Three unsigned self-comparisons use a pure
+marking only unused return values. Typed unsigned self-comparisons use a pure
 identity helper; floating-point comparisons are unchanged. Shared values are
 read by threadgroup reference after the original lane-zero writes and barrier,
 without adding per-lane writes or changing shared storage.
@@ -45,7 +52,7 @@ held original SPIRV OpFunction has DontInline set. SPIRV-Cross had replaced
 those boundaries with forced inlining, and the actual jets compiler exceeded
 the 6 GiB cap. Function bodies, arguments, all resource slots, work/thread
 counts, O3/strict-float flags and resource limits are unchanged. The remaining
-48 scalar-uint self-comparisons use the existing pure identity helper; no
+scalar-uint self-comparisons use the existing pure identity helper; no
 floating-point comparison is rewritten. Exact inverse source audits retain
 all original bytes aside from these reviewed annotations/uint expressions.
 Successful SDK linking would still not prove runtime behavior or performance.
