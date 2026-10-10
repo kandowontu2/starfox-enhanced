@@ -5,12 +5,13 @@ permissions:
   contents: read
 jobs:
   metal-sdk:
-    name: Strict complete25 / ${{ matrix.sdk }}
+    name: Strict ${{ matrix.sdk }} / ${{ matrix.shader }}
     runs-on: macos-15-intel
     strategy:
       fail-fast: false
       matrix:
         sdk: [macosx, iphoneos]
+        shader: [tiles, reduce, query, mapping, domains, frames, optical, optical_stream, optical_schedule, jets, jets_stream, roots_clear, witness, folds, guide, colour, compose, publish, publish_diagnostics, admission_clear, capture, history, lobes, paths, curved_paths]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -26,12 +27,12 @@ jobs:
           xcrun --sdk '${{ matrix.sdk }}' --find metal
           xcrun --sdk '${{ matrix.sdk }}' --find metallib
       - name: Compile and link the exact complete25 source shaders
-        run: python3 tools/compile_metal.py --sdk '${{ matrix.sdk }}' --out '${{ runner.temp }}/metal-result'
+        run: python3 tools/compile_metal.py --sdk '${{ matrix.sdk }}' --shader '${{ matrix.shader }}' --out '${{ runner.temp }}/metal-result'
       - name: Preserve SDK diagnostics and nonprivate shader artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: metal-${{ matrix.sdk }}
+          name: metal-${{ matrix.sdk }}-${{ matrix.shader }}
           path: |
             ${{ runner.temp }}/metal-result/*.metallib
             ${{ runner.temp }}/metal-result/*.terminal.json

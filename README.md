@@ -16,7 +16,7 @@ identity helper; floating-point comparisons are unchanged. Shared values are
 read by threadgroup reference after the original lane-zero writes and barrier,
 without adding per-lane writes or changing shared storage.
 
-Both SDK jobs attempt all 25 programs with warnings as errors, fast math
+Both SDK matrices attempt all 25 programs with warnings as errors, fast math
 disabled and contraction disabled. SDK compilation does not prove runtime
 binding behavior, numerical parity, optical quality or acceptable frame cost.
 Every operation verifies the complete source hash, byte count and entry point.
@@ -24,9 +24,21 @@ Every operation verifies the complete source hash, byte count and entry point.
 The macOS monitor uses native process births/paths and whole-owned-tree
 resident memory, not Windows private committed memory. It requires 6 GiB
 reclaimable physical and physical-plus-free-swap memory before launch, caps
-observed owned-tree residency at 2 GiB, and retains 1 GiB physical/1.5 GiB
+observed owned-tree residency at the lower of 6 GiB or launch physical
+headroom minus 3 GiB, and retains 1 GiB physical/1.5 GiB
 physical-plus-swap running floors. It does not kill a compiler merely for
 elapsed time, or automatically retry an unchanged compilation.
+
+This cloud-only 14 GiB runner recipe is not a pass of the earlier 2 GiB cap.
+Each SDK/program has its own job so a large compiler failure cannot hide the
+remaining programs. All 25 source pins are checked in each job; full compiler
+coverage requires all 50 SDK/program jobs. The SDK target/root and original
+tool name are explicit, linker warnings reject, and each MTLB must contain its
+exact expected kernel token. No empty library is accepted as linked success.
+
+These MSL 3.0 checks explicitly target macOS 13/iOS 16. They do not raise the
+application's macOS 11/iOS 15 deployment minimums or prove compatibility of
+this translated candidate with those older systems.
 
 Original project ownership, licensing and credits apply to the shaders.
 SPIRV-Cross is by Khronos Group contributors under Apache 2.0; its unmodified

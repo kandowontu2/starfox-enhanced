@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 NAMES = set("tiles reduce query mapping domains frames optical optical_stream optical_schedule jets jets_stream roots_clear witness folds guide colour compose publish publish_diagnostics admission_clear capture history lobes paths curved_paths".split())
 FLAGS = ["-std=metal3.0", "-O3", "-Werror", "-fno-fast-math", "-ffp-contract=off"]
 GIB = 1 << 30
+SDK_TARGETS = {'macosx': 'air64-apple-macosx13.0', 'iphoneos': 'air64-apple-ios16.0'}
 
 
 class Deferred(RuntimeError):
@@ -71,6 +72,12 @@ def controls(manifest):
         changed[key] = value
         if same_identity(owner, changed):
             raise RuntimeError("Changed native identity accepted")
+    for empty in (b'', b'MTLB' + bytes(88), b'MTLB' + bytes(1024)):
+        try:
+            qualify_metallib(empty, 'actual_kernel')
+        except RuntimeError:
+            continue
+        raise RuntimeError('Empty/missing-entry library accepted')
     print("PASS: complete25 actual source pins; missing/duplicate/escaped/changed bytes/entry/size rejected. No SDK compiler launched.")
 
 
@@ -127,7 +134,33 @@ def same_identity(left, right):
     return right is not None and all(left[k] == right[k] for k in ("pid", "birth", "path"))
 
 
-def operate(name, tool, args, out, manifest, library):
+def qualify_metallib(data, entry):
+    # The old resolved air-lld invocation warned that it ignored the input AIR
+    # and produced a 92-byte empty MTLB. Reject that actual failure and a missing
+    # exact kernel NAME token. This is not a GPU library-load/PSO proof.
+    if len(data) <= 92 or data[:4] != b'MTLB' or entry.encode('utf-8') + b'\0' not in data:
+        raise RuntimeError('Empty/invalid Metal library or exact kernel entry missing')
+
+
+def observed_identity(process, expected, library, record):
+    # A libproc query can lose the task while waitpid has not reported its
+    # retirement yet. Re-poll the same owned child, never restart or signal an
+    # unknown PID. Record both actual identities if a real mismatch remains.
+    for attempt in range(3):
+        actual = native(process.pid, library)
+        if process.poll() is not None:
+            return None
+        if actual is not None:
+            if expected is not None and not same_identity(expected, actual):
+                record['identity_mismatch'] = {'expected': expected, 'actual': actual}
+                raise RuntimeError('Actual owned compiler birth/path changed')
+            return actual
+        time.sleep(0.05)
+    record['identity_mismatch'] = {'expected': expected, 'actual': None}
+    raise RuntimeError('Owned live compiler identity unavailable after bounded re-poll')
+
+
+def operate(name, tool, args, out, manifest, library, sdk_environment):
     qualify(manifest)
     deadline = time.monotonic() + 300
     before = memory()
@@ -138,33 +171,43 @@ def operate(name, tool, args, out, manifest, library):
             raise Deferred("Deferred before launch: mapped macOS6GiB launch floors; no native compiler launched")
         time.sleep(5)
         before = memory()
-    record = {"name": name, "tool": str(tool), "tool_sha256": digest(tool), "arguments": args,
+    # Cloud-only recipe on14GiB runners. Preserve6GiB prelaunch and original
+    # global running floors, leave3GiB launch headroom outside the owned tree,
+    # and cap that tree at6GiB. This does not pass the earlier2GiB recipe.
+    resident_cap = min(6 * GIB, before['available_physical_bytes'] - 3 * GIB)
+    record = {"name": name, "tool": str(tool), "tool_realpath": os.path.realpath(tool),
+              "tool_sha256": digest(tool), "arguments": args, "sdk_environment": sdk_environment,
               "launch_memory": before, "exit_code": None, "resource_stopped": False,
-              "peak_owned_tree_resident_bytes": 0, "scope": "macOS resident-byte cap, not Windows private committed bytes"}
+              "peak_owned_tree_resident_bytes": 0, 'owned_tree_resident_cap_bytes': resident_cap,
+              "scope": "Cloud14GiB host-adapted resident cap, not the earlier2GiB recipe or Windows private committed bytes"}
     stdout, stderr = out / f"{name}.stdout.log", out / f"{name}.stderr.log"
     with stdout.open("xb") as so, stderr.open("xb") as se:
         process = subprocess.Popen([str(tool), *args], cwd=ROOT, stdin=subprocess.DEVNULL,
-                                   stdout=so, stderr=se, start_new_session=True)
+                                   stdout=so, stderr=se, start_new_session=True, env={**os.environ, **sdk_environment})
         record["pid"] = process.pid
         identity = native(process.pid, library)
         record["native_identity"] = identity
         print(f"Actual SDK {name} PID={process.pid} native_identity={identity}", flush=True)
         try:
             while process.poll() is None:
+                actual = observed_identity(process, identity, library, record)
+                if actual is None:
+                    break
                 if identity is None:
-                    identity = native(process.pid, library)
-                    record["native_identity"] = identity
-                if identity is None:
-                    raise RuntimeError("Actual compiler native identity unavailable")
+                    identity = actual
+                    record['native_identity'] = identity
                 children = tree(identity, library)
                 resident = sum(p["resident"] for p in children)
                 record["peak_owned_tree_resident_bytes"] = max(record["peak_owned_tree_resident_bytes"], resident)
                 current = memory()
-                if resident > 2 * GIB or current["available_physical_bytes"] < GIB or current["available_physical_plus_free_swap_bytes"] < 3 * GIB // 2:
+                if resident > resident_cap or current["available_physical_bytes"] < GIB or current["available_physical_plus_free_swap_bytes"] < 3 * GIB // 2:
                     if process.poll() is not None:
+                        record['resource_limit_exceeded_at_retirement'] = True
                         break
-                    if not same_identity(identity, native(process.pid, library)):
-                        raise RuntimeError("Refusing mismatched compiler resource stop")
+                    actual = observed_identity(process, identity, library, record)
+                    if actual is None:
+                        record['resource_limit_exceeded_at_retirement'] = True
+                        break
                     for child in reversed(children):
                         if same_identity(child, native(child["pid"], library)):
                             os.kill(child["pid"], signal.SIGKILL)
@@ -194,7 +237,7 @@ def operate(name, tool, args, out, manifest, library):
                 record["live_at_observer_failure"] = True
             (out / f"{name}.terminal.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
     qualify(manifest)
-    if record["resource_stopped"] or record["exit_code"] != 0:
+    if record["resource_stopped"] or record.get('resource_limit_exceeded_at_retirement') or record["exit_code"] != 0:
         raise RuntimeError(f"Actual SDK operation failed: {name}; terminal/logs preserved")
     return record
 
@@ -204,6 +247,7 @@ def main():
     parser.add_argument("--sdk", choices=("macosx", "iphoneos"))
     parser.add_argument("--out", type=Path)
     parser.add_argument("--self-test", action="store_true")
+    parser.add_argument('--shader', choices=sorted(NAMES))
     args = parser.parse_args()
     manifest = json.loads((ROOT / "shaders.json").read_text(encoding="utf-8-sig"))
     controls(manifest)
@@ -216,18 +260,28 @@ def main():
     library.proc_pidpath.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
     if ctypes.sizeof(BsdInfo) != 136 or ctypes.sizeof(TaskInfo) != 96:
         raise RuntimeError("Unexpected native Darwin identity/task ABI")
-    metal = Path(subprocess.check_output(["xcrun", "--sdk", args.sdk, "--find", "metal"], text=True).strip()).resolve()
-    metallib = Path(subprocess.check_output(["xcrun", "--sdk", args.sdk, "--find", "metallib"], text=True).strip()).resolve()
+    # Preserve tool argv[0]: metallib is a multicall/symlink frontend, not a
+    # request to invoke the resolved air-lld with its default target/version.
+    metal = Path(subprocess.check_output(['xcrun', '--sdk', args.sdk, '--find', 'metal'], text=True).strip()).absolute()
+    metallib = Path(subprocess.check_output(['xcrun', '--sdk', args.sdk, '--find', 'metallib'], text=True).strip()).absolute()
+    sdk_root = subprocess.check_output(['xcrun', '--sdk', args.sdk, '--show-sdk-path'], text=True).strip()
+    sdk_environment = {'SDKROOT': sdk_root}
+    target_flags = ['-target', SDK_TARGETS[args.sdk], '-isysroot', sdk_root]
     args.out.mkdir(parents=True, exist_ok=False)
     operations, accepted, failed = [], [], []
-    for row in qualify(manifest):
+    selected = [row for row in qualify(manifest) if args.shader is None or row['Name'] == args.shader]
+    for row in selected:
         air, binary = args.out / f"{row['Name']}.air", args.out / f"{row['Name']}.metallib"
         try:
-            operations.append(operate(row["Name"] + "-compile", metal, [*FLAGS, "-c", str(ROOT / row["File"]), "-o", str(air)], args.out, manifest, library))
-            operations.append(operate(row["Name"] + "-link", metallib, [str(air), "-o", str(binary)], args.out, manifest, library))
-            if not binary.stat().st_size:
-                raise RuntimeError("Actual linked Metal library is empty")
-            accepted.append({"name": row["Name"], "source_sha256": row["Sha256"], "metallib_sha256": digest(binary), "bytes": binary.stat().st_size})
+            operations.append(operate(row["Name"] + "-compile", metal, [*FLAGS, *target_flags, "-c", str(ROOT / row["File"]), "-o", str(air)], args.out, manifest, library, sdk_environment))
+            operations.append(operate(row["Name"] + "-link", metallib, [str(air), "-o", str(binary)], args.out, manifest, library, sdk_environment))
+            qualify_metallib(binary.read_bytes(), row['Entry'])
+            link_log = (args.out / f"{row['Name']}-link.stderr.log").read_text()
+            if re.search(r'ignoring (?:file|input)|warning:', link_log, re.I):
+                raise RuntimeError('Linker warned or ignored an input; not a valid SDK library pass')
+            accepted.append({"name": row["Name"], 'entry': row['Entry'], "source_sha256": row["Sha256"],
+                             'air_sha256': digest(air), "metallib_sha256": digest(binary), "bytes": binary.stat().st_size,
+                             'exact_entry_token_present': True})
         except RuntimeError as error:
             failed.append({"name": row["Name"], "error": str(error)})
             if isinstance(error, Deferred):
@@ -237,10 +291,12 @@ def main():
                 break
     receipt = {"scope": "Actual SDK compilation/link only; not Metal runtime, SDL binding ABI, numerical/optical parity or performance acceptance",
                "sdk": args.sdk, "sdk_version": subprocess.check_output(["xcrun", "--sdk", args.sdk, "--show-sdk-version"], text=True).strip(),
-               "manifest_sha256": digest(ROOT / "shaders.json"), "flags": FLAGS, "operations": operations,
-               "accepted": accepted, "failed": failed, "success": len(accepted) == 25 and not failed}
+               "manifest_sha256": digest(ROOT / "shaders.json"), "flags": FLAGS,
+               'target': SDK_TARGETS[args.sdk], 'sdk_root': sdk_root, 'selected_shader': args.shader,
+               'full_source_inventory':25, 'expected_compiled_programs':len(selected), "operations": operations,
+               "accepted": accepted, "failed": failed, "success": len(accepted) == len(selected) and not failed}
     (args.out / "receipt.json").write_text(json.dumps(receipt, indent=2), encoding="utf-8")
-    print(f"Actual {args.sdk}: {len(accepted)}/25 SDK programs compiled+linked; failures={len(failed)}")
+    print(f"Actual {args.sdk}: {len(accepted)}/{len(selected)} selected SDK programs compiled+linked; complete25 source pins checked; failures={len(failed)}")
     if not receipt["success"]:
         raise SystemExit(1)
 
