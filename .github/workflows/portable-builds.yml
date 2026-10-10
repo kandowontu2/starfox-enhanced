@@ -1,0 +1,143 @@
+name: Temporary paired-sine native reflection shader compilation (no release)
+
+# This existing workflow ID is dispatched only on the temporary source-only
+# branch. No main changes, release triggers, assets, or platform packages.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  optical-shader:
+    name: Strict ${{ matrix.mode }} / ${{ matrix.format }}
+    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - mode: tiles
+            format: dxil
+          - mode: tiles
+            format: spirv
+          - mode: reduce
+            format: dxil
+          - mode: reduce
+            format: spirv
+          - mode: query
+            format: dxil
+          - mode: query
+            format: spirv
+          - mode: mapping
+            format: dxil
+          - mode: mapping
+            format: spirv
+          - mode: domains
+            format: dxil
+          - mode: domains
+            format: spirv
+          - mode: frames
+            format: dxil
+          - mode: frames
+            format: spirv
+          - mode: optical
+            format: dxil
+          - mode: optical
+            format: spirv
+          - mode: optical_stream
+            format: dxil
+          - mode: optical_stream
+            format: spirv
+          - mode: optical_schedule
+            format: dxil
+          - mode: optical_schedule
+            format: spirv
+          - mode: jets
+            format: dxil
+          - mode: jets
+            format: spirv
+          - mode: jets_stream
+            format: dxil
+          - mode: jets_stream
+            format: spirv
+          - mode: roots_clear
+            format: dxil
+          - mode: roots_clear
+            format: spirv
+          - mode: witness
+            format: dxil
+          - mode: witness
+            format: spirv
+          - mode: folds
+            format: dxil
+          - mode: folds
+            format: spirv
+          - mode: guide
+            format: dxil
+          - mode: guide
+            format: spirv
+          - mode: colour
+            format: dxil
+          - mode: colour
+            format: spirv
+          - mode: compose
+            format: dxil
+          - mode: compose
+            format: spirv
+          - mode: publish
+            format: dxil
+          - mode: publish
+            format: spirv
+          - mode: publish_diagnostics
+            format: dxil
+          - mode: publish_diagnostics
+            format: spirv
+          - mode: admission_clear
+            format: dxil
+          - mode: admission_clear
+            format: spirv
+          - mode: capture
+            format: dxil
+          - mode: capture
+            format: spirv
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          submodules: false
+          lfs: false
+      - name: Download and verify the exact already-tested compiler
+        shell: pwsh
+        run: |
+          $shaderArchive = Join-Path $env:RUNNER_TEMP 'dxc_2026_07_29.zip'
+          Invoke-WebRequest -Uri 'https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.9.2607/dxc_2026_07_29.zip' -OutFile $shaderArchive
+          if ((Get-FileHash -LiteralPath $shaderArchive).Hash -ne 'A1DFB116BA3EEAE6A1582291B53A8E7BF65AD760676BD3194685C8F7367CD241') {
+            throw 'Pinned DXC archive checksum mismatch'
+          }
+          $shaderTools = Join-Path $env:RUNNER_TEMP 'shader-dxc'
+          Expand-Archive -LiteralPath $shaderArchive -DestinationPath $shaderTools
+          if ((Get-FileHash -LiteralPath "$shaderTools/bin/x64/dxc.exe").Hash -ne '980A3A4C6E5C88F5737DDE321E548860021D58FA2349790D4E572805CB298293' -or
+              (Get-FileHash -LiteralPath "$shaderTools/bin/x64/dxcompiler.dll").Hash -ne '9A5100511E127C6A2FC78EDF984F95074A76D35B90C90C4D342430A5AE160E9B') {
+            throw 'Pinned DXC executable/library checksum mismatch'
+          }
+          & "$shaderTools/bin/x64/dxc.exe" --version
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect verified DXC version' }
+      - name: Compile the complete pinned source with original flags and memory guards
+        shell: pwsh
+        run: |
+          & ./tools/ci/compile-optical-shader.ps1 -Mode '${{ matrix.mode }}' -Format '${{ matrix.format }}' `
+            -Compiler "$env:RUNNER_TEMP/shader-dxc/bin/x64/dxc.exe" `
+            -OutputDirectory "$env:RUNNER_TEMP/shader-result"
+      - name: Preserve only shader binary and nonprivate compilation receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: optical-${{ matrix.mode }}-${{ matrix.format }}
+          path: |
+            ${{ runner.temp }}/shader-result/*.dxil
+            ${{ runner.temp }}/shader-result/*.spirv
+            ${{ runner.temp }}/shader-result/receipt.json
+            ${{ runner.temp }}/shader-result/compiler.stdout.log
+            ${{ runner.temp }}/shader-result/compiler.stderr.log
+          if-no-files-found: warn
+          retention-days: 7
