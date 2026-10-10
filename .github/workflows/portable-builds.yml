@@ -1,48 +1,32 @@
-name: Temporary iOS native bundle artifact check (no GPU, no release)
+name: Temporary offline Apple shader build graph (no release)
 on:
   workflow_dispatch:
 permissions:
   contents: read
-  actions: read
 jobs:
-  metal-embedding:
-    name: Complete25 real SDL component link / ${{ matrix.sdk }}
+  metal-source-graph:
+    name: Complete25 source build configuration / ${{ matrix.sdk }}
     runs-on: macos-15-intel
     strategy:
       fail-fast: false
       matrix:
-        sdk: [iphoneos]
+        sdk: [macosx, iphoneos]
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
           submodules: false
           lfs: false
-      - name: Fetch only the original complete25 public SDK shader results
-        uses: actions/download-artifact@v4
-        with:
-          github-token: ${{ github.token }}
-          run-id: 38054247676
-          pattern: metal-${{ matrix.sdk }}-*
-          path: ${{ runner.temp }}/sdk-artifacts
-      - name: Build and link actual complete factory graph against real SDL
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: python3 tools/check_link.py --sdk '${{ matrix.sdk }}' --artifacts '${{ runner.temp }}/sdk-artifacts' --out '${{ runner.temp }}/embedding-result'
-      - name: Preserve diagnostics and nonprivate native shader artifacts
+      - name: Configure real SDK and full offline build graph
+        run: python3 tools/check_source_graph.py --sdk '${{ matrix.sdk }}' --out '${{ runner.temp }}/source-graph'
+      - name: Preserve actual native configuration and graph evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: linked-${{ matrix.sdk }}
+          name: source-graph-${{ matrix.sdk }}
           path: |
-            ${{ runner.temp }}/embedding-result/*.o
-            ${{ runner.temp }}/embedding-result/*.terminal.json
-            ${{ runner.temp }}/embedding-result/*.prelaunch.json
-            ${{ runner.temp }}/embedding-result/*.stdout.log
-            ${{ runner.temp }}/embedding-result/*.stderr.log
-            ${{ runner.temp }}/embedding-result/link-receipt.json
-            ${{ runner.temp }}/embedding-result/compile_commands.json
-            ${{ runner.temp }}/embedding-result/native-link-consumer
-            ${{ runner.temp }}/embedding-result/libstarfox_metal_reflection_history.a
+            ${{ runner.temp }}/source-graph/*.json
+            ${{ runner.temp }}/source-graph/*.log
+            ${{ runner.temp }}/source-graph/build.ninja
           if-no-files-found: warn
           retention-days: 7
