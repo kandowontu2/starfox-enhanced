@@ -17,11 +17,16 @@ preserve failed attempts, and produce the same embedded provider. Changed SDK
 roots, versions and tool bytes invalidate cached outputs. No temporary CI
 artifact download, GitHub API or runtime network access is part of that adapter.
 
-This branch's manual CI configures the actual native graph on both SDKs. It
-does not repeat the completed component build, launch a GPU, or restart the
-separate live driver diagnostic. It is configuration evidence, not a newly
-completed shader/application build, Metal numerical/performance acceptance,
-physical compatibility or production adoption. No release is published.
+The preceding native graph configuration passed on both SDKs. This branch's
+manual CI now exercises that new source-built target end to end: compile all25
+programs from their held Metal source using the same strict compiler/observer,
+generate the complete read-only bundle, build the original factory/provider
+component, and link real SDL. No previously compiled CI shader artifact is
+downloaded. A fresh macOS native consumer verifies idle-owner/full25/refusals;
+iOS is compiled/linked only. No GPU, game application, driver restart, Metal
+numerical/frame-cost/physical acceptance or production adoption is implied.
+No release is published. Actual failures remain preserved, never retried merely
+because an observer sees a long-running native operation.
 
 `cmake/BuildMetalReflection.cmake` exposes
 `starfox_add_source_built_metal_reflection_history(target source_root sdk output_root)`.

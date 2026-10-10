@@ -1,11 +1,11 @@
-name: Temporary offline Apple shader build graph (no release)
+name: Temporary source-built Apple shader component (no GPU/release)
 on:
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
   metal-source-graph:
-    name: Complete25 source build configuration / ${{ matrix.sdk }}
+    name: Complete25 source-built native component / ${{ matrix.sdk }}
     runs-on: macos-15-intel
     strategy:
       fail-fast: false
@@ -17,16 +17,26 @@ jobs:
           persist-credentials: false
           submodules: false
           lfs: false
-      - name: Configure real SDK and full offline build graph
-        run: python3 tools/check_source_graph.py --sdk '${{ matrix.sdk }}' --out '${{ runner.temp }}/source-graph'
-      - name: Preserve actual native configuration and graph evidence
+      - name: Build all25 shaders from source and link real SDL component
+        run: python3 tools/check_source_graph.py --build --sdk '${{ matrix.sdk }}' --out '${{ runner.temp }}/source-graph'
+      - name: Preserve actual native source-build evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: source-graph-${{ matrix.sdk }}
+          name: source-component-${{ matrix.sdk }}
           path: |
             ${{ runner.temp }}/source-graph/*.json
             ${{ runner.temp }}/source-graph/*.log
             ${{ runner.temp }}/source-graph/build.ninja
+            ${{ runner.temp }}/source-graph/compiler-evidence
+            ${{ runner.temp }}/source-graph/component-libraries.o
+            ${{ runner.temp }}/source-graph/native-link-consumer
+            ${{ runner.temp }}/source-graph/libstarfox_metal_reflection_history.a
+            ${{ runner.temp }}/source-graph/build/generated-metal/**/*.terminal.json
+            ${{ runner.temp }}/source-graph/build/generated-metal/**/*.prelaunch.json
+            ${{ runner.temp }}/source-graph/build/generated-metal/**/receipt.json
+            ${{ runner.temp }}/source-graph/build/generated-metal/**/*.stdout.log
+            ${{ runner.temp }}/source-graph/build/generated-metal/**/*.stderr.log
+            ${{ runner.temp }}/source-graph/build/generated-metal/**/*.metallib
           if-no-files-found: warn
           retention-days: 7

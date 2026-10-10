@@ -1,7 +1,8 @@
-"""Configure the actual offline Apple CMake graph; do not launch GPU/build.
+"""Configure and optionally build the actual offline Apple CMake component.
 
-Actual SDK compiler identification occurs during CMake configuration. Full
-shader compilation/linkage/runtime are separate gates, never inferred here.
+Actual SDK compiler identification occurs during CMake configuration. The
+explicit build mode compiles every shader from source and links the component;
+neither mode launches a GPU or proves game/runtime/performance acceptance.
 """
 import argparse
 import ctypes
@@ -26,6 +27,7 @@ def main():
     parser.add_argument('--sdk', choices=('macosx', 'iphoneos'), required=True)
     parser.add_argument('--out', required=True, type=Path)
     parser.add_argument('--self-test', action='store_true')
+    parser.add_argument('--build', action='store_true')
     args = parser.parse_args()
     manifest, rows, held = link.qualify_component()
     module = (ROOT / 'cmake/BuildMetalReflection.cmake').read_text()
@@ -62,6 +64,12 @@ def main():
         return original_pin(tool)
     sdk.pin_sdk_executables = pin_graph_tool
     name, failure, operations = 'configure-offline-complete25', None, []
+    operation_names = [name]
+    if args.build:
+        operation_names.append('build-offline-complete25-component')
+        if args.sdk == 'macosx':
+            operation_names.append('run-offline-native-link-consumer')
+    graph_verified, payload_verified, native_consumer = False, False, False
     build = args.out / 'build'
     try:
         configure = ['-S', str(ROOT / 'build-integration'), '-B', str(build), '-G', 'Ninja',
@@ -103,16 +111,85 @@ def main():
         shutil.copyfile(build / 'build.ninja', args.out / 'build.ninja')
         shutil.copyfile(build / 'compile_commands.json', args.out / 'compile_commands.json')
         shutil.copyfile(build / 'generated-metal/sdk-context.json', args.out / 'sdk-context.json')
+        graph_verified = True
+        if args.build:
+            operations.append(sdk.operate(operation_names[1], cmake,
+                ['--build', str(build), '--target', 'starfox_metal_factory_link_check',
+                 '--parallel', '1', '--verbose'], args.out, manifest, library, {'SDKROOT': sdk_root}))
+            # Fresh, unique CMake build: all25 SDK compiler operations must
+            # actually complete. No artifact download/old bytecode substitution.
+            spec = importlib.util.spec_from_file_location('source_build_adapter', ROOT / 'tools/build_metal_bundle.py')
+            adapter = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(adapter)
+            embedded, source_rows, source_held = adapter.load_source(ROOT)
+            libraries = build / 'generated-metal/libraries'
+            evidence = args.out / 'compiler-evidence'
+            evidence.mkdir()
+            actual_dirs = {p.name for p in libraries.iterdir() if p.is_dir()}
+            if actual_dirs != {f'metal-{args.sdk}-{r["Name"]}' for r in source_rows}:
+                raise RuntimeError('Actual source-built complete25 SDK inventory differs')
+            for row in source_rows:
+                directory = libraries / f'metal-{args.sdk}-{row["Name"]}'
+                adapter.verify_library(embedded, row, args.sdk, directory, context)
+                shutil.copytree(directory, evidence / directory.name)
+            expected_directory = args.out / 'expected-embedding'
+            expected_directory.mkdir()
+            _, expected = embedded.generate(args.sdk, source_rows, source_held['Recipes'], libraries, expected_directory)
+            for filename in ('libraries.S', 'embedding_programs.hpp'):
+                if (expected_directory / filename).read_bytes() != (build / 'generated-metal/bundle' / filename).read_bytes():
+                    raise RuntimeError('Actual source-built complete25 embedding changed')
+            objects = list(build.glob('CMakeFiles/starfox_metal_reflection_history.dir/**/libraries.S.o'))
+            if len(objects) != 1:
+                raise RuntimeError('One actual complete25 native embedding object required')
+            cpu = 0x1000007 if args.sdk == 'macosx' else 0x100000c
+            actual = embedded.native_section(objects[0].read_bytes(), cpu)
+            if actual[:len(expected)] != expected or len(actual)-len(expected) not in range(16) or any(actual[len(expected):]):
+                raise RuntimeError('Actual complete25 read-only native object bytes differ')
+            executable = (build / ('starfox_metal_factory_link_check.app/starfox_metal_factory_link_check'
+                if args.sdk == 'iphoneos' else 'starfox_metal_factory_link_check')).resolve(strict=True)
+            constants, address = link.native_executable_constants(executable.read_bytes(), cpu)
+            if constants.count(expected) != 1 or (address + constants.find(expected)) % 16:
+                raise RuntimeError('Actual final native executable lacks the complete read-only aligned bundle')
+            archive = build / 'libstarfox_metal_reflection_history.a'
+            if objects[0].read_bytes() not in archive.read_bytes():
+                raise RuntimeError('Actual component archive lacks the original native embedding object')
+            shutil.copyfile(objects[0], args.out / 'component-libraries.o')
+            shutil.copyfile(executable, args.out / 'native-link-consumer')
+            shutil.copyfile(archive, args.out / 'libstarfox_metal_reflection_history.a')
+            payload_verified = True
+            if args.sdk == 'macosx':
+                # Authorize only this verified newly linked executable before
+                # launch; original SDK launcher restrictions remain unchanged.
+                executable_digest = sdk.digest(executable)
+                def pin_consumer_tool(tool):
+                    if tool == executable:
+                        if sdk.digest(tool) != executable_digest:
+                            raise RuntimeError('Prelaunch native consumer bytes changed')
+                        return {str(executable): executable_digest}
+                    return pin_graph_tool(tool)
+                sdk.pin_sdk_executables = pin_consumer_tool
+                operations.append(sdk.operate(operation_names[2], executable, [], args.out,
+                    manifest, library, {'SDKROOT': sdk_root}))
+                output = (args.out / (operation_names[2] + '.stdout.log')).read_text()
+                if output.count('PAYLOAD_PASS ') != 25 or 'ALL25_SDL_PAYLOAD_SELECTION_PASS refusals=625;' not in output or 'ACTUAL_FACTORY_OWNER_LINK_PASS;' not in output:
+                    raise RuntimeError('Actual native idle-owner/full25/refusal consumer incomplete')
+                native_consumer = True
     except Exception as error:
         failure = str(error)
     finally:
-        terminal = args.out / (name + '.terminal.json')
-        if not operations and terminal.exists():
-            operations.append(json.loads(terminal.read_text()))
-        receipt = {'Scope': 'Actual native CMake configure and complete25 offline build graph only; no full shader/component build, GPU, game or performance acceptance',
+        for operation_name in operation_names:
+            terminal = args.out / (operation_name + '.terminal.json')
+            if terminal.exists() and not any(o['name'] == operation_name for o in operations):
+                operations.append(json.loads(terminal.read_text()))
+        receipt = {'Scope': 'Actual native source-built complete25 shader/component/SDL link when explicitly requested; no GPU, application integration/adoption, numerical/frame-cost/physical/goal acceptance',
                    'Sdk': args.sdk, 'Programs': 25, 'Operations': operations, 'Failure': failure,
-                   'CmakeSha256': cmake_digest, 'BuildLaunched': False, 'GpuLaunched': False,
-                   'ConfigurationSucceeded': failure is None and len(operations) == 1}
+                   'CmakeSha256': cmake_digest, 'BuildRequested': args.build,
+                   'BuildLaunched': any(o['name'] == 'build-offline-complete25-component' and o.get('native_identity') for o in operations),
+                   'GpuLaunched': False, 'ProductionAdopted': False,
+                   'ConfigurationSucceeded': graph_verified,
+                   'FinalReadonlyPayloadBytesAccepted': payload_verified,
+                   'NativeConsumerAccepted': native_consumer,
+                   'BuildSucceeded': args.build and failure is None and payload_verified and len(operations) == len(operation_names)}
         (args.out / 'source-graph-receipt.json').write_text(json.dumps(receipt, indent=2))
         print(json.dumps(receipt))
         sdk.pin_sdk_executables = original_pin
