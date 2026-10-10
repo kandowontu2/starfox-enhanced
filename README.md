@@ -4,6 +4,15 @@ This source-only development snapshot is not a playable build, release or
 production merge. It contains no ROM, asset pack or production Git history.
 Its only trigger is manual dispatch; main, tags and releases remain untouched.
 
+The preceding embedding run compiled both native SDK probes and embedded all50
+libraries exactly, but its macOS runtime stopped after six successful pipelines
+when optical returned nil without NSError. That failure is preserved. This
+revised diagnostic uses the same descriptor-based constructor as SDL's Metal
+backend, records generic device capabilities, and attempts every original
+program even after a pipeline rejection. It changes no shader bytes, precision,
+workgroups, bindings or mathematical coverage. Only all25 successful loads may
+produce runtime acceptance; an unavailable device or partial result fails.
+
 The preceding SDK run compiled and linked all25 unchanged programs for both
 macOS11 and iOS15 with the strict Metal2.3 profile. This follow-up downloads
 only those exact public shader artifacts, verifies every original source,

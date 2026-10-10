@@ -176,15 +176,25 @@ def main():
             sdk.pin_sdk_executables = lambda frontend: {str(probe.resolve()): sdk.digest(probe)} if frontend == probe else original_pin(frontend)
             operations.append(sdk.operate('load-all25-pipelines', probe, [], args.out, manifest, library, environment))
             text = (args.out / 'load-all25-pipelines.stdout.log').read_text()
-            runtime_pass = text.count('PIPELINE_PASS ') == 25 and 'ALL25_NATIVE_METAL_PIPELINES_PASS' in text
+            runtime_pass = (text.count('PIPELINE_BEGIN ') == 25 and text.count('PIPELINE_PASS ') == 25 and
+                            'PIPELINE_SUMMARY attempted=25 libraries=25 kernels=25 passed=25 failed=0' in text and
+                            'ALL25_NATIVE_METAL_PIPELINES_PASS' in text)
             if not runtime_pass:
                 raise RuntimeError('Actual full25 Metal pipeline result missing')
     except RuntimeError as error:
         failure = str(error)
     finally:
+        # A failed operate call still writes its actual native terminal. Retain it
+        # in the summary as a failure, not as a successful or missing operation.
+        runtime_terminal = args.out / 'load-all25-pipelines.terminal.json'
+        if runtime_terminal.exists() and not any(op['name'] == 'load-all25-pipelines' for op in operations):
+            operations.append(json.loads(runtime_terminal.read_text()))
+        runtime_log = args.out / 'load-all25-pipelines.stdout.log'
+        attempted = runtime_log.read_text().count('PIPELINE_BEGIN ') if runtime_log.exists() else 0
         report = {'Scope': 'Actual complete25 native Apple binary embedding and SDK probe compilation; Metal pipeline loading is separately reported, not dispatch/numerical/frame-cost/production acceptance',
                   'Sdk': args.sdk, 'SourceRun': SDK_RUN, 'SourceCommit': SDK_COMMIT, 'Programs': 25,
                   'NativeObjectAccepted': object_pass, 'Operations': operations, 'MetalPipelineLoadsAccepted': runtime_pass,
+                  'MetalPipelineAttemptCount': attempted,
                   'Failure': failure, 'ProductionAdopted': False}
         (args.out / 'embedding-receipt.json').write_text(json.dumps(report, indent=2))
         print(json.dumps(report, indent=2))
