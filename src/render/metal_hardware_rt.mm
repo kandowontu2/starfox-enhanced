@@ -796,7 +796,10 @@ bool MetalHardwareRt::render_shadows(void* raw,const Scene& scene,
             auto* triangles=[MTLAccelerationStructureTriangleGeometryDescriptor descriptor];
             triangles.vertexBuffer=vertices;
             triangles.vertexStride=sizeof(Float4);
-            triangles.vertexFormat=MTLAttributeFormatFloat3;
+            // Earlier Metal triangle descriptors already use float3 vertices.
+            // The explicit format setter was introduced later than our targets.
+            if(@available(macOS 13.0,iOS 16.0,*))
+                triangles.vertexFormat=MTLAttributeFormatFloat3;
             triangles.triangleCount=vertex_count/3U;
             triangles.opaque=indexed?NO:YES;
             auto* descriptor=[MTLPrimitiveAccelerationStructureDescriptor descriptor];
@@ -931,7 +934,8 @@ bool MetalHardwareRt::render_reflections(void* raw,
             auto* triangles=[MTLAccelerationStructureTriangleGeometryDescriptor descriptor];
             triangles.vertexBuffer=vertices;
             triangles.vertexStride=sizeof(Float4);
-            triangles.vertexFormat=MTLAttributeFormatFloat3;
+            if(@available(macOS 13.0,iOS 16.0,*))
+                triangles.vertexFormat=MTLAttributeFormatFloat3;
             triangles.triangleCount=geometry.vertex_count/3U;
             triangles.opaque=NO;
             auto* descriptor=[MTLPrimitiveAccelerationStructureDescriptor descriptor];

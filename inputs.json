@@ -758,8 +758,8 @@
     },
     {
       "File": "src/render/metal_hardware_rt.mm",
-      "Sha256": "a5be1fafbb6dd1c41aee2bfa8d2b12926895b9c08fb757dd87f8a6b4fbbd5251",
-      "Bytes": 57967
+      "Sha256": "ddf1dcb826a00a89f268b2f4c5746686e0ee3f9f1fe3220df65aeef8d09d865a",
+      "Bytes": 58235
     },
     {
       "File": "src/render/shaders/metal_native_material_shared.hpp.in",
@@ -773,8 +773,8 @@
     },
     {
       "File": "tests/test_metal_shader_sources.py",
-      "Sha256": "d8283256df440a04a37be7523c8380a8502bfb20d9abad7e7ce757cdbd512f28",
-      "Bytes": 4567
+      "Sha256": "31d37b58ee46292835120574eb609aabd9e36db04a62075a43749d85009139c7",
+      "Bytes": 4770
     },
     {
       "File": "tools/check_metal_rt_shaders.py",

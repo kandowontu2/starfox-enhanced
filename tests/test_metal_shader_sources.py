@@ -73,6 +73,8 @@ class MetalSourceAssemblyTests(unittest.TestCase):
         self.assertIn("SDL_StarfoxMetalTrackBuffer", shadow)
         self.assertIn("Native calibrated RGBA reflection material ABI not supported", self.implementation)
         self.assertEqual(self.implementation.count("options.fastMathEnabled=NO;"), 2)
+        self.assertEqual(self.implementation.count("if(@available(macOS 13.0,iOS 16.0,*))"), 2)
+        self.assertEqual(self.implementation.count("triangles.vertexFormat=MTLAttributeFormatFloat3;"), 2)
         self.assertEqual((self.destination / "shadow.metal").read_text(encoding="utf-8").count("uint starfox_native_material_coverage("), 1)
 
 
