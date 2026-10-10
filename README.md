@@ -1,4 +1,18 @@
-# Temporary real SDL Metal exact-workgroup candidate
+# Temporary source-built real SDL Metal exact-workgroup candidate
+
+This follow-up connects the already compiled real-SDL exact-workgroup candidate
+to the offline source-build graph too. Both SDK jobs freshly compile all25
+original shader sources, then build the complete reflection component and
+privately patched SDL implementation. They link the original full25 consumer
+and the same metadata lifetime tests. macOS executes both CPU-only consumers;
+iOS is compile/link only. No GPU, production merge or release is launched.
+
+All shader calculations, strict floating-point flags, binding layouts,
+workgroup sizes, resource caps and the native observer stay unchanged. The
+separately live driver check is neither replaced nor restarted. This candidate
+still needs actual pipeline/dispatch/numerical/frame-cost and game acceptance.
+
+## Earlier embedded-library integration history
 
 This source-only candidate connects the exact-original-workgroup descriptor
 hint to the actual SDL Metal compute constructor and the full reflection

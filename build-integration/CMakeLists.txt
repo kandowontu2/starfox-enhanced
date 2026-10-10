@@ -13,6 +13,8 @@ FetchContent_Declare(SDL3 URL "${STARFOX_SDL_ARCHIVE}"
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
 FetchContent_MakeAvailable(SDL3)
 get_filename_component(source_root "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
+include("${source_root}/cmake/SDLMetalExactWorkgroup.cmake")
+starfox_patch_metal_exact_workgroup("${sdl3_SOURCE_DIR}")
 include("${source_root}/cmake/BuildMetalReflection.cmake")
 starfox_add_source_built_metal_reflection_history(starfox_metal_reflection_history
     "${source_root}" "${STARFOX_BUILD_SDK}" "${CMAKE_CURRENT_BINARY_DIR}/generated-metal")
@@ -25,3 +27,11 @@ target_include_directories(starfox_metal_factory_link_check PRIVATE
 target_compile_definitions(starfox_metal_factory_link_check PRIVATE SDL_MAIN_HANDLED=1)
 target_link_libraries(starfox_metal_factory_link_check PRIVATE
     starfox_metal_reflection_history SDL3::SDL3)
+add_executable(starfox_metal_pipeline_metadata_check
+    "${source_root}/tools/check_metal_pipeline_metadata.cpp")
+target_include_directories(starfox_metal_pipeline_metadata_check PRIVATE "${source_root}/include")
+target_compile_features(starfox_metal_pipeline_metadata_check PRIVATE cxx_std_20)
+target_compile_options(starfox_metal_pipeline_metadata_check PRIVATE
+    -O3 -fno-fast-math -ffp-contract=off -Wall -Wextra -Wconversion -Werror)
+target_compile_definitions(starfox_metal_pipeline_metadata_check PRIVATE SDL_MAIN_HANDLED=1)
+target_link_libraries(starfox_metal_pipeline_metadata_check PRIVATE SDL3::SDL3)

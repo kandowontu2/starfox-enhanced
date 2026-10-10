@@ -32,6 +32,7 @@ def main():
     manifest, rows, held = link.qualify_component()
     module = (ROOT / 'cmake/BuildMetalReflection.cmake').read_text()
     for required in ('STARFOX_REFLECTION_SOURCE_INDEX_AVAILABLE=1', 'STARFOX_REFLECTION_EMBEDDED_METAL=1',
+                     'STARFOX_REFLECTION_METAL_EXACT_WORKGROUP=1',
                      '-fno-fast-math', '-ffp-contract=off', '-Wconversion', '-Werror',
                      'DEPENDS ${inputs} ${previous}', 'sdk-context.json', 'SDL3::SDL3'):
         if required not in module:
@@ -69,7 +70,8 @@ def main():
         operation_names.append('build-offline-complete25-component')
         if args.sdk == 'macosx':
             operation_names.append('run-offline-native-link-consumer')
-    graph_verified, payload_verified, native_consumer = False, False, False
+            operation_names.append('run-offline-native-metadata-consumer')
+    graph_verified, payload_verified, native_consumer, metadata_consumer = False, False, False, False
     build = args.out / 'build'
     try:
         configure = ['-S', str(ROOT / 'build-integration'), '-B', str(build), '-G', 'Ninja',
@@ -100,21 +102,30 @@ def main():
                 raise RuntimeError('Actual native graph loses full serialized dependencies')
             previous = f'generated-metal/libraries/metal-{args.sdk}-{row["Name"]}/{row["Name"]}.metallib'
         compile_commands = json.loads((build / 'compile_commands.json').read_text())
-        for filename in ('gpu_calibrated_reflection_history.cpp', 'embedded_metal_reflection_programs.cpp', 'check_link.cpp'):
+        for filename in ('gpu_calibrated_reflection_history.cpp', 'embedded_metal_reflection_programs.cpp',
+                         'check_link.cpp', 'check_metal_pipeline_metadata.cpp'):
             matching = [c for c in compile_commands if Path(c['file']).name == filename]
             if len(matching) != 1 or any(flag not in matching[0]['command'] for flag in (
                     '-O3', '-fno-fast-math', '-ffp-contract=off', '-Wconversion', '-Werror', '-arch ' + arch)):
                 raise RuntimeError('Actual native component compile recipe changed')
+            if filename in ('gpu_calibrated_reflection_history.cpp', 'embedded_metal_reflection_programs.cpp'):
+                if '-DSTARFOX_REFLECTION_METAL_EXACT_WORKGROUP=1' not in matching[0]['command']:
+                    raise RuntimeError('Offline source-built component lost the exact-workgroup opt-in')
+        patched_sdl = build / '_deps/sdl3-src/src/gpu/metal/SDL_gpu_metal.m'
+        if sdk.digest(patched_sdl) != '3798a2b37450d933c2c30a443fe5da530a6f17234b11da4b599f4fd1d5c2d440':
+            raise RuntimeError('Offline graph did not apply the original verified real SDL constructor patch')
         context = json.loads((build / 'generated-metal/sdk-context.json').read_text())
         if (context['sdk'], context['root']) != (args.sdk, sdk_root):
             raise RuntimeError('Actual graph configured a mismatched SDK context')
         shutil.copyfile(build / 'build.ninja', args.out / 'build.ninja')
         shutil.copyfile(build / 'compile_commands.json', args.out / 'compile_commands.json')
         shutil.copyfile(build / 'generated-metal/sdk-context.json', args.out / 'sdk-context.json')
+        shutil.copyfile(patched_sdl, args.out / 'patched-SDL_gpu_metal.m')
         graph_verified = True
         if args.build:
             operations.append(sdk.operate(operation_names[1], cmake,
                 ['--build', str(build), '--target', 'starfox_metal_factory_link_check',
+                 'starfox_metal_pipeline_metadata_check',
                  '--parallel', '1', '--verbose'], args.out, manifest, library, {'SDKROOT': sdk_root}))
             # Fresh, unique CMake build: all25 SDK compiler operations must
             # actually complete. No artifact download/old bytecode substitution.
@@ -156,6 +167,13 @@ def main():
             shutil.copyfile(objects[0], args.out / 'component-libraries.o')
             shutil.copyfile(executable, args.out / 'native-link-consumer')
             shutil.copyfile(archive, args.out / 'libstarfox_metal_reflection_history.a')
+            metadata_executable = (build / ('starfox_metal_pipeline_metadata_check.app/starfox_metal_pipeline_metadata_check'
+                if args.sdk == 'iphoneos' else 'starfox_metal_pipeline_metadata_check')).resolve(strict=True)
+            shutil.copyfile(metadata_executable, args.out / 'native-metadata-consumer')
+            for candidate in (executable, metadata_executable):
+                data = candidate.read_bytes()
+                if b'Metal returned nil without NSError\0' not in data or b'starfox.gpu.compute.exact_threadgroup.v1\0' not in data:
+                    raise RuntimeError('Actual source-built executable lacks the patched SDL constructor')
             payload_verified = True
             if args.sdk == 'macosx':
                 # Authorize only this verified newly linked executable before
@@ -174,6 +192,20 @@ def main():
                 if output.count('PAYLOAD_PASS ') != 25 or 'ALL25_SDL_PAYLOAD_SELECTION_PASS refusals=625;' not in output or 'ACTUAL_FACTORY_OWNER_LINK_PASS;' not in output:
                     raise RuntimeError('Actual native idle-owner/full25/refusal consumer incomplete')
                 native_consumer = True
+                metadata_digest = sdk.digest(metadata_executable)
+                def pin_metadata_tool(tool):
+                    if tool == metadata_executable:
+                        if sdk.digest(tool) != metadata_digest:
+                            raise RuntimeError('Prelaunch native metadata consumer bytes changed')
+                        return {str(metadata_executable): metadata_digest}
+                    return pin_consumer_tool(tool)
+                sdk.pin_sdk_executables = pin_metadata_tool
+                operations.append(sdk.operate(operation_names[3], metadata_executable, [], args.out,
+                    manifest, library, {'SDKROOT': sdk_root}))
+                metadata_output = (args.out / (operation_names[3] + '.stdout.log')).read_text()
+                if metadata_output.count('METAL_EXACT_WORKGROUP_METADATA_PASS; real SDL properties; no GPU or pipeline created') != 1:
+                    raise RuntimeError('Source-built real SDL metadata lifecycle/ownership checks incomplete')
+                metadata_consumer = True
     except Exception as error:
         failure = str(error)
     finally:
@@ -189,6 +221,7 @@ def main():
                    'ConfigurationSucceeded': graph_verified,
                    'FinalReadonlyPayloadBytesAccepted': payload_verified,
                    'NativeConsumerAccepted': native_consumer,
+                   'ExactWorkgroupMetadataAccepted': metadata_consumer,
                    'BuildSucceeded': args.build and failure is None and payload_verified and len(operations) == len(operation_names)}
         (args.out / 'source-graph-receipt.json').write_text(json.dumps(receipt, indent=2))
         print(json.dumps(receipt))
