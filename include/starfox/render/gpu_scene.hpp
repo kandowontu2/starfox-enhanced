@@ -249,7 +249,9 @@ public:
     [[nodiscard]] GpuRasterOutput resident_output() const noexcept;
     // Triangle float4s, concatenated in draw order, borrowed through the next
     // batch/release. Submission ownership/fence rules match the colour output.
-    // No requested casters or unsupported caster paths return an empty output.
+    // Validated model-free batches publish complete zero-caster metadata with
+    // no geometry allocation. Unsupported/unrequested opaque casters remain
+    // incomplete; a previous model/material buffer is never an empty scene.
     [[nodiscard]] RayGeometryOutput ray_geometry_output() const noexcept;
     bool wait_for_completion();
     // Optional diagnostic timing: retire, encode, submit microseconds, draws.

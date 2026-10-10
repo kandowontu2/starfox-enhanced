@@ -967,6 +967,7 @@ GpuRasterOutput GpuScene::enqueue_batch(void* device,void* command,std::uint32_t
         impl_->topology_models=impl_->prepared_topology_models=impl_->prepared_projection_models=0;
         impl_->model_uploads={};
         impl_->ray_output={};impl_->ray_vertex_count=0;
+        impl_->ray_material_offset=0;impl_->ray_gpu_materials_complete=false;
         impl_->ray_materials.triangles.clear();impl_->ray_materials.texels.clear();impl_->ray_materials_complete=true;
         if(!valid_raster_jitter(jitter) || !device || !command || !width || !height || std::uint64_t(width)*height>UINT32_MAX/16)
             throw std::runtime_error("Invalid GPU scene batch dimensions");
@@ -975,6 +976,7 @@ GpuRasterOutput GpuScene::enqueue_batch(void* device,void* command,std::uint32_t
         // Validate the entire layout before encoding any draws. Geometry packing
         // can still fail later; the caller must cancel, never submit a partial scene.
         std::uint64_t ray_triangles=0;bool rays_requested=false,materials_requested=false;
+        bool opaque_models_present=false;
         bool rays_complete=std::getenv("STARFOX_DISABLE_GPU_RAY_GEOMETRY")==nullptr;
         for(const auto& draw:draws) {
             if(const auto* model=std::get_if<GpuModelDraw>(&draw)) {
@@ -984,6 +986,10 @@ GpuRasterOutput GpuScene::enqueue_batch(void* device,void* command,std::uint32_t
                     || width/scale>32767 || height/scale>32767)) || (custom &&
                     (!model->logical_viewport[0] || !model->logical_viewport[1] || model->logical_viewport[0]>32767 || model->logical_viewport[1]>32767)))
                     throw std::runtime_error("Invalid GPU scene model layout");
+                // Missing ray requests for an opaque model are not an empty
+                // scene. Only a validated model-free batch can publish zero
+                // casters without asking the model packer for geometry.
+                opaque_models_present|=!model->emissive && !model->pose.simple_scaled_sprite;
                 // Whole-object sprites are texel billboards. The reference
                 // renderer's shadow-only path returns before emitting faces,
                 // so they are not missing GPU casters and must not invalidate
@@ -1088,6 +1094,8 @@ GpuRasterOutput GpuScene::enqueue_batch(void* device,void* command,std::uint32_t
             accumulate_msaa(output,{});
             output.msaa_color=msaa && msaa->defer_palette?nullptr:impl_->msaa_result;
             impl_->status="Empty GPU scene batch cleared resident";
+            if(rays_complete)
+                impl_->ray_output={device,nullptr,0,true,&impl_->ray_materials,0,0};
             impl_->gpu_timestamps.end(impl_->timestamp_ticket,static_cast<SDL_GPUCommandBuffer*>(command));
             return output;
         }
@@ -1300,7 +1308,7 @@ GpuRasterOutput GpuScene::enqueue_batch(void* device,void* command,std::uint32_t
         if(inplace_models && std::getenv("STARFOX_TRACE_GPU"))
             std::cerr<<"scene-inplace-raster: models="<<inplace_models<<'\n';
         output.msaa_color=msaa && msaa->defer_palette?nullptr:impl_->msaa_result;
-        if(rays_requested && rays_complete)
+        if((rays_requested || !opaque_models_present) && rays_complete)
             impl_->ray_output={device,impl_->ray_vertex_count?impl_->ray_vertices:nullptr,impl_->ray_vertex_count,true,
                 impl_->ray_materials_complete && (impl_->ray_gpu_materials_complete || impl_->ray_materials.triangles.size()*3==impl_->ray_vertex_count)
                     ? &impl_->ray_materials : nullptr,impl_->ray_gpu_materials_complete?impl_->ray_material_offset:0};

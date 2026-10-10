@@ -25,9 +25,29 @@ documented below. Historical packages do not gain this change retroactively.
 CPU speedup alone does not establish stable 60 FPS; measure New-model stereo
 and old-model mono separately before claiming playable performance.
 
-## Current tester candidates (October 9)
+## Current tester candidate R180 (October 10)
 
-Use `build/StarFoxEnhanced-3ds-test-r149.zip` for the current functional
+Use `build/StarFoxEnhanced-3ds-test-r180.zip` and its companion
+`build/StarFoxEnhanced-3ds-test-r180-START-HERE.txt`. The exact source is
+`bbc5d96956291e5ffa8647cd462f2d99fb0bced5`; the
+[source-only ARM run 38000160275](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38000160275)
+passes all 43 host tests and the seven native ARM targets, including stack
+and package checks. The asset-free ZIP is 1,120,357 bytes, SHA256
+`2d633592020ee7667d1f659e983ed8f0453c2bdf4c7662cee9c66eccce83d31d`.
+
+This strict Release-O3 candidate completes the ordinary emulator route:
+all 42 real-menu input events, gameplay, guest shutdown and normal host exit.
+It retains source game timing and strict arithmetic, without fast-math or LTO.
+New 3DS/XL uses slider-controlled stereo; Original 3DS/XL and both 2DS models
+remain mono. Follow [the quick start](TESTING.md), using your own BIN and DSP
+firmware. Console FPS, audible output, stereo, Home/sleep and full-campaign
+acceptance are still unverified. This is an experimental 3DSX, not a CIA or
+release. Its `BUILD-INFO.json` identifies the packaged source; do not assume
+the current working tree has adopted every change from that source.
+
+## Earlier tester candidates R149 and R153 (October 9)
+
+`build/StarFoxEnhanced-3ds-test-r149.zip` is the earlier functional
 baseline. Its exact geometry comparison, full 43-test host graph, real ARM
 build/package gates and complete ordinary emulator route pass. The route
 uses the real menu, all 42 input edges and clean guest/host retirement.
@@ -35,7 +55,7 @@ ZIP SHA256: `c1436b4c31492bb66d7975d1fbd571d89035922f305582580bfacdb0aea53ca3`.
 This remains experimental: emulator success does not establish console
 performance, audible output, PICA pixels, Home/sleep or slider acceptance.
 
-The newer `build/StarFoxEnhanced-3ds-test-r153.zip` is a separate strict native
+`build/StarFoxEnhanced-3ds-test-r153.zip` is an earlier separate strict native
 Release-O3 experiment, not a replacement accepted on hardware. Its
 [source-only ARM run 37936446669](https://github.com/kandowontu2/starfox-enhanced/actions/runs/37936446669)
 passes, and the downloaded package and all 81 actual ARM compiler commands

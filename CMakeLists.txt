@@ -1212,30 +1212,32 @@ if(STARFOX_BUILD_RUNTIME)
     endif()
     if(APPLE)
         enable_language(OBJCXX)
-        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-            "${CMAKE_CURRENT_SOURCE_DIR}/include/starfox/render/lava_surface.inc"
-            "${CMAKE_CURRENT_SOURCE_DIR}/include/starfox/render/water_caustics.inc"
-            "${CMAKE_CURRENT_SOURCE_DIR}/include/starfox/render/water_transmission.inc")
-        file(READ "${CMAKE_CURRENT_SOURCE_DIR}/include/starfox/render/lava_surface.inc" STARFOX_LAVA_SURFACE_SOURCE)
-        file(READ "${CMAKE_CURRENT_SOURCE_DIR}/include/starfox/render/water_caustics.inc" STARFOX_WATER_CAUSTICS_SOURCE)
-        file(READ "${CMAKE_CURRENT_SOURCE_DIR}/include/starfox/render/water_transmission.inc" STARFOX_WATER_TRANSMISSION_SOURCE)
-        configure_file(src/render/shaders/metal_water_shared.hpp.in
-            "${CMAKE_CURRENT_BINARY_DIR}/generated/metal_water_shared.hpp" @ONLY)
+        include(cmake/NativeMetalMaterialSource.cmake)
         if(STARFOX_BUILD_TOOLS AND NOT IOS)
             find_package(Python3 COMPONENTS Interpreter REQUIRED)
             set(STARFOX_NATIVE_METAL_SOURCE_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/native-metal-check")
             add_custom_command(OUTPUT "${STARFOX_NATIVE_METAL_SOURCE_DIR}/reflection.metal"
                     "${STARFOX_NATIVE_METAL_SOURCE_DIR}/shadow.metal"
+                    "${STARFOX_NATIVE_METAL_SOURCE_DIR}/empty_reflection.metal"
+                    "${STARFOX_NATIVE_METAL_SOURCE_DIR}/empty_shadow.metal"
                 COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_metal_rt_shaders.py"
                     --emit-only "${STARFOX_NATIVE_METAL_SOURCE_DIR}"
+                    --generated-dir "${CMAKE_CURRENT_BINARY_DIR}/generated"
                 DEPENDS tools/check_metal_rt_shaders.py src/render/metal_hardware_rt.mm
                     src/render/shaders/metal_water_shared.hpp.in
+                    src/render/shaders/metal_native_material_shared.hpp.in
+                    "${CMAKE_CURRENT_BINARY_DIR}/generated/metal_water_shared.hpp"
+                    "${CMAKE_CURRENT_BINARY_DIR}/generated/metal_native_material_shared.hpp"
+                    "${CMAKE_CURRENT_BINARY_DIR}/generated/metal_liquid_optics.inc"
+                    "${CMAKE_CURRENT_BINARY_DIR}/generated/metal_material_colour.inc"
                     include/starfox/render/lava_surface.inc include/starfox/render/water_caustics.inc
                     include/starfox/render/water_transmission.inc
                 VERBATIM)
             add_custom_target(starfox_native_metal_source DEPENDS
                 "${STARFOX_NATIVE_METAL_SOURCE_DIR}/reflection.metal"
-                "${STARFOX_NATIVE_METAL_SOURCE_DIR}/shadow.metal")
+                "${STARFOX_NATIVE_METAL_SOURCE_DIR}/shadow.metal"
+                "${STARFOX_NATIVE_METAL_SOURCE_DIR}/empty_reflection.metal"
+                "${STARFOX_NATIVE_METAL_SOURCE_DIR}/empty_shadow.metal")
             add_executable(starfox_native_metal_check tools/check_native_metal.mm)
             add_dependencies(starfox_native_metal_check starfox_native_metal_source)
             target_compile_features(starfox_native_metal_check PRIVATE cxx_std_20)

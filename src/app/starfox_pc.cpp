@@ -2999,7 +2999,7 @@ public:
         if(!native_gpu_enabled() || (eye<2)!=stereo_scene_ready_ || palette.size()!=256
             || std::getenv("STARFOX_DISABLE_GPU_EFFECTS")) return false;
         const auto geometry=eye<2?native_stereo_scene_.ray_geometry_output(eye):native_scene_.ray_geometry_output();
-        if(!geometry.complete || !geometry.materials || !geometry.vertex_count) return false;
+        if(!geometry.complete || !geometry.materials) return false;
         std::array<std::uint32_t,256> packed{};
         for(unsigned i=0;i<256;++i) packed[i]=std::uint32_t(palette[i].r)
             |(std::uint32_t(palette[i].g)<<8)|(std::uint32_t(palette[i].b)<<16)|0xff000000U;
@@ -3022,7 +3022,8 @@ public:
                 if(metal_hardware_rt_.available(effect_device())) {
                     auto& underlay=eye<2?stereo_motion_reflections_metal_[eye]:motion_reflections_metal_;
                     ready=underlay.render_reflections(effect_device(),geometry,camera,
-                        packed,packed[0],quality,roughness,metallic,ground,water,background,true);
+                        packed,packed[0],quality,roughness,metallic,ground,water,background,true,
+                        std::nullopt,2);
                     if(ready) underlay_output=underlay.reflection_output();
                 } else
 #endif
@@ -3057,11 +3058,13 @@ public:
         else native_metal_reflection_selected_=false;
         auto& metal=eye<2?stereo_metal_hardware_rt_[eye]:metal_hardware_rt_;
         if(metal.available(effect_device())) {
-            if(eye<2) stereo_metal_reflection_selected_[eye]=true;
-            else native_metal_reflection_selected_=true;
             const bool success=metal.render_reflections(effect_device(),geometry,camera,
                 packed,packed[0],quality,roughness,
-                metallic,ground,water,background);
+                metallic,ground,water,background,false,std::nullopt,2);
+            if(success) {
+                if(eye<2) stereo_metal_reflection_selected_[eye]=true;
+                else native_metal_reflection_selected_=true;
+            }
             if(!success && std::getenv("STARFOX_TRACE_GPU_RAYS"))
                 std::cerr<<"Metal reflection-scene declined: "<<metal.status()<<'\n';
             return success;
@@ -15230,6 +15233,19 @@ int main(int argc, char** argv) {
             ray_water.mirror_models=static_cast<starfox::render::Effect>(game.active_material())==starfox::render::Effect::mirror;
             ray_water.material=lava_requested?3:water_environment.modes[0]>=7?water_environment.modes[0]-6:0;
             ray_water.reflection_strength=float(game.reflective_surfaces())/3.f;
+#if defined(__APPLE__)
+            if(water_requested && ray_water.material==0) {
+                // Transport the current cartridge's live water palette in
+                // linear light; do not derive its colour from reflected sky.
+                const auto water_gradient=starfox::render::source_ground_gradient(
+                    ppu.cgram,water_environment.classes,true);
+                if(water_gradient[0][3]==5.f && water_gradient[1][3]>0.f) {
+                    ray_water.source_colour.emplace();
+                    for(unsigned c=0;c<3;++c) (*ray_water.source_colour)[c]=
+                        (water_gradient[0][c]+water_gradient[1][c])/(2.f*255.f);
+                }
+            }
+#endif
             ray_water.camera_position={float(camera.x),float(camera.y),float(camera.z)};
             for(unsigned row=0;row<3;++row) for(unsigned col=0;col<3;++col)
                 ray_water.world_to_view[row*3+col]=float(view_matrix[col*3+row])/32768.f;

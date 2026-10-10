@@ -1,0 +1,10 @@
+#pragma once
+// Embed the exact independently CPU/SDK-checked decoder into runtime sources;
+// the app must not depend on filesystem includes when Metal compiles a string.
+inline constexpr char starfox_metal_native_material_shared[] = R"SF_NATIVE(
+#include <metal_stdlib>
+using namespace metal;
+@STARFOX_METAL_NATIVE_COVERAGE_SOURCE@
+@STARFOX_METAL_MATERIAL_COLOUR_SOURCE@
+@STARFOX_METAL_NATIVE_COLOUR_SOURCE@
+)SF_NATIVE";

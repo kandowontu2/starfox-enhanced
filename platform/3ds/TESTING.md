@@ -2,8 +2,11 @@
 
 ## Quick start for testers
 
-1. Download the current `StarFoxEnhanced-3ds-test.zip` experimental player
-   (or its numbered tester ZIP) and extract it to the SD card's root.
+1. Use `StarFoxEnhanced-3ds-test-r180.zip` with its companion
+   `StarFoxEnhanced-3ds-test-r180-START-HERE.txt`, or download the experimental
+   `StarFoxEnhanced-3ds-test.zip` artifact from
+   [ARM run 38000160275](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38000160275).
+   Extract the ZIP to the SD card's root, keeping its folder structure.
 2. Put your own `Starfox-Assets.BIN` in `/3ds/starfox-enhanced/`.
    The final path must be `/3ds/starfox-enhanced/Starfox-Assets.BIN`.
    Do not put a ROM in that folder instead of the generated BIN.
@@ -39,7 +42,27 @@ still required.
 
 ## Current build and validation
 
-The current functional baseline is `build/StarFoxEnhanced-3ds-test-r149.zip`.
+The current tester package is `build/StarFoxEnhanced-3ds-test-r180.zip`
+(1,120,357 bytes), from source `bbc5d96956291e5ffa8647cd462f2d99fb0bced5`.
+ZIP SHA256: `2d633592020ee7667d1f659e983ed8f0453c2bdf4c7662cee9c66eccce83d31d`.
+Its [source-only ARM run 38000160275](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38000160275)
+passes all 43 host tests and seven native targets, including stack and package
+checks. The five ZIP members, payload checksums and 81 actual ARM compiler
+commands were independently checked. The strict Release-O3 build keeps source
+game timing and does not enable fast-math, Ofast or LTO.
+
+This exact package completes all 42 ordinary emulator input events, gameplay,
+guest audio/GPU/kernel shutdown and normal host exit, with settings restored.
+That is functional evidence, not console FPS, audible output, slider or
+Home/sleep acceptance. New 3DS/XL stereo and Original/2DS mono remain the policy.
+Use your own BIN and DSP firmware. This is an experimental homebrew 3DSX,
+not a CIA or release; full console and campaign testing remains required.
+Check `BUILD-INFO.json` for the package's source rather than assuming the current
+working tree includes every staged change used by this candidate.
+
+## Earlier build validation
+
+The earlier functional baseline is `build/StarFoxEnhanced-3ds-test-r149.zip`.
 It reuses clipped terrain/water corner calculations while keeping the exact
 emitted geometry. The complete fresh host build and all 43 tests pass. An
 independent comparison against R148 matches every serialized vertex float and
@@ -64,7 +87,7 @@ Use the quick-start steps above and your own BIN/DSP firmware. New 3DS/XL stereo
 and old-model mono policy remain unchanged. Native full-game, audio, sleep and
 sustained performance testing is still required. No release is published.
 
-The newer strict native Release-O3 experiment is available separately as
+The earlier strict native Release-O3 experiment is available separately as
 `build/StarFoxEnhanced-3ds-test-r153.zip`, from
 [run 37936446669](https://github.com/kandowontu2/starfox-enhanced/actions/runs/37936446669)
 at source `28a28d010551944eade72d8e432964c69abb07f0`.
@@ -74,7 +97,7 @@ The full host tests, ARM/stack/package gates, five-member package audit and all
 strict arithmetic and no fast-math/IPO/LTO. Its ordinary emulator route stops
 after 26/42 input edges at the unchanged host-memory floor; it has no full
 runtime, console or measured performance verdict. Use R149 as the functional
-baseline when comparing this experimental build, and retain your save backup.
+baseline when comparing that historical experiment, and retain your save backup.
 
 The isolated R148 background follow-up passes all43 current host tests and
 24,584,446 BG2 pixel, palette, ownership, HDMA, budget and cache checks. It avoids

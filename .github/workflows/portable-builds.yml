@@ -1,0 +1,83 @@
+name: Temporary full Metal game integration (no release)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  full-game:
+    name: Actual application / ${{ matrix.sdk }}
+    runs-on: macos-15-intel
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        sdk: [macosx, iphoneos]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          submodules: false
+          lfs: false
+      - name: Configure the complete game graph
+        shell: bash
+        run: |
+          sdk='${{ matrix.sdk }}'
+          args=(-S . -B "build/${sdk}" -G Xcode
+            -DCMAKE_OSX_SYSROOT="${sdk}"
+            -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO
+            -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED=NO
+            -DSTARFOX_BUILD_RUNTIME=ON -DSTARFOX_BUILD_TESTS=OFF
+            -DSTARFOX_BUILD_TOOLS=OFF -DSTARFOX_BUILD_VR=OFF
+            -DSTARFOX_METAL_INTEROP=ON -DSTARFOX_EMBED_RUNTIME_ASSETS=ON
+            -DSTARFOX_PACKAGE_MSU1_MUSIC=OFF)
+          if [[ "${sdk}" == iphoneos ]]; then
+            args+=(-DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_ARCHITECTURES=arm64
+              -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0)
+          else
+            args+=(-DCMAKE_OSX_ARCHITECTURES='arm64;x86_64'
+              -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0)
+          fi
+          cmake "${args[@]}" 2>&1 | tee configure.log
+      - name: Check all four complete native runtime shader programs
+        shell: bash
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          python3 tests/test_metal_shader_sources.py
+          python3 tools/check_metal_rt_shaders.py --sdk '${{ matrix.sdk }}' \
+            --generated-dir 'build/${{ matrix.sdk }}/generated'
+      - name: Compile and link the actual application
+        shell: bash
+        run: |
+          cmake --build 'build/${{ matrix.sdk }}' --config Release \
+            --parallel 1 --target starfox_pc 2>&1 | tee build.log
+      - name: Verify and package the test application
+        shell: bash
+        run: |
+          sdk='${{ matrix.sdk }}'
+          directory=Release
+          if [[ "${sdk}" == iphoneos ]]; then directory=Release-iphoneos; fi
+          app="build/${sdk}/${directory}/StarFoxEnhanced.app"
+          test -s "${app}/StarFoxEnhanced"
+          plutil -lint "${app}/Info.plist"
+          lipo -archs "${app}/StarFoxEnhanced"
+          if [[ "${sdk}" == iphoneos ]]; then
+            python3 tools/package_ios.py --app "${app}" \
+              --output StarFoxEnhanced-metal-integration-unsigned.ipa
+          else
+            ditto -c -k --sequesterRsrc --keepParent "${app}" \
+              StarFoxEnhanced-metal-integration-macos.zip
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: full-metal-game-${{ matrix.sdk }}
+          path: |
+            configure.log
+            build.log
+            build/${{ matrix.sdk }}/CMakeCache.txt
+            build/${{ matrix.sdk }}/generated/*.hpp
+            StarFoxEnhanced-metal-integration-unsigned.ipa
+            StarFoxEnhanced-metal-integration-macos.zip
+          if-no-files-found: warn
+          retention-days: 7
