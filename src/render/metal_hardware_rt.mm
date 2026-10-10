@@ -35,9 +35,11 @@ struct alignas(16) Parameters {
     Float4 ground_point{}, ground_normal{};
     std::array<Float4,16> lights{};
     std::array<std::uint32_t,4> coverage{};
+    Float4 primary_range{};
 };
-static_assert(sizeof(Parameters)==336);
+static_assert(sizeof(Parameters)==352);
 static_assert(offsetof(Parameters,lights)==64 && offsetof(Parameters,coverage)==320);
+static_assert(offsetof(Parameters,primary_range)==336);
 struct alignas(16) ReflectionParameters {
     std::uint32_t width{},height{},quality{},metallic{};
     float focal_x{},focal_y{},center_x{},center_y{};
@@ -49,9 +51,21 @@ struct alignas(16) ReflectionParameters {
     std::array<std::uint32_t,4> enhanced_size{};
     Float4 enhanced_motion{},enhanced_plane{},enhanced_projection{},enhanced_palette{},enhanced_keep0{},enhanced_keep1{};
     std::array<std::uint32_t,4> coverage{};
+    Float4 primary_range{};
 };
-static_assert(sizeof(ReflectionParameters)==288);
+static_assert(sizeof(ReflectionParameters)==304);
 static_assert(offsetof(ReflectionParameters,coverage)==272);
+static_assert(offsetof(ReflectionParameters,primary_range)==288);
+
+bool valid_primary_range(const std::optional<PrimaryRayRange>& range) {
+    // Distinct double planes can collapse after conversion to native ray
+    // floats. Refuse that pair before allocating or submitting GPU work.
+    return !range || (range->valid() && float(range->near_depth)<float(range->far_depth));
+}
+Float4 primary_parameters(const std::optional<PrimaryRayRange>& range) {
+    const auto depth=range.value_or(PrimaryRayRange{});
+    return {float(depth.near_depth),float(depth.far_depth),range?1.f:0.f,0};
+}
 
 // Shared by both native kernels and the exact-source Apple compiler/runtime
 // checks. Reject candidates in-place: restarting past a transparent hit with
@@ -155,6 +169,7 @@ struct Parameters {
     float4 ground_point, ground_normal;
     float4 lights[16];
     uint4 coverage;
+    float4 primary_range;
 };
 kernel void starfox_hardware_shadow(
     primitive_acceleration_structure scene [[buffer(0)]],
@@ -167,9 +182,13 @@ kernel void starfox_hardware_shadow(
     uint x=id%p.width, y=id/p.width;
     float3 direction=float3((float(x)+0.5f-p.center_x)/p.focal_x,
         (float(y)+0.5f-p.center_y)/p.focal_y,1.0f);
-    float receiver=65536.0f;
+    // The primary direction has z=1: t is camera depth, not normalized
+    // distance. Secondary light/reflection rays retain their legacy range.
+    float near_depth=p.primary_range.z>0.5f?p.primary_range.x:1.0f;
+    float far_depth=p.primary_range.z>0.5f?p.primary_range.y:65536.0f;
+    float receiver=far_depth;
     if (p.ground_only<0.5f) {
-        ray primary(float3(0.0f),direction,1.0f,65536.0f);
+        ray primary(float3(0.0f),direction,near_depth,far_depth);
         auto hit=visible_hit(primary,scene,uint2(x,y),materials,texels,p.coverage.y,p.coverage.z!=0u,false,p.coverage);
         if (hit.type==intersection_type::triangle) receiver=hit.distance;
     }
@@ -177,10 +196,10 @@ kernel void starfox_hardware_shadow(
         float denominator=dot(direction,p.ground_normal.xyz);
         if (abs(denominator)>1.e-10f) {
             float ground=dot(p.ground_point.xyz,p.ground_normal.xyz)/denominator;
-            if (ground>1.0f && ground<receiver) receiver=ground;
+            if (ground>near_depth && ground<receiver) receiver=ground;
         }
     }
-    if (receiver>=65536.0f) {output[id]=0;return;}
+    if (receiver>=far_depth) {output[id]=0;return;}
     float3 point=direction*receiver;
     float bias=max(0.1f,receiver*1.e-5f);
     uint blocked=0;
@@ -209,6 +228,7 @@ struct Parameters {
     uint4 enhanced_size;
     float4 enhanced_motion,enhanced_plane,enhanced_projection,enhanced_palette,enhanced_keep0,enhanced_keep1;
     uint4 coverage;
+    float4 primary_range;
 };
 float3 rgb(uint packed) {
     return float3(float(packed&255u),float((packed>>8)&255u),
@@ -372,25 +392,27 @@ kernel void starfox_hardware_reflection(
     uint2 pixel=uint2(id%p.width,id/p.width);
     float3 direction=float3((float(pixel.x)+0.5f-p.center_x)/p.focal_x,
         (float(pixel.y)+0.5f-p.center_y)/p.focal_y,1.0f);
-    VisibleHit hit={intersection_type::none,65536.0f,0u,float2(0.0f)};
+    float near_depth=p.primary_range.z>0.5f?p.primary_range.x:1.0f;
+    float far_depth=p.primary_range.z>0.5f?p.primary_range.y:65536.0f;
+    VisibleHit hit={intersection_type::none,far_depth,0u,float2(0.0f)};
     if(p.ground_point.w<0.5f) {
-        SF_VISIBLE_HIT(primary,float3(0.0f),direction,1.0f,65536.0f)
+        SF_VISIBLE_HIT(primary,float3(0.0f),direction,near_depth,far_depth)
         hit=primary;
     }
     // Ground-only exposure excludes primary models, retaining all secondary
     // reflected/transmitted casters. ground_point.w is the receiver flag.
-    float distance=hit.type==intersection_type::triangle?hit.distance:65536.0f;
+    float distance=hit.type==intersection_type::triangle?hit.distance:far_depth;
     bool ground_hit=false;
     if(p.has_ground>0.5f) {
         float denominator=dot(direction,p.ground_normal.xyz);
         if(abs(denominator)>1.e-10f) {
             float ground=dot(p.ground_point.xyz,p.ground_normal.xyz)/denominator;
-            if(ground>1.0f && ground<distance) {
+            if(ground>near_depth && ground<distance) {
                 distance=ground;ground_hit=true;
             }
         }
     }
-    if(distance>=65536.0f) {output[id]=0u;return;}
+    if(distance>=far_depth) {output[id]=0u;return;}
     float3 normal;
     if(ground_hit) normal=normalize(p.ground_normal.xyz);
     else {
@@ -694,9 +716,13 @@ bool MetalHardwareRt::available(void* raw) const noexcept {
 }
 bool MetalHardwareRt::render_shadows(void* raw,const Scene& scene,
     const render::GpuScene::RayGeometryOutput* resident_geometry,
-    Camera camera,Vec3 light,std::optional<ReceiverPlane> ground,bool ground_only) {
+    Camera camera,Vec3 light,std::optional<ReceiverPlane> ground,bool ground_only,
+    std::optional<PrimaryRayRange> primary_range) {
     impl_->shadow={};
     if(ground_only && !ground) return false;
+    if(!valid_primary_range(primary_range)) {
+        impl_->status="Invalid native Metal primary camera range";return false;
+    }
     try {
         auto* device=static_cast<SDL_GPUDevice*>(raw);
         const auto pixels=std::uint64_t(camera.width)*camera.height;
@@ -821,6 +847,7 @@ bool MetalHardwareRt::render_shadows(void* raw,const Scene& scene,
                 scratchBuffer:slot.scratch scratchBufferOffset:0];
             [builder endEncoding];
             Parameters p{};
+            p.primary_range=primary_parameters(primary_range);
             p.ground_only=ground_only?1.0F:0.0F;
             p.width=camera.width;p.height=camera.height;
             p.focal_x=float(camera.focal_length);
@@ -873,9 +900,13 @@ bool MetalHardwareRt::render_reflections(void* raw,
     const render::GpuScene::RayGeometryOutput& geometry,
     Camera camera,std::span<const std::uint32_t,256> palette,
     std::uint32_t environment,std::uint8_t quality,float roughness,
-    std::uint32_t metallic,std::optional<ReceiverPlane> ground,const RayWater* water,const GpuBackgroundDraw* background,bool ground_only) {
+    std::uint32_t metallic,std::optional<ReceiverPlane> ground,const RayWater* water,const GpuBackgroundDraw* background,bool ground_only,
+    std::optional<PrimaryRayRange> primary_range) {
     impl_->reflection={};
     if(ground_only && (!ground || !water)) return false;
+    if(!valid_primary_range(primary_range)) {
+        impl_->status="Invalid native Metal primary camera range";return false;
+    }
     try {
         auto* device=static_cast<SDL_GPUDevice*>(raw);
         const auto pixels=std::uint64_t(camera.width)*camera.height;
@@ -996,6 +1027,7 @@ bool MetalHardwareRt::render_reflections(void* raw,
                 scratchBuffer:slot.scratch scratchBufferOffset:0];
             [builder endEncoding];
             ReflectionParameters p{};
+            p.primary_range=primary_parameters(primary_range);
             p.width=camera.width;p.height=camera.height;p.quality=quality;
             p.metallic=metallic;p.focal_x=float(camera.focal_length);
             p.focal_y=float(camera.vertical_focal_length());

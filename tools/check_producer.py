@@ -15,7 +15,7 @@ import compile_metal as observer
 ROOT = Path(__file__).resolve().parents[1]
 OBSERVER_SHA = "cc770ea2068978eb0eeb381dc3bbf8983b838c2563f2605678272146f632fbb4"
 DECODER_SHA = "69d61c1055f123f1b750eaa95bc3063994f2dbe754316430b41533c8cbe83a86"
-SCOPE = "additional-native-reflection-material-producer-and-runtime-shaders"
+SCOPE = "additional-native-primary-camera-range-producer-and-runtime-shaders"
 REQUIRED = {
     ".gitattributes", ".github/workflows/portable-builds.yml", "README.md", "LICENSE",
     "headers/SDL3/LICENSE.txt", "src/render/metal_hardware_rt.mm",

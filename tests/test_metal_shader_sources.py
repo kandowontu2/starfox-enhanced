@@ -90,7 +90,7 @@ class MetalSourceAssemblyTests(unittest.TestCase):
         self.assertIn("setBuffer:native_rgba?vertices:slot.texels", reflection)
         self.assertIn("Calibrated Metal liquid output layers are not implemented", reflection)
         self.assertIn("Unknown Metal reflection material encoding", reflection)
-        self.assertIn("sizeof(ReflectionParameters)==288", self.implementation)
+        self.assertIn("sizeof(ReflectionParameters)==304", self.implementation)
         self.assertIn("offsetof(ReflectionParameters,coverage)==272", self.implementation)
         shader = self.body("Reflection")
         self.assertEqual(shader.count("uint4 coverage;"), 1)
@@ -102,6 +102,43 @@ class MetalSourceAssemblyTests(unittest.TestCase):
         self.assertEqual(helper.count("scene_styled_colour("), 1)
         self.assertIn("if(words[at+15u]==2u) return packed;", helper)
         self.assertIn("if(packed==0u) return 0u;", helper)
+
+    def test_primary_camera_planes_do_not_clip_secondary_rays(self):
+        shadow = self.body("Shadow")
+        reflection = self.body("Reflection")
+        for shader in (shadow, reflection):
+            self.assertEqual(shader.count("float4 primary_range;"), 1)
+            self.assertIn("float near_depth=p.primary_range.z>0.5f?p.primary_range.x:1.0f;", shader)
+            self.assertIn("float far_depth=p.primary_range.z>0.5f?p.primary_range.y:65536.0f;", shader)
+        primary_reflection = reflection.split("kernel void starfox_hardware_reflection(", 1)[1].split("float distance=", 1)[0]
+        self.assertNotIn("normalize(direction)", primary_reflection)
+        self.assertNotIn("normalize(direction)", shadow)
+        self.assertIn("ray primary(float3(0.0f),direction,near_depth,far_depth);", shadow)
+        self.assertIn("ground>near_depth && ground<receiver", shadow)
+        self.assertIn("receiver>=far_depth", shadow)
+        self.assertIn("ray shadow(point,p.lights[sample].xyz,bias,65536.0f);", shadow)
+        self.assertIn("SF_VISIBLE_HIT(primary,float3(0.0f),direction,near_depth,far_depth)", reflection)
+        self.assertIn("ground>near_depth && ground<distance", reflection)
+        self.assertIn("distance>=far_depth", reflection)
+        self.assertIn("SF_VISIBLE_HIT(obstacle,origin,direction,minimum,65536.0f)", reflection)
+        self.assertIn("SF_VISIBLE_HIT(submerged,origin,through,bias,min(65536.0f,bed))", reflection)
+        self.assertIn("SF_VISIBLE_HIT(overhead,entry,rotation*float3(0,-1,0),bias,65536.0f)", reflection)
+        self.assertIn("SF_VISIBLE_HIT(reflected_hit,point+normal*bias,bounce,bias,65536.0f)", reflection)
+        self.assertIn("SF_VISIBLE_HIT(bounced,point,cast,max(0.1f,distance*1.e-5f),65536.0f)", reflection)
+
+    def test_primary_camera_host_abi_and_validation(self):
+        header = (ROOT / "include/starfox/render/metal_hardware_rt.hpp").read_text(encoding="utf-8")
+        self.assertEqual(header.count("std::optional<PrimaryRayRange> primary_range=std::nullopt"), 2)
+        self.assertIn("range->valid() && float(range->near_depth)<float(range->far_depth)", self.implementation)
+        self.assertIn("float(depth.near_depth),float(depth.far_depth),range?1.f:0.f,0", self.implementation)
+        self.assertIn("sizeof(Parameters)==352", self.implementation)
+        self.assertIn("offsetof(Parameters,primary_range)==336", self.implementation)
+        self.assertIn("offsetof(ReflectionParameters,primary_range)==288", self.implementation)
+        for name in ("shadows", "reflections"):
+            entry = self.implementation.split(f"bool MetalHardwareRt::render_{name}", 1)[1].split("return true;", 1)[0]
+            self.assertIn("std::optional<PrimaryRayRange> primary_range", entry)
+            self.assertLess(entry.index("if(!valid_primary_range(primary_range))"), entry.index("impl_->initialize(device)"))
+            self.assertEqual(entry.count("p.primary_range=primary_parameters(primary_range);"), 1)
 
 
 if __name__ == "__main__":
