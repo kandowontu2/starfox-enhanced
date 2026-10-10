@@ -1,10 +1,22 @@
-# Star Fox Enhanced — native Metal camera clipping candidate
+# Star Fox Enhanced — native Metal optical transport candidate
 
-This temporary source-only component connects explicit primary camera-depth
-planes to the entire native Metal shadow and packed-reflection producer, on top
-of the previously compiled resident RGBA material and colour candidate.
+This temporary source-only component adds explicit linear/sRGB reflection
+transport, seamless resident environment cubes and calibrated mirror/gold/copper
+model lobes to the entire native Metal producer and both runtime shaders.
 
 AI/Codex is used for programming, testing and documentation.
+
+Encoding 0 retains the legacy gamma approximation; 1 transports linear colour;
+2 decodes/encodes the canonical sRGB equations. Liquid emission, refraction,
+mirror accumulation and model lobes use that negotiated domain. Resident cube
+faces follow +X,-X,+Y,-Y,+Z,-Z in the same tracked native material allocation;
+bilinear taps crossing a face edge reproject onto the adjacent face. Size,
+alignment, format, orthonormal rotation and actual native allocation bounds
+are validated. No CPU cube/atlas upload is introduced. Calibrated conductor
+model transport is an explicit independent choice; it retains the full eight
+rough-lobe samples and four nested mirror bounces of the Vulkan native path.
+The native primary ground uses compensated two-float plane evaluation to
+retain banked horizon cancellation. Legacy and secondary ray limits remain.
 
 Both APIs accept an optional `PrimaryRayRange`. The host rejects invalid ranges
 and distinct double planes that collapse to one native float before allocating
@@ -33,8 +45,9 @@ CI compiles the entire Objective-C++ producer against its real project header
 closure and original public SDL headers, then compiles/links both full runtime
 shadow and reflection shader libraries using the existing Metal3.0 RT language
 recipe and strict O3/FP flags. It retains the original native process/memory
-observer. All five prior source assembly tests are retained and two camera
-contract checks are added. No GPU is executed. This is not an abbreviated
+observer. All seven prior source assembly/contract tests are retained, updated
+only for intentional ABI/call-site additions; three optical-contract checks
+are added. No GPU is executed. This is not an abbreviated
 complete25 test suite.
 
 This candidate supplies the native material colour/coverage contract for the

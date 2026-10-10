@@ -84,18 +84,18 @@ class MetalSourceAssemblyTests(unittest.TestCase):
         reflection = self.implementation.split("bool MetalHardwareRt::render_reflections", 1)[1]
         self.assertIn("p.coverage={geometry.vertex_count/3U,geometry.material_bytes,2,native_material_words}", reflection)
         self.assertIn("vertices.length-geometry.material_offset", reflection)
-        self.assertIn("+material_bytes>vertices.length", reflection)
+        self.assertIn("+material_bytes+cube_bytes>vertices.length", reflection)
         self.assertIn("!geometry.materials->triangles.empty() || !geometry.materials->texels.empty()", reflection)
         self.assertIn("if(!native_rgba) {", reflection)
         self.assertIn("setBuffer:native_rgba?vertices:slot.texels", reflection)
         self.assertIn("Calibrated Metal liquid output layers are not implemented", reflection)
         self.assertIn("Unknown Metal reflection material encoding", reflection)
-        self.assertIn("sizeof(ReflectionParameters)==304", self.implementation)
+        self.assertIn("sizeof(ReflectionParameters)==384", self.implementation)
         self.assertIn("offsetof(ReflectionParameters,coverage)==272", self.implementation)
         shader = self.body("Reflection")
         self.assertEqual(shader.count("uint4 coverage;"), 1)
-        self.assertEqual(shader.count("p.texel_count,p.coverage"), 4)
-        self.assertEqual(shader.count("palette_hit("), 5)  # definition plus all four colour queries
+        self.assertEqual(shader.count("p.texel_count,p.coverage"), 6)
+        self.assertEqual(shader.count("palette_hit("), 7)  # definition plus all six colour queries
         self.assertIn("p.texel_count,true,false,p.coverage);", shader)
         self.assertIn("starfox_native_material_colour(primitive,bary.x,bary.y,pixel.x,pixel.y", shader)
         helper = (ROOT / "include/starfox/render/metal_native_material_colour.inc").read_text(encoding="utf-8")
@@ -139,6 +139,47 @@ class MetalSourceAssemblyTests(unittest.TestCase):
             self.assertIn("std::optional<PrimaryRayRange> primary_range", entry)
             self.assertLess(entry.index("if(!valid_primary_range(primary_range))"), entry.index("impl_->initialize(device)"))
             self.assertEqual(entry.count("p.primary_range=primary_parameters(primary_range);"), 1)
+
+    def test_explicit_colour_transport_and_primary_model_lobes(self):
+        shader = self.body("Reflection")
+        self.assertIn("if(p.optical.x==2u) return calibrated_decode_srgb(value);", shader)
+        self.assertIn("p.optical.x==1u?value:value*value", shader)
+        self.assertIn("if(p.optical.x==2u) value=calibrated_encode_srgb(value);", shader)
+        self.assertIn("else if(p.optical.x==0u) value=sqrt(value);", shader)
+        self.assertIn("result.radiance=reflection_authored_linear(molten,p);", shader)
+        self.assertIn("uint samples=p.roughness>0.0f?8u:1u;", shader)
+        self.assertIn("bool model_transport=p.optical.y!=0u;", shader)
+        self.assertIn("if(!ground_hit && p.optical.y!=0u)", shader)
+        self.assertIn("float3(1.0f,.766f,.336f)", shader)
+        self.assertIn("float3(.955f,.638f,.538f)", shader)
+        host = self.implementation.split("bool MetalHardwareRt::render_reflections", 1)[1]
+        self.assertLess(host.index("if(specular_models && (!native_rgba || !colour_encoding))"), host.index("impl_->initialize(device)"))
+        self.assertIn("roughness>1 || metallic>3 || colour_encoding>2", host)
+        self.assertIn("p.optical={colour_encoding,specular_models?1U:0U,0,0};", host)
+
+    def test_resident_cube_seams_bindings_and_bounds(self):
+        shader = self.body("Reflection")
+        self.assertIn("cube_coordinates(direction,face,uv);", shader)
+        self.assertIn("if(at>=p.coverage.w) return float3(0.0f);", shader)
+        self.assertIn("p.cube_info.x+face*size*size+uint(pixel.y)*size+uint(pixel.x)", shader)
+        self.assertIn("if(p.cube_info.w!=0u) return reflected_cube(direction,p,panorama);", shader)
+        host = self.implementation.split("bool MetalHardwareRt::render_reflections", 1)[1]
+        for check in ("cube.relative_offset!=geometry.material_bytes", "cube.face_size<8 || cube.face_size>512",
+                      "std::abs(product-double(row==other))>.01", "+material_bytes+cube_bytes>vertices.length",
+                      "setBuffer:panorama offset:resident_environment?geometry.material_offset:0 atIndex:7"):
+            self.assertIn(check, host)
+        self.assertIn("offsetof(ReflectionParameters,optical)==304", self.implementation)
+        self.assertIn("offsetof(ReflectionParameters,cube_info)==320", self.implementation)
+        self.assertIn("offsetof(ReflectionParameters,cube_row0)==336", self.implementation)
+        self.assertIn("offsetof(ReflectionParameters,cube_row2)==368", self.implementation)
+
+    def test_compensated_ground_does_not_change_legacy_or_secondary_range(self):
+        shader = self.body("Reflection")
+        self.assertIn("float error=fma(a.x,b.x,-high)+a.x*b.y+a.y*b.x;", shader)
+        self.assertIn("float ground=p.optical.x!=0u?native_ground_depth(pixel,p)", shader)
+        self.assertIn(":dot(p.ground_point.xyz,p.ground_normal.xyz)/denominator;", shader)
+        self.assertIn("float ground_t=abs(denominator)>1e-6f?", shader)
+        self.assertIn("SF_VISIBLE_HIT(obstacle,origin,direction,minimum,65536.0f)", shader)
 
 
 if __name__ == "__main__":

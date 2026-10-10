@@ -1,5 +1,5 @@
 {
-  "Scope": "additional-native-primary-camera-range-producer-and-runtime-shaders",
+  "Scope": "additional-native-linear-colour-resident-environment-model-transport-producer",
   "Sources": [
     {
       "File": ".gitattributes",
@@ -588,8 +588,8 @@
     },
     {
       "File": "include/starfox/render/metal_hardware_rt.hpp",
-      "Sha256": "23e907ae3c28e49e4eee16ef0b50d96ecb37929004d6a03e45efe6afa6fe149a",
-      "Bytes": 1869
+      "Sha256": "d2cf15b4ec49d4ce9363278401e2472c7652b943809281bb55359cdc9695aa39",
+      "Bytes": 2034
     },
     {
       "File": "include/starfox/render/metal_material_colour.inc",
@@ -763,13 +763,13 @@
     },
     {
       "File": "README.md",
-      "Sha256": "bf6f03d1e736cbf2de75881a6a6a6e644fef71c2f1b96ed8af09fc102f9cd3bf",
-      "Bytes": 3043
+      "Sha256": "dbe1a373cca2b23a3918e0c82a4424d27db0c673a906c9926b886c81d1086f68",
+      "Bytes": 3954
     },
     {
       "File": "src/render/metal_hardware_rt.mm",
-      "Sha256": "6a595e07df0935d42079474242381a70d9d655a0cc8f69819a2b01e12e81792c",
-      "Bytes": 61977
+      "Sha256": "6e347f30bb0a55fa1510f0b08155fa188dd5d3e517a362c5bacdf11402cceb3f",
+      "Bytes": 73611
     },
     {
       "File": "src/render/shaders/metal_native_material_shared.hpp.in",
@@ -783,8 +783,8 @@
     },
     {
       "File": "tests/test_metal_shader_sources.py",
-      "Sha256": "465c0946eaa04216ed6cdc11200b65eb4cb43633dafea11125c02176767f5776",
-      "Bytes": 9779
+      "Sha256": "44d54bb0c0c883fd69fab672b4ddbd442ab49ec3ca5b3b232e48dc01d9d65140",
+      "Bytes": 12855
     },
     {
       "File": "tools/check_metal_rt_shaders.py",
@@ -793,8 +793,8 @@
     },
     {
       "File": "tools/check_producer.py",
-      "Sha256": "019b12b8200df81b9e61116be5983000c0a873f53db8c158da20ba402ac9619e",
-      "Bytes": 11383
+      "Sha256": "749dcfb2419c09b44267f78669c5a7e3088b8b1499209387885089f872b1bfb6",
+      "Bytes": 11393
     },
     {
       "File": "tools/compile_metal.py",

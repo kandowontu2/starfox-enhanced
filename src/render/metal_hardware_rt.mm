@@ -2,6 +2,7 @@
 #include <SDL3/SDL.h>
 
 #include "starfox/render/metal_hardware_rt.hpp"
+#include "starfox/render/vulkan_hardware_rt.hpp"
 #include "metal_water_shared.hpp"
 #include "metal_native_material_shared.hpp"
 #include "starfox/render/gpu_background.hpp"
@@ -52,10 +53,14 @@ struct alignas(16) ReflectionParameters {
     Float4 enhanced_motion{},enhanced_plane{},enhanced_projection{},enhanced_palette{},enhanced_keep0{},enhanced_keep1{};
     std::array<std::uint32_t,4> coverage{};
     Float4 primary_range{};
+    std::array<std::uint32_t,4> optical{},cube_info{};
+    Float4 cube_row0{},cube_row1{},cube_row2{};
 };
-static_assert(sizeof(ReflectionParameters)==304);
+static_assert(sizeof(ReflectionParameters)==384);
 static_assert(offsetof(ReflectionParameters,coverage)==272);
 static_assert(offsetof(ReflectionParameters,primary_range)==288);
+static_assert(offsetof(ReflectionParameters,optical)==304 && offsetof(ReflectionParameters,cube_info)==320);
+static_assert(offsetof(ReflectionParameters,cube_row0)==336 && offsetof(ReflectionParameters,cube_row2)==368);
 
 bool valid_primary_range(const std::optional<PrimaryRayRange>& range) {
     // Distinct double planes can collapse after conversion to native ray
@@ -229,6 +234,8 @@ struct Parameters {
     float4 enhanced_motion,enhanced_plane,enhanced_projection,enhanced_palette,enhanced_keep0,enhanced_keep1;
     uint4 coverage;
     float4 primary_range;
+    uint4 optical,cube_info;
+    float4 cube_row0,cube_row1,cube_row2;
 };
 float3 rgb(uint packed) {
     return float3(float(packed&255u),float((packed>>8)&255u),
@@ -237,6 +244,49 @@ float3 rgb(uint packed) {
 uint rgba(float3 colour) {
     uint3 c=uint3(round(clamp(colour,0.0f,1.0f)*255.0f));
     return c.x|(c.y<<8)|(c.z<<16)|0xff000000u;
+}
+float3 reflection_authored_linear(float3 value,constant Parameters& p) {
+    if(p.optical.x==2u) return calibrated_decode_srgb(value);
+    return p.optical.x==1u?value:value*value;
+}
+float3 reflection_linear(uint packed,constant Parameters& p) {
+    return reflection_authored_linear(rgb(packed),p);
+}
+uint reflection_pack_linear(float3 value,uint marker,constant Parameters& p) {
+    value=clamp(value,0.0f,1.0f);
+    if(p.optical.x==2u) value=calibrated_encode_srgb(value);
+    else if(p.optical.x==0u) value=sqrt(value);
+    return (rgba(value)&0x00ffffffu)|(marker<<24u);
+}
+// Keep the cancellation in a banked plane equation before division. These
+// two-float expansions match the Vulkan native path without shader Float64.
+float2 liquid_sum(float2 a,float2 b) {
+    float sum=a.x+b.x,virtual_b=sum-a.x;
+    float error=(a.x-(sum-virtual_b))+(b.x-virtual_b)+a.y+b.y;
+    float high=sum+error;
+    return float2(high,error-(high-sum));
+}
+float2 liquid_product(float2 a,float2 b) {
+    float high=a.x*b.x;
+    float error=fma(a.x,b.x,-high)+a.x*b.y+a.y*b.x;
+    return liquid_sum(float2(high,0.0f),float2(error,0.0f));
+}
+float native_ground_depth(uint2 pixel,constant Parameters& p) {
+    float2 fx=float2(p.focal_x,0.0f),fy=float2(p.focal_y,0.0f);
+    float2 focal=liquid_product(fx,fy);
+    float2 x=liquid_sum(float2(float(pixel.x)+.5f,0.0f),float2(-p.center_x,0.0f));
+    float2 y=liquid_sum(float2(float(pixel.y)+.5f,0.0f),float2(-p.center_y,0.0f));
+    float2 denominator=liquid_sum(liquid_product(liquid_product(x,fy),float2(p.ground_normal.x,0.0f)),
+        liquid_product(liquid_product(y,fx),float2(p.ground_normal.y,0.0f)));
+    denominator=liquid_sum(denominator,liquid_product(focal,float2(p.ground_normal.z,0.0f)));
+    float2 numerator=liquid_sum(liquid_product(float2(p.ground_point.x,0.0f),float2(p.ground_normal.x,0.0f)),
+        liquid_product(float2(p.ground_point.y,0.0f),float2(p.ground_normal.y,0.0f)));
+    numerator=liquid_product(liquid_sum(numerator,
+        liquid_product(float2(p.ground_point.z,0.0f),float2(p.ground_normal.z,0.0f))),focal);
+    if(abs(denominator.x)<1e-10f) return 0.0f;
+    float quotient=numerator.x/denominator.x;
+    float2 residual=liquid_sum(numerator,-liquid_product(denominator,float2(quotient,0.0f)));
+    return quotient+(residual.x+residual.y)/denominator.x;
 }
 uint palette_hit(uint primitive,float2 bary,uint2 pixel,
     device const RayMaterial* materials,device const uint* palette,
@@ -259,7 +309,53 @@ bool inside_keep(float2 point,float4 ellipse) {
     if(ellipse.z<=0.0f || ellipse.w<=0.0f) return false;
     float2 offset=(point-ellipse.xy)/ellipse.zw;return dot(offset,offset)<=1.0f;
 }
+// Resident cube faces are +X,-X,+Y,-Y,+Z,-Z. Reproject edge taps onto
+// neighbouring faces instead of clamping a seam into reflected sky.
+void cube_coordinates(float3 direction,thread uint& face,thread float2& uv) {
+    float3 a=abs(direction);
+    if(a.x>=a.y && a.x>=a.z) {
+        face=direction.x>=0.0f?0u:1u;
+        uv=float2(direction.x>=0.0f?-direction.z:direction.z,-direction.y)/a.x;
+    } else if(a.y>=a.z) {
+        face=direction.y>=0.0f?2u:3u;
+        uv=float2(direction.x,direction.y>=0.0f?direction.z:-direction.z)/a.y;
+    } else {
+        face=direction.z>=0.0f?4u:5u;
+        uv=float2(direction.z>=0.0f?direction.x:-direction.x,-direction.y)/a.z;
+    }
+}
+float3 cube_tap(uint face,int2 pixel,constant Parameters& p,device const uint* words) {
+    uint size=p.cube_info.y;
+    if(any(pixel<int2(0)) || any(pixel>=int2(size))) {
+        float2 uv=(float2(pixel)+.5f)/float(size)*2.0f-1.0f;
+        float3 direction;
+        if(face==0u) direction=float3(1,-uv.y,-uv.x);
+        else if(face==1u) direction=float3(-1,-uv.y,uv.x);
+        else if(face==2u) direction=float3(uv.x,1,uv.y);
+        else if(face==3u) direction=float3(uv.x,-1,-uv.y);
+        else if(face==4u) direction=float3(uv.x,-uv.y,1);
+        else direction=float3(-uv.x,-uv.y,-1);
+        cube_coordinates(direction,face,uv);
+        pixel=int2(floor((uv*.5f+.5f)*float(size)));
+    }
+    pixel=clamp(pixel,int2(0),int2(size)-1);
+    uint at=p.cube_info.x+face*size*size+uint(pixel.y)*size+uint(pixel.x);
+    if(at>=p.coverage.w) return float3(0.0f);
+    float3 colour=rgb(words[at]);
+    return p.cube_info.z==2u?calibrated_decode_srgb(colour):colour;
+}
+uint reflected_cube(float3 direction,constant Parameters& p,device const uint* words) {
+    direction=float3(dot(direction,p.cube_row0.xyz),dot(direction,p.cube_row1.xyz),dot(direction,p.cube_row2.xyz));
+    uint face;float2 uv;cube_coordinates(direction,face,uv);
+    float2 at=(uv*.5f+.5f)*float(p.cube_info.y)-.5f;
+    int2 lo=int2(floor(at));float2 f=fract(at);
+    float3 colour=mix(mix(cube_tap(face,lo,p,words),cube_tap(face,lo+int2(1,0),p,words),f.x),
+        mix(cube_tap(face,lo+int2(0,1),p,words),cube_tap(face,lo+int2(1,1),p,words),f.x),f.y);
+    return reflection_pack_linear(colour,255u,p);
+}
 uint sample_backdrop(float2 at,constant Parameters& p,device const uint* panorama,device const uint* palette,device const uint* enhanced) {
+    if(p.cube_info.w!=0u)
+        return reflected_cube(float3((at.x-128.0f)/256.0f,(at.y-112.0f)/256.0f,1.0f),p,panorama);
     float x=at.x-128.0f,slope=p.enhanced_plane.x;
     if(p.enhanced_size.z!=0u && at.y<p.enhanced_motion.x+slope*x
         && !inside_keep(float2(x,at.y),p.enhanced_keep0) && !inside_keep(float2(x,at.y),p.enhanced_keep1)) {
@@ -281,6 +377,7 @@ uint sample_backdrop(float2 at,constant Parameters& p,device const uint* panoram
     return (value&0x04000000u)!=0u?palette[value&255u]:p.environment;
 }
 uint reflected_backdrop(float3 direction,constant Parameters& p,device const uint* panorama,device const uint* palette,device const uint* enhanced) {
+    if(p.cube_info.w!=0u) return reflected_cube(direction,p,panorama);
     return sample_backdrop(float2(128.0f+atan2(direction.x,direction.z)*256.0f,
         112.0f+atan2(direction.y,length(direction.xz))*256.0f),p,panorama,palette,enhanced);
 }
@@ -312,15 +409,17 @@ LavaOptics lava_optics(float3 origin,float3 direction,float distance,constant Pa
     float3 viewer=view_to_world(-direction,p);
     LavaColour colour=lava_shade(liquid,viewer.x,viewer.y,viewer.z);
     float3 molten=float3(colour.r,colour.g,colour.b)*p.water_settings.z;
-    result.radiance=molten*molten;
+    result.radiance=reflection_authored_linear(molten,p);
     result.share=(.035f+.40f*pow(1.0f-clamp(dot(-direction,result.normal),0.0f,1.0f),5.0f))
         *p.water_settings.y*(.3f+.7f*liquid.crust);
     result.bias=max(.05f,distance*1e-5f);
     return result;
 }
-uint reflected_accumulated(uint terminal,float3 throughput,float3 accumulated) {
-    float3 colour=rgb(terminal);
-    return rgba(sqrt(clamp(accumulated+throughput*colour*colour,0.0f,1.0f)));
+uint reflected_accumulated(uint terminal,float3 throughput,float3 accumulated,constant Parameters& p) {
+    return reflection_pack_linear(accumulated+throughput*reflection_linear(terminal,p),255u,p);
+}
+float3 conductor_f0(uint source,constant Parameters& p) {
+    return p.metallic==2u?float3(1.0f,.766f,.336f):p.metallic==3u?float3(.955f,.638f,.538f):reflection_linear(source,p);
 }
 uint trace_mirrors(float3 origin,float3 direction,uint2 pixel,float minimum,bool escaping_source_ground,
     primitive_acceleration_structure scene,constant Parameters& p,device const float4* vertices,
@@ -343,7 +442,7 @@ uint trace_mirrors(float3 origin,float3 direction,uint2 pixel,float minimum,bool
             if((flags&15u)==3u) {
                 LavaOptics lava=lava_optics(origin,direction,distance,p);
                 accumulated+=throughput*lava.radiance;throughput*=lava.share;
-                if(all(throughput<float3(1e-5f))) return rgba(sqrt(clamp(accumulated,0.0f,1.0f)));
+                if(all(throughput<float3(1e-5f))) return reflection_pack_linear(accumulated,255u,p);
                 origin=lava.hit+lava.normal*lava.bias;
                 direction=reflect(direction,lava.normal);minimum=lava.bias;
                 continue;
@@ -351,7 +450,7 @@ uint trace_mirrors(float3 origin,float3 direction,uint2 pixel,float minimum,bool
             if((flags&15u)!=1u && (flags&15u)!=2u) {
                 uint colour=hit.z>1.0f?sample_backdrop(float2(128.0f,112.0f)+256.0f*hit.xy/hit.z,p,panorama,palette,enhanced)
                     :reflected_backdrop(hit,p,panorama,palette,enhanced);
-                return reflected_accumulated(colour,throughput,accumulated);
+                return reflected_accumulated(colour,throughput,accumulated,p);
             }
             normal=normalize(p.ground_normal.xyz);
             if(dot(normal,direction)>0.0f) normal=-normal;
@@ -361,17 +460,53 @@ uint trace_mirrors(float3 origin,float3 direction,uint2 pixel,float minimum,bool
             }
         } else if(model) {
             uint primitive=obstacle.primitive_id;
-            if((flags&16u)==0u) return reflected_accumulated(palette_hit(primitive,
-                obstacle.triangle_barycentric_coord,pixel,materials,palette,texels,p.texel_count,p.coverage),throughput,accumulated);
+            bool model_transport=p.optical.y!=0u;
+            if((flags&16u)==0u && !model_transport) return reflected_accumulated(palette_hit(primitive,
+                obstacle.triangle_barycentric_coord,pixel,materials,palette,texels,p.texel_count,p.coverage),throughput,accumulated,p);
             uint first=primitive*3u;
             normal=normalize(cross(vertices[first+1u].xyz-vertices[first].xyz,
                 vertices[first+2u].xyz-vertices[first].xyz));
-        } else return reflected_accumulated(reflected_backdrop(direction,p,panorama,palette,enhanced),throughput,accumulated);
+            if(dot(normal,direction)>0.0f) normal=-normal;
+            if(model_transport && p.metallic!=0u) {
+                float3 f0=conductor_f0(palette_hit(primitive,obstacle.triangle_barycentric_coord,
+                    pixel,materials,palette,texels,p.texel_count,p.coverage),p);
+                float grazing=pow(1.0f-clamp(dot(-direction,normal),0.0f,1.0f),5.0f);
+                throughput*=f0+(1.0f-f0)*grazing;
+            }
+        } else return reflected_accumulated(reflected_backdrop(direction,p,panorama,palette,enhanced),throughput,accumulated,p);
         if(dot(normal,direction)>0.0f) normal=-normal;
         minimum=max(.05f,distance*1e-5f);
         origin+=direction*distance+normal*minimum;direction=reflect(direction,normal);
     }
-    return reflected_accumulated(reflected_backdrop(direction,p,panorama,palette,enhanced),throughput,accumulated);
+    return reflected_accumulated(reflected_backdrop(direction,p,panorama,palette,enhanced),throughput,accumulated,p);
+}
+uint shade_native_model(uint2 pixel,float3 incoming,float3 point,float3 normal,float distance,
+    uint primitive,float2 bary,primitive_acceleration_structure scene,constant Parameters& p,
+    device const float4* vertices,device const RayMaterial* materials,device const uint* palette,
+    device const uchar* texels,device const uint* panorama,device const uint* enhanced) {
+    float bias=max(.01f,distance*1e-5f);
+    float3 origin=point+normal*bias,central=reflect(incoming,normal);
+    if(p.roughness==0.0f && p.metallic==0u)
+        return trace_mirrors(origin,central,pixel,bias,false,scene,p,vertices,materials,palette,texels,panorama,enhanced);
+    float3 tangent=normalize(cross(central,abs(central.y)<.95f?float3(0,1,0):float3(1,0,0)));
+    float3 bitangent=cross(central,tangent),sum=float3(0.0f);
+    const float2 taps[8]={float2(.5f,0),float2(-.5f,0),float2(0,.5f),float2(0,-.5f),
+        float2(.612f,.612f),float2(-.612f,.612f),float2(.612f,-.612f),float2(-.612f,-.612f)};
+    uint samples=p.roughness>0.0f?8u:1u;
+    for(uint sample_index=0u;sample_index<samples;++sample_index) {
+        float3 direction=normalize(central+p.roughness*p.roughness
+            *(tangent*taps[sample_index].x+bitangent*taps[sample_index].y));
+        if(dot(direction,normal)<=0.0f) direction=central;
+        sum+=reflection_linear(trace_mirrors(origin,direction,pixel,bias,false,
+            scene,p,vertices,materials,palette,texels,panorama,enhanced),p);
+    }
+    float3 radiance=sum/float(samples);
+    if(p.metallic!=0u) {
+        float3 f0=conductor_f0(palette_hit(primitive,bary,pixel,materials,palette,texels,p.texel_count,p.coverage),p);
+        float grazing=pow(1.0f-clamp(dot(-incoming,normal),0.0f,1.0f),5.0f);
+        radiance*=f0+(1.0f-f0)*grazing;
+    }
+    return reflection_pack_linear(radiance,255u,p);
 }
 float hash(uint n) {
     n=(n^61u)^(n>>16u);n*=9u;n^=n>>4u;n*=0x27d4eb2du;n^=n>>15u;
@@ -406,7 +541,8 @@ kernel void starfox_hardware_reflection(
     if(p.has_ground>0.5f) {
         float denominator=dot(direction,p.ground_normal.xyz);
         if(abs(denominator)>1.e-10f) {
-            float ground=dot(p.ground_point.xyz,p.ground_normal.xyz)/denominator;
+            float ground=p.optical.x!=0u?native_ground_depth(pixel,p)
+                :dot(p.ground_point.xyz,p.ground_normal.xyz)/denominator;
             if(ground>near_depth && ground<distance) {
                 distance=ground;ground_hit=true;
             }
@@ -423,16 +559,22 @@ kernel void starfox_hardware_reflection(
     if(dot(normal,direction)>0.0f) normal=-normal;
     float3 point=direction*distance;
     uint water_material=uint(p.water_settings.w)&15u;
+    if(!ground_hit && p.optical.y!=0u) {
+        output[id]=shade_native_model(pixel,normalize(direction),point,normal,length(point),
+            hit.primitive_id,hit.triangle_barycentric_coord,scene,p,vertices,materials,palette,texels,panorama,enhanced);
+        return;
+    }
     if(ground_hit && water_material==3u) {
         float3 incoming=normalize(direction);
         LavaOptics lava=lava_optics(float3(0.0f),incoming,length(point),p);
-        float3 molten=sqrt(clamp(lava.radiance,0.0f,1.0f));
+        float3 molten=p.optical.x==0u?sqrt(clamp(lava.radiance,0.0f,1.0f)):lava.radiance;
         if(lava.share>0.0f) {
             uint colour=trace_mirrors(lava.hit+lava.normal*lava.bias,reflect(incoming,lava.normal),pixel,
                 lava.bias,true,scene,p,vertices,materials,palette,texels,panorama,enhanced);
-            molten+=rgb(colour)*lava.share;
+            molten+=(p.optical.x==0u?rgb(colour):reflection_linear(colour,p))*lava.share;
         }
-        output[id]=(rgba(molten)&0x00ffffffu)|0xfe000000u;
+        output[id]=p.optical.x==0u?(rgba(molten)&0x00ffffffu)|0xfe000000u
+            :reflection_pack_linear(molten,254u,p);
         return;
     }
     if(ground_hit && (water_material==1u || water_material==2u)) {
@@ -440,15 +582,18 @@ kernel void starfox_hardware_reflection(
         float bias=max(.05f,length(point)*1e-5f);
         float3 value=float3(0.0f);
         if(p.water_settings.y>0.0f) {
-            value=rgb(trace_mirrors(point+normal*bias,cast,pixel,bias,true,
-                scene,p,vertices,materials,palette,texels,panorama,enhanced));
+            uint incident=trace_mirrors(point+normal*bias,cast,pixel,bias,true,
+                scene,p,vertices,materials,palette,texels,panorama,enhanced);
+            value=p.optical.x==0u?rgb(incident):reflection_linear(incident,p);
             float grazing=pow(1.0f-clamp(dot(-incoming,normal),0.0f,1.0f),5.0f);
             float3 f0=water_material==2u?float3(1.0f,.766f,.336f):float3(1.0f);
-            value*=sqrt(p.water_settings.y*(f0+(1.0f-f0)*grazing));
+            float3 response=p.water_settings.y*(f0+(1.0f-f0)*grazing);
+            value*=p.optical.x==0u?sqrt(response):response;
         }
         // A completed enhanced ground surface uses the ground-coverage marker,
         // never the opaque-model marker or the original palette image.
-        output[id]=(rgba(value*p.water_settings.z)&0x00ffffffu)|0xfe000000u;
+        output[id]=p.optical.x==0u?(rgba(value*p.water_settings.z)&0x00ffffffu)|0xfe000000u
+            :reflection_pack_linear(value*p.water_settings.z,254u,p);
         return;
     }
     if(ground_hit && p.water_settings.z>0.0f && (uint(p.water_settings.w)&15u)==0u) {
@@ -474,11 +619,11 @@ kernel void starfox_hardware_reflection(
         float bed=down>0.0f?(world.y+640.0f-world_origin.y)/down:65536.0f;
         SF_VISIBLE_HIT(submerged,origin,through,bias,min(65536.0f,bed))
         float travel=bed;
-        float3 receiver=float3(.28f,.24f,.16f);
+        float3 receiver=p.optical.x==0u?float3(.28f,.24f,.16f):reflection_authored_linear(float3(.28f,.24f,.16f),p);
         if(submerged.type==intersection_type::triangle) {
-            receiver=rgb(palette_hit(submerged.primitive_id,submerged.triangle_barycentric_coord,
-                pixel,materials,palette,texels,p.texel_count,p.coverage));
-            receiver*=receiver;travel=submerged.distance;
+            receiver=reflection_linear(palette_hit(submerged.primitive_id,submerged.triangle_barycentric_coord,
+                pixel,materials,palette,texels,p.texel_count,p.coverage),p);
+            travel=submerged.distance;
         }
         uint caustics=(uint(p.water_settings.w)>>5u)&3u;
         if(caustics!=0u && travel<65536.0f) {
@@ -506,7 +651,7 @@ kernel void starfox_hardware_reflection(
             }
         }
         float brightness=dot(rgb(sample_backdrop(float2(128.0f,112.0f)+256.0f*point.xy/max(point.z,1.0f),p,panorama,palette,enhanced)),float3(.3f,.59f,.11f));
-        float3 body=brightness*float3(.2f,.58f,.85f);body*=body;
+        float3 body=reflection_authored_linear(brightness*float3(.2f,.58f,.85f),p);
         float3 radiance=float3(water_transmitted_channel(receiver.r,body.r,travel,.0025f),
             water_transmitted_channel(receiver.g,body.g,travel,.0008f),
             water_transmitted_channel(receiver.b,body.b,travel,.00035f));
@@ -521,10 +666,11 @@ kernel void starfox_hardware_reflection(
                 ?palette_hit(reflected_hit.primitive_id,reflected_hit.triangle_barycentric_coord,
                     pixel,materials,palette,texels,p.texel_count,p.coverage):reflected_backdrop(bounce,p,panorama,palette,enhanced);
         }
-        float3 reflected_colour=rgb(reflected_word);
+        float3 reflected_colour=reflection_linear(reflected_word,p);
         float fresnel=.02f+.98f*pow(1.0f-clamp(dot(-incoming,normal),0.0f,1.0f),5.0f);
-        radiance=mix(radiance,reflected_colour*reflected_colour,clamp(fresnel*p.water_settings.y,0.0f,1.0f));
-        output[id]=(rgba(sqrt(clamp(radiance,0.0f,1.0f))*p.water_settings.z)&0x00ffffffu)|0xfe000000u;
+        radiance=mix(radiance,reflected_colour,clamp(fresnel*p.water_settings.y,0.0f,1.0f));
+        output[id]=p.optical.x==0u?(rgba(sqrt(clamp(radiance,0.0f,1.0f))*p.water_settings.z)&0x00ffffffu)|0xfe000000u
+            :reflection_pack_linear(radiance*p.water_settings.z,254u,p);
         return;
     }
     float3 reflected=normalize(reflect(normalize(direction),normal));
@@ -551,12 +697,12 @@ kernel void starfox_hardware_reflection(
                     pixel,materials,palette,texels,p.texel_count,p.coverage)
                 :reflected_backdrop(cast,p,panorama,palette,enhanced);
         }
-        sum+=rgb(colour);
+        sum+=p.optical.x==0u?rgb(colour):reflection_linear(colour,p);
     }
     float3 value=sum/float(rays);
     if(p.metallic==2u) value*=float3(1.0f,0.82f,0.34f);
     else if(p.metallic==3u) value*=float3(1.0f,0.59f,0.38f);
-    output[id]=rgba(value);
+    output[id]=p.optical.x==0u?rgba(value):reflection_pack_linear(value,255u,p);
 }
 )METAL";
 
@@ -901,7 +1047,8 @@ bool MetalHardwareRt::render_reflections(void* raw,
     Camera camera,std::span<const std::uint32_t,256> palette,
     std::uint32_t environment,std::uint8_t quality,float roughness,
     std::uint32_t metallic,std::optional<ReceiverPlane> ground,const RayWater* water,const GpuBackgroundDraw* background,bool ground_only,
-    std::optional<PrimaryRayRange> primary_range) {
+    std::optional<PrimaryRayRange> primary_range,unsigned colour_encoding,
+    const ResidentEnvironmentCube* resident_environment,bool specular_models) {
     impl_->reflection={};
     if(ground_only && (!ground || !water)) return false;
     if(!valid_primary_range(primary_range)) {
@@ -918,8 +1065,10 @@ bool MetalHardwareRt::render_reflections(void* raw,
         const bool native_rgba=geometry.materials && geometry.materials->encoding==RayMaterialEncoding::native_rgba;
         const auto record_bytes=std::uint64_t(geometry.vertex_count/3U)*sizeof(render::RayMaterial);
         if(!quality || quality>3 || !pixels || pixels>std::numeric_limits<std::uint32_t>::max()/4U
+            || !std::isfinite(camera.focal_length) || !std::isfinite(camera.vertical_focal_length())
+            || !std::isfinite(camera.center_x) || !std::isfinite(camera.center_y)
             || camera.focal_length<=0 || camera.vertical_focal_length()<=0
-            || !std::isfinite(roughness) || roughness<0
+            || !std::isfinite(roughness) || roughness<0 || roughness>1 || metallic>3 || colour_encoding>2
             || !geometry.complete || geometry.device!=raw || !geometry.buffer
             || geometry.vertex_count<3 || geometry.vertex_count%3
             || !geometry.materials
@@ -930,6 +1079,33 @@ bool MetalHardwareRt::render_reflections(void* raw,
             || geometry.material_bytes%4U || geometry.material_bytes<record_bytes
             || !geometry.materials->triangles.empty() || !geometry.materials->texels.empty())) {
             impl_->status="Invalid native Metal reflection material payload";return false;
+        }
+        if(specular_models && (!native_rgba || !colour_encoding)) {
+            impl_->status="Calibrated Metal model transport requires native materials and explicit linear/sRGB encoding";return false;
+        }
+        if(ground && (!std::isfinite(dot(ground->point,ground->point))
+            || !std::isfinite(dot(ground->normal,ground->normal)) || dot(ground->normal,ground->normal)<1.e-20)) {
+            impl_->status="Invalid Metal reflection ground plane";return false;
+        }
+        std::uint64_t cube_bytes=0;
+        if(resident_environment) {
+            const auto& cube=*resident_environment;
+            if(!native_rgba || !colour_encoding || background || cube.relative_offset!=geometry.material_bytes
+                || !cube.relative_offset || cube.relative_offset%4 || cube.face_size<8 || cube.face_size>512
+                || (cube.face_size&(cube.face_size-1))) {
+                impl_->status="Invalid resident Metal reflection environment metadata";return false;
+            }
+            for(unsigned row=0;row<3;++row) for(unsigned other=0;other<3;++other) {
+                double product=0;
+                for(unsigned c=0;c<3;++c) product+=double(cube.rotation[row*3+c])*cube.rotation[other*3+c];
+                if(!std::isfinite(product) || std::abs(product-double(row==other))>.01) {
+                    impl_->status="Invalid resident Metal environment rotation";return false;
+                }
+            }
+            cube_bytes=std::uint64_t(cube.face_size)*cube.face_size*6*4;
+            if(std::uint64_t(geometry.material_offset)+cube.relative_offset+cube_bytes>std::numeric_limits<std::uint32_t>::max()) {
+                impl_->status="Resident Metal environment byte range exceeds SDL buffer limits";return false;
+            }
         }
         // This producer currently emits the packed reflection image. Never
         // pretend it supplies the separate calibrated liquid guides/history.
@@ -979,7 +1155,7 @@ bool MetalHardwareRt::render_reflections(void* raw,
             const auto material_bytes=native_rgba?std::uint64_t(geometry.material_bytes):record_bytes;
             if(vertex_bytes>vertices.length || (geometry.material_offset
                 && (geometry.material_offset<vertex_bytes || std::uint64_t(geometry.material_offset)
-                    +material_bytes>vertices.length)))
+                    +material_bytes+cube_bytes>vertices.length)))
                 throw std::runtime_error("Resident Metal reflection geometry/materials exceed their buffer");
             std::uint32_t native_material_words=0;
             if(native_rgba) {
@@ -1028,6 +1204,14 @@ bool MetalHardwareRt::render_reflections(void* raw,
             [builder endEncoding];
             ReflectionParameters p{};
             p.primary_range=primary_parameters(primary_range);
+            p.optical={colour_encoding,specular_models?1U:0U,0,0};
+            if(resident_environment) {
+                const auto& cube=*resident_environment;
+                p.cube_info={cube.relative_offset/4,cube.face_size,colour_encoding,1};
+                p.cube_row0={cube.rotation[0],cube.rotation[1],cube.rotation[2],0};
+                p.cube_row1={cube.rotation[3],cube.rotation[4],cube.rotation[5],0};
+                p.cube_row2={cube.rotation[6],cube.rotation[7],cube.rotation[8],0};
+            }
             p.width=camera.width;p.height=camera.height;p.quality=quality;
             p.metallic=metallic;p.focal_x=float(camera.focal_length);
             p.focal_y=float(camera.vertical_focal_length());
@@ -1082,9 +1266,11 @@ bool MetalHardwareRt::render_reflections(void* raw,
             [encoder setBuffer:materials offset:material_offset atIndex:4];
             [encoder setBuffer:slot.palette offset:0 atIndex:5];
             [encoder setBuffer:native_rgba?vertices:slot.texels offset:0 atIndex:6];
-            id<MTLBuffer> panorama=panorama_buffer
+            // The cube follows the native materials in the very same tracked
+            // resident allocation. Do not upload or reinterpret a CPU atlas.
+            id<MTLBuffer> panorama=resident_environment?vertices:panorama_buffer
                 ?(__bridge id<MTLBuffer>)SDL_StarfoxMetalBuffer(panorama_buffer):slot.palette;
-            [encoder setBuffer:panorama offset:0 atIndex:7];
+            [encoder setBuffer:panorama offset:resident_environment?geometry.material_offset:0 atIndex:7];
             id<MTLBuffer> enhanced=enhanced_image?slot.enhanced_backdrop:slot.palette;
             [encoder setBuffer:enhanced offset:0 atIndex:8];
             [encoder useResource:slot.acceleration usage:MTLResourceUsageRead];
