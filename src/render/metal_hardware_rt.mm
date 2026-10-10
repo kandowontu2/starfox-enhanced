@@ -48,8 +48,10 @@ struct alignas(16) ReflectionParameters {
     std::array<std::uint32_t,4> backdrop{};
     std::array<std::uint32_t,4> enhanced_size{};
     Float4 enhanced_motion{},enhanced_plane{},enhanced_projection{},enhanced_palette{},enhanced_keep0{},enhanced_keep1{};
+    std::array<std::uint32_t,4> coverage{};
 };
-static_assert(sizeof(ReflectionParameters)==272);
+static_assert(sizeof(ReflectionParameters)==288);
+static_assert(offsetof(ReflectionParameters,coverage)==272);
 
 // Shared by both native kernels and the exact-source Apple compiler/runtime
 // checks. Reject candidates in-place: restarting past a transparent hit with
@@ -206,6 +208,7 @@ struct Parameters {
     uint4 backdrop;
     uint4 enhanced_size;
     float4 enhanced_motion,enhanced_plane,enhanced_projection,enhanced_palette,enhanced_keep0,enhanced_keep1;
+    uint4 coverage;
 };
 float3 rgb(uint packed) {
     return float3(float(packed&255u),float((packed>>8)&255u),
@@ -217,12 +220,15 @@ uint rgba(float3 colour) {
 }
 uint palette_hit(uint primitive,float2 bary,uint2 pixel,
     device const RayMaterial* materials,device const uint* palette,
-    device const uchar* texels,uint texel_count) {
+    device const uchar* texels,uint texel_count,uint4 coverage) {
+    if(coverage.z==2u)
+        return starfox_native_material_colour(primitive,bary.x,bary.y,pixel.x,pixel.y,
+            reinterpret_cast<device const uint*>(materials),coverage.x,coverage.y,coverage.w);
     uint index=indexed_source_index(materials[primitive],bary,pixel,texels,texel_count);
     return index<=255u?palette[index]|0xff000000u:0u;
 }
 #define SF_VISIBLE_HIT(NAME, ORIGIN, DIRECTION, MINIMUM, MAXIMUM) \
-    auto NAME=visible_hit(ray(ORIGIN,DIRECTION,MINIMUM,MAXIMUM),scene,pixel,materials,texels,p.texel_count,true,false);
+    auto NAME=visible_hit(ray(ORIGIN,DIRECTION,MINIMUM,MAXIMUM),scene,pixel,materials,texels,p.texel_count,true,false,p.coverage);
 float3 enhanced_bilinear(float2 at,constant Parameters& p,device const uint* enhanced) {
     uint2 lo=min(uint2(at),p.enhanced_size.xy-1u),hi=min(lo+1u,p.enhanced_size.xy-1u);
     float2 f=fract(at);uint w=p.enhanced_size.x;
@@ -336,7 +342,7 @@ uint trace_mirrors(float3 origin,float3 direction,uint2 pixel,float minimum,bool
         } else if(model) {
             uint primitive=obstacle.primitive_id;
             if((flags&16u)==0u) return reflected_accumulated(palette_hit(primitive,
-                obstacle.triangle_barycentric_coord,pixel,materials,palette,texels,p.texel_count),throughput,accumulated);
+                obstacle.triangle_barycentric_coord,pixel,materials,palette,texels,p.texel_count,p.coverage),throughput,accumulated);
             uint first=primitive*3u;
             normal=normalize(cross(vertices[first+1u].xyz-vertices[first].xyz,
                 vertices[first+2u].xyz-vertices[first].xyz));
@@ -449,7 +455,7 @@ kernel void starfox_hardware_reflection(
         float3 receiver=float3(.28f,.24f,.16f);
         if(submerged.type==intersection_type::triangle) {
             receiver=rgb(palette_hit(submerged.primitive_id,submerged.triangle_barycentric_coord,
-                pixel,materials,palette,texels,p.texel_count));
+                pixel,materials,palette,texels,p.texel_count,p.coverage));
             receiver*=receiver;travel=submerged.distance;
         }
         uint caustics=(uint(p.water_settings.w)>>5u)&3u;
@@ -491,7 +497,7 @@ kernel void starfox_hardware_reflection(
             SF_VISIBLE_HIT(reflected_hit,point+normal*bias,bounce,bias,65536.0f)
             reflected_word=reflected_hit.type==intersection_type::triangle
                 ?palette_hit(reflected_hit.primitive_id,reflected_hit.triangle_barycentric_coord,
-                    pixel,materials,palette,texels,p.texel_count):reflected_backdrop(bounce,p,panorama,palette,enhanced);
+                    pixel,materials,palette,texels,p.texel_count,p.coverage):reflected_backdrop(bounce,p,panorama,palette,enhanced);
         }
         float3 reflected_colour=rgb(reflected_word);
         float fresnel=.02f+.98f*pow(1.0f-clamp(dot(-incoming,normal),0.0f,1.0f),5.0f);
@@ -520,7 +526,7 @@ kernel void starfox_hardware_reflection(
             SF_VISIBLE_HIT(bounced,point,cast,max(0.1f,distance*1.e-5f),65536.0f)
             colour=bounced.type==intersection_type::triangle
                 ?palette_hit(bounced.primitive_id,bounced.triangle_barycentric_coord,
-                    pixel,materials,palette,texels,p.texel_count)
+                    pixel,materials,palette,texels,p.texel_count,p.coverage)
                 :reflected_backdrop(cast,p,panorama,palette,enhanced);
         }
         sum+=rgb(colour);
@@ -873,20 +879,32 @@ bool MetalHardwareRt::render_reflections(void* raw,
     try {
         auto* device=static_cast<SDL_GPUDevice*>(raw);
         const auto pixels=std::uint64_t(camera.width)*camera.height;
-        if(geometry.materials && geometry.materials->encoding!=RayMaterialEncoding::indexed) {
-            impl_->status="Native calibrated RGBA reflection material ABI not supported by this Metal producer";
+        if(geometry.materials && geometry.materials->encoding!=RayMaterialEncoding::indexed
+            && geometry.materials->encoding!=RayMaterialEncoding::native_rgba) {
+            impl_->status="Unknown Metal reflection material encoding";
             return false;
         }
+        const bool native_rgba=geometry.materials && geometry.materials->encoding==RayMaterialEncoding::native_rgba;
+        const auto record_bytes=std::uint64_t(geometry.vertex_count/3U)*sizeof(render::RayMaterial);
         if(!quality || quality>3 || !pixels || pixels>std::numeric_limits<std::uint32_t>::max()/4U
             || camera.focal_length<=0 || camera.vertical_focal_length()<=0
             || !std::isfinite(roughness) || roughness<0
             || !geometry.complete || geometry.device!=raw || !geometry.buffer
             || geometry.vertex_count<3 || geometry.vertex_count%3
             || !geometry.materials
-            || geometry.materials->encoding!=RayMaterialEncoding::indexed
-            || (!geometry.material_offset && geometry.materials->triangles.size()!=geometry.vertex_count/3U)
+            || (!native_rgba && !geometry.material_offset && geometry.materials->triangles.size()!=geometry.vertex_count/3U)
             || geometry.material_offset%16U
-            || geometry.materials->texels.size()>16'000'000) return false;
+            || (!native_rgba && geometry.materials->texels.size()>16'000'000)) return false;
+        if(native_rgba && (!geometry.material_offset || geometry.vertex_count/3U>0x03ffffffU
+            || geometry.material_bytes%4U || geometry.material_bytes<record_bytes
+            || !geometry.materials->triangles.empty() || !geometry.materials->texels.empty())) {
+            impl_->status="Invalid native Metal reflection material payload";return false;
+        }
+        // This producer currently emits the packed reflection image. Never
+        // pretend it supplies the separate calibrated liquid guides/history.
+        if(native_rgba && water && (water->source_colour || water->auxiliary_layers || water->surface_layers)) {
+            impl_->status="Calibrated Metal liquid output layers are not implemented";return false;
+        }
         if(water) {
             if(!ground || water->material>3 || water->caustics>3
                 || !std::isfinite(water->time) || !std::isfinite(water->brightness)
@@ -927,10 +945,18 @@ bool MetalHardwareRt::render_reflections(void* raw,
             if(!vertices || !target || !native)
                 throw std::runtime_error("Missing native Metal reflection resource");
             const auto vertex_bytes=std::uint64_t(geometry.vertex_count)*sizeof(Float4);
+            const auto material_bytes=native_rgba?std::uint64_t(geometry.material_bytes):record_bytes;
             if(vertex_bytes>vertices.length || (geometry.material_offset
                 && (geometry.material_offset<vertex_bytes || std::uint64_t(geometry.material_offset)
-                    +std::uint64_t(geometry.vertex_count/3U)*sizeof(render::RayMaterial)>vertices.length)))
+                    +material_bytes>vertices.length)))
                 throw std::runtime_error("Resident Metal reflection geometry/materials exceed their buffer");
+            std::uint32_t native_material_words=0;
+            if(native_rgba) {
+                const auto words=std::uint64_t(vertices.length-geometry.material_offset)/4U;
+                if(words>std::numeric_limits<std::uint32_t>::max())
+                    throw std::runtime_error("Native Metal reflection binding word count overflow");
+                native_material_words=std::uint32_t(words);
+            }
             auto* triangles=[MTLAccelerationStructureTriangleGeometryDescriptor descriptor];
             triangles.vertexBuffer=vertices;
             triangles.vertexStride=sizeof(Float4);
@@ -948,9 +974,11 @@ bool MetalHardwareRt::render_reflections(void* raw,
                 length:palette.size_bytes() options:MTLResourceStorageModeShared];
             const std::uint8_t blank=0;
             const auto& texels=geometry.materials->texels;
-            slot.texels=[impl_->metal newBufferWithBytes:texels.empty()?&blank:texels.data()
-                length:std::max<std::size_t>(1,texels.size())
-                options:MTLResourceStorageModeShared];
+            if(!native_rgba) {
+                slot.texels=[impl_->metal newBufferWithBytes:texels.empty()?&blank:texels.data()
+                    length:std::max<std::size_t>(1,texels.size())
+                    options:MTLResourceStorageModeShared];
+            }
             id<MTLBuffer> materials=vertices;
             NSUInteger material_offset=geometry.material_offset;
             if(!material_offset) {
@@ -960,7 +988,7 @@ bool MetalHardwareRt::render_reflections(void* raw,
                     options:MTLResourceStorageModeShared];
                 materials=slot.cpu_materials;
             }
-            if(!slot.acceleration || !slot.scratch || !slot.palette || !slot.texels
+            if(!slot.acceleration || !slot.scratch || !slot.palette || (!native_rgba && !slot.texels)
                 || !materials)
                 throw std::runtime_error("Metal reflection resource allocation failed");
             auto builder=[native accelerationStructureCommandEncoder];
@@ -974,6 +1002,7 @@ bool MetalHardwareRt::render_reflections(void* raw,
             p.center_x=float(camera.center_x);p.center_y=float(camera.center_y);
             p.roughness=roughness;p.environment=environment;
             p.texel_count=std::uint32_t(texels.size());
+            if(native_rgba) p.coverage={geometry.vertex_count/3U,geometry.material_bytes,2,native_material_words};
             p.has_ground=ground?1.0F:0.0F;
             if(panorama_buffer) p.backdrop={backdrop_width,backdrop_height,backdrop_origin,0};
             const auto* enhanced_environment=panorama_buffer?background->settings.reflection_environment:nullptr;
@@ -1020,7 +1049,7 @@ bool MetalHardwareRt::render_reflections(void* raw,
             [encoder setBuffer:vertices offset:0 atIndex:3];
             [encoder setBuffer:materials offset:material_offset atIndex:4];
             [encoder setBuffer:slot.palette offset:0 atIndex:5];
-            [encoder setBuffer:slot.texels offset:0 atIndex:6];
+            [encoder setBuffer:native_rgba?vertices:slot.texels offset:0 atIndex:6];
             id<MTLBuffer> panorama=panorama_buffer
                 ?(__bridge id<MTLBuffer>)SDL_StarfoxMetalBuffer(panorama_buffer):slot.palette;
             [encoder setBuffer:panorama offset:0 atIndex:7];

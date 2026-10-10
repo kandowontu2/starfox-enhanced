@@ -1,4 +1,4 @@
-# Star Fox Enhanced — native Metal shadow material candidate
+# Star Fox Enhanced — native Metal reflection material candidate
 
 This temporary source-only component integrates the separately CPU/SDK-checked
 64-byte native RGBA opacity decoder into the actual Metal shadow producer and
@@ -11,6 +11,11 @@ The candidate embeds the exact decoder in runtime source strings rather than
 depending on on-device filesystem includes. Runtime compilation disables unsafe
 floating-point optimizations, with the appropriate old/new SDK option selected
 by availability. Both primary and shadow rays receive the native material view.
+Reflected, refracted and nested-mirror queries now use that same resident
+coverage view. Native RGBA/indexed-atlas reflected colours use the canonical
+calibrated colour equations: already-styled kind2 solids pass through, while
+kind3 texture samples are decoded, styled once and encoded according to their
+submitted flags.
 
 CI compiles the entire Objective-C++ producer against its real project header
 closure and original public SDL headers, then compiles/links both full runtime
@@ -18,8 +23,11 @@ shadow and reflection shader libraries using the existing Metal3.0 RT language
 recipe and strict O3/FP flags. It retains the original native process/memory
 observer. No GPU is executed. This is not an abbreviated complete25 test suite.
 
-Native RGBA reflection production still deliberately refuses unsupported input:
-its full colour/history/producer contract remains separate work. Empty caster
+This candidate supplies the native material colour/coverage contract for the
+existing packed reflection image. It does not yet implement the full calibrated
+reflection-history/guide/ordered curved-path producer contract. Unsupported
+calibrated liquid layer inputs explicitly refuse rather than returning an
+incomplete image as successful. Empty caster
 scenes, GPU execution, numerical/frame cost, full game integration and physical
 device acceptance are not proven by compilation or source checks. Do not adopt
 or call the whole rendering goal complete from these artifacts.

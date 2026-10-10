@@ -30,6 +30,10 @@ class MetalSourceAssemblyTests(unittest.TestCase):
         template = (ROOT / "src/render/shaders/metal_native_material_shared.hpp.in").read_text(encoding="utf-8")
         template = template.replace("@STARFOX_METAL_NATIVE_COVERAGE_SOURCE@",
             (ROOT / "include/starfox/render/metal_native_material_coverage.inc").read_text(encoding="utf-8"))
+        template = template.replace("@STARFOX_METAL_MATERIAL_COLOUR_SOURCE@",
+            (ROOT / "include/starfox/render/metal_material_colour.inc").read_text(encoding="utf-8"))
+        template = template.replace("@STARFOX_METAL_NATIVE_COLOUR_SOURCE@",
+            (ROOT / "include/starfox/render/metal_native_material_colour.inc").read_text(encoding="utf-8"))
         match = re.search(r'R"SF_NATIVE\((.*?)\)SF_NATIVE"', template, re.S)
         self.assertIsNotNone(match)
         return match[1]
@@ -63,7 +67,7 @@ class MetalSourceAssemblyTests(unittest.TestCase):
         self.assertIsNotNone(shadow)
         self.assertIsNotNone(reflection)
 
-    def test_native_shadow_bindings_and_legacy_reflection_boundary(self):
+    def test_native_shadow_bindings_preserved(self):
         shadow = self.implementation.split("bool MetalHardwareRt::render_shadows", 1)[1].split("GpuShadowOutput MetalHardwareRt::shadow_output", 1)[0]
         self.assertIn("p.coverage={vertex_count/3U,resident_geometry->material_bytes,2,native_material_words}", shadow)
         self.assertIn("vertices.length-material_offset", shadow)
@@ -71,11 +75,33 @@ class MetalSourceAssemblyTests(unittest.TestCase):
         self.assertIn("resident_geometry->material_bytes<record_bytes", shadow)
         self.assertIn("if(!native_rgba) {", shadow)
         self.assertIn("SDL_StarfoxMetalTrackBuffer", shadow)
-        self.assertIn("Native calibrated RGBA reflection material ABI not supported", self.implementation)
         self.assertEqual(self.implementation.count("options.fastMathEnabled=NO;"), 2)
         self.assertEqual(self.implementation.count("if(@available(macOS 13.0,iOS 16.0,*))"), 2)
         self.assertEqual(self.implementation.count("triangles.vertexFormat=MTLAttributeFormatFloat3;"), 2)
         self.assertEqual((self.destination / "shadow.metal").read_text(encoding="utf-8").count("uint starfox_native_material_coverage("), 1)
+
+    def test_native_reflection_resident_atlas_and_colour(self):
+        reflection = self.implementation.split("bool MetalHardwareRt::render_reflections", 1)[1]
+        self.assertIn("p.coverage={geometry.vertex_count/3U,geometry.material_bytes,2,native_material_words}", reflection)
+        self.assertIn("vertices.length-geometry.material_offset", reflection)
+        self.assertIn("+material_bytes>vertices.length", reflection)
+        self.assertIn("!geometry.materials->triangles.empty() || !geometry.materials->texels.empty()", reflection)
+        self.assertIn("if(!native_rgba) {", reflection)
+        self.assertIn("setBuffer:native_rgba?vertices:slot.texels", reflection)
+        self.assertIn("Calibrated Metal liquid output layers are not implemented", reflection)
+        self.assertIn("Unknown Metal reflection material encoding", reflection)
+        self.assertIn("sizeof(ReflectionParameters)==288", self.implementation)
+        self.assertIn("offsetof(ReflectionParameters,coverage)==272", self.implementation)
+        shader = self.body("Reflection")
+        self.assertEqual(shader.count("uint4 coverage;"), 1)
+        self.assertEqual(shader.count("p.texel_count,p.coverage"), 4)
+        self.assertEqual(shader.count("palette_hit("), 5)  # definition plus all four colour queries
+        self.assertIn("p.texel_count,true,false,p.coverage);", shader)
+        self.assertIn("starfox_native_material_colour(primitive,bary.x,bary.y,pixel.x,pixel.y", shader)
+        helper = (ROOT / "include/starfox/render/metal_native_material_colour.inc").read_text(encoding="utf-8")
+        self.assertEqual(helper.count("scene_styled_colour("), 1)
+        self.assertIn("if(words[at+15u]==2u) return packed;", helper)
+        self.assertIn("if(packed==0u) return 0u;", helper)
 
 
 if __name__ == "__main__":

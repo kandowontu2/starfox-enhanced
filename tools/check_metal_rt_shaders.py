@@ -30,6 +30,10 @@ def main():
     native_template = (root / "src/render/shaders/metal_native_material_shared.hpp.in").read_text(encoding="utf-8")
     native_template = native_template.replace("@STARFOX_METAL_NATIVE_COVERAGE_SOURCE@",
         (root / "include/starfox/render/metal_native_material_coverage.inc").read_text(encoding="utf-8"))
+    native_template = native_template.replace("@STARFOX_METAL_MATERIAL_COLOUR_SOURCE@",
+        (root / "include/starfox/render/metal_material_colour.inc").read_text(encoding="utf-8"))
+    native_template = native_template.replace("@STARFOX_METAL_NATIVE_COLOUR_SOURCE@",
+        (root / "include/starfox/render/metal_native_material_colour.inc").read_text(encoding="utf-8"))
     if re.search(r"@STARFOX_[A-Z_]+@", native_template):
         raise RuntimeError("Unresolved native material Metal shader source token")
     native = re.search(r'R"SF_NATIVE\((.*?)\)SF_NATIVE"', native_template, re.S)
