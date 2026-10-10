@@ -1,4 +1,4 @@
-name: Temporary complete Metal embedding checks (no release)
+name: Temporary exact-workgroup Metal SDK checks (no GPU or release)
 on:
   workflow_dispatch:
 permissions:
@@ -6,7 +6,7 @@ permissions:
   actions: read
 jobs:
   metal-embedding:
-    name: Complete25 embedding / ${{ matrix.sdk }}
+    name: Complete25 exact-workgroup probe compile / ${{ matrix.sdk }}
     runs-on: macos-15-intel
     strategy:
       fail-fast: false
@@ -25,10 +25,10 @@ jobs:
           run-id: 38054247676
           pattern: metal-${{ matrix.sdk }}-*
           path: ${{ runner.temp }}/sdk-artifacts
-      - name: Inspect exact native embedding and all available Metal pipeline loads
+      - name: Compile exact-workgroup candidate without replacing the live runtime probe
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 tools/check_embedding.py --sdk '${{ matrix.sdk }}' --artifacts '${{ runner.temp }}/sdk-artifacts' --out '${{ runner.temp }}/embedding-result'
+        run: python3 tools/check_embedding.py --compile-only --sdk '${{ matrix.sdk }}' --artifacts '${{ runner.temp }}/sdk-artifacts' --out '${{ runner.temp }}/embedding-result'
       - name: Preserve diagnostics and nonprivate native shader artifacts
         if: always()
         uses: actions/upload-artifact@v4

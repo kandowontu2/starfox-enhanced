@@ -56,10 +56,13 @@ int main() {
                     continue;
                 }
                 ++kernels;
-                // Match SDL_gpu_metal.m's production pipeline creation. Do not
-                // reduce the declared workgroup or change shader code/precision.
+                // Candidate descriptor hint only: constrain the compiler to
+                // the SAME original dispatch workgroup, not a smaller workload.
+                // The unchanged R266 automatic-limit probe remains separate.
+                const unsigned threads = program.x * program.y * program.z;
                 MTLComputePipelineDescriptor* descriptor = [MTLComputePipelineDescriptor new];
                 descriptor.computeFunction = function;
+                descriptor.maxTotalThreadsPerThreadgroup = threads;
                 error = nil;
                 id<MTLComputePipelineState> pipeline = [device
                     newComputePipelineStateWithDescriptor:descriptor options:MTLPipelineOptionNone
@@ -68,7 +71,6 @@ int main() {
                     report_error("PIPELINE_FAILED", program.name, error);
                     continue;
                 }
-                const unsigned threads = program.x * program.y * program.z;
                 if (pipeline.maxTotalThreadsPerThreadgroup < threads) {
                     std::fprintf(stderr, "THREADGROUP_UNSUPPORTED %s: required=%u maximum=%lu\n",
                         program.name, threads, (unsigned long)pipeline.maxTotalThreadsPerThreadgroup);

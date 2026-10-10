@@ -1,4 +1,25 @@
-# Temporary Metal reflection binary embedding checks
+# Temporary exact-workgroup Metal descriptor SDK checks
+
+This candidate supplies Metal's pipeline descriptor with each shader's original
+declared threadgroup size (64, 128 or 256 threads). It changes no shader source,
+library bytes, mathematical work, precision, binding layout or dispatch size.
+There is no conflicting max_total_threads_per_threadgroup shader attribute.
+
+The manual workflow explicitly uses --compile-only. It compiles the complete
+25-program probe on both SDKs and links the macOS executable, without creating
+a GPU or restarting the separately live automatic-limit runtime test. Runtime
+acceptance remains false, including for a successful SDK compile/link. The
+original process identity, full-family checks and resource guards are retained.
+Any later runtime comparison must wait for the actual prior owner to retire,
+preserve that result, and attempt all 25 programs with the original workgroups.
+No performance improvement, dispatch/numerical parity, application integration
+or release is claimed by this preparation.
+
+Apple documents the descriptor property and requires matching values if a
+shader also supplies the corresponding attribute:
+https://developer.apple.com/documentation/metal/mtlcomputepipelinedescriptor/maxtotalthreadsperthreadgroup
+
+## Original diagnostic history (not this workflow's execution scope)
 
 This source-only development snapshot is not a playable build, release or
 production merge. It contains no ROM, asset pack or production Git history.

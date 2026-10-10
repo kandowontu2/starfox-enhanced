@@ -112,6 +112,8 @@ def main():
     parser.add_argument('--artifacts', type=Path, required=True)
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--self-test', action='store_true')
+    parser.add_argument('--compile-only', action='store_true',
+                        help='Compile the complete25 probe without creating a GPU or accepting runtime work')
     args = parser.parse_args()
     manifest = json.loads((ROOT / 'shaders.json').read_text())
     sdk.controls(manifest)
@@ -169,7 +171,7 @@ def main():
         else:
             probe_flags += ['-c', '-o', str(probe)]
         operations.append(sdk.operate('compile-probe', tool, probe_flags, args.out, manifest, library, environment))
-        if args.sdk == 'macosx':
+        if args.sdk == 'macosx' and not args.compile_only:
             # Use the identical guarded native observer, pinning this reviewed
             # newly-built diagnostic executable rather than an Xcode frontend.
             original_pin = sdk.pin_sdk_executables
@@ -194,7 +196,7 @@ def main():
         report = {'Scope': 'Actual complete25 native Apple binary embedding and SDK probe compilation; Metal pipeline loading is separately reported, not dispatch/numerical/frame-cost/production acceptance',
                   'Sdk': args.sdk, 'SourceRun': SDK_RUN, 'SourceCommit': SDK_COMMIT, 'Programs': 25,
                   'NativeObjectAccepted': object_pass, 'Operations': operations, 'MetalPipelineLoadsAccepted': runtime_pass,
-                  'MetalPipelineAttemptCount': attempted,
+                  'MetalPipelineAttemptCount': attempted, 'RuntimeExplicitlyDeferred': args.compile_only,
                   'Failure': failure, 'ProductionAdopted': False}
         (args.out / 'embedding-receipt.json').write_text(json.dumps(report, indent=2))
         print(json.dumps(report, indent=2))
