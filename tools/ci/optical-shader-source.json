@@ -1,0 +1,530 @@
+{
+  "pipelines": [
+    {
+      "mode": "tiles",
+      "source": "src/render/shaders/reflection_source_index.hlsl",
+      "entry": "feature_tiles_main",
+      "closure": [
+        "src/render/shaders/reflection_source_feature.hlsli",
+        "src/render/shaders/reflection_source_index_settings.hlsli",
+        "src/render/shaders/reflection_source_index.hlsl"
+      ]
+    },
+    {
+      "mode": "reduce",
+      "source": "src/render/shaders/reflection_source_index.hlsl",
+      "entry": "feature_reduce_main",
+      "closure": [
+        "src/render/shaders/reflection_source_feature.hlsli",
+        "src/render/shaders/reflection_source_index_settings.hlsli",
+        "src/render/shaders/reflection_source_index.hlsl"
+      ]
+    },
+    {
+      "mode": "query",
+      "source": "src/render/shaders/reflection_source_index.hlsl",
+      "entry": "feature_query_main",
+      "closure": [
+        "src/render/shaders/reflection_source_feature.hlsli",
+        "src/render/shaders/reflection_source_index_settings.hlsli",
+        "src/render/shaders/reflection_source_index.hlsl"
+      ]
+    },
+    {
+      "mode": "mapping",
+      "source": "src/render/shaders/reflection_source_queries.hlsl",
+      "entry": "feature_mapping_main",
+      "closure": [
+        "src/render/shaders/reflection_curved_precision.hlsli",
+        "src/render/shaders/reflection_source_feature.hlsli",
+        "src/render/shaders/reflection_source_queries.hlsl"
+      ]
+    },
+    {
+      "mode": "domains",
+      "source": "src/render/shaders/reflection_source_domains.hlsl",
+      "entry": "feature_domains_main",
+      "closure": [
+        "src/render/shaders/reflection_curved_precision.hlsli",
+        "src/render/shaders/reflection_source_domains.hlsl",
+        "src/render/shaders/reflection_source_feature.hlsli",
+        "src/render/shaders/reflection_source_index_settings.hlsli"
+      ]
+    },
+    {
+      "mode": "frames",
+      "source": "src/render/shaders/reflection_source_frames.hlsl",
+      "entry": "feature_frames_main",
+      "closure": [
+        "src/render/shaders/reflection_rough_hit_motion.hlsli",
+        "src/render/shaders/reflection_source_feature.hlsli",
+        "src/render/shaders/reflection_source_frames.hlsl",
+        "src/render/shaders/reflection_specular_path_motion.hlsli"
+      ]
+    },
+    {
+      "mode": "optical",
+      "source": "src/render/shaders/reflection_source_optical.hlsl",
+      "entry": "feature_optical_main",
+      "closure": [
+        "include/starfox/render/lava_surface.inc",
+        "include/starfox/render/water_caustics.inc",
+        "src/render/shaders/liquid_optics.hlsli",
+        "src/render/shaders/reflection_curved_precision.hlsli",
+        "src/render/shaders/reflection_liquid_hit_motion.hlsli",
+        "src/render/shaders/reflection_rough_hit_motion.hlsli",
+        "src/render/shaders/reflection_source_directed_rounding.hlsli",
+        "src/render/shaders/reflection_source_feature.hlsli",
+        "src/render/shaders/reflection_source_index_settings.hlsli",
+        "src/render/shaders/reflection_source_optical_interval.hlsli",
+        "src/render/shaders/reflection_source_optical_reciprocals.inc",
+        "src/render/shaders/reflection_source_optical_target.hlsli",
+        "src/render/shaders/reflection_source_optical.hlsl",
+        "src/render/shaders/reflection_specular_path_motion.hlsli"
+      ]
+    },
+    {
+      "mode": "optical_stream",
+      "source": "src/render/shaders/reflection_source_optical_stream.hlsl",
+      "entry": "feature_optical_stream_main",
+      "closure": [
+        "include/starfox/render/lava_surface.inc",
+        "include/starfox/render/water_caustics.inc",
+        "src/render/shaders/liquid_optics.hlsli",
+        "src/render/shaders/reflection_curved_precision.hlsli",
+        "src/render/shaders/reflection_liquid_hit_motion.hlsli",
+        "src/render/shaders/reflection_rough_hit_motion.hlsli",
+        "src/render/shaders/reflection_source_directed_rounding.hlsli",
+        "src/render/shaders/reflection_source_feature.hlsli",
+        "src/render/shaders/reflection_source_index_settings.hlsli",
+        "src/render/shaders/reflection_source_optical_interval.hlsli",
+        "src/render/shaders/reflection_source_optical_reciprocals.inc",
+        "src/render/shaders/reflection_source_optical_stream.hlsl",
+        "src/render/shaders/reflection_source_optical_target.hlsli",
+        "src/render/shaders/reflection_source_optical.hlsl",
+        "src/render/shaders/reflection_specular_path_motion.hlsli"
+      ]
+    },
+    {
+      "mode": "optical_schedule",
+      "source": "src/render/shaders/reflection_source_optical_schedule.hlsl",
+      "entry": "feature_optical_schedule_main",
+      "closure": [
+        "src/render/shaders/reflection_source_optical_schedule.hlsl"
+      ]
+    },
+    {
+      "mode": "jets",
+      "source": "src/render/shaders/reflection_source_jets.hlsl",
+      "entry": "feature_jets_main",
+      "closure": [
+        "include/starfox/render/lava_surface.inc",
+        "include/starfox/render/water_caustics.inc",
+        "src/render/shaders/liquid_optics.hlsli",
+        "src/render/shaders/reflection_curved_precision.hlsli",
+        "src/render/shaders/reflection_liquid_hit_motion.hlsli",
+        "src/render/shaders/reflection_rough_hit_motion.hlsli",
+        "src/render/shaders/reflection_source_directed_rounding.hlsli",
+        "src/render/shaders/reflection_source_feature.hlsli",
+        "src/render/shaders/reflection_source_index_settings.hlsli",
+        "src/render/shaders/reflection_source_jets.hlsl",
+        "src/render/shaders/reflection_source_optical_interval.hlsli",
+        "src/render/shaders/reflection_source_optical_jet.hlsli",
+        "src/render/shaders/reflection_source_optical_local_root.hlsli",
+        "src/render/shaders/reflection_source_optical_reciprocals.inc",
+        "src/render/shaders/reflection_source_optical_target.hlsli",
+        "src/render/shaders/reflection_specular_path_motion.hlsli"
+      ]
+    },
+    {
+      "mode": "jets_stream",
+      "source": "src/render/shaders/reflection_source_jets_stream.hlsl",
+      "entry": "feature_jets_stream_main",
+      "closure": [
+        "include/starfox/render/lava_surface.inc",
+        "include/starfox/render/water_caustics.inc",
+        "src/render/shaders/liquid_optics.hlsli",
+        "src/render/shaders/reflection_curved_precision.hlsli",
+        "src/render/shaders/reflection_liquid_hit_motion.hlsli",
+        "src/render/shaders/reflection_rough_hit_motion.hlsli",
+        "src/render/shaders/reflection_source_directed_rounding.hlsli",
+        "src/render/shaders/reflection_source_feature.hlsli",
+        "src/render/shaders/reflection_source_index_settings.hlsli",
+        "src/render/shaders/reflection_source_jets_stream.hlsl",
+        "src/render/shaders/reflection_source_jets.hlsl",
+        "src/render/shaders/reflection_source_optical_interval.hlsli",
+        "src/render/shaders/reflection_source_optical_jet.hlsli",
+        "src/render/shaders/reflection_source_optical_local_root.hlsli",
+        "src/render/shaders/reflection_source_optical_reciprocals.inc",
+        "src/render/shaders/reflection_source_optical_target.hlsli",
+        "src/render/shaders/reflection_specular_path_motion.hlsli"
+      ]
+    },
+    {
+      "mode": "roots_clear",
+      "source": "src/render/shaders/reflection_source_roots_clear.hlsl",
+      "entry": "feature_roots_clear_main",
+      "closure": [
+        "src/render/shaders/reflection_source_roots_clear.hlsl"
+      ]
+    },
+    {
+      "mode": "witness",
+      "source": "src/render/shaders/reflection_source_witness.hlsl",
+      "entry": "feature_witness_main",
+      "closure": [
+        "include/starfox/render/lava_surface.inc",
+        "include/starfox/render/water_caustics.inc",
+        "src/render/shaders/liquid_optics.hlsli",
+        "src/render/shaders/reflection_curved_precision.hlsli",
+        "src/render/shaders/reflection_liquid_hit_motion.hlsli",
+        "src/render/shaders/reflection_rough_hit_motion.hlsli",
+        "src/render/shaders/reflection_source_directed_rounding.hlsli",
+        "src/render/shaders/reflection_source_feature.hlsli",
+        "src/render/shaders/reflection_source_index_settings.hlsli",
+        "src/render/shaders/reflection_source_optical_interval.hlsli",
+        "src/render/shaders/reflection_source_optical_reciprocals.inc",
+        "src/render/shaders/reflection_source_optical_target.hlsli",
+        "src/render/shaders/reflection_source_witness.hlsl",
+        "src/render/shaders/reflection_specular_path_motion.hlsli"
+      ]
+    },
+    {
+      "mode": "folds",
+      "source": "src/render/shaders/reflection_source_folds.hlsl",
+      "entry": "feature_folds_main",
+      "closure": [
+        "include/starfox/render/lava_surface.inc",
+        "include/starfox/render/water_caustics.inc",
+        "src/render/shaders/liquid_optics.hlsli",
+        "src/render/shaders/reflection_curved_path_motion.hlsli",
+        "src/render/shaders/reflection_curved_precision.hlsli",
+        "src/render/shaders/reflection_liquid_hit_motion.hlsli",
+        "src/render/shaders/reflection_rough_hit_motion.hlsli",
+        "src/render/shaders/reflection_source_directed_rounding.hlsli",
+        "src/render/shaders/reflection_source_feature.hlsli",
+        "src/render/shaders/reflection_source_folds.hlsl",
+        "src/render/shaders/reflection_source_index_settings.hlsli",
+        "src/render/shaders/reflection_source_optical_interval.hlsli",
+        "src/render/shaders/reflection_source_optical_reciprocals.inc",
+        "src/render/shaders/reflection_source_optical_target.hlsli",
+        "src/render/shaders/reflection_source_witness.hlsl",
+        "src/render/shaders/reflection_specular_path_motion.hlsli"
+      ]
+    },
+    {
+      "mode": "guide",
+      "source": "src/render/shaders/reflection_source_guide.hlsl",
+      "entry": "feature_guide_main",
+      "closure": [
+        "include/starfox/render/lava_surface.inc",
+        "include/starfox/render/water_caustics.inc",
+        "src/render/shaders/liquid_optics.hlsli",
+        "src/render/shaders/reflection_curved_path_motion.hlsli",
+        "src/render/shaders/reflection_curved_precision.hlsli",
+        "src/render/shaders/reflection_liquid_hit_motion.hlsli",
+        "src/render/shaders/reflection_rough_hit_motion.hlsli",
+        "src/render/shaders/reflection_source_directed_rounding.hlsli",
+        "src/render/shaders/reflection_source_feature.hlsli",
+        "src/render/shaders/reflection_source_guide.hlsl",
+        "src/render/shaders/reflection_source_index_settings.hlsli",
+        "src/render/shaders/reflection_source_optical_interval.hlsli",
+        "src/render/shaders/reflection_source_optical_reciprocals.inc",
+        "src/render/shaders/reflection_source_optical_target.hlsli",
+        "src/render/shaders/reflection_source_witness.hlsl",
+        "src/render/shaders/reflection_specular_path_motion.hlsli"
+      ]
+    },
+    {
+      "mode": "colour",
+      "source": "src/render/shaders/reflection_source_colour.hlsl",
+      "entry": "feature_colour_main",
+      "closure": [
+        "src/render/shaders/calibrated_colour.hlsli",
+        "src/render/shaders/reflection_source_colour.hlsl",
+        "src/render/shaders/reflection_source_feature.hlsli",
+        "src/render/shaders/reflection_source_index_settings.hlsli"
+      ]
+    },
+    {
+      "mode": "compose",
+      "source": "src/render/shaders/reflection_source_compose.hlsl",
+      "entry": "feature_compose_main",
+      "closure": [
+        "src/render/shaders/calibrated_colour.hlsli",
+        "src/render/shaders/reflection_source_compose.hlsl",
+        "src/render/shaders/reflection_source_feature.hlsli",
+        "src/render/shaders/reflection_source_index_settings.hlsli"
+      ]
+    },
+    {
+      "mode": "publish",
+      "source": "src/render/shaders/reflection_source_publish.hlsl",
+      "entry": "feature_publish_main",
+      "closure": [
+        "src/render/shaders/reflection_source_publish.hlsl"
+      ]
+    },
+    {
+      "mode": "publish_diagnostics",
+      "source": "src/render/shaders/reflection_source_publish_diagnostics.hlsl",
+      "entry": "feature_publish_diagnostics_main",
+      "closure": [
+        "src/render/shaders/reflection_source_publish_diagnostics.hlsl",
+        "src/render/shaders/reflection_source_publish.hlsl"
+      ]
+    },
+    {
+      "mode": "admission_clear",
+      "source": "src/render/shaders/reflection_source_admission_clear.hlsl",
+      "entry": "feature_admission_clear_main",
+      "closure": [
+        "src/render/shaders/reflection_source_admission_clear.hlsl"
+      ]
+    },
+    {
+      "mode": "capture",
+      "source": "src/render/shaders/reflection_path_capture.hlsl",
+      "entry": "reflection_path_capture_main",
+      "closure": [
+        "src/render/shaders/calibrated_ray_history.hlsli",
+        "src/render/shaders/reflection_path_capture.hlsl"
+      ]
+    }
+  ],
+  "scope": "Exact R204 38-source candidate, every21 native stage and complete recursive include closure;42 DXIL/SPIRV binaries. Production per-stage flags retained, native jet flags exactly R204. No assets, history, release or GPU acceptance.",
+  "schema": 1,
+  "sources": [
+    {
+      "original_sha256": "b8f9fcaffd17ec44ff018f175be3343667fe2fb3328019422b2a768807a74d00",
+      "path": "include/starfox/render/lava_surface.inc",
+      "canonical_bytes": 5622,
+      "canonical_sha256": "b8f9fcaffd17ec44ff018f175be3343667fe2fb3328019422b2a768807a74d00"
+    },
+    {
+      "original_sha256": "5006aefca36b2f52f9240a81778d4fbdfb0d23a8c7f6ca57fd82f650e0063580",
+      "path": "include/starfox/render/water_caustics.inc",
+      "canonical_bytes": 4243,
+      "canonical_sha256": "5006aefca36b2f52f9240a81778d4fbdfb0d23a8c7f6ca57fd82f650e0063580"
+    },
+    {
+      "original_sha256": "46b0f06ee630c52efb5a9b0c1b003a2d5f19f5d8a070a94f12b6a2ae59383ac2",
+      "path": "src/render/shaders/calibrated_colour.hlsli",
+      "canonical_bytes": 4536,
+      "canonical_sha256": "46b0f06ee630c52efb5a9b0c1b003a2d5f19f5d8a070a94f12b6a2ae59383ac2"
+    },
+    {
+      "original_sha256": "41dc8c9b9445409421fac510d8c3d64792a3dae5e4bff1553e60911756e09246",
+      "path": "src/render/shaders/calibrated_ray_history.hlsli",
+      "canonical_bytes": 661,
+      "canonical_sha256": "41dc8c9b9445409421fac510d8c3d64792a3dae5e4bff1553e60911756e09246"
+    },
+    {
+      "original_sha256": "54df5d2046a3d4f850a5b0dad404eb561441300f1296cfdbd68359f03bb757ee",
+      "path": "src/render/shaders/liquid_optics.hlsli",
+      "canonical_bytes": 1764,
+      "canonical_sha256": "54df5d2046a3d4f850a5b0dad404eb561441300f1296cfdbd68359f03bb757ee"
+    },
+    {
+      "original_sha256": "f9ecb5ec77dfd81f8781284e3a9ee75b9b87e36f402284ed77498f747ac21218",
+      "path": "src/render/shaders/reflection_curved_path_motion.hlsli",
+      "canonical_bytes": 28739,
+      "canonical_sha256": "f9ecb5ec77dfd81f8781284e3a9ee75b9b87e36f402284ed77498f747ac21218"
+    },
+    {
+      "original_sha256": "4dc9217abb5b22553b9c6050f457509409258d33005a6208ad3872510937378a",
+      "path": "src/render/shaders/reflection_curved_precision.hlsli",
+      "canonical_bytes": 19543,
+      "canonical_sha256": "4dc9217abb5b22553b9c6050f457509409258d33005a6208ad3872510937378a"
+    },
+    {
+      "original_sha256": "16de9d16dc1213f34830b119c0b368c68f008cebdbc94855295c305a643cb090",
+      "path": "src/render/shaders/reflection_liquid_hit_motion.hlsli",
+      "canonical_bytes": 9690,
+      "canonical_sha256": "16de9d16dc1213f34830b119c0b368c68f008cebdbc94855295c305a643cb090"
+    },
+    {
+      "original_sha256": "5a6d48e0cf008f0abae56b9a322b5339673b30d3158fbb943229b59334c605b2",
+      "path": "src/render/shaders/reflection_path_capture.hlsl",
+      "canonical_bytes": 2761,
+      "canonical_sha256": "5a6d48e0cf008f0abae56b9a322b5339673b30d3158fbb943229b59334c605b2"
+    },
+    {
+      "original_sha256": "938ae6996b5a350b8c139f99381ccff29e825f60b8dae4bd424466f9b2c97baa",
+      "path": "src/render/shaders/reflection_rough_hit_motion.hlsli",
+      "canonical_bytes": 9498,
+      "canonical_sha256": "938ae6996b5a350b8c139f99381ccff29e825f60b8dae4bd424466f9b2c97baa"
+    },
+    {
+      "original_sha256": "04a652aabe9923ea635fb461ed47dfa19b314c8adb706a5146163750deaf389e",
+      "path": "src/render/shaders/reflection_source_admission_clear.hlsl",
+      "canonical_bytes": 585,
+      "canonical_sha256": "04a652aabe9923ea635fb461ed47dfa19b314c8adb706a5146163750deaf389e"
+    },
+    {
+      "original_sha256": "10304877883ba6a53c2fc6fcea66ed85ce8c5c4f44289c1b12832e35708c6830",
+      "path": "src/render/shaders/reflection_source_colour.hlsl",
+      "canonical_bytes": 8815,
+      "canonical_sha256": "10304877883ba6a53c2fc6fcea66ed85ce8c5c4f44289c1b12832e35708c6830"
+    },
+    {
+      "original_sha256": "bd8d5f1f58fdc78dc283a1767625b0edf9273a5319a3600b691728de2f4ba0ae",
+      "path": "src/render/shaders/reflection_source_compose.hlsl",
+      "canonical_bytes": 7096,
+      "canonical_sha256": "bd8d5f1f58fdc78dc283a1767625b0edf9273a5319a3600b691728de2f4ba0ae"
+    },
+    {
+      "original_sha256": "5ee4294d20f54840068919d290f0bfe029217d75d464a46e48caeea6168f3dbb",
+      "path": "src/render/shaders/reflection_source_directed_rounding.hlsli",
+      "canonical_bytes": 2780,
+      "canonical_sha256": "5ee4294d20f54840068919d290f0bfe029217d75d464a46e48caeea6168f3dbb"
+    },
+    {
+      "original_sha256": "b7a28fbf3f42257e76c322189135b8c97335881f1155de02cfc9f3173f94e502",
+      "path": "src/render/shaders/reflection_source_domains.hlsl",
+      "canonical_bytes": 11162,
+      "canonical_sha256": "b7a28fbf3f42257e76c322189135b8c97335881f1155de02cfc9f3173f94e502"
+    },
+    {
+      "original_sha256": "ef480e1597f797d12ee1cbb9fd3c16155b8105adf2e7afc8a071f77248b392ce",
+      "path": "src/render/shaders/reflection_source_feature.hlsli",
+      "canonical_bytes": 604,
+      "canonical_sha256": "ef480e1597f797d12ee1cbb9fd3c16155b8105adf2e7afc8a071f77248b392ce"
+    },
+    {
+      "original_sha256": "abbf8f4b865617a8f6174059da2bf002a50f529e87d21b7b21b0da43d6e72f25",
+      "path": "src/render/shaders/reflection_source_folds.hlsl",
+      "canonical_bytes": 10151,
+      "canonical_sha256": "abbf8f4b865617a8f6174059da2bf002a50f529e87d21b7b21b0da43d6e72f25"
+    },
+    {
+      "original_sha256": "832b22753bc6e17585bd4ea747ae4229d4210d3e8682210de784ee83eec362d9",
+      "path": "src/render/shaders/reflection_source_frames.hlsl",
+      "canonical_bytes": 3938,
+      "canonical_sha256": "832b22753bc6e17585bd4ea747ae4229d4210d3e8682210de784ee83eec362d9"
+    },
+    {
+      "original_sha256": "2f7c796ec5d1ddefbe03626f82de697975a03e239a8e89f905675d59dd1d4132",
+      "path": "src/render/shaders/reflection_source_guide.hlsl",
+      "canonical_bytes": 6009,
+      "canonical_sha256": "2f7c796ec5d1ddefbe03626f82de697975a03e239a8e89f905675d59dd1d4132"
+    },
+    {
+      "original_sha256": "742821b41796c204c3e2b78d9669c11ec6266d9dd16c789d5ae810c9b8f7f521",
+      "path": "src/render/shaders/reflection_source_index_settings.hlsli",
+      "canonical_bytes": 466,
+      "canonical_sha256": "742821b41796c204c3e2b78d9669c11ec6266d9dd16c789d5ae810c9b8f7f521"
+    },
+    {
+      "original_sha256": "1906b397dd8818bfa8c62c5bfb40353c705d5921dbb00280aee30b03b8730514",
+      "path": "src/render/shaders/reflection_source_index.hlsl",
+      "canonical_bytes": 6290,
+      "canonical_sha256": "1906b397dd8818bfa8c62c5bfb40353c705d5921dbb00280aee30b03b8730514"
+    },
+    {
+      "original_sha256": "e04574e100b4470e1df489c720d281f52e2a76dc8dc59f350e02f501af839bb3",
+      "path": "src/render/shaders/reflection_source_jets_stream.hlsl",
+      "canonical_bytes": 280,
+      "canonical_sha256": "e04574e100b4470e1df489c720d281f52e2a76dc8dc59f350e02f501af839bb3"
+    },
+    {
+      "original_sha256": "4af33408f340e2b36b2cb4158158cbfecddfac785d21f1c4825595dcc059a2f0",
+      "path": "src/render/shaders/reflection_source_jets.hlsl",
+      "canonical_bytes": 8506,
+      "canonical_sha256": "4af33408f340e2b36b2cb4158158cbfecddfac785d21f1c4825595dcc059a2f0"
+    },
+    {
+      "original_sha256": "2428344d7cabfe475a648f3230656274174bc9c361e27047eb521dad8b86a846",
+      "path": "src/render/shaders/reflection_source_optical_interval.hlsli",
+      "canonical_bytes": 25091,
+      "canonical_sha256": "2428344d7cabfe475a648f3230656274174bc9c361e27047eb521dad8b86a846"
+    },
+    {
+      "original_sha256": "dfbd886a39835aaaca0b81a84410920641f596a0c21c5df3c8a1e9b108b0d47d",
+      "path": "src/render/shaders/reflection_source_optical_jet.hlsli",
+      "canonical_bytes": 24260,
+      "canonical_sha256": "dfbd886a39835aaaca0b81a84410920641f596a0c21c5df3c8a1e9b108b0d47d"
+    },
+    {
+      "original_sha256": "414e704ddfd0a1e487262def24f45bf22cbf8329c6d9706376e2458bcda98915",
+      "path": "src/render/shaders/reflection_source_optical_local_root.hlsli",
+      "canonical_bytes": 4969,
+      "canonical_sha256": "414e704ddfd0a1e487262def24f45bf22cbf8329c6d9706376e2458bcda98915"
+    },
+    {
+      "original_sha256": "a60346d521c14ad3f8ab67892703b59dccf8a2b85fe2134e6ed61641327198b8",
+      "path": "src/render/shaders/reflection_source_optical_reciprocals.inc",
+      "canonical_bytes": 528,
+      "canonical_sha256": "a60346d521c14ad3f8ab67892703b59dccf8a2b85fe2134e6ed61641327198b8"
+    },
+    {
+      "original_sha256": "310ecbd249a9579016d2213432dffbdcfb50cba9772778f4aaa357c28b942770",
+      "path": "src/render/shaders/reflection_source_optical_schedule.hlsl",
+      "canonical_bytes": 1645,
+      "canonical_sha256": "310ecbd249a9579016d2213432dffbdcfb50cba9772778f4aaa357c28b942770"
+    },
+    {
+      "original_sha256": "d5ff845863c2334bbbe2b3ac7d222f9df3e122bac30c86994280f273edc3ce54",
+      "path": "src/render/shaders/reflection_source_optical_stream.hlsl",
+      "canonical_bytes": 262,
+      "canonical_sha256": "d5ff845863c2334bbbe2b3ac7d222f9df3e122bac30c86994280f273edc3ce54"
+    },
+    {
+      "original_sha256": "3350426ff5e2860044130b0c629441aa07337635d95f2e4a51478a98e453eff6",
+      "path": "src/render/shaders/reflection_source_optical_target.hlsli",
+      "canonical_bytes": 1220,
+      "canonical_sha256": "3350426ff5e2860044130b0c629441aa07337635d95f2e4a51478a98e453eff6"
+    },
+    {
+      "original_sha256": "41d24454f3f6255d4feede6a29ac2ee27db44360263eb2a3aeed26175b5c288d",
+      "path": "src/render/shaders/reflection_source_optical.hlsl",
+      "canonical_bytes": 8876,
+      "canonical_sha256": "41d24454f3f6255d4feede6a29ac2ee27db44360263eb2a3aeed26175b5c288d"
+    },
+    {
+      "original_sha256": "74c2fb50cf15e26938268c1530367e6ceb6af09a9c1596c89777a56185fa9855",
+      "path": "src/render/shaders/reflection_source_publish_diagnostics.hlsl",
+      "canonical_bytes": 151,
+      "canonical_sha256": "74c2fb50cf15e26938268c1530367e6ceb6af09a9c1596c89777a56185fa9855"
+    },
+    {
+      "original_sha256": "f83d041e40fd50e40cd723775eddb1ec7db9dd48daa1e0b3290fa3e0c2245521",
+      "path": "src/render/shaders/reflection_source_publish.hlsl",
+      "canonical_bytes": 2724,
+      "canonical_sha256": "f83d041e40fd50e40cd723775eddb1ec7db9dd48daa1e0b3290fa3e0c2245521"
+    },
+    {
+      "original_sha256": "9bf39500373ba448f20dc34962679bea0b2962c1112bb9d29b10011561b0df32",
+      "path": "src/render/shaders/reflection_source_queries.hlsl",
+      "canonical_bytes": 4103,
+      "canonical_sha256": "9bf39500373ba448f20dc34962679bea0b2962c1112bb9d29b10011561b0df32"
+    },
+    {
+      "original_sha256": "bef5fc8ebc69908534c8451867a5f25a1ddd735fd0a714b6c9f0db048c7b8f7e",
+      "path": "src/render/shaders/reflection_source_roots_clear.hlsl",
+      "canonical_bytes": 556,
+      "canonical_sha256": "bef5fc8ebc69908534c8451867a5f25a1ddd735fd0a714b6c9f0db048c7b8f7e"
+    },
+    {
+      "original_sha256": "865a22490e2ec2608836bf4a413b71497096289404df30eb8592198a3e452371",
+      "path": "src/render/shaders/reflection_source_witness.hlsl",
+      "canonical_bytes": 10933,
+      "canonical_sha256": "865a22490e2ec2608836bf4a413b71497096289404df30eb8592198a3e452371"
+    },
+    {
+      "original_sha256": "7580a1801dec3c0f65120a95ccb4f08fec87e8b64f337cbd1c6a86f1d5f3ce5e",
+      "path": "src/render/shaders/reflection_specular_path_motion.hlsli",
+      "canonical_bytes": 8442,
+      "canonical_sha256": "7580a1801dec3c0f65120a95ccb4f08fec87e8b64f337cbd1c6a86f1d5f3ce5e"
+    },
+    {
+      "original_sha256": "3aef7f397b3bd1efc1a9c47a4ca4adc85ddf9f0c7f39986bf73c559848b13d97",
+      "path": "tools/shaders/check_reflected_visibility_jets.hlsl",
+      "canonical_bytes": 4610,
+      "canonical_sha256": "3aef7f397b3bd1efc1a9c47a4ca4adc85ddf9f0c7f39986bf73c559848b13d97"
+    }
+  ],
+  "production_adopted": false,
+  "candidate": "R205 complete native reflection pipeline, directed binary32 endpoints",
+  "gpu_runtime_accepted": false
+}
