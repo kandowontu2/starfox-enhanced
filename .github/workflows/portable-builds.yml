@@ -1,4 +1,4 @@
-name: Temporary native Metal component CMake linkage (no GPU, no release)
+name: Temporary native Metal C++ driver linkage fix (no GPU, no release)
 on:
   workflow_dispatch:
 permissions:

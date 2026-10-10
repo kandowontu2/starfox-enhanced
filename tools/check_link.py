@@ -98,7 +98,7 @@ def main():
     _, expected = embedding.generate(args.sdk, rows, held['Recipes'], args.artifacts, args.out)
     sdk_root = subprocess.check_output(['xcrun', '--sdk', args.sdk, '--show-sdk-path'], text=True).strip()
     clang = Path(subprocess.check_output(['xcrun', '--sdk', args.sdk, '--find', 'clang'], text=True).strip()).resolve()
-    clangxx = Path(subprocess.check_output(['xcrun', '--sdk', args.sdk, '--find', 'clang++'], text=True).strip()).resolve()
+    clangxx = Path(subprocess.check_output(['xcrun', '--sdk', args.sdk, '--find', 'clang++'], text=True).strip()).absolute()
     cmake = Path(shutil.which('cmake')).resolve(strict=True)
     ninja = Path(shutil.which('ninja')).resolve(strict=True)
     cpu, arch, minimum = (0x1000007, 'x86_64', '11.0') if args.sdk == 'macosx' else (0x100000c, 'arm64', '15.0')

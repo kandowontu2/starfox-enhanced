@@ -18,3 +18,10 @@ iOS is linked only. The separate live driver diagnostic is not restarted.
 This does not establish integration into the game application, source adoption,
 Metal precision, numerical correctness, performance or physical compatibility.
 Nothing is published as a release.
+
+The preceding native link attempt failed on both SDKs because the harness
+resolved the clang++ executable alias to clang and therefore omitted the C++
+runtime at link time. This follow-up retains the actual clang++ invocation
+name. That is the only harness-code change; all shader sources, factory sites,
+component sources, descriptors, workgroups, strict flags and resource guards
+are unchanged. The preceding failed native terminals remain preserved.
