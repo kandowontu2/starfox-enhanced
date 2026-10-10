@@ -1,4 +1,4 @@
-# Star Fox Enhanced — native Metal canonical build integration candidate
+# Star Fox Enhanced — native Metal empty-scene support candidate
 
 This temporary source-only component adds explicit linear/sRGB reflection
 transport, seamless resident environment cubes and calibrated mirror/gold/copper
@@ -7,6 +7,19 @@ It also implements calibrated transparent water, its optional hidden-world
 colour plane and its camera-space normal/depth plane in one retained allocation.
 
 AI/Codex is used for programming, testing and documentation.
+
+Empty caster scenes now use a compile-time specialization of the entire shared
+optical kernel, without fabricating a model, building an empty acceleration
+structure or binding a nil acceleration structure. The source inventory and
+Apple SDK recipe retain both original full-scene programs and also compile/link
+both complete empty-scene variants. CPU-empty shadows produce a clear mask;
+native-empty batches require complete resident header metadata, correct device,
+16-byte aligned nonzero offsets, a minimum bounded native payload and no CPU
+records/texels. Actual native buffer bounds remain checked. Analytic water,
+lava, mirror/gold and resident cube transport retain their original equations,
+layers, primary camera depth, secondary bounds and four mirror bounces. Both
+pipeline variants participate in the existing certified cleanup lifetime.
+The empty shader binds an unused ordinary buffer argument, never a missing AS.
 
 The public CMake fragment generates both shared runtime headers directly from
 the authoritative liquid and colour equations. It declares both generators,
@@ -81,12 +94,13 @@ kind3 texture samples are decoded, styled once and encoded according to their
 submitted flags.
 
 CI compiles the entire Objective-C++ producer against its real project header
-closure and original public SDL headers, then compiles/links both full runtime
+closure and original public SDL headers, then compiles/links all four full runtime
 shadow and reflection shader libraries using the existing Metal3.0 RT language
 recipe and strict O3/FP flags. It retains the original native process/memory
-observer. All thirteen prior source assembly/contract checks are retained with
-the intentional extended ABI, and four liquid/layout checks are added. A further
-check executes the real CMake embedding/regeneration fragment.
+observer. All eighteen prior source assembly/contract checks are retained with
+the additional empty-pipeline compile-options count. Two further empty-scene
+contract/assembly checks are added. The real CMake embedding/regeneration check
+continues comparing all four complete assembled shader sources.
 No GPU is executed. This is not an abbreviated
 complete25 test suite.
 
@@ -95,8 +109,7 @@ existing packed reflection image and canonical current liquid layer prefix.
 It does not yet implement the full calibrated reflection-history/ordered
 curved-path producer contract. Layer requests without validated calibrated
 source colour explicitly refuse rather than returning an incomplete image.
-Empty caster
-scenes, GPU execution, numerical/frame cost, full game integration and physical
+GPU execution, numerical/frame cost, full game integration and physical
 device acceptance are not proven by compilation or source checks. Do not adopt
 or call the whole rendering goal complete from these artifacts.
 

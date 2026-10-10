@@ -76,7 +76,7 @@ class MetalSourceAssemblyTests(unittest.TestCase):
         self.assertIn("resident_geometry->material_bytes<record_bytes", shadow)
         self.assertIn("if(!native_rgba) {", shadow)
         self.assertIn("SDL_StarfoxMetalTrackBuffer", shadow)
-        self.assertEqual(self.implementation.count("options.fastMathEnabled=NO;"), 2)
+        self.assertEqual(self.implementation.count("options.fastMathEnabled=NO;"), 3)
         self.assertEqual(self.implementation.count("if(@available(macOS 13.0,iOS 16.0,*))"), 2)
         self.assertEqual(self.implementation.count("triangles.vertexFormat=MTLAttributeFormatFloat3;"), 2)
         self.assertEqual((self.destination / "shadow.metal").read_text(encoding="utf-8").count("uint starfox_native_material_coverage("), 1)
@@ -305,7 +305,7 @@ class MetalSourceAssemblyTests(unittest.TestCase):
             emitted=project / "runtime"
             subprocess.run([sys.executable,str(copied / "tools/check_metal_rt_shaders.py"),
                 "--generated-dir",str(generated),"--emit-only",str(emitted)],check=True,capture_output=True)
-            for name in ("shadow.metal","reflection.metal"):
+            for name in ("shadow.metal","reflection.metal","empty_shadow.metal","empty_reflection.metal"):
                 self.assertEqual((emitted / name).read_bytes(),(self.destination / name).read_bytes())
             # Change only the temporary copies. Both canonical generators must
             # participate in CMake's ordinary regeneration dependency graph.
@@ -316,6 +316,47 @@ class MetalSourceAssemblyTests(unittest.TestCase):
             subprocess.run([cmake,"--build",str(build)],check=True,capture_output=True,text=True)
             self.assertIn("// Liquid dependency refresh check.",(generated / "metal_water_shared.hpp").read_text(encoding="utf-8"))
             self.assertIn("// Colour dependency refresh check.",(generated / "metal_native_material_shared.hpp").read_text(encoding="utf-8"))
+
+    def test_empty_variants_retain_entire_normal_optical_source(self):
+        for name in ("shadow","reflection"):
+            normal=(self.destination / f"{name}.metal").read_text(encoding="utf-8")
+            empty=(self.destination / f"empty_{name}.metal").read_text(encoding="utf-8")
+            self.assertEqual(empty,"#define STARFOX_EMPTY_NATIVE_SCENE 1\n"+normal)
+        code=self.implementation
+        empty=code.split("void ensure_empty_pipeline(",1)[1].split("void ensure_output(",1)[0]
+        for check in ("stringWithUTF8String:kEmptyScenePrefix", "starfox_metal_water_shared",
+                      "starfox_metal_native_material_shared", "kIndexedShader", "reflection?kReflectionShader:kShadowShader"):
+            self.assertIn(check,empty)
+        shader=self.body("Indexed")
+        native_empty=shader.split("#ifdef STARFOX_EMPTY_NATIVE_SCENE",2)[2].split("#else",1)[0]
+        self.assertIn("return result;",native_empty)
+        self.assertNotIn("intersect(",native_empty)
+        self.assertNotIn("intersection_query",native_empty)
+        self.assertIn("#define SF_KERNEL_SCENE constant uint& scene [[buffer(0)]]",shader)
+        self.assertEqual(code.count("SF_KERNEL_SCENE,"),2)
+
+    def test_empty_header_contract_no_synthetic_triangle_or_as(self):
+        code=self.implementation
+        contract=code.split("bool empty_native_geometry(",1)[1].split("constexpr char kEmptyScenePrefix",1)[0]
+        for check in ("geometry.complete", "geometry.device==device", "geometry.buffer", "geometry.vertex_count==0",
+                      "geometry.material_offset>=16", "geometry.material_offset%16U==0", "geometry.material_bytes>=16",
+                      "geometry.material_bytes%4U==0", "RayMaterialEncoding::native_rgba",
+                      "geometry.materials->triangles.empty()", "geometry.materials->texels.empty()"):
+            self.assertIn(check,contract)
+        shadow=code.split("bool MetalHardwareRt::render_shadows",1)[1].split("GpuShadowOutput MetalHardwareRt::shadow_output",1)[0]
+        reflection=code.split("bool MetalHardwareRt::render_reflections",1)[1]
+        self.assertIn("resident_geometry->vertex_count==0 && !empty_resident",shadow)
+        self.assertIn("if(no_models)impl_->ensure_empty_pipeline(false)",shadow)
+        self.assertIn("if(no_models)impl_->ensure_empty_pipeline(true)",reflection)
+        self.assertIn("(geometry.vertex_count<3 && !no_models)",reflection)
+        self.assertIn("if(no_models && !resident)vertices=target",shadow)
+        self.assertIn("if(no_models)[encoder setBuffer:target offset:0 atIndex:0]",shadow)
+        self.assertIn("if(no_models)[encoder setBuffer:slot.palette offset:0 atIndex:0]",reflection)
+        self.assertEqual(code.count("if(!no_models)[encoder useResource:slot.acceleration"),2)
+        self.assertEqual(code.count("else [encoder setAccelerationStructure:slot.acceleration atBufferIndex:0]"),2)
+        self.assertIn("if((!no_models && (!slot.acceleration || !slot.scratch))",reflection)
+        self.assertIn("+material_bytes+cube_bytes>vertices.length",reflection)
+        self.assertIn("empty_shadow_pipeline=nil;empty_reflection_pipeline=nil",code)
 
 
 if __name__ == "__main__":

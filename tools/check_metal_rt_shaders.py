@@ -3,6 +3,7 @@
 --emit-only produces inspectable sources elsewhere; it does not validate Metal.
 """
 import argparse
+import json
 from pathlib import Path
 import re
 import subprocess
@@ -19,6 +20,10 @@ def main():
     root = Path(__file__).resolve().parents[1]
     generated = args.generated_dir or root / "include/starfox/render"
     implementation = (root / "src/render/metal_hardware_rt.mm").read_text(encoding="utf-8")
+    prefix=re.search(r'constexpr char kEmptyScenePrefix\[\]=("(?:[^"\\]|\\.)*");',implementation)
+    if not prefix:
+        raise RuntimeError("Missing exact runtime empty-scene specialization prefix")
+    empty_prefix=json.loads(prefix[1])
     template = (root / "src/render/shaders/metal_water_shared.hpp.in").read_text(encoding="utf-8")
     template = template.replace("@STARFOX_LAVA_SURFACE_SOURCE@",
                                 (root / "include/starfox/render/lava_surface.inc").read_text(encoding="utf-8"))
@@ -53,6 +58,8 @@ def main():
         if not match:
             raise RuntimeError(f"Missing runtime {name} shader")
         sources[name] = (shared[1] if name == "Reflection" else "") + native[1] + indexed[1] + match[1]
+    for name, source in tuple(sources.items()):
+        sources[f"Empty_{name}"]=empty_prefix+source
     with tempfile.TemporaryDirectory(prefix="starfox-metal-check-") as temporary:
         destination = args.emit_only or Path(temporary)
         destination.mkdir(parents=True, exist_ok=True)

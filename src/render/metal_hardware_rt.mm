@@ -74,6 +74,17 @@ Float4 primary_parameters(const std::optional<PrimaryRayRange>& range) {
     const auto depth=range.value_or(PrimaryRayRange{});
     return {float(depth.near_depth),float(depth.far_depth),range?1.f:0.f,0};
 }
+bool empty_native_geometry(const render::GpuScene::RayGeometryOutput& geometry,void* device) {
+    // A zero-triangle native batch still owns a real, bounded metadata header.
+    // Never fabricate a triangle or reinterpret incomplete/indexed batches.
+    return geometry.complete && geometry.device==device && geometry.buffer
+        && geometry.vertex_count==0 && geometry.material_offset>=16
+        && geometry.material_offset%16U==0 && geometry.material_bytes>=16
+        && geometry.material_bytes%4U==0 && geometry.materials
+        && geometry.materials->encoding==RayMaterialEncoding::native_rgba
+        && geometry.materials->triangles.empty() && geometry.materials->texels.empty();
+}
+constexpr char kEmptyScenePrefix[]="#define STARFOX_EMPTY_NATIVE_SCENE 1\n";
 
 // Shared by both native kernels and the exact-source Apple compiler/runtime
 // checks. Reject candidates in-place: restarting past a transparent hit with
@@ -83,6 +94,13 @@ constexpr char kIndexedShader[] = R"METAL(
 #include <metal_raytracing>
 using namespace metal;
 using namespace metal::raytracing;
+#ifdef STARFOX_EMPTY_NATIVE_SCENE
+using StarfoxScene=uint;
+#define SF_KERNEL_SCENE constant uint& scene [[buffer(0)]]
+#else
+using StarfoxScene=primitive_acceleration_structure;
+#define SF_KERNEL_SCENE primitive_acceleration_structure scene [[buffer(0)]]
+#endif
 struct RayMaterial {
     float uv[6];
     uint textured,dither,even,odd,colour_base,face;
@@ -118,10 +136,15 @@ struct VisibleHit {
     uint primitive_id;
     float2 triangle_barycentric_coord;
 };
-VisibleHit visible_hit(ray cast,primitive_acceleration_structure scene,uint2 pixel,
+VisibleHit visible_hit(ray cast,StarfoxScene scene,uint2 pixel,
     device const RayMaterial* materials,device const uchar* texels,uint texel_count,
     bool indexed,bool any_hit,uint4 native_coverage=uint4(0u)) {
     VisibleHit result={intersection_type::none,65536.0f,0u,float2(0.0f)};
+#ifdef STARFOX_EMPTY_NATIVE_SCENE
+    // Compile-time empty-scene specialization: no acceleration structure is
+    // declared or dereferenced, even by secondary water/caustic/mirror rays.
+    return result;
+#else
     if(!indexed) {
         // Geometry-only/solid shadow casters need neither material uploads
         // nor per-candidate texture tests.
@@ -162,6 +185,7 @@ VisibleHit visible_hit(ray cast,primitive_acceleration_structure scene,uint2 pix
         result.triangle_barycentric_coord=query.get_committed_triangle_barycentric_coord();
     }
     return result;
+#endif
 }
 )METAL";
 
@@ -180,7 +204,7 @@ struct Parameters {
     float4 primary_range;
 };
 kernel void starfox_hardware_shadow(
-    primitive_acceleration_structure scene [[buffer(0)]],
+    SF_KERNEL_SCENE,
     device uint* output [[buffer(1)]],
     constant Parameters& p [[buffer(2)]],
     device const RayMaterial* materials [[buffer(3)]],
@@ -431,10 +455,10 @@ struct NativeWaterSample {
     float fresnel,bias;
 };
 NativeWaterSample native_water_sample(float3 origin,float3 direction,float distance,uint2 pixel,
-    primitive_acceleration_structure scene,constant Parameters& p,device const float4* vertices,
+    StarfoxScene scene,constant Parameters& p,device const float4* vertices,
     device const RayMaterial* materials,device const uint* palette,device const uchar* texels);
 uint trace_mirrors(float3 origin,float3 direction,uint2 pixel,float minimum,bool escaping_source_ground,
-    primitive_acceleration_structure scene,constant Parameters& p,device const float4* vertices,
+    StarfoxScene scene,constant Parameters& p,device const float4* vertices,
     device const RayMaterial* materials,device const uint* palette,device const uchar* texels,
     device const uint* panorama,device const uint* enhanced) {
     uint flags=uint(p.water_settings.w);
@@ -503,7 +527,7 @@ uint trace_mirrors(float3 origin,float3 direction,uint2 pixel,float minimum,bool
     return reflected_accumulated(reflected_backdrop(direction,p,panorama,palette,enhanced),throughput,accumulated,p);
 }
 uint shade_native_model(uint2 pixel,float3 incoming,float3 point,float3 normal,float distance,
-    uint primitive,float2 bary,primitive_acceleration_structure scene,constant Parameters& p,
+    uint primitive,float2 bary,StarfoxScene scene,constant Parameters& p,
     device const float4* vertices,device const RayMaterial* materials,device const uint* palette,
     device const uchar* texels,device const uint* panorama,device const uint* enhanced) {
     float bias=max(.01f,distance*1e-5f);
@@ -531,14 +555,14 @@ uint shade_native_model(uint2 pixel,float3 incoming,float3 point,float3 normal,f
     return reflection_pack_linear(radiance,255u,p);
 }
 bool caustic_blocked(float3 origin,float3 direction,float maximum,float minimum,uint2 pixel,
-    primitive_acceleration_structure scene,constant Parameters& p,
+    StarfoxScene scene,constant Parameters& p,
     device const RayMaterial* materials,device const uchar* texels) {
     auto obstacle=visible_hit(ray(origin,direction,minimum,maximum),scene,pixel,
         materials,texels,p.texel_count,true,true,p.coverage);
     return obstacle.type==intersection_type::triangle;
 }
 NativeWaterSample native_water_sample(float3 origin,float3 direction,float distance,uint2 pixel,
-    primitive_acceleration_structure scene,constant Parameters& p,device const float4* vertices,
+    StarfoxScene scene,constant Parameters& p,device const float4* vertices,
     device const RayMaterial* materials,device const uint* palette,device const uchar* texels) {
     float3x3 rotation=transpose(float3x3(p.water_row0.xyz,p.water_row1.xyz,p.water_row2.xyz));
     float3x3 forward=transpose(float3x3(cross(p.water_row1.xyz,p.water_row2.xyz),
@@ -605,7 +629,7 @@ NativeWaterSample native_water_sample(float3 origin,float3 direction,float dista
     return result;
 }
 uint shade_native_water(uint2 pixel,float3 direction,float distance,thread float4& surface,
-    primitive_acceleration_structure scene,constant Parameters& p,device const float4* vertices,
+    StarfoxScene scene,constant Parameters& p,device const float4* vertices,
     device const RayMaterial* materials,device const uint* palette,device const uchar* texels,
     device const uint* panorama,device const uint* enhanced) {
     NativeWaterSample water=native_water_sample(float3(0.0f),direction,distance,pixel,
@@ -625,7 +649,7 @@ void store_liquid_surface(uint id,float4 surface,constant Parameters& p,device u
     output[at]=words.x;output[at+1u]=words.y;output[at+2u]=words.z;output[at+3u]=words.w;
 }
 uint shade_native_metal(uint2 pixel,float3 direction,float distance,float3 hit,float3 normal,uint material,
-    primitive_acceleration_structure scene,constant Parameters& p,device const float4* vertices,
+    StarfoxScene scene,constant Parameters& p,device const float4* vertices,
     device const RayMaterial* materials,device const uint* palette,device const uchar* texels,
     device const uint* panorama,device const uint* enhanced) {
     float bias=max(.05f,distance*1e-5f);
@@ -653,7 +677,7 @@ float hash(uint n) {
     return float(n&65535u)/65535.0f;
 }
 kernel void starfox_hardware_reflection(
-    primitive_acceleration_structure scene [[buffer(0)]],
+    SF_KERNEL_SCENE,
     device uint* output [[buffer(1)]],
     constant Parameters& p [[buffer(2)]],
     device const float4* vertices [[buffer(3)]],
@@ -907,6 +931,8 @@ struct MetalHardwareRt::Impl {
     id<MTLDevice> metal;
     id<MTLComputePipelineState> shadow_pipeline;
     id<MTLComputePipelineState> reflection_pipeline;
+    id<MTLComputePipelineState> empty_shadow_pipeline;
+    id<MTLComputePipelineState> empty_reflection_pipeline;
     SDL_GPUBuffer* output{};
     std::uint32_t output_capacity{};
     SDL_GPUBuffer* reflection_buffer{};
@@ -991,6 +1017,7 @@ struct MetalHardwareRt::Impl {
         reflection_backdrop.release_device();
         output=reflection_buffer=nullptr;output_capacity=reflection_capacity_bytes=0;
         shadow_pipeline=nil;reflection_pipeline=nil;metal=nil;
+        empty_shadow_pipeline=nil;empty_reflection_pipeline=nil;
         serial=0;device=nullptr;
         return true;
     }
@@ -1037,6 +1064,24 @@ struct MetalHardwareRt::Impl {
     void wait_slot(InFlight& slot) {
         await(slot);
         clear_completed(slot);
+    }
+    void ensure_empty_pipeline(bool reflection) {
+        auto& pipeline=reflection?empty_reflection_pipeline:empty_shadow_pipeline;
+        if(pipeline)return;
+        NSError* error=nil;
+        NSString* source=[NSString stringWithUTF8String:kEmptyScenePrefix];
+        if(reflection)source=[source stringByAppendingString:[NSString stringWithUTF8String:starfox_metal_water_shared]];
+        source=[source stringByAppendingString:[NSString stringWithUTF8String:starfox_metal_native_material_shared]];
+        source=[source stringByAppendingString:[NSString stringWithUTF8String:kIndexedShader]];
+        source=[source stringByAppendingString:[NSString stringWithUTF8String:reflection?kReflectionShader:kShadowShader]];
+        MTLCompileOptions* options=[MTLCompileOptions new];
+        if(@available(iOS 18.0, macOS 15.0, *)) options.mathMode=MTLMathModeSafe;
+        else options.fastMathEnabled=NO;
+        id<MTLLibrary> library=[metal newLibraryWithSource:source options:options error:&error];
+        if(!library)throw std::runtime_error(metal_error(error));
+        id<MTLFunction> function=[library newFunctionWithName:reflection?@"starfox_hardware_reflection":@"starfox_hardware_shadow"];
+        pipeline=[metal newComputePipelineStateWithFunction:function error:&error];
+        if(!pipeline)throw std::runtime_error(metal_error(error));
     }
     void ensure_output(std::uint32_t pixels) {
         if(output && output_capacity>=pixels) return;
@@ -1087,12 +1132,19 @@ bool MetalHardwareRt::render_shadows(void* raw,const Scene& scene,
         const auto pixels=std::uint64_t(camera.width)*camera.height;
         const auto length=std::sqrt(dot(light,light));
         if(!pixels || pixels>std::numeric_limits<std::uint32_t>::max()/4U || !std::isfinite(length)
+            || !std::isfinite(camera.focal_length) || !std::isfinite(camera.vertical_focal_length())
+            || !std::isfinite(camera.center_x) || !std::isfinite(camera.center_y)
             || length<1.e-10 || camera.focal_length<=0
             || camera.vertical_focal_length()<=0) return false;
+        const bool empty_resident=resident_geometry && empty_native_geometry(*resident_geometry,raw);
+        if(resident_geometry && resident_geometry->vertex_count==0 && !empty_resident) {
+            impl_->status="Invalid empty native Metal shadow metadata";return false;
+        }
         const bool resident=resident_geometry && resident_geometry->complete
             && resident_geometry->device==raw && resident_geometry->buffer
-            && resident_geometry->vertex_count>=3
+            && (resident_geometry->vertex_count>=3 || empty_resident)
             && resident_geometry->vertex_count%3==0;
+        const bool no_models=resident?resident_geometry->vertex_count==0:scene.triangle_count()==0;
         const auto* coverage=resident?resident_geometry->materials:nullptr;
         if(coverage && coverage->encoding!=RayMaterialEncoding::indexed
             && coverage->encoding!=RayMaterialEncoding::native_rgba) {
@@ -1114,6 +1166,7 @@ bool MetalHardwareRt::render_shadows(void* raw,const Scene& scene,
             impl_->status="Invalid indexed Metal shadow material topology/atlas";return false;
         }
         impl_->initialize(device);
+        if(no_models)impl_->ensure_empty_pipeline(false);
         auto& slot=impl_->inflight[impl_->serial++%impl_->inflight.size()];
         impl_->wait_slot(slot);
         id<MTLBuffer> vertices=nil;
@@ -1132,12 +1185,13 @@ bool MetalHardwareRt::render_shadows(void* raw,const Scene& scene,
                 packed.push_back(as_float4(t.c));
             }
             vertex_count=std::uint32_t(packed.size());
-            if(!vertex_count) return false;
-            slot.cpu_vertices=[impl_->metal newBufferWithBytes:packed.data()
-                length:packed.size()*sizeof(Float4) options:MTLResourceStorageModeShared];
-            vertices=slot.cpu_vertices;
+            if(vertex_count) {
+                slot.cpu_vertices=[impl_->metal newBufferWithBytes:packed.data()
+                    length:packed.size()*sizeof(Float4) options:MTLResourceStorageModeShared];
+                vertices=slot.cpu_vertices;
+            }
         }
-        if(!vertices || std::uint64_t(vertex_count)*sizeof(Float4)>vertices.length) return false;
+        if((resident || !no_models) && (!vertices || std::uint64_t(vertex_count)*sizeof(Float4)>vertices.length)) return false;
         id<MTLBuffer> materials=nil;
         NSUInteger material_offset=0;
         std::uint32_t native_material_words=0;
@@ -1184,6 +1238,8 @@ bool MetalHardwareRt::render_shadows(void* raw,const Scene& scene,
             auto target=(__bridge id<MTLBuffer>)SDL_StarfoxMetalBuffer(impl_->output);
             auto native=(__bridge id<MTLCommandBuffer>)SDL_StarfoxMetalCommandBuffer(command);
             if(!target || !native) throw std::runtime_error("Missing native Metal command resource");
+            if(no_models && !resident)vertices=target; // Unused bindings; no synthetic vertices or caster.
+            if(!no_models) {
             auto* triangles=[MTLAccelerationStructureTriangleGeometryDescriptor descriptor];
             triangles.vertexBuffer=vertices;
             triangles.vertexStride=sizeof(Float4);
@@ -1205,6 +1261,7 @@ bool MetalHardwareRt::render_shadows(void* raw,const Scene& scene,
             [builder buildAccelerationStructure:slot.acceleration descriptor:descriptor
                 scratchBuffer:slot.scratch scratchBufferOffset:0];
             [builder endEncoding];
+            }
             Parameters p{};
             p.primary_range=primary_parameters(primary_range);
             p.ground_only=ground_only?1.0F:0.0F;
@@ -1221,8 +1278,10 @@ bool MetalHardwareRt::render_shadows(void* raw,const Scene& scene,
             if(native_rgba) p.coverage={vertex_count/3U,resident_geometry->material_bytes,2,native_material_words};
             else if(indexed) p.coverage={vertex_count/3U,std::uint32_t(coverage->texels.size()),1,0};
             auto encoder=[native computeCommandEncoder];
-            [encoder setComputePipelineState:impl_->shadow_pipeline];
-            [encoder setAccelerationStructure:slot.acceleration atBufferIndex:0];
+            id<MTLComputePipelineState> pipeline=no_models?impl_->empty_shadow_pipeline:impl_->shadow_pipeline;
+            [encoder setComputePipelineState:pipeline];
+            if(no_models)[encoder setBuffer:target offset:0 atIndex:0];
+            else [encoder setAccelerationStructure:slot.acceleration atBufferIndex:0];
             [encoder setBuffer:target offset:0 atIndex:1];
             [encoder setBytes:&p length:sizeof(p) atIndex:2];
             // No auxiliary allocation/upload for opaque geometry. Bind the
@@ -1231,10 +1290,10 @@ bool MetalHardwareRt::render_shadows(void* raw,const Scene& scene,
             // Native RGBA records include their atlas in the tracked resident
             // allocation. The legacy texel argument is unused for that mode.
             [encoder setBuffer:indexed && !native_rgba?slot.texels:vertices offset:0 atIndex:4];
-            [encoder useResource:slot.acceleration usage:MTLResourceUsageRead];
+            if(!no_models)[encoder useResource:slot.acceleration usage:MTLResourceUsageRead];
             const auto grid=MTLSizeMake(NSUInteger(pixels),1,1);
             const auto group=MTLSizeMake(std::min<NSUInteger>(64,
-                impl_->shadow_pipeline.maxTotalThreadsPerThreadgroup),1,1);
+                pipeline.maxTotalThreadsPerThreadgroup),1,1);
             [encoder dispatchThreads:grid threadsPerThreadgroup:group];
             [encoder endEncoding];
             submitted=true;
@@ -1244,7 +1303,7 @@ bool MetalHardwareRt::render_shadows(void* raw,const Scene& scene,
             throw;
         }
         impl_->shadow={device,impl_->output,camera.width,camera.height,0};
-        impl_->status=resident
+        impl_->status=no_models?"Metal native clear shadow mask from empty caster scene":resident
             ?"Metal hardware rays from resident GPU casters"
             :"Metal hardware rays from CPU fallback casters";
         return true;
@@ -1275,6 +1334,7 @@ bool MetalHardwareRt::render_reflections(void* raw,
             return false;
         }
         const bool native_rgba=geometry.materials && geometry.materials->encoding==RayMaterialEncoding::native_rgba;
+        const bool no_models=empty_native_geometry(geometry,raw);
         const auto record_bytes=std::uint64_t(geometry.vertex_count/3U)*sizeof(render::RayMaterial);
         if(!quality || quality>3 || !pixels || pixels>std::numeric_limits<std::uint32_t>::max()/4U
             || !std::isfinite(camera.focal_length) || !std::isfinite(camera.vertical_focal_length())
@@ -1282,7 +1342,7 @@ bool MetalHardwareRt::render_reflections(void* raw,
             || camera.focal_length<=0 || camera.vertical_focal_length()<=0
             || !std::isfinite(roughness) || roughness<0 || roughness>1 || metallic>3 || colour_encoding>2
             || !geometry.complete || geometry.device!=raw || !geometry.buffer
-            || geometry.vertex_count<3 || geometry.vertex_count%3
+            || (geometry.vertex_count<3 && !no_models) || geometry.vertex_count%3
             || !geometry.materials
             || (!native_rgba && !geometry.material_offset && geometry.materials->triangles.size()!=geometry.vertex_count/3U)
             || geometry.material_offset%16U
@@ -1360,7 +1420,8 @@ bool MetalHardwareRt::render_reflections(void* raw,
             }
         }
         impl_->initialize(device);
-        impl_->ensure_reflection_pipeline();
+        if(no_models)impl_->ensure_empty_pipeline(true);
+        else impl_->ensure_reflection_pipeline();
         auto& slot=impl_->inflight[impl_->serial++%impl_->inflight.size()];
         impl_->wait_slot(slot);
         const auto output_bytes=layers?layers->storage_bytes:std::uint32_t(pixels*4U);
@@ -1403,6 +1464,8 @@ bool MetalHardwareRt::render_reflections(void* raw,
                     throw std::runtime_error("Native Metal reflection binding word count overflow");
                 native_material_words=std::uint32_t(words);
             }
+            MTLPrimitiveAccelerationStructureDescriptor* descriptor=nil;
+            if(!no_models) {
             auto* triangles=[MTLAccelerationStructureTriangleGeometryDescriptor descriptor];
             triangles.vertexBuffer=vertices;
             triangles.vertexStride=sizeof(Float4);
@@ -1410,12 +1473,13 @@ bool MetalHardwareRt::render_reflections(void* raw,
                 triangles.vertexFormat=MTLAttributeFormatFloat3;
             triangles.triangleCount=geometry.vertex_count/3U;
             triangles.opaque=NO;
-            auto* descriptor=[MTLPrimitiveAccelerationStructureDescriptor descriptor];
+            descriptor=[MTLPrimitiveAccelerationStructureDescriptor descriptor];
             descriptor.geometryDescriptors=@[triangles];
             const auto sizes=[impl_->metal accelerationStructureSizesWithDescriptor:descriptor];
             slot.acceleration=[impl_->metal newAccelerationStructureWithSize:sizes.accelerationStructureSize];
             slot.scratch=[impl_->metal newBufferWithLength:sizes.buildScratchBufferSize
                 options:MTLResourceStorageModePrivate];
+            }
             slot.palette=[impl_->metal newBufferWithBytes:palette.data()
                 length:palette.size_bytes() options:MTLResourceStorageModeShared];
             const std::uint8_t blank=0;
@@ -1434,13 +1498,15 @@ bool MetalHardwareRt::render_reflections(void* raw,
                     options:MTLResourceStorageModeShared];
                 materials=slot.cpu_materials;
             }
-            if(!slot.acceleration || !slot.scratch || !slot.palette || (!native_rgba && !slot.texels)
+            if((!no_models && (!slot.acceleration || !slot.scratch)) || !slot.palette || (!native_rgba && !slot.texels)
                 || !materials)
                 throw std::runtime_error("Metal reflection resource allocation failed");
+            if(!no_models) {
             auto builder=[native accelerationStructureCommandEncoder];
             [builder buildAccelerationStructure:slot.acceleration descriptor:descriptor
                 scratchBuffer:slot.scratch scratchBufferOffset:0];
             [builder endEncoding];
+            }
             ReflectionParameters p{};
             p.primary_range=primary_parameters(primary_range);
             p.optical={colour_encoding,specular_models?1U:0U,0,native_rgba && colour_encoding?1U:0U};
@@ -1500,8 +1566,10 @@ bool MetalHardwareRt::render_reflections(void* raw,
                     water->auxiliary_layers?3U:2U,layers->storage_bytes/4};
             }
             auto encoder=[native computeCommandEncoder];
-            [encoder setComputePipelineState:impl_->reflection_pipeline];
-            [encoder setAccelerationStructure:slot.acceleration atBufferIndex:0];
+            id<MTLComputePipelineState> pipeline=no_models?impl_->empty_reflection_pipeline:impl_->reflection_pipeline;
+            [encoder setComputePipelineState:pipeline];
+            if(no_models)[encoder setBuffer:slot.palette offset:0 atIndex:0];
+            else [encoder setAccelerationStructure:slot.acceleration atBufferIndex:0];
             [encoder setBuffer:target offset:0 atIndex:1];
             [encoder setBytes:&p length:sizeof(p) atIndex:2];
             [encoder setBuffer:vertices offset:0 atIndex:3];
@@ -1515,10 +1583,10 @@ bool MetalHardwareRt::render_reflections(void* raw,
             [encoder setBuffer:panorama offset:resident_environment?geometry.material_offset:0 atIndex:7];
             id<MTLBuffer> enhanced=enhanced_image?slot.enhanced_backdrop:slot.palette;
             [encoder setBuffer:enhanced offset:0 atIndex:8];
-            [encoder useResource:slot.acceleration usage:MTLResourceUsageRead];
+            if(!no_models)[encoder useResource:slot.acceleration usage:MTLResourceUsageRead];
             const auto grid=MTLSizeMake(NSUInteger(pixels),1,1);
             const auto group=MTLSizeMake(std::min<NSUInteger>(64,
-                impl_->reflection_pipeline.maxTotalThreadsPerThreadgroup),1,1);
+                pipeline.maxTotalThreadsPerThreadgroup),1,1);
             [encoder dispatchThreads:grid threadsPerThreadgroup:group];
             [encoder endEncoding];
             submitted=true;

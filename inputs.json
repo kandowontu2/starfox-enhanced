@@ -1,5 +1,5 @@
 {
-  "Scope": "additional-native-metal-canonical-build-source-integration",
+  "Scope": "additional-native-metal-empty-caster-and-analytic-scenes",
   "Sources": [
     {
       "File": ".gitattributes",
@@ -773,13 +773,13 @@
     },
     {
       "File": "README.md",
-      "Sha256": "5fe896b20c45d6de5e051dd1e8fb6a3d064f0efa238f71d699b1eb0b60d1e9a6",
-      "Bytes": 6819
+      "Sha256": "7600adae67dc58925d9cb7bd101c3d4194d2c2552ddfffa855b7cfaef4b6b657",
+      "Bytes": 7801
     },
     {
       "File": "src/render/metal_hardware_rt.mm",
-      "Sha256": "9b4814b198ea427c49bb5a5200bf7f8dd5ed641866ffdd96abc3490594d8d5f9",
-      "Bytes": 89225
+      "Sha256": "c75a8629791ad0225752cdfafa281880584a7392c5a46d355d2e0f8021963255",
+      "Bytes": 93365
     },
     {
       "File": "src/render/shaders/calibrated_colour.hlsli",
@@ -808,18 +808,18 @@
     },
     {
       "File": "tests/test_metal_shader_sources.py",
-      "Sha256": "c244d29c0d35a2eedcf26e199ea6242005f1ce00309e385a1d1ed133222f4eb0",
-      "Bytes": 23063
+      "Sha256": "bae1818f138b218cdaa76a244971fd34c0c79e1580a602dfc61670d5eab968c8",
+      "Bytes": 26278
     },
     {
       "File": "tools/check_metal_rt_shaders.py",
-      "Sha256": "201ea3cf0985be5f71aaee6adc20b2ca60c60c7f96b9e25cf8b194821770adf9",
-      "Bytes": 4151
+      "Sha256": "f0a6382cc62b731e4b2fc9563da69da8b30acbad956185bac793e13c7fb37cb6",
+      "Bytes": 4506
     },
     {
       "File": "tools/check_producer.py",
-      "Sha256": "aea7220c8163d343d0f538322e51cfd22d824861d0d0b68208560d170cbce20f",
-      "Bytes": 12273
+      "Sha256": "933986f9836191e7254d44a03180edcfcb6ffe608bc4b8f79281ebb562ff6233",
+      "Bytes": 12402
     },
     {
       "File": "tools/compile_metal.py",

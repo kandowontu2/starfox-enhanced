@@ -17,7 +17,7 @@ from metal_material_colour import material_colour_source
 ROOT = Path(__file__).resolve().parents[1]
 OBSERVER_SHA = "cc770ea2068978eb0eeb381dc3bbf8983b838c2563f2605678272146f632fbb4"
 DECODER_SHA = "69d61c1055f123f1b750eaa95bc3063994f2dbe754316430b41533c8cbe83a86"
-SCOPE = "additional-native-metal-canonical-build-source-integration"
+SCOPE = "additional-native-metal-empty-caster-and-analytic-scenes"
 REQUIRED = {
     ".gitattributes", ".github/workflows/portable-builds.yml", "README.md", "LICENSE",
     "headers/SDL3/LICENSE.txt", "src/render/metal_hardware_rt.mm",
@@ -167,7 +167,8 @@ def main():
              "-I", str(ROOT / "include"), "-I", str(ROOT / "headers"), "-I", str(generated),
              "-c", str(ROOT / "src/render/metal_hardware_rt.mm"), "-o", str(obj)], args.out, manifest, library, environment))
         receipt["producer_object_sha256"] = observer.digest(obj)
-        for name, entry in (("shadow", "starfox_hardware_shadow"), ("reflection", "starfox_hardware_reflection")):
+        for name, entry in (("shadow", "starfox_hardware_shadow"), ("reflection", "starfox_hardware_reflection"),
+                            ("empty_shadow", "starfox_hardware_shadow"), ("empty_reflection", "starfox_hardware_reflection")):
             air, binary = args.out / f"{name}.air", args.out / f"{name}.metallib"
             operations.append(observer.operate(f"{name}-compile", tools["metal"],
                 [*shader_flags, "-target", shader_target, "-isysroot", sdk_root,
@@ -180,13 +181,13 @@ def main():
             accepted.append({"name": name, "entry": entry, "air_sha256": observer.digest(air),
                              "metallib_sha256": observer.digest(binary), "bytes": binary.stat().st_size})
         qualify(manifest)
-        receipt["success"] = len(operations) == 5 and len(accepted) == 2
+        receipt["success"] = len(operations) == 9 and len(accepted) == 4
     except Exception as error:
         receipt["error"] = str(error)
         raise
     finally:
         (args.out / "producer-receipt.json").write_text(json.dumps(receipt, indent=2), encoding="utf-8")
-    print(f"Actual {args.sdk}: producer ObjC++ and both complete runtime shader libraries built; no GPU/game/performance acceptance")
+    print(f"Actual {args.sdk}: whole producer ObjC++ and all four full/empty runtime libraries built; no GPU/game/performance acceptance")
 
 
 if __name__ == "__main__":
