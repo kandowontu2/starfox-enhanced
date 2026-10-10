@@ -1,4 +1,4 @@
-name: Temporary actual Metal reflection factory compilation (no GPU, no release)
+name: Temporary native Metal component CMake linkage (no GPU, no release)
 on:
   workflow_dispatch:
 permissions:
@@ -6,7 +6,7 @@ permissions:
   actions: read
 jobs:
   metal-embedding:
-    name: Complete25 actual factories / ${{ matrix.sdk }}
+    name: Complete25 real SDL component link / ${{ matrix.sdk }}
     runs-on: macos-15-intel
     strategy:
       fail-fast: false
@@ -25,21 +25,24 @@ jobs:
           run-id: 38054247676
           pattern: metal-${{ matrix.sdk }}-*
           path: ${{ runner.temp }}/sdk-artifacts
-      - name: Compile actual complete factory graph and SDK program provider
+      - name: Build and link actual complete factory graph against real SDL
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 tools/check_wiring.py --sdk '${{ matrix.sdk }}' --artifacts '${{ runner.temp }}/sdk-artifacts' --out '${{ runner.temp }}/embedding-result'
+        run: python3 tools/check_link.py --sdk '${{ matrix.sdk }}' --artifacts '${{ runner.temp }}/sdk-artifacts' --out '${{ runner.temp }}/embedding-result'
       - name: Preserve diagnostics and nonprivate native shader artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: wiring-${{ matrix.sdk }}
+          name: linked-${{ matrix.sdk }}
           path: |
             ${{ runner.temp }}/embedding-result/*.o
             ${{ runner.temp }}/embedding-result/*.terminal.json
             ${{ runner.temp }}/embedding-result/*.prelaunch.json
             ${{ runner.temp }}/embedding-result/*.stdout.log
             ${{ runner.temp }}/embedding-result/*.stderr.log
-            ${{ runner.temp }}/embedding-result/wiring-receipt.json
+            ${{ runner.temp }}/embedding-result/link-receipt.json
+            ${{ runner.temp }}/embedding-result/compile_commands.json
+            ${{ runner.temp }}/embedding-result/native-link-consumer
+            ${{ runner.temp }}/embedding-result/libstarfox_metal_reflection_history.a
           if-no-files-found: warn
           retention-days: 7

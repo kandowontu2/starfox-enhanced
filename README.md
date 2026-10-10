@@ -1,4 +1,4 @@
-# Temporary complete Metal reflection factory compilation
+# Temporary complete Metal reflection component native linkage
 
 Source-only CI branch for Star Fox Enhanced. No ROMs, private game assets,
 credentials or release publication are included.
@@ -9,9 +9,12 @@ uniforms, samplers, workgroups, shader calculations and dispatches stay intact.
 The native DXIL/SPIRV path is preserved. The full source transformation must
 invert exactly to the pinned original factory implementation.
 
-CI compiles the actual factory module and its complete program provider for
-macOS 11 and arm64 iOS 15, using the already qualified complete shader family
-and the actual SDL interface. This does not launch a GPU or restart the
-separate live driver diagnostic. Compile results do not establish application
-linking/adoption, Metal precision, numerical correctness, performance or
-physical hardware compatibility. Nothing is published as a release.
+CI now builds a reusable CMake static component and links a native consumer
+against the real pinned SDL implementation for macOS 11 and arm64 iOS 15.
+The original entire factory module, provider and all twenty-five unchanged
+SDK libraries are linked. macOS checks the real component's idle lifecycle
+and complete payload selection/refusal suite, without creating any GPU device.
+iOS is linked only. The separate live driver diagnostic is not restarted.
+This does not establish integration into the game application, source adoption,
+Metal precision, numerical correctness, performance or physical compatibility.
+Nothing is published as a release.
