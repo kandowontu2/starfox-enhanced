@@ -13,8 +13,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sdk", choices=("macosx", "iphoneos"), default="iphoneos")
     parser.add_argument("--emit-only", type=Path)
+    parser.add_argument("--generated-dir", type=Path,
+                        help="Build-generated canonical Metal helpers; default is the held source inventory")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
+    generated = args.generated_dir or root / "include/starfox/render"
     implementation = (root / "src/render/metal_hardware_rt.mm").read_text(encoding="utf-8")
     template = (root / "src/render/shaders/metal_water_shared.hpp.in").read_text(encoding="utf-8")
     template = template.replace("@STARFOX_LAVA_SURFACE_SOURCE@",
@@ -23,7 +26,7 @@ def main():
         template = template.replace(f"@STARFOX_WATER_{token}_SOURCE@",
                                     (root / f"include/starfox/render/{name}.inc").read_text(encoding="utf-8"))
     template = template.replace("@STARFOX_LIQUID_OPTICS_SOURCE@",
-        (root / "include/starfox/render/metal_liquid_optics.inc").read_text(encoding="utf-8"))
+        (generated / "metal_liquid_optics.inc").read_text(encoding="utf-8"))
     if re.search(r"@STARFOX_[A-Z_]+@", template):
         raise RuntimeError("Unresolved shared Metal shader source token")
     shared = re.search(r'R"SF_WATER\((.*?)\)SF_WATER"', template, re.S)
@@ -33,7 +36,7 @@ def main():
     native_template = native_template.replace("@STARFOX_METAL_NATIVE_COVERAGE_SOURCE@",
         (root / "include/starfox/render/metal_native_material_coverage.inc").read_text(encoding="utf-8"))
     native_template = native_template.replace("@STARFOX_METAL_MATERIAL_COLOUR_SOURCE@",
-        (root / "include/starfox/render/metal_material_colour.inc").read_text(encoding="utf-8"))
+        (generated / "metal_material_colour.inc").read_text(encoding="utf-8"))
     native_template = native_template.replace("@STARFOX_METAL_NATIVE_COLOUR_SOURCE@",
         (root / "include/starfox/render/metal_native_material_colour.inc").read_text(encoding="utf-8"))
     if re.search(r"@STARFOX_[A-Z_]+@", native_template):

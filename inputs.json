@@ -1,5 +1,5 @@
 {
-  "Scope": "additional-native-metal-calibrated-liquid-world-and-surface-layers",
+  "Scope": "additional-native-metal-canonical-build-source-integration",
   "Sources": [
     {
       "File": ".gitattributes",
@@ -13,8 +13,8 @@
     },
     {
       "File": "cmake/NativeMetalMaterialSource.cmake",
-      "Sha256": "dddf9f7e1e612bbddb7ef34c348f44eeec3aac92677cca3a1b7c02713f3b75b1",
-      "Bytes": 1750
+      "Sha256": "e4518ca212582fb42dd320d76fedb4b8e7955eed5b800eca3e8bd7a29c774a88",
+      "Bytes": 3354
     },
     {
       "File": "headers/SDL3/LICENSE.txt",
@@ -773,13 +773,18 @@
     },
     {
       "File": "README.md",
-      "Sha256": "2a296093d5fc05064d18398d78f7a0392db4d852640f3f2e682ff4aec0dcc465",
-      "Bytes": 5991
+      "Sha256": "b13e419713f0bcb63306f992c492926607be7dd230b2f57c37f011668bb40973",
+      "Bytes": 6611
     },
     {
       "File": "src/render/metal_hardware_rt.mm",
       "Sha256": "9b4814b198ea427c49bb5a5200bf7f8dd5ed641866ffdd96abc3490594d8d5f9",
       "Bytes": 89225
+    },
+    {
+      "File": "src/render/shaders/calibrated_colour.hlsli",
+      "Sha256": "46b0f06ee630c52efb5a9b0c1b003a2d5f19f5d8a070a94f12b6a2ae59383ac2",
+      "Bytes": 4536
     },
     {
       "File": "src/render/shaders/liquid_optics.hlsli",
@@ -797,19 +802,24 @@
       "Bytes": 335
     },
     {
+      "File": "src/vr/shaders/scene_colour.hlsli",
+      "Sha256": "5034054f848189c1afe2765298d684e79569106de6560dabc14fea9125430f5d",
+      "Bytes": 1812
+    },
+    {
       "File": "tests/test_metal_shader_sources.py",
-      "Sha256": "267711ccac03e719c0d0e1495aec8c1533ee48a80f3e6794f79a6c5735dbb2c1",
-      "Bytes": 19969
+      "Sha256": "c244d29c0d35a2eedcf26e199ea6242005f1ce00309e385a1d1ed133222f4eb0",
+      "Bytes": 23063
     },
     {
       "File": "tools/check_metal_rt_shaders.py",
-      "Sha256": "f7fb0308ce4f482d3df88d7c56e716abb9769a944f116034a0a15cabfc6df2ac",
-      "Bytes": 3953
+      "Sha256": "201ea3cf0985be5f71aaee6adc20b2ca60c60c7f96b9e25cf8b194821770adf9",
+      "Bytes": 4151
     },
     {
       "File": "tools/check_producer.py",
-      "Sha256": "037093345e8ac79afed10817602b15d6ca88bfe21524652661eb33b8f85c1e19",
-      "Bytes": 11880
+      "Sha256": "aea7220c8163d343d0f538322e51cfd22d824861d0d0b68208560d170cbce20f",
+      "Bytes": 12273
     },
     {
       "File": "tools/compile_metal.py",
@@ -820,6 +830,11 @@
       "File": "tools/metal_liquid_optics.py",
       "Sha256": "e68e8815adc59a4ed18570c63a3c2126caa3c2bab8a60ea3b4a916da313665b4",
       "Bytes": 2004
+    },
+    {
+      "File": "tools/metal_material_colour.py",
+      "Sha256": "ad2b9e7888251363e50280fa05105e0ff755199a499504cd3da9453212234fca",
+      "Bytes": 2294
     }
   ]
 }

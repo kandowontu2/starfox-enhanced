@@ -12,11 +12,12 @@ import sys
 
 import compile_metal as observer
 from metal_liquid_optics import liquid_optics_source
+from metal_material_colour import material_colour_source
 
 ROOT = Path(__file__).resolve().parents[1]
 OBSERVER_SHA = "cc770ea2068978eb0eeb381dc3bbf8983b838c2563f2605678272146f632fbb4"
 DECODER_SHA = "69d61c1055f123f1b750eaa95bc3063994f2dbe754316430b41533c8cbe83a86"
-SCOPE = "additional-native-metal-calibrated-liquid-world-and-surface-layers"
+SCOPE = "additional-native-metal-canonical-build-source-integration"
 REQUIRED = {
     ".gitattributes", ".github/workflows/portable-builds.yml", "README.md", "LICENSE",
     "headers/SDL3/LICENSE.txt", "src/render/metal_hardware_rt.mm",
@@ -28,6 +29,8 @@ REQUIRED = {
     "tests/test_metal_shader_sources.py", "tools/compile_metal.py", "tools/check_producer.py",
     "tools/metal_liquid_optics.py", "src/render/shaders/liquid_optics.hlsli",
     "include/starfox/render/metal_liquid_optics.inc",
+    "tools/metal_material_colour.py", "src/render/shaders/calibrated_colour.hlsli",
+    "src/vr/shaders/scene_colour.hlsli",
 }
 
 
@@ -54,6 +57,8 @@ def qualify(manifest):
         raise RuntimeError("Original native observer or previously checked decoder changed")
     if (ROOT / "include/starfox/render/metal_liquid_optics.inc").read_text(encoding="utf-8") != liquid_optics_source(ROOT):
         raise RuntimeError("Canonical liquid geometry and generated Metal helper differ")
+    if (ROOT / "include/starfox/render/metal_material_colour.inc").read_text(encoding="utf-8") != material_colour_source(ROOT):
+        raise RuntimeError("Canonical colour equations and generated Metal helper differ")
     actual = {str(path.relative_to(ROOT)).replace('\\', '/') for path in ROOT.rglob('*') if path.is_file()
               and '__pycache__' not in path.parts and '.git' not in path.parts and path.name != 'CMakeLists.txt'}
     if actual != set(names) | {"inputs.json"}:

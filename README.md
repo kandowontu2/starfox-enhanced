@@ -1,4 +1,4 @@
-# Star Fox Enhanced — native Metal calibrated liquid candidate
+# Star Fox Enhanced — native Metal canonical build integration candidate
 
 This temporary source-only component adds explicit linear/sRGB reflection
 transport, seamless resident environment cubes and calibrated mirror/gold/copper
@@ -7,6 +7,14 @@ It also implements calibrated transparent water, its optional hidden-world
 colour plane and its camera-space normal/depth plane in one retained allocation.
 
 AI/Codex is used for programming, testing and documentation.
+
+The public CMake fragment generates both shared runtime headers directly from
+the authoritative liquid and colour equations. It declares both generators,
+all scalar kernels, both colour inputs and both templates as regeneration
+dependencies. The runtime source-check tool accepts the same build-generated
+helper directory. An actual CMake/Ninja NONE-project check verifies byte-exact
+headers/runtime assembly and regeneration after changes to temporary canonical
+input copies. This is build-source wiring, not full application linking.
 
 The native owner now provides nonblocking completion polling and cleanup,
 with output-image capacity accounting (not available VRAM). Pending/failed
@@ -74,7 +82,8 @@ closure and original public SDL headers, then compiles/links both full runtime
 shadow and reflection shader libraries using the existing Metal3.0 RT language
 recipe and strict O3/FP flags. It retains the original native process/memory
 observer. All thirteen prior source assembly/contract checks are retained with
-the intentional extended ABI, and four liquid/layout checks are added.
+the intentional extended ABI, and four liquid/layout checks are added. A further
+check executes the real CMake embedding/regeneration fragment.
 No GPU is executed. This is not an abbreviated
 complete25 test suite.
 

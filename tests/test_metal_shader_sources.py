@@ -1,6 +1,7 @@
 """Exact-source assembly checks only; NOT Metal compilation or GPU acceptance."""
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -276,6 +277,45 @@ class MetalSourceAssemblyTests(unittest.TestCase):
         self.assertIn("float3(1.0f,.875f,.58f):float3(.8f,.82f,.85f)",planar)
         self.assertLess(planar.index("float3 radiance="),planar.index("if(p.water_settings.y>0.0f)"))
         self.assertIn("return reflection_pack_linear(radiance,254u,p);",planar)
+
+    def test_actual_cmake_generates_and_refreshes_canonical_runtime_sources(self):
+        # Exercise the real public embedding fragment, not a reimplemented
+        # template recipe. No compiler or GPU is launched by this NONE project.
+        cmake,ninja=shutil.which("cmake"),shutil.which("ninja")
+        self.assertIsNotNone(cmake,"CMake is required for the embedding integration check")
+        self.assertIsNotNone(ninja,"Ninja is required for regeneration checks")
+        with tempfile.TemporaryDirectory(prefix="starfox-metal-cmake-") as temporary:
+            project=Path(temporary)
+            copied=project / "public-source"
+            shutil.copytree(ROOT,copied,ignore=shutil.ignore_patterns("__pycache__"))
+            build=project / "build"
+            (project / "CMakeLists.txt").write_text(
+                'cmake_minimum_required(VERSION 3.24)\nproject(MetalEmbedding NONE)\n'
+                f'set(STARFOX_METAL_SOURCE_ROOT "{copied.as_posix()}")\n'
+                f'include("{(copied / "cmake/NativeMetalMaterialSource.cmake").as_posix()}")\n',encoding="utf-8")
+            subprocess.run([cmake,"-S",str(project),"-B",str(build),"-G","Ninja",
+                f"-DCMAKE_MAKE_PROGRAM={ninja}",f"-DPython3_EXECUTABLE={sys.executable}"],
+                check=True,capture_output=True,text=True)
+            generated=build / "generated"
+            for name in ("metal_material_colour.inc","metal_liquid_optics.inc"):
+                self.assertEqual((generated / name).read_bytes(),(ROOT / "include/starfox/render" / name).read_bytes())
+            for name in ("water","native_material"):
+                actual=(generated / f"metal_{name}_shared.hpp").read_text(encoding="utf-8")
+                self.assertNotIn("@STARFOX_",actual)
+            emitted=project / "runtime"
+            subprocess.run([sys.executable,str(copied / "tools/check_metal_rt_shaders.py"),
+                "--generated-dir",str(generated),"--emit-only",str(emitted)],check=True,capture_output=True)
+            for name in ("shadow.metal","reflection.metal"):
+                self.assertEqual((emitted / name).read_bytes(),(self.destination / name).read_bytes())
+            # Change only the temporary copies. Both canonical generators must
+            # participate in CMake's ordinary regeneration dependency graph.
+            liquid=copied / "src/render/shaders/liquid_optics.hlsli"
+            colour=copied / "src/vr/shaders/scene_colour.hlsli"
+            liquid.write_text(liquid.read_text(encoding="utf-8")+"\n// Liquid dependency refresh check.\n",encoding="utf-8")
+            colour.write_text(colour.read_text(encoding="utf-8")+"\n// Colour dependency refresh check.\n",encoding="utf-8")
+            subprocess.run([cmake,"--build",str(build)],check=True,capture_output=True,text=True)
+            self.assertIn("// Liquid dependency refresh check.",(generated / "metal_water_shared.hpp").read_text(encoding="utf-8"))
+            self.assertIn("// Colour dependency refresh check.",(generated / "metal_native_material_shared.hpp").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":
