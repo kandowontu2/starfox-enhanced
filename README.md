@@ -57,9 +57,13 @@ floating-point comparison is rewritten. Exact inverse source audits retain
 all original bytes aside from these reviewed annotations/uint expressions.
 Successful SDK linking would still not prove runtime behavior or performance.
 
-These MSL 3.0 checks explicitly target macOS 13/iOS 16. They do not raise the
-application's macOS 11/iOS 15 deployment minimums or prove compatibility of
-this translated candidate with those older systems.
+This follow-up keeps all 25 generated shader files and the source manifest
+byte-identical. Only the SDK language/deployment profile changes: platform-
+specific Metal 2.3 with explicit macOS 11/iOS 15 targets, matching the app's
+deployment minimums. O3, warnings as errors, disabled fast math/contraction,
+the complete 50-job matrix, linker checks and native resource guards remain.
+No unsupported shader is omitted or replaced. Compilation must validate this
+candidate; old-system runtime behavior and numerical parity still need tests.
 
 Original project ownership, licensing and credits apply to the shaders.
 SPIRV-Cross is by Khronos Group contributors under Apache 2.0; its unmodified

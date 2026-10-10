@@ -14,9 +14,12 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 NAMES = set("tiles reduce query mapping domains frames optical optical_stream optical_schedule jets jets_stream roots_clear witness folds guide colour compose publish publish_diagnostics admission_clear capture history lobes paths curved_paths".split())
-FLAGS = ["-std=metal3.0", "-O3", "-Werror", "-fno-fast-math", "-ffp-contract=off"]
+FLAGS = {
+    'macosx': ["-std=macos-metal2.3", "-O3", "-Werror", "-fno-fast-math", "-ffp-contract=off"],
+    'iphoneos': ["-std=ios-metal2.3", "-O3", "-Werror", "-fno-fast-math", "-ffp-contract=off"],
+}
 GIB = 1 << 30
-SDK_TARGETS = {'macosx': 'air64-apple-macosx13.0', 'iphoneos': 'air64-apple-ios16.0'}
+SDK_TARGETS = {'macosx': 'air64-apple-macosx11.0', 'iphoneos': 'air64-apple-ios15.0'}
 
 
 class Deferred(RuntimeError):
@@ -307,6 +310,7 @@ def main():
         return
     if sys.platform != "darwin" or not args.sdk or not args.out:
         raise RuntimeError("Actual macOS host/SDK/unique output directory required")
+    flags = FLAGS[args.sdk]
     library = ctypes.CDLL("/usr/lib/libproc.dylib")
     library.proc_pidinfo.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_uint64, ctypes.c_void_p, ctypes.c_int]
     library.proc_pidpath.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
@@ -325,7 +329,7 @@ def main():
     for row in selected:
         air, binary = args.out / f"{row['Name']}.air", args.out / f"{row['Name']}.metallib"
         try:
-            operations.append(operate(row["Name"] + "-compile", metal, [*FLAGS, *target_flags, "-c", str(ROOT / row["File"]), "-o", str(air)], args.out, manifest, library, sdk_environment))
+            operations.append(operate(row["Name"] + "-compile", metal, [*flags, *target_flags, "-c", str(ROOT / row["File"]), "-o", str(air)], args.out, manifest, library, sdk_environment))
             operations.append(operate(row["Name"] + "-link", metallib, [str(air), "-o", str(binary)], args.out, manifest, library, sdk_environment))
             qualify_metallib(binary.read_bytes(), row['Entry'])
             link_log = (args.out / f"{row['Name']}-link.stderr.log").read_text()
@@ -343,7 +347,7 @@ def main():
                 break
     receipt = {"scope": "Actual SDK compilation/link only; not Metal runtime, SDL binding ABI, numerical/optical parity or performance acceptance",
                "sdk": args.sdk, "sdk_version": subprocess.check_output(["xcrun", "--sdk", args.sdk, "--show-sdk-version"], text=True).strip(),
-               "manifest_sha256": digest(ROOT / "shaders.json"), "flags": FLAGS,
+               "manifest_sha256": digest(ROOT / "shaders.json"), "flags": flags,
                'target': SDK_TARGETS[args.sdk], 'sdk_root': sdk_root, 'selected_shader': args.shader,
                'full_source_inventory':25, 'expected_compiled_programs':len(selected), "operations": operations,
                "accepted": accepted, "failed": failed, "success": len(accepted) == len(selected) and not failed}
