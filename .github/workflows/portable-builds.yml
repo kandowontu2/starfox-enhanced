@@ -1,11 +1,11 @@
-name: Temporary native material coverage SDK compile (no GPU, no release)
+name: Temporary native material coverage and colour SDK compile (no GPU, no release)
 on:
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
   native-coverage:
-    name: Additional material coverage kernel / ${{ matrix.sdk }}
+    name: Additional material coverage and colour kernels / ${{ matrix.sdk }}
     runs-on: macos-15-intel
     strategy:
       fail-fast: false
@@ -20,12 +20,14 @@ jobs:
       - name: Compile and link held component with original strict flags and native resource observer
         env:
           PYTHONDONTWRITEBYTECODE: '1'
-        run: python3 tools/compile_coverage.py --sdk '${{ matrix.sdk }}' --out '${{ runner.temp }}/coverage-result'
+        run: |
+          python3 tools/test_metal_material_colour.py
+          python3 tools/compile_coverage.py --sdk '${{ matrix.sdk }}' --out '${{ runner.temp }}/coverage-result'
       - name: Preserve real compiler diagnostics and nonprivate component artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: native-coverage-${{ matrix.sdk }}
+          name: native-material-${{ matrix.sdk }}
           path: |
             ${{ runner.temp }}/coverage-result/*.air
             ${{ runner.temp }}/coverage-result/*.metallib

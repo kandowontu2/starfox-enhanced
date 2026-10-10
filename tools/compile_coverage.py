@@ -1,4 +1,4 @@
-"""Compile one additional native material coverage kernel; never execute a GPU."""
+"""Compile additional native coverage and colour kernels; never execute a GPU."""
 import argparse
 import copy
 import ctypes
@@ -9,9 +9,11 @@ import subprocess
 import sys
 
 import compile_metal as observer
+from metal_material_colour import material_colour_source
 
 ROOT = Path(__file__).resolve().parents[1]
 ENTRY = "starfox_native_coverage_probe"
+COLOUR_ENTRY = "starfox_native_colour_probe"
 OBSERVER_SHA = "cc770ea2068978eb0eeb381dc3bbf8983b838c2563f2605678272146f632fbb4"
 DECODER_SHA = "69d61c1055f123f1b750eaa95bc3063994f2dbe754316430b41533c8cbe83a86"
 FILES = (
@@ -24,7 +26,10 @@ FILES = (
     "include/starfox/render/lava_surface.hpp",
     "include/starfox/render/lava_surface.inc",
     "include/starfox/render/metal_native_material_coverage.inc",
-    "tests/coverage.cpp", "tests/coverage.metal",
+    "tests/coverage.cpp", "tests/coverage.metal", "tests/colour.metal",
+    "src/render/shaders/calibrated_colour.hlsli", "src/vr/shaders/scene_colour.hlsli",
+    "include/starfox/render/metal_material_colour.inc",
+    "tools/metal_material_colour.py", "tools/test_metal_material_colour.py",
     "tools/compile_metal.py", "tools/compile_coverage.py",
 )
 
@@ -34,7 +39,7 @@ def qualify_component(manifest):
     names = [row.get("File") for row in rows]
     if len(rows) != len(FILES) or len(set(names)) != len(FILES) or set(names) != set(FILES):
         raise RuntimeError("Complete unique allowlisted coverage component sources required")
-    if manifest.get("Entry") != ENTRY or manifest.get("Scope") != "one-additional-coverage-kernel":
+    if manifest.get("Entries") != [ENTRY, COLOUR_ENTRY] or manifest.get("Scope") != "additional-material-coverage-and-colour":
         raise RuntimeError("Separate component scope or exact entry changed")
     for row in rows:
         path = ROOT / row["File"]
@@ -50,11 +55,16 @@ def qualify_component(manifest):
     code = (ROOT / "tests/coverage.metal").read_text(encoding="utf-8")
     if not re.search(r"kernel\s+void\s+" + ENTRY + r"\(", code) or "if(id>=query_count) return;" not in code:
         raise RuntimeError("Exact kernel entry or query-count guard missing")
+    if (ROOT / "include/starfox/render/metal_material_colour.inc").read_text(encoding="utf-8") != material_colour_source(ROOT):
+        raise RuntimeError("Generated Metal shared colour equations differ from current whole sources")
+    colour = (ROOT / "tests/colour.metal").read_text(encoding="utf-8")
+    if not re.search(r"kernel\s+void\s+" + COLOUR_ENTRY + r"\(", colour) or "if(id>=query_count) return;" not in colour:
+        raise RuntimeError("Exact colour entry or query-count guard missing")
     # All quoted include paths in this component must resolve within the held
     # source inventory. No system/dependency discovery is treated as a source pin.
     held = {ROOT / name for name in FILES}
     for name in FILES:
-        if not name.endswith((".hpp", ".inc", ".cpp", ".metal")):
+        if not name.endswith((".hpp", ".inc", ".cpp", ".metal", ".hlsli")):
             continue
         path = ROOT / name
         for quoted in re.findall(r'^\s*#\s*include\s*"([^"\n]+)"', path.read_text(encoding="utf-8"), re.M):
@@ -82,7 +92,7 @@ def controls(manifest):
         changed = copy.deepcopy(manifest)
         changed["Sources"][0][key] = value
         negatives.append(changed)
-    for key, value in (("Entry", "absent_kernel"), ("Scope", "complete25")):
+    for key, value in (("Entries", [ENTRY]), ("Scope", "complete25")):
         changed = copy.deepcopy(manifest)
         changed[key] = value
         negatives.append(changed)
@@ -143,16 +153,16 @@ def main():
     sdk_environment = {"SDKROOT": sdk_root}
     args.out.mkdir(parents=True, exist_ok=False)
     (args.out / "source-controls.json").write_text(json.dumps(source_controls, indent=2), encoding="utf-8")
-    # This is an additional one-kernel component, NOT an abbreviated run of the
+    # This is an additional coverage/colour component, NOT an abbreviated run of the
     # original 25-program producer. Keep operate()/flags/floors/caps unchanged;
     # substitute only complete-source qualification for this new component.
     observer.qualify = qualify_component
     air, binary = args.out / "coverage.air", args.out / "coverage.metallib"
     flags = observer.FLAGS[args.sdk]
     target_flags = ["-target", observer.SDK_TARGETS[args.sdk], "-isysroot", sdk_root]
-    receipt = {"scope": "one additional coverage kernel, actual SDK compilation/link only; not original complete25 acceptance, GPU execution, ray traversal, game adoption or performance",
+    receipt = {"scope": "additional coverage and colour kernels, actual SDK compilation/link only; not original complete25 acceptance, GPU execution, ray traversal, game adoption or performance",
                "sdk": args.sdk, "sdk_root": sdk_root, "flags": flags,
-               "target": observer.SDK_TARGETS[args.sdk], "entry": ENTRY,
+               "target": observer.SDK_TARGETS[args.sdk], "entries": [ENTRY, COLOUR_ENTRY],
                "manifest_sha256": observer.digest(ROOT / "inputs.json"),
                "sources": manifest["Sources"], "operations": [], "success": False,
                "gpu_launched": False, "production_adopted": False}
@@ -163,6 +173,7 @@ def main():
         receipt["operations"].append(observer.operate("coverage-link", metallib,
             [str(air), "-o", str(binary)], args.out, manifest, library, sdk_environment))
         observer.qualify_metallib(binary.read_bytes(), ENTRY)
+        observer.qualify_metallib(binary.read_bytes(), COLOUR_ENTRY)
         if re.search(r"ignoring (?:file|input)|warning:", (args.out / "coverage-link.stderr.log").read_text(), re.I):
             raise RuntimeError("Actual linker warning/ignored input is not a pass")
         qualify_component(manifest)
@@ -173,7 +184,7 @@ def main():
         raise
     finally:
         (args.out / "coverage-receipt.json").write_text(json.dumps(receipt, indent=2), encoding="utf-8")
-    print(f"Actual {args.sdk}: coverage kernel compiled and linked; no GPU execution or production adoption")
+    print(f"Actual {args.sdk}: coverage and colour kernels compiled and linked; no GPU execution or production adoption")
 
 
 if __name__ == "__main__":

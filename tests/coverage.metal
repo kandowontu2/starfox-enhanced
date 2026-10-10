@@ -14,3 +14,4 @@ kernel void starfox_native_coverage_probe(device const uint* words [[buffer(0)]]
     output[id]=starfox_native_material_coverage(q.primitive,q.bary_x,q.bary_y,q.pixel_x,q.pixel_y,
         words,q.count,q.byte_count,q.binding_words);
 }
+#include "colour.metal"

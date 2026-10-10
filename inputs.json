@@ -1,6 +1,9 @@
 {
-  "Scope": "one-additional-coverage-kernel",
-  "Entry": "starfox_native_coverage_probe",
+  "Scope": "additional-material-coverage-and-colour",
+  "Entries": [
+    "starfox_native_coverage_probe",
+    "starfox_native_colour_probe"
+  ],
   "Sources": [
     {
       "File": ".gitattributes",
@@ -9,8 +12,8 @@
     },
     {
       "File": ".github/workflows/portable-builds.yml",
-      "Sha256": "cf3075f80c6d61debc2fb49b195138c65d0f0ccb9a3c73b77d9c89fc7fbd0ad4",
-      "Bytes": 1254
+      "Sha256": "917ddda9ebea93af7619c810cda3954a3a0cd645681a4fc3e31c01c7da7675f6",
+      "Bytes": 1343
     },
     {
       "File": "fixtures/native_indexed_cutout_fixture.hpp",
@@ -48,6 +51,11 @@
       "Bytes": 5622
     },
     {
+      "File": "include/starfox/render/metal_material_colour.inc",
+      "Sha256": "ec73381d05ad01b71780abb821d5f25b54080124410e8854a8c52931ea5d9347",
+      "Bytes": 6865
+    },
+    {
       "File": "include/starfox/render/metal_native_material_coverage.inc",
       "Sha256": "69d61c1055f123f1b750eaa95bc3063994f2dbe754316430b41533c8cbe83a86",
       "Bytes": 2717
@@ -59,8 +67,23 @@
     },
     {
       "File": "README.md",
-      "Sha256": "8c0f859430a0d8ea5130c4f97f70feb5158dbcc2f16499c2ae57a84b20dfe351",
-      "Bytes": 1706
+      "Sha256": "f52b500d5c9b2f1c70d7a6cebdc6a8966af44e0bc6c3e0e56e48088bc8cb8dfd",
+      "Bytes": 2213
+    },
+    {
+      "File": "src/render/shaders/calibrated_colour.hlsli",
+      "Sha256": "46b0f06ee630c52efb5a9b0c1b003a2d5f19f5d8a070a94f12b6a2ae59383ac2",
+      "Bytes": 4536
+    },
+    {
+      "File": "src/vr/shaders/scene_colour.hlsli",
+      "Sha256": "5034054f848189c1afe2765298d684e79569106de6560dabc14fea9125430f5d",
+      "Bytes": 1812
+    },
+    {
+      "File": "tests/colour.metal",
+      "Sha256": "cc0d00eebbf13e02de6efccf3880661dcd9db7c43a71af124453e942a4a2fa96",
+      "Bytes": 1464
     },
     {
       "File": "tests/coverage.cpp",
@@ -69,18 +92,28 @@
     },
     {
       "File": "tests/coverage.metal",
-      "Sha256": "cf453e4a7c43f35665bbc8ee69b329f824fc1786b208a7aaba52303f639f21d6",
-      "Bytes": 715
+      "Sha256": "2fcde801c6368750af9d2f87d6eba6293520bd06bee2986cb2bd9821d8d1986e",
+      "Bytes": 739
     },
     {
       "File": "tools/compile_coverage.py",
-      "Sha256": "f85c8d31e2bc85edf096aa7b15875eed7d2731ecaae13c73e22bd81a342a1275",
-      "Bytes": 10031
+      "Sha256": "5189111dc7f8589e6759e8a7711d6f524461ece46cedc1967cf624505452cd66",
+      "Bytes": 11019
     },
     {
       "File": "tools/compile_metal.py",
       "Sha256": "cc770ea2068978eb0eeb381dc3bbf8983b838c2563f2605678272146f632fbb4",
       "Bytes": 19817
+    },
+    {
+      "File": "tools/metal_material_colour.py",
+      "Sha256": "e6205853232a779e99230b0c332509ce17c1ec3077599335310b1804d2214697",
+      "Bytes": 2013
+    },
+    {
+      "File": "tools/test_metal_material_colour.py",
+      "Sha256": "82e3566b384e85dad8afb6af2f65f2735545d48e37c9a261c3dee077dd8a1f10",
+      "Bytes": 1944
     }
   ]
 }
