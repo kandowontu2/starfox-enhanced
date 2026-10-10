@@ -1,5 +1,5 @@
 {
-  "Scope": "additional-native-metal-completion-and-resource-lifecycle-producer",
+  "Scope": "additional-native-metal-calibrated-liquid-world-and-surface-layers",
   "Sources": [
     {
       "File": ".gitattributes",
@@ -13,8 +13,8 @@
     },
     {
       "File": "cmake/NativeMetalMaterialSource.cmake",
-      "Sha256": "1d3795b9b6d620343b2d01a83d45cfd1453246a228748b507638985befa3bcb4",
-      "Bytes": 1044
+      "Sha256": "dddf9f7e1e612bbddb7ef34c348f44eeec3aac92677cca3a1b7c02713f3b75b1",
+      "Bytes": 1750
     },
     {
       "File": "headers/SDL3/LICENSE.txt",
@@ -592,6 +592,11 @@
       "Bytes": 2590
     },
     {
+      "File": "include/starfox/render/metal_liquid_optics.inc",
+      "Sha256": "a91c4b36da7fdef3eb01abb4352dd04f5f52937be8147e84e04869b5826612f9",
+      "Bytes": 1864
+    },
+    {
       "File": "include/starfox/render/metal_material_colour.inc",
       "Sha256": "ec73381d05ad01b71780abb821d5f25b54080124410e8854a8c52931ea5d9347",
       "Bytes": 6865
@@ -768,13 +773,18 @@
     },
     {
       "File": "README.md",
-      "Sha256": "336629a468552a351ffafd549ebd801620707aadc881926021b3e4ea6ce4358b",
-      "Bytes": 4604
+      "Sha256": "2a296093d5fc05064d18398d78f7a0392db4d852640f3f2e682ff4aec0dcc465",
+      "Bytes": 5991
     },
     {
       "File": "src/render/metal_hardware_rt.mm",
-      "Sha256": "aaa246952efba61832c0244aadfdd350ac83b36bf089d88815ed410602bfea89",
-      "Bytes": 76380
+      "Sha256": "9b4814b198ea427c49bb5a5200bf7f8dd5ed641866ffdd96abc3490594d8d5f9",
+      "Bytes": 89225
+    },
+    {
+      "File": "src/render/shaders/liquid_optics.hlsli",
+      "Sha256": "54df5d2046a3d4f850a5b0dad404eb561441300f1296cfdbd68359f03bb757ee",
+      "Bytes": 1764
     },
     {
       "File": "src/render/shaders/metal_native_material_shared.hpp.in",
@@ -783,28 +793,33 @@
     },
     {
       "File": "src/render/shaders/metal_water_shared.hpp.in",
-      "Sha256": "67212acad0bd55914b2be7c9255d048769ee0490b98f4b309b3a0c80bade187e",
-      "Bytes": 304
+      "Sha256": "0691ebd569fbbd5927d26f1fbb93d28a12d331e36391d52843b26ede38664976",
+      "Bytes": 335
     },
     {
       "File": "tests/test_metal_shader_sources.py",
-      "Sha256": "f3fd5ac81c281b29a3f448d3f380fd7b56e30f6849f0d79664f889f9b500258e",
-      "Bytes": 15454
+      "Sha256": "267711ccac03e719c0d0e1495aec8c1533ee48a80f3e6794f79a6c5735dbb2c1",
+      "Bytes": 19969
     },
     {
       "File": "tools/check_metal_rt_shaders.py",
-      "Sha256": "e5854fbca9348a04207a6b12251bcdb4542552c2819635f86e6b07914500f5d1",
-      "Bytes": 3792
+      "Sha256": "f7fb0308ce4f482d3df88d7c56e716abb9769a944f116034a0a15cabfc6df2ac",
+      "Bytes": 3953
     },
     {
       "File": "tools/check_producer.py",
-      "Sha256": "a0aa4b3190d149b450dacf8058f75681c36dc66ea674cf662a8f5c359e809d7b",
-      "Bytes": 11382
+      "Sha256": "037093345e8ac79afed10817602b15d6ca88bfe21524652661eb33b8f85c1e19",
+      "Bytes": 11880
     },
     {
       "File": "tools/compile_metal.py",
       "Sha256": "cc770ea2068978eb0eeb381dc3bbf8983b838c2563f2605678272146f632fbb4",
       "Bytes": 19817
+    },
+    {
+      "File": "tools/metal_liquid_optics.py",
+      "Sha256": "e68e8815adc59a4ed18570c63a3c2126caa3c2bab8a60ea3b4a916da313665b4",
+      "Bytes": 2004
     }
   ]
 }

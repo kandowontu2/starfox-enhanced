@@ -55,12 +55,15 @@ struct alignas(16) ReflectionParameters {
     Float4 primary_range{};
     std::array<std::uint32_t,4> optical{},cube_info{};
     Float4 cube_row0{},cube_row1{},cube_row2{};
+    Float4 source_colour{};
+    std::array<std::uint32_t,4> liquid_layers{};
 };
-static_assert(sizeof(ReflectionParameters)==384);
+static_assert(sizeof(ReflectionParameters)==416);
 static_assert(offsetof(ReflectionParameters,coverage)==272);
 static_assert(offsetof(ReflectionParameters,primary_range)==288);
 static_assert(offsetof(ReflectionParameters,optical)==304 && offsetof(ReflectionParameters,cube_info)==320);
 static_assert(offsetof(ReflectionParameters,cube_row0)==336 && offsetof(ReflectionParameters,cube_row2)==368);
+static_assert(offsetof(ReflectionParameters,source_colour)==384 && offsetof(ReflectionParameters,liquid_layers)==400);
 
 bool valid_primary_range(const std::optional<PrimaryRayRange>& range) {
     // Distinct double planes can collapse after conversion to native ray
@@ -236,6 +239,8 @@ struct Parameters {
     float4 primary_range;
     uint4 optical,cube_info;
     float4 cube_row0,cube_row1,cube_row2;
+    float4 source_colour;
+    uint4 liquid_layers;
 };
 float3 rgb(uint packed) {
     return float3(float(packed&255u),float((packed>>8)&255u),
@@ -421,6 +426,13 @@ uint reflected_accumulated(uint terminal,float3 throughput,float3 accumulated,co
 float3 conductor_f0(uint source,constant Parameters& p) {
     return p.metallic==2u?float3(1.0f,.766f,.336f):p.metallic==3u?float3(.955f,.638f,.538f):reflection_linear(source,p);
 }
+struct NativeWaterSample {
+    float3 hit,normal,radiance,specular;
+    float fresnel,bias;
+};
+NativeWaterSample native_water_sample(float3 origin,float3 direction,float distance,uint2 pixel,
+    primitive_acceleration_structure scene,constant Parameters& p,device const float4* vertices,
+    device const RayMaterial* materials,device const uint* palette,device const uchar* texels);
 uint trace_mirrors(float3 origin,float3 direction,uint2 pixel,float minimum,bool escaping_source_ground,
     primitive_acceleration_structure scene,constant Parameters& p,device const float4* vertices,
     device const RayMaterial* materials,device const uint* palette,device const uchar* texels,
@@ -439,6 +451,16 @@ uint trace_mirrors(float3 origin,float3 direction,uint2 pixel,float minimum,bool
         if(floor_hit) {
             distance=ground_t;
             float3 hit=origin+direction*distance;
+            if(p.source_colour.w>0.5f && (flags&15u)==0u) {
+                NativeWaterSample water=native_water_sample(origin,direction,distance,pixel,
+                    scene,p,vertices,materials,palette,texels);
+                accumulated+=throughput*(water.radiance*(1.0f-water.fresnel)+water.specular);
+                throughput*=water.fresnel;
+                if(all(throughput<float3(1e-5f))) return reflection_pack_linear(accumulated,255u,p);
+                origin=water.hit+water.normal*water.bias;
+                direction=reflect(direction,water.normal);minimum=water.bias;
+                continue;
+            }
             if((flags&15u)==3u) {
                 LavaOptics lava=lava_optics(origin,direction,distance,p);
                 accumulated+=throughput*lava.radiance;throughput*=lava.share;
@@ -508,6 +530,124 @@ uint shade_native_model(uint2 pixel,float3 incoming,float3 point,float3 normal,f
     }
     return reflection_pack_linear(radiance,255u,p);
 }
+bool caustic_blocked(float3 origin,float3 direction,float maximum,float minimum,uint2 pixel,
+    primitive_acceleration_structure scene,constant Parameters& p,
+    device const RayMaterial* materials,device const uchar* texels) {
+    auto obstacle=visible_hit(ray(origin,direction,minimum,maximum),scene,pixel,
+        materials,texels,p.texel_count,true,true,p.coverage);
+    return obstacle.type==intersection_type::triangle;
+}
+NativeWaterSample native_water_sample(float3 origin,float3 direction,float distance,uint2 pixel,
+    primitive_acceleration_structure scene,constant Parameters& p,device const float4* vertices,
+    device const RayMaterial* materials,device const uint* palette,device const uchar* texels) {
+    float3x3 rotation=transpose(float3x3(p.water_row0.xyz,p.water_row1.xyz,p.water_row2.xyz));
+    float3x3 forward=transpose(float3x3(cross(p.water_row1.xyz,p.water_row2.xyz),
+        cross(p.water_row2.xyz,p.water_row0.xyz),cross(p.water_row0.xyz,p.water_row1.xyz)))
+        /dot(p.water_row0.xyz,cross(p.water_row1.xyz,p.water_row2.xyz));
+    float3 offset=float3(p.water_row0.w,p.water_row1.w,p.water_row2.w);
+    NativeWaterSample result;result.hit=origin+direction*distance;
+    float footprint=length(result.hit)/max(p.focal_x,1.0f)
+        /max(abs(dot(direction,p.ground_normal.xyz)),.04f);
+    LiquidOpticalSample optical=liquid_optical_sample(result.hit,direction,distance,
+        footprint,rotation,offset,p.water_settings.x,0u);
+    result.hit=optical.hit;result.normal=optical.normal;float3 position=optical.position;
+    result.bias=max(.05f,distance*1e-5f);
+    float3 light=normalize(forward*float3(-1.0f));
+    float visibility=caustic_blocked(result.hit+result.normal*result.bias,light,65536.0f,
+        result.bias,pixel,scene,p,materials,texels)?0.0f:1.0f;
+    float3 authored=reflection_authored_linear(p.source_colour.xyz,p);
+    float3 base=dot(authored,float3(.3f,.59f,.11f))*float3(.20f,.58f,.85f);
+    result.radiance=base*(.65f+.35f*visibility*max(0.0f,dot(result.normal,light)));
+    float3 transmitted=refract(direction,result.normal,optical.entering?.75f:1.0f/.75f);
+    bool total_internal=dot(transmitted,transmitted)<1e-10f;
+    if(!total_internal) {
+        float3 through=result.hit-result.normal*result.bias;
+        float3 world_origin=through*rotation+offset,world_direction=transmitted*rotation;
+        float bottom=world_direction.y>0.0f?(position.y+640.0f-world_origin.y)/world_direction.y:65536.0f;
+        SF_VISIBLE_HIT(submerged,through,transmitted,result.bias,min(65536.0f,max(result.bias,bottom)))
+        bool found=submerged.type==intersection_type::triangle;
+        float travel=found?submerged.distance:bottom;
+        if(found || (bottom>result.bias && bottom<65536.0f)) {
+            uint primitive=found?submerged.primitive_id:0u;
+            float3 receiver=found?reflection_linear(palette_hit(primitive,
+                submerged.triangle_barycentric_coord,pixel,materials,palette,texels,p.texel_count,p.coverage),p)
+                :float3(.28f,.24f,.16f)*p.water_settings.z;
+            float3 receiver_view=through+transmitted*travel,receiver_world=receiver_view*rotation+offset;
+            float depth=receiver_world.y-position.y,up=1.0f;
+            if(found) {
+                uint first=primitive*3u;
+                float3 n=normalize(cross(vertices[first+1u].xyz-vertices[first].xyz,
+                    vertices[first+2u].xyz-vertices[first].xyz));
+                if(dot(n,transmitted)>0.0f)n=-n;
+                up=clamp(-normalize(n*forward).y,0.0f,1.0f);
+            }
+            uint caustics=(uint(p.water_settings.w)>>5u)&3u;
+            if(caustics!=0u && depth>0.0f && up>0.0f) {
+                WaterCausticSample focus=water_caustic_sample(receiver_world.x,receiver_world.z,
+                    p.water_settings.x,depth,footprint);
+                float3 entry=forward*(float3(focus.entry_x,position.y,focus.entry_z)-offset);
+                float3 segment=entry-receiver_view;float path=length(segment);
+                if(path>result.bias*2.0f
+                    && !caustic_blocked(receiver_view,segment/path,path-result.bias,result.bias,pixel,scene,p,materials,texels)
+                    && !caustic_blocked(entry,normalize(forward*float3(0,-1,0)),65536.0f,result.bias,pixel,scene,p,materials,texels))
+                    receiver*=clamp(1.0f+(focus.irradiance-exp(-depth/1600.0f))*up*float(caustics)/3.0f,.25f,3.0f);
+            }
+            result.radiance=float3(water_transmitted_channel(receiver.r,result.radiance.r,travel,.0025f),
+                water_transmitted_channel(receiver.g,result.radiance.g,travel,.0008f),
+                water_transmitted_channel(receiver.b,result.radiance.b,travel,.00035f));
+        }
+    }
+    float grazing=pow(1.0f-clamp(dot(-direction,result.normal),0.0f,1.0f),5.0f);
+    result.fresnel=total_internal?1.0f:clamp((.02f+.98f*grazing)*p.water_settings.y,0.0f,1.0f);
+    float3 halfway=normalize(light-direction);
+    result.specular=float3(1,.95f,.82f)*pow(clamp(dot(result.normal,halfway),0.0f,1.0f),96.0f)*visibility
+        *max(authored.r,max(authored.g,authored.b))*.55f;
+    return result;
+}
+uint shade_native_water(uint2 pixel,float3 direction,float distance,thread float4& surface,
+    primitive_acceleration_structure scene,constant Parameters& p,device const float4* vertices,
+    device const RayMaterial* materials,device const uint* palette,device const uchar* texels,
+    device const uint* panorama,device const uint* enhanced) {
+    NativeWaterSample water=native_water_sample(float3(0.0f),direction,distance,pixel,
+        scene,p,vertices,materials,palette,texels);
+    surface=float4(water.normal,water.hit.z);
+    float3 radiance=water.radiance*(1.0f-water.fresnel)+water.specular;
+    if(water.fresnel>0.0f) radiance+=reflection_linear(trace_mirrors(water.hit+water.normal*water.bias,
+        reflect(direction,water.normal),pixel,water.bias,true,
+        scene,p,vertices,materials,palette,texels,panorama,enhanced),p)*water.fresnel;
+    return reflection_pack_linear(radiance,253u,p);
+}
+void store_liquid_surface(uint id,float4 surface,constant Parameters& p,device uint* output) {
+    if(p.source_colour.w<0.5f || (p.liquid_layers.z&2u)==0u)return;
+    uint at=p.liquid_layers.y+id*4u;
+    if(at+3u>=p.liquid_layers.w)return;
+    uint4 words=as_type<uint4>(surface);
+    output[at]=words.x;output[at+1u]=words.y;output[at+2u]=words.z;output[at+3u]=words.w;
+}
+uint shade_native_metal(uint2 pixel,float3 direction,float distance,float3 hit,float3 normal,uint material,
+    primitive_acceleration_structure scene,constant Parameters& p,device const float4* vertices,
+    device const RayMaterial* materials,device const uint* palette,device const uchar* texels,
+    device const uint* panorama,device const uint* enhanced) {
+    float bias=max(.05f,distance*1e-5f);
+    float3 light=normalize(world_to_view(float3(-1.0f),p));
+    float visibility=caustic_blocked(hit+normal*bias,light,65536.0f,bias,pixel,scene,p,materials,texels)?0.0f:1.0f;
+    float3 authored=rgb(p.environment);
+    if(p.backdrop.x!=0u && p.cube_info.w==0u)
+        authored=rgb(sample_backdrop(float2(128.0f,112.0f)+256.0f*hit.xy/hit.z,p,panorama,palette,enhanced));
+    float3 base=dot(authored,float3(.30f,.59f,.11f))
+        *(material==2u?float3(1.0f,.875f,.58f):float3(.8f,.82f,.85f));
+    float3 radiance=reflection_authored_linear(base,p)*(.65f+.35f*visibility*max(0.0f,dot(normal,light)));
+    if(p.water_settings.y>0.0f) {
+        uint colour=trace_mirrors(hit+normal*bias,reflect(direction,normal),pixel,bias,true,
+            scene,p,vertices,materials,palette,texels,panorama,enhanced);
+        float grazing=pow(1.0f-clamp(dot(-direction,normal),0.0f,1.0f),5.0f);
+        float3 f0=material==2u?float3(1.0f,.766f,.336f):float3(1.0f);
+        radiance=mix(radiance,reflection_linear(colour,p)*(f0+(1.0f-f0)*grazing),p.water_settings.y);
+    }
+    float specular=pow(max(0.0f,dot(normal,normalize(light-direction))),96.0f)*visibility;
+    radiance+=float3(1.0f,.95f,.82f)*specular*max(authored.r,max(authored.g,authored.b))*.55f;
+    return reflection_pack_linear(radiance,254u,p);
+}
 float hash(uint n) {
     n=(n^61u)^(n>>16u);n*=9u;n^=n>>4u;n*=0x27d4eb2du;n^=n>>15u;
     return float(n&65535u)/65535.0f;
@@ -529,6 +669,17 @@ kernel void starfox_hardware_reflection(
         (float(pixel.y)+0.5f-p.center_y)/p.focal_y,1.0f);
     float near_depth=p.primary_range.z>0.5f?p.primary_range.x:1.0f;
     float far_depth=p.primary_range.z>0.5f?p.primary_range.y:65536.0f;
+    store_liquid_surface(id,float4(0.0f),p,output);
+    uint world_colour=0u;float4 world_surface=float4(0.0f);bool world_valid=false;
+    if(p.source_colour.w>0.5f && (p.liquid_layers.z&1u)!=0u) {
+        float ground=native_ground_depth(pixel,p);
+        if(ground>near_depth && ground<far_depth) {
+            world_colour=shade_native_water(pixel,normalize(direction),ground*length(direction),world_surface,
+                scene,p,vertices,materials,palette,texels,panorama,enhanced);
+            world_valid=true;
+        }
+        output[p.liquid_layers.x+id]=world_colour;
+    }
     VisibleHit hit={intersection_type::none,far_depth,0u,float2(0.0f)};
     if(p.ground_point.w<0.5f) {
         SF_VISIBLE_HIT(primary,float3(0.0f),direction,near_depth,far_depth)
@@ -540,7 +691,7 @@ kernel void starfox_hardware_reflection(
     bool ground_hit=false;
     if(p.has_ground>0.5f) {
         float denominator=dot(direction,p.ground_normal.xyz);
-        if(abs(denominator)>1.e-10f) {
+        if(p.optical.x!=0u || abs(denominator)>1.e-10f) {
             float ground=p.optical.x!=0u?native_ground_depth(pixel,p)
                 :dot(p.ground_point.xyz,p.ground_normal.xyz)/denominator;
             if(ground>near_depth && ground<distance) {
@@ -549,6 +700,12 @@ kernel void starfox_hardware_reflection(
         }
     }
     if(distance>=far_depth) {output[id]=0u;return;}
+    if(ground_hit && p.source_colour.w>0.5f) {
+        float4 surface=float4(0.0f);
+        output[id]=world_valid?world_colour:shade_native_water(pixel,normalize(direction),distance*length(direction),surface,
+            scene,p,vertices,materials,palette,texels,panorama,enhanced);
+        store_liquid_surface(id,world_valid?world_surface:surface,p,output);return;
+    }
     float3 normal;
     if(ground_hit) normal=normalize(p.ground_normal.xyz);
     else {
@@ -559,7 +716,7 @@ kernel void starfox_hardware_reflection(
     if(dot(normal,direction)>0.0f) normal=-normal;
     float3 point=direction*distance;
     uint water_material=uint(p.water_settings.w)&15u;
-    if(!ground_hit && p.optical.y!=0u) {
+    if(!ground_hit && p.optical.w!=0u) {
         output[id]=shade_native_model(pixel,normalize(direction),point,normal,length(point),
             hit.primitive_id,hit.triangle_barycentric_coord,scene,p,vertices,materials,palette,texels,panorama,enhanced);
         return;
@@ -578,6 +735,10 @@ kernel void starfox_hardware_reflection(
         return;
     }
     if(ground_hit && (water_material==1u || water_material==2u)) {
+        if(p.optical.w!=0u) {
+            output[id]=shade_native_metal(pixel,normalize(direction),length(point),point,normal,water_material,
+                scene,p,vertices,materials,palette,texels,panorama,enhanced);return;
+        }
         float3 incoming=normalize(direction),cast=reflect(incoming,normal);
         float bias=max(.05f,length(point)*1e-5f);
         float3 value=float3(0.0f);
@@ -749,7 +910,7 @@ struct MetalHardwareRt::Impl {
     SDL_GPUBuffer* output{};
     std::uint32_t output_capacity{};
     SDL_GPUBuffer* reflection_buffer{};
-    std::uint32_t reflection_capacity{};
+    std::uint32_t reflection_capacity_bytes{};
     GpuBackground reflection_backdrop;
     struct InFlight {
         SDL_GPUFence* fence{};
@@ -828,7 +989,7 @@ struct MetalHardwareRt::Impl {
         if(output) SDL_ReleaseGPUBuffer(device,output);
         if(reflection_buffer) SDL_ReleaseGPUBuffer(device,reflection_buffer);
         reflection_backdrop.release_device();
-        output=reflection_buffer=nullptr;output_capacity=reflection_capacity=0;
+        output=reflection_buffer=nullptr;output_capacity=reflection_capacity_bytes=0;
         shadow_pipeline=nil;reflection_pipeline=nil;metal=nil;
         serial=0;device=nullptr;
         return true;
@@ -887,15 +1048,15 @@ struct MetalHardwareRt::Impl {
         if(output) SDL_ReleaseGPUBuffer(device,output);
         output=next;output_capacity=pixels;
     }
-    void ensure_reflection_output(std::uint32_t pixels) {
-        if(reflection_buffer && reflection_capacity>=pixels) return;
+    void ensure_reflection_output(std::uint32_t bytes) {
+        if(reflection_buffer && reflection_capacity_bytes>=bytes) return;
         SDL_GPUBufferCreateInfo info{};
         info.usage=SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ|SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE;
-        info.size=pixels*4U;
+        info.size=bytes;
         auto* next=SDL_CreateGPUBuffer(device,&info);
         if(!next) throw std::runtime_error(SDL_GetError());
         if(reflection_buffer) SDL_ReleaseGPUBuffer(device,reflection_buffer);
-        reflection_buffer=next;reflection_capacity=pixels;
+        reflection_buffer=next;reflection_capacity_bytes=bytes;
     }
 };
 
@@ -1158,11 +1319,8 @@ bool MetalHardwareRt::render_reflections(void* raw,
                 impl_->status="Resident Metal environment byte range exceeds SDL buffer limits";return false;
             }
         }
-        // This producer currently emits the packed reflection image. Never
-        // pretend it supplies the separate calibrated liquid guides/history.
-        if(native_rgba && water && (water->source_colour || water->auxiliary_layers || water->surface_layers)) {
-            impl_->status="Calibrated Metal liquid output layers are not implemented";return false;
-        }
+        const bool native_water=water && water->source_colour.has_value();
+        std::optional<NativeWaterLayers> layers;
         if(water) {
             if(!ground || water->material>3 || water->caustics>3
                 || !std::isfinite(water->time) || !std::isfinite(water->brightness)
@@ -1171,12 +1329,42 @@ bool MetalHardwareRt::render_reflections(void* raw,
                 || water->reflection_strength<0 || water->reflection_strength>1) return false;
             for(float value:water->world_to_view) if(!std::isfinite(value)) return false;
             for(float value:water->camera_position) if(!std::isfinite(value)) return false;
+            if(native_water) {
+                if(!native_rgba || !ground || water->material!=0 || !colour_encoding) {
+                    impl_->status="Calibrated water requires native materials, a plane and explicit linear/sRGB encoding";return false;
+                }
+                for(float value:*water->source_colour) if(!std::isfinite(value) || value<0 || value>1) {
+                    impl_->status="Invalid calibrated Metal water source colour";return false;
+                }
+            }
+            if(native_water || (native_rgba && colour_encoding && water->material!=0)) {
+                const auto& r=water->world_to_view;
+                const double determinant=double(r[0])*(double(r[4])*r[8]-double(r[5])*r[7])
+                    -double(r[1])*(double(r[3])*r[8]-double(r[5])*r[6])
+                    +double(r[2])*(double(r[3])*r[7]-double(r[4])*r[6]);
+                double volume=1;
+                for(unsigned row=0;row<3;++row) {
+                    double squared=0;for(unsigned c=0;c<3;++c)squared+=double(r[row*3+c])*r[row*3+c];
+                    volume*=std::sqrt(squared);
+                }
+                if(!std::isfinite(determinant) || (native_water?std::abs(determinant)<1.e-8
+                    :!std::isfinite(volume) || volume==0 || std::abs(determinant)<=volume*1.e-8)) {
+                    impl_->status="Singular calibrated Metal liquid/planar transform";return false;
+                }
+            }
+            if(native_water && (water->auxiliary_layers || water->surface_layers)) {
+                layers=native_water_layers(camera.width,camera.height,water->auxiliary_layers);
+                if(!layers) {impl_->status="Calibrated Metal water layer dimensions overflow";return false;}
+            } else if(!native_water && (water->auxiliary_layers || water->surface_layers)) {
+                impl_->status="Metal water layers require calibrated source colour";return false;
+            }
         }
         impl_->initialize(device);
         impl_->ensure_reflection_pipeline();
         auto& slot=impl_->inflight[impl_->serial++%impl_->inflight.size()];
         impl_->wait_slot(slot);
-        impl_->ensure_reflection_output(std::uint32_t(pixels));
+        const auto output_bytes=layers?layers->storage_bytes:std::uint32_t(pixels*4U);
+        impl_->ensure_reflection_output(output_bytes);
         auto* command=SDL_AcquireGPUCommandBuffer(device);
         if(!command) throw std::runtime_error(SDL_GetError());
         bool submitted=false;
@@ -1200,7 +1388,7 @@ bool MetalHardwareRt::render_reflections(void* raw,
             auto vertices=(__bridge id<MTLBuffer>)SDL_StarfoxMetalBuffer(source);
             auto target=(__bridge id<MTLBuffer>)SDL_StarfoxMetalBuffer(impl_->reflection_buffer);
             auto native=(__bridge id<MTLCommandBuffer>)SDL_StarfoxMetalCommandBuffer(command);
-            if(!vertices || !target || !native)
+            if(!vertices || !target || !native || target.length<output_bytes)
                 throw std::runtime_error("Missing native Metal reflection resource");
             const auto vertex_bytes=std::uint64_t(geometry.vertex_count)*sizeof(Float4);
             const auto material_bytes=native_rgba?std::uint64_t(geometry.material_bytes):record_bytes;
@@ -1255,7 +1443,7 @@ bool MetalHardwareRt::render_reflections(void* raw,
             [builder endEncoding];
             ReflectionParameters p{};
             p.primary_range=primary_parameters(primary_range);
-            p.optical={colour_encoding,specular_models?1U:0U,0,0};
+            p.optical={colour_encoding,specular_models?1U:0U,0,native_rgba && colour_encoding?1U:0U};
             if(resident_environment) {
                 const auto& cube=*resident_environment;
                 p.cube_info={cube.relative_offset/4,cube.face_size,colour_encoding,1};
@@ -1307,6 +1495,9 @@ bool MetalHardwareRt::render_reflections(void* raw,
                 p.water_row0={r[0],r[1],r[2],water->camera_position[0]};
                 p.water_row1={r[3],r[4],r[5],water->camera_position[1]};
                 p.water_row2={r[6],r[7],r[8],water->camera_position[2]};
+                if(native_water) p.source_colour={(*water->source_colour)[0],(*water->source_colour)[1],(*water->source_colour)[2],1};
+                if(layers) p.liquid_layers={layers->world_offset/4,layers->surface_offset/4,
+                    water->auxiliary_layers?3U:2U,layers->storage_bytes/4};
             }
             auto encoder=[native computeCommandEncoder];
             [encoder setComputePipelineState:impl_->reflection_pipeline];
@@ -1338,6 +1529,7 @@ bool MetalHardwareRt::render_reflections(void* raw,
         }
         impl_->reflection={device,impl_->reflection_buffer,camera.width,camera.height,
             camera.width*4U};
+        if(layers) impl_->reflection.water_layers=*layers;
         impl_->status=quality==1?"Metal hardware reflections LOW (1 ray)"
             :quality==2?"Metal hardware reflections MEDIUM (2 rays)"
             :"Metal hardware reflections HIGH (4 rays)";
@@ -1352,7 +1544,7 @@ const std::string& MetalHardwareRt::status() const noexcept {return impl_->statu
 bool MetalHardwareRt::native_work_complete() const noexcept {return impl_->complete();}
 std::uint64_t MetalHardwareRt::working_image_bytes() const noexcept {
     return (impl_->output?std::uint64_t(impl_->output_capacity)*4:0)
-        +(impl_->reflection_buffer?std::uint64_t(impl_->reflection_capacity)*4:0);
+        +(impl_->reflection_buffer?std::uint64_t(impl_->reflection_capacity_bytes):0);
 }
 bool MetalHardwareRt::try_release_device() noexcept {return impl_->release(false);}
 void MetalHardwareRt::release_device() noexcept {(void)impl_->release(true);}

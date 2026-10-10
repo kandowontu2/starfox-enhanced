@@ -22,6 +22,8 @@ def main():
     for token, name in (("CAUSTICS", "water_caustics"), ("TRANSMISSION", "water_transmission")):
         template = template.replace(f"@STARFOX_WATER_{token}_SOURCE@",
                                     (root / f"include/starfox/render/{name}.inc").read_text(encoding="utf-8"))
+    template = template.replace("@STARFOX_LIQUID_OPTICS_SOURCE@",
+        (root / "include/starfox/render/metal_liquid_optics.inc").read_text(encoding="utf-8"))
     if re.search(r"@STARFOX_[A-Z_]+@", template):
         raise RuntimeError("Unresolved shared Metal shader source token")
     shared = re.search(r'R"SF_WATER\((.*?)\)SF_WATER"', template, re.S)

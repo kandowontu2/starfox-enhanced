@@ -11,11 +11,12 @@ import subprocess
 import sys
 
 import compile_metal as observer
+from metal_liquid_optics import liquid_optics_source
 
 ROOT = Path(__file__).resolve().parents[1]
 OBSERVER_SHA = "cc770ea2068978eb0eeb381dc3bbf8983b838c2563f2605678272146f632fbb4"
 DECODER_SHA = "69d61c1055f123f1b750eaa95bc3063994f2dbe754316430b41533c8cbe83a86"
-SCOPE = "additional-native-metal-completion-and-resource-lifecycle-producer"
+SCOPE = "additional-native-metal-calibrated-liquid-world-and-surface-layers"
 REQUIRED = {
     ".gitattributes", ".github/workflows/portable-builds.yml", "README.md", "LICENSE",
     "headers/SDL3/LICENSE.txt", "src/render/metal_hardware_rt.mm",
@@ -25,6 +26,8 @@ REQUIRED = {
     "include/starfox/render/lava_surface.inc", "include/starfox/render/water_caustics.inc",
     "include/starfox/render/water_transmission.inc", "tools/check_metal_rt_shaders.py",
     "tests/test_metal_shader_sources.py", "tools/compile_metal.py", "tools/check_producer.py",
+    "tools/metal_liquid_optics.py", "src/render/shaders/liquid_optics.hlsli",
+    "include/starfox/render/metal_liquid_optics.inc",
 }
 
 
@@ -49,6 +52,8 @@ def qualify(manifest):
             ROOT / "include/starfox/render/metal_native_material_coverage.inc") != DECODER_SHA or observer.digest(
             ROOT / "include/starfox/render/metal_material_colour.inc") != "ec73381d05ad01b71780abb821d5f25b54080124410e8854a8c52931ea5d9347":
         raise RuntimeError("Original native observer or previously checked decoder changed")
+    if (ROOT / "include/starfox/render/metal_liquid_optics.inc").read_text(encoding="utf-8") != liquid_optics_source(ROOT):
+        raise RuntimeError("Canonical liquid geometry and generated Metal helper differ")
     actual = {str(path.relative_to(ROOT)).replace('\\', '/') for path in ROOT.rglob('*') if path.is_file()
               and '__pycache__' not in path.parts and '.git' not in path.parts and path.name != 'CMakeLists.txt'}
     if actual != set(names) | {"inputs.json"}:
@@ -123,7 +128,8 @@ def main():
     water = embedded_header(ROOT / "src/render/shaders/metal_water_shared.hpp.in", {
         "@STARFOX_LAVA_SURFACE_SOURCE@": ROOT / "include/starfox/render/lava_surface.inc",
         "@STARFOX_WATER_CAUSTICS_SOURCE@": ROOT / "include/starfox/render/water_caustics.inc",
-        "@STARFOX_WATER_TRANSMISSION_SOURCE@": ROOT / "include/starfox/render/water_transmission.inc"})
+        "@STARFOX_WATER_TRANSMISSION_SOURCE@": ROOT / "include/starfox/render/water_transmission.inc",
+        "@STARFOX_LIQUID_OPTICS_SOURCE@": ROOT / "include/starfox/render/metal_liquid_optics.inc"})
     native = embedded_header(ROOT / "src/render/shaders/metal_native_material_shared.hpp.in", {
         "@STARFOX_METAL_NATIVE_COVERAGE_SOURCE@": ROOT / "include/starfox/render/metal_native_material_coverage.inc",
         "@STARFOX_METAL_MATERIAL_COLOUR_SOURCE@": ROOT / "include/starfox/render/metal_material_colour.inc",

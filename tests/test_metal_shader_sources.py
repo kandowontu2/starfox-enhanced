@@ -88,14 +88,14 @@ class MetalSourceAssemblyTests(unittest.TestCase):
         self.assertIn("!geometry.materials->triangles.empty() || !geometry.materials->texels.empty()", reflection)
         self.assertIn("if(!native_rgba) {", reflection)
         self.assertIn("setBuffer:native_rgba?vertices:slot.texels", reflection)
-        self.assertIn("Calibrated Metal liquid output layers are not implemented", reflection)
+        self.assertIn("Metal water layers require calibrated source colour", reflection)
         self.assertIn("Unknown Metal reflection material encoding", reflection)
-        self.assertIn("sizeof(ReflectionParameters)==384", self.implementation)
+        self.assertIn("sizeof(ReflectionParameters)==416", self.implementation)
         self.assertIn("offsetof(ReflectionParameters,coverage)==272", self.implementation)
         shader = self.body("Reflection")
         self.assertEqual(shader.count("uint4 coverage;"), 1)
-        self.assertEqual(shader.count("p.texel_count,p.coverage"), 6)
-        self.assertEqual(shader.count("palette_hit("), 7)  # definition plus all six colour queries
+        self.assertEqual(shader.count("p.texel_count,p.coverage"), 7)
+        self.assertEqual(shader.count("palette_hit("), 8)  # definition plus all seven colour queries
         self.assertIn("p.texel_count,true,false,p.coverage);", shader)
         self.assertIn("starfox_native_material_colour(primitive,bary.x,bary.y,pixel.x,pixel.y", shader)
         helper = (ROOT / "include/starfox/render/metal_native_material_colour.inc").read_text(encoding="utf-8")
@@ -110,7 +110,7 @@ class MetalSourceAssemblyTests(unittest.TestCase):
             self.assertEqual(shader.count("float4 primary_range;"), 1)
             self.assertIn("float near_depth=p.primary_range.z>0.5f?p.primary_range.x:1.0f;", shader)
             self.assertIn("float far_depth=p.primary_range.z>0.5f?p.primary_range.y:65536.0f;", shader)
-        primary_reflection = reflection.split("kernel void starfox_hardware_reflection(", 1)[1].split("float distance=", 1)[0]
+        primary_reflection = reflection.split("VisibleHit hit=", 1)[1].split("float distance=", 1)[0]
         self.assertNotIn("normalize(direction)", primary_reflection)
         self.assertNotIn("normalize(direction)", shadow)
         self.assertIn("ray primary(float3(0.0f),direction,near_depth,far_depth);", shadow)
@@ -149,13 +149,13 @@ class MetalSourceAssemblyTests(unittest.TestCase):
         self.assertIn("result.radiance=reflection_authored_linear(molten,p);", shader)
         self.assertIn("uint samples=p.roughness>0.0f?8u:1u;", shader)
         self.assertIn("bool model_transport=p.optical.y!=0u;", shader)
-        self.assertIn("if(!ground_hit && p.optical.y!=0u)", shader)
+        self.assertIn("if(!ground_hit && p.optical.w!=0u)", shader)
         self.assertIn("float3(1.0f,.766f,.336f)", shader)
         self.assertIn("float3(.955f,.638f,.538f)", shader)
         host = self.implementation.split("bool MetalHardwareRt::render_reflections", 1)[1]
         self.assertLess(host.index("if(specular_models && (!native_rgba || !colour_encoding))"), host.index("impl_->initialize(device)"))
         self.assertIn("roughness>1 || metallic>3 || colour_encoding>2", host)
-        self.assertIn("p.optical={colour_encoding,specular_models?1U:0U,0,0};", host)
+        self.assertIn("p.optical={colour_encoding,specular_models?1U:0U,0,native_rgba && colour_encoding?1U:0U};", host)
 
     def test_resident_cube_seams_bindings_and_bounds(self):
         shader = self.body("Reflection")
@@ -204,7 +204,7 @@ class MetalSourceAssemblyTests(unittest.TestCase):
         self.assertLess(release.index("for(auto& slot:inflight) await(slot);"), release.index("clear_completed(slot,true)"))
         self.assertLess(release.index("else if(!complete())"), release.index("SDL_ReleaseGPUBuffer"))
         self.assertIn("shadow_pipeline=nil;reflection_pipeline=nil;metal=nil;", release)
-        self.assertIn("output=reflection_buffer=nullptr;output_capacity=reflection_capacity=0;", release)
+        self.assertIn("output=reflection_buffer=nullptr;output_capacity=reflection_capacity_bytes=0;", release)
         self.assertIn("serial=0;device=nullptr;", release)
         self.assertIn("if(!impl_->release(true)) (void)impl_.release();", code)
         self.assertNotIn("impl_.reset(new Impl)", code)
@@ -214,9 +214,68 @@ class MetalSourceAssemblyTests(unittest.TestCase):
         code = self.implementation
         body = code.split("MetalHardwareRt::working_image_bytes() const noexcept {", 1)[1].split("bool MetalHardwareRt::try_release_device", 1)[0]
         self.assertIn("std::uint64_t(impl_->output_capacity)*4", body)
-        self.assertIn("std::uint64_t(impl_->reflection_capacity)*4", body)
+        self.assertIn("std::uint64_t(impl_->reflection_capacity_bytes)", body)
         self.assertNotIn("scratch", body)
         self.assertNotIn("acceleration", body)
+
+    def test_calibrated_liquid_host_abi_capacity_and_refusal(self):
+        code=self.implementation
+        host=code.split("bool MetalHardwareRt::render_reflections",1)[1]
+        for check in ("offsetof(ReflectionParameters,source_colour)==384", "offsetof(ReflectionParameters,liquid_layers)==400"):
+            self.assertIn(check,code)
+        for check in ("!native_rgba || !ground || water->material!=0 || !colour_encoding",
+                      "!std::isfinite(value) || value<0 || value>1", "std::abs(determinant)<1.e-8",
+                      "std::abs(determinant)<=volume*1.e-8", "native_water_layers(camera.width,camera.height,water->auxiliary_layers)",
+                      "layers?layers->storage_bytes:std::uint32_t(pixels*4U)", "target.length<output_bytes",
+                      "impl_->reflection.water_layers=*layers", "water->auxiliary_layers?3U:2U,layers->storage_bytes/4"):
+            self.assertIn(check,host)
+        self.assertLess(host.index("native_water_layers("),host.index("impl_->initialize(device)"))
+        allocation=code.split("void ensure_reflection_output(",1)[1].split("MetalHardwareRt::MetalHardwareRt",1)[0]
+        self.assertIn("info.size=bytes;",allocation)
+        self.assertNotIn("pixels*4",allocation)
+
+    def test_canonical_liquid_geometry_and_full_transmission(self):
+        sys.path.insert(0,str(ROOT / "tools"))
+        from metal_liquid_optics import liquid_optics_source
+        generated=(ROOT / "include/starfox/render/metal_liquid_optics.inc").read_text(encoding="utf-8")
+        self.assertEqual(generated,liquid_optics_source(ROOT))
+        actual=(self.destination / "reflection.metal").read_text(encoding="utf-8")
+        self.assertIn(generated,actual)
+        self.assertEqual(actual.count("LiquidOpticalSample liquid_optical_sample("),1)
+        shader=self.body("Reflection")
+        water=shader.split("NativeWaterSample native_water_sample(float3 origin",2)[2].split("uint shade_native_water",1)[0]
+        for check in ("optical.entering?.75f:1.0f/.75f", "bool total_internal=dot(transmitted,transmitted)<1e-10f",
+                      "min(65536.0f,max(result.bias,bottom))", "receiver_world=receiver_view*rotation+offset",
+                      "water_caustic_sample(", "path-result.bias", "water_transmitted_channel(receiver.r",
+                      "water_transmitted_channel(receiver.g", "water_transmitted_channel(receiver.b",
+                      "result.fresnel=total_internal?1.0f", "result.specular=float3(1,.95f,.82f)"):
+            self.assertIn(check,water)
+        self.assertIn("materials,texels,p.texel_count,true,true,p.coverage",shader)
+        self.assertIn("water.radiance*(1.0f-water.fresnel)+water.specular",shader)
+        self.assertIn("return reflection_pack_linear(radiance,253u,p);",shader)
+
+    def test_world_layers_do_not_replace_primary_opaque_models(self):
+        shader=self.body("Reflection")
+        main=shader.split("kernel void starfox_hardware_reflection(",1)[1]
+        self.assertLess(main.index("store_liquid_surface(id,float4(0.0f)"),main.index("VisibleHit hit="))
+        self.assertLess(main.index("output[p.liquid_layers.x+id]=world_colour"),main.index("SF_VISIBLE_HIT(primary"))
+        self.assertIn("if(ground_hit && p.source_colour.w>0.5f)",main)
+        self.assertIn("store_liquid_surface(id,world_valid?world_surface:surface,p,output)",main)
+        self.assertIn("surface=float4(water.normal,water.hit.z)",shader)
+        self.assertIn("if(at+3u>=p.liquid_layers.w)return;",shader)
+        self.assertIn("uint4 words=as_type<uint4>(surface)",shader)
+        self.assertIn("if(p.optical.x!=0u || abs(denominator)>1.e-10f)",main)
+        self.assertLess(main.index("if(ground_hit && p.source_colour.w>0.5f)"),main.index("if(!ground_hit && p.optical.w!=0u)"))
+        self.assertNotIn("source_colour.w",main.split("if(!ground_hit && p.optical.w!=0u)",1)[1].split("return;",1)[0])
+
+    def test_calibrated_planar_surface_keeps_authored_base(self):
+        shader=self.body("Reflection")
+        planar=shader.split("uint shade_native_metal(",1)[1].split("float hash(",1)[0]
+        self.assertIn("float3 authored=rgb(p.environment)",planar)
+        self.assertIn("p.backdrop.x!=0u && p.cube_info.w==0u",planar)
+        self.assertIn("float3(1.0f,.875f,.58f):float3(.8f,.82f,.85f)",planar)
+        self.assertLess(planar.index("float3 radiance="),planar.index("if(p.water_settings.y>0.0f)"))
+        self.assertIn("return reflection_pack_linear(radiance,254u,p);",planar)
 
 
 if __name__ == "__main__":
