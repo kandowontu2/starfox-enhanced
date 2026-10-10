@@ -1,36 +1,29 @@
-# Star Fox Enhanced — native material coverage and colour SDK candidate
+# Star Fox Enhanced — native Metal shadow material candidate
 
-This temporary, source-only tree compiles native material-opacity and colour probes for
-the macOS and iOS Metal SDKs. It is not a release or a replacement for the
-existing complete 25-program reflection pipeline and its validation suite.
+This temporary source-only component integrates the separately CPU/SDK-checked
+64-byte native RGBA opacity decoder into the actual Metal shadow producer and
+its complete runtime shader sources. Native shadows read the resident records
+and atlas directly, with declared payload and actual allocation-word bounds.
+Legacy indexed and geometry-only paths are retained. Opacity is checked inside
+the native intersection query, not by restarting a ray past a cutout.
 
-The decoder handles the native 64-byte kind-2 solid/dither and kind-3
-RGBA/indexed-atlas material records. It returns only fully opaque texels and
-does not apply material styles, lighting or sRGB conversions. Palette index
-zero can be opaque black; partially transparent texels are ray cutouts.
+The candidate embeds the exact decoder in runtime source strings rather than
+depending on on-device filesystem includes. Runtime compilation disables unsafe
+floating-point optimizations, with the appropriate old/new SDK option selected
+by availability. Both primary and shadow rays receive the native material view.
 
-The same scalar decoder passed 4,217,088 independent CPU opacity comparisons
-across all 24 existing opacity variants before this SDK check. That result is
-not Metal execution, ray traversal, reflection-colour, game integration or
-performance acceptance. Both Metal probes have a query-count bounds check.
+CI compiles the entire Objective-C++ producer against its real project header
+closure and original public SDL headers, then compiles/links both full runtime
+shadow and reflection shader libraries using the existing Metal3.0 RT language
+recipe and strict O3/FP flags. It retains the original native process/memory
+observer. No GPU is executed. This is not an abbreviated complete25 test suite.
 
-The colour probe evaluates a committed opaque material, using the same whole
-calibrated palette and scene-colour sources as native DXR and Vulkan. A restricted
-syntax adapter changes only known scalar swizzles, out-reference syntax, lerp
-spelling and floating-literal suffixes. Native kind2 solids stay already styled;
-kind3 textures receive the selected style once, with the same input/output sRGB
-flags. Source assembly and SDK compilation are not colour-output acceptance.
+Native RGBA reflection production still deliberately refuses unsupported input:
+its full colour/history/producer contract remains separate work. Empty caster
+scenes, GPU execution, numerical/frame cost, full game integration and physical
+device acceptance are not proven by compilation or source checks. Do not adopt
+or call the whole rendering goal complete from these artifacts.
 
-`tools/compile_coverage.py` verifies every source byte against `inputs.json`,
-then uses the unchanged native compiler observer from the complete-pipeline
-SDK recipe. Only its source-qualification callback changes to this explicitly
-separate component's complete input inventory. Compiler flags, SDK minimums,
-process ownership, memory floors and resident cap are unchanged.
-
-The manual workflow compiles and links these two probe kernels per SDK, preserves real
-diagnostics and native-operation receipts, and never executes it on a GPU. It
-does not publish a release, package assets, change main or validate production
-adoption. GPU dispatch and integration remain separate work.
-
-Sources are licensed under GPLv3, like Star Fox Enhanced. The project uses
-AI/Codex assistance for programming, testing and documentation.
+No main/release/ROM/assets/credentials are changed or published. AI/Codex is used
+for programming, testing and documentation. Project sources are GPLv3; the
+unmodified SDL public include directory retains its bundled upstream license.

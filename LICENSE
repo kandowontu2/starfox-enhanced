@@ -1,10 +1,6 @@
-Star Fox Enhanced — source-only material coverage candidate
+Star Fox Enhanced — source-only native Metal shadow candidate
 
-These project sources are distributed under the GNU General Public License,
-version 3. You may redistribute and modify them under the terms of that license.
-
-This software is supplied without warranty, including any implied warranty of
-merchantability or fitness for a particular purpose. See the full license:
-https://www.gnu.org/licenses/gpl-3.0.txt
-
-This temporary source tree contains no retail ROM or private game assets.
+Project sources are distributed under GNU GPL version 3, without warranty.
+The full license is available at https://www.gnu.org/licenses/gpl-3.0.txt
+The unmodified public SDL headers retain their own license, included in
+headers/SDL3/LICENSE.txt. No retail ROM or private assets are included.

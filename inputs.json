@@ -1,9 +1,5 @@
 {
-  "Scope": "additional-material-coverage-and-colour",
-  "Entries": [
-    "starfox_native_coverage_probe",
-    "starfox_native_colour_probe"
-  ],
+  "Scope": "additional-native-shadow-producer-and-runtime-shaders",
   "Sources": [
     {
       "File": ".gitattributes",
@@ -12,33 +8,573 @@
     },
     {
       "File": ".github/workflows/portable-builds.yml",
-      "Sha256": "917ddda9ebea93af7619c810cda3954a3a0cd645681a4fc3e31c01c7da7675f6",
-      "Bytes": 1343
+      "Sha256": "2fad5bc3783e007e8e4333ab66b3387780f0cf551b8fc3e55e2aa2c026e18b46",
+      "Bytes": 1423
     },
     {
-      "File": "fixtures/native_indexed_cutout_fixture.hpp",
-      "Sha256": "f33abe9008e43269f06b0e9998e3a0ac1e92aa11f2291cee29301d7e7fa264fc",
-      "Bytes": 10361
+      "File": "cmake/NativeMetalMaterialSource.cmake",
+      "Sha256": "fe961ffb82321f72563bc5c9045fb64581b54ef4d30db35522fcdd5222c3f174",
+      "Bytes": 604
     },
     {
-      "File": "fixtures/native_reflection_fixture.hpp",
-      "Sha256": "42066c631dc9ddb04895c8e78367a448d416925d474c998de99c35ca455d7f23",
-      "Bytes": 18666
+      "File": "headers/SDL3/LICENSE.txt",
+      "Sha256": "1c040b8271b37e5076359f8fd54240e371114112924d2df81ef87c7d6a1dfdfd",
+      "Bytes": 884
     },
     {
-      "File": "fixtures/native_rgba_shadow_fixture.hpp",
-      "Sha256": "a96dc35d8e1ebd12b918b22916454da7aafdf39d4578a718b1be61a9540036ce",
-      "Bytes": 9073
+      "File": "headers/SDL3/SDL_assert.h",
+      "Sha256": "0832e7ba5084c0aaaee64bfaed031b05be07bcdd399e28f69c04c9bbd2dbf19a",
+      "Bytes": 28361
     },
     {
-      "File": "fixtures/native_shadow_cutout_fixture.hpp",
-      "Sha256": "0f68e24972ab0f9dca4465570e6b08bad00a6e7c0fa311ff402493a6b0f271b9",
-      "Bytes": 5610
+      "File": "headers/SDL3/SDL_asyncio.h",
+      "Sha256": "acec5e4c8cbcfe8dc371adb63ad986ff3521685bca9b683ac4cc18ed13b1e840",
+      "Bytes": 23450
     },
     {
-      "File": "fixtures/reflected_liquid_oracle.hpp",
-      "Sha256": "21551eb44bbebd5589e69a31c6338017fa6d148e1808939ce16beb838a8244e9",
-      "Bytes": 4895
+      "File": "headers/SDL3/SDL_atomic.h",
+      "Sha256": "42b130672823adfe1225f7b68d65919444a21b618c86b40e9d44e027db29de9e",
+      "Bytes": 26048
+    },
+    {
+      "File": "headers/SDL3/SDL_audio.h",
+      "Sha256": "244fa8da51ac74d9c01414de18e35ce4371c2e15250c8e450ffe4d67d62d16f3",
+      "Bytes": 98065
+    },
+    {
+      "File": "headers/SDL3/SDL_begin_code.h",
+      "Sha256": "00e0196d5356ca8c38557d8d473c78735aacb4412ba0c6d1012e8df387270e28",
+      "Bytes": 18082
+    },
+    {
+      "File": "headers/SDL3/SDL_bits.h",
+      "Sha256": "028c845f51fe13238072778a282514f824d24622f4af0b0af63a3811271d0912",
+      "Bytes": 4352
+    },
+    {
+      "File": "headers/SDL3/SDL_blendmode.h",
+      "Sha256": "3a3e25b43bb2ab520b59a50c101a06f4ce17af27e2250a4dfd6cb296c973c3d1",
+      "Bytes": 9342
+    },
+    {
+      "File": "headers/SDL3/SDL_camera.h",
+      "Sha256": "e317c60e7bff8db50358d021813661a9c7de36ac11f655f21fb45b2cf3b3cd2a",
+      "Bytes": 21109
+    },
+    {
+      "File": "headers/SDL3/SDL_clipboard.h",
+      "Sha256": "6351b0b419168c98f95d2f131bc2f2208fbe0171ab32085488d25adffe8f6e37",
+      "Bytes": 12441
+    },
+    {
+      "File": "headers/SDL3/SDL_close_code.h",
+      "Sha256": "67aeed66c5310ac5dc62bc0f1c03713719f28529033cde6bb668d5964d179c27",
+      "Bytes": 1567
+    },
+    {
+      "File": "headers/SDL3/SDL_copying.h",
+      "Sha256": "b5113ee040521690fecda79e1e00d078166d2ec2632153a8ee498f3bcbf40886",
+      "Bytes": 984
+    },
+    {
+      "File": "headers/SDL3/SDL_cpuinfo.h",
+      "Sha256": "9307452eccae54d8bf35dff79daa2e804e29f244e2208c5e7932dfadcf3e8c12",
+      "Bytes": 11359
+    },
+    {
+      "File": "headers/SDL3/SDL_dialog.h",
+      "Sha256": "b81aaf26316299bd9bfb1017c48a5d4b6fe525c64d0058821b70b3223df579db",
+      "Bytes": 14538
+    },
+    {
+      "File": "headers/SDL3/SDL_dlopennote.h",
+      "Sha256": "10449e075868d279114658d3024300b1e59d42ec98cb2374949ba18478544df4",
+      "Bytes": 8786
+    },
+    {
+      "File": "headers/SDL3/SDL_egl.h",
+      "Sha256": "f477f952afad531447dc644d95fb564505d4c2c11d3e246a1affbceabaf779bc",
+      "Bytes": 108941
+    },
+    {
+      "File": "headers/SDL3/SDL_endian.h",
+      "Sha256": "19405eb59c29e5a4eb69afdcf3c38bd678fcf5660a529ec0b8015a82ba602d91",
+      "Bytes": 20162
+    },
+    {
+      "File": "headers/SDL3/SDL_error.h",
+      "Sha256": "c3fb65e2899d341f84ab3a0bbe99646d51efab252290fff28ce36ffc7b5f9a34",
+      "Bytes": 7095
+    },
+    {
+      "File": "headers/SDL3/SDL_events.h",
+      "Sha256": "bb51b7035b41462b8040ce17677fddc90dd0a1ff3ecd8e97086f474f0be9baa1",
+      "Bytes": 71634
+    },
+    {
+      "File": "headers/SDL3/SDL_filesystem.h",
+      "Sha256": "594df8cacd921611186fe9251c4771bb5a9733d36bdd3e821c2fd9382857097a",
+      "Bytes": 22921
+    },
+    {
+      "File": "headers/SDL3/SDL_gamepad.h",
+      "Sha256": "55350e07e9569d70a25643e578edb53bce60867aebb2a3550b00250033f60a8b",
+      "Bytes": 59615
+    },
+    {
+      "File": "headers/SDL3/SDL_gpu.h",
+      "Sha256": "209f37565e01ec0231b4f97a4ca24d157efa33a6454753fcdc255fdb43f54553",
+      "Bytes": 181916
+    },
+    {
+      "File": "headers/SDL3/SDL_guid.h",
+      "Sha256": "556ed320776337ef8af8fada3e3fe4a795dddc2abfb7f4813830acb3272d879e",
+      "Bytes": 3430
+    },
+    {
+      "File": "headers/SDL3/SDL_haptic.h",
+      "Sha256": "b44f466ce6ffc44f4390c02c0688b9462ea48c0150373a4187c9c4eaf3829e95",
+      "Bytes": 45075
+    },
+    {
+      "File": "headers/SDL3/SDL_hidapi.h",
+      "Sha256": "129fcc4b99aca44a30dccb0d1c653c1a0b018f3e57d3547c414c81db7de508af",
+      "Bytes": 22043
+    },
+    {
+      "File": "headers/SDL3/SDL_hints.h",
+      "Sha256": "55e08ab2d465c8741244a3ea02dca17de001360302b2876a5b295662997cb2a2",
+      "Bytes": 169611
+    },
+    {
+      "File": "headers/SDL3/SDL_init.h",
+      "Sha256": "54f65b10221de0e1ee59b99d01661a56472bc9abb05690c0d5bd787670965a8d",
+      "Bytes": 20850
+    },
+    {
+      "File": "headers/SDL3/SDL_intrin.h",
+      "Sha256": "66f00cfb3259e0207d32d608bc326f2aeb25fc96d5223e26ff5501d0efc5bd82",
+      "Bytes": 13860
+    },
+    {
+      "File": "headers/SDL3/SDL_iostream.h",
+      "Sha256": "81f8719b82f61d00a96dac7b97313115172e82e05361878dbcbaad96e334aed8",
+      "Bytes": 53548
+    },
+    {
+      "File": "headers/SDL3/SDL_joystick.h",
+      "Sha256": "de936f3314f39bb02aaf3afc758aa3af7cf5cd2152c2265369d7dc5abca1f1bb",
+      "Bytes": 51596
+    },
+    {
+      "File": "headers/SDL3/SDL_keyboard.h",
+      "Sha256": "b7664fb34abcf86f669edf4fd5fdef2d58fa025f49d91b4743888f192c519d8d",
+      "Bytes": 21492
+    },
+    {
+      "File": "headers/SDL3/SDL_keycode.h",
+      "Sha256": "82c54f5b995c952d6bda3dae6a409d0115b604ee17da3c77de8fe62dbb9c8e60",
+      "Bytes": 26697
+    },
+    {
+      "File": "headers/SDL3/SDL_loadso.h",
+      "Sha256": "14246190e220d2ec52c40a586ceb571ee928215d09e1d82b260675da3a94634f",
+      "Bytes": 5182
+    },
+    {
+      "File": "headers/SDL3/SDL_locale.h",
+      "Sha256": "a65538f0a78a6fc5477c41a0ef359c8b57eacf03c2998d48cac48dd7645bd6f8",
+      "Bytes": 4524
+    },
+    {
+      "File": "headers/SDL3/SDL_log.h",
+      "Sha256": "15f28418f4fe636b41f78541bd73217c32ec0e11a2ef0f39c2ba8033fc3702cf",
+      "Bytes": 16982
+    },
+    {
+      "File": "headers/SDL3/SDL_main_impl.h",
+      "Sha256": "e2084e6e8ca5ef1c6948ae2de406e82c0df45bf910c90260433abaa24f232970",
+      "Bytes": 5846
+    },
+    {
+      "File": "headers/SDL3/SDL_main.h",
+      "Sha256": "cc1b4a1ad67b6e090951babc392548ce9cd7e5a33618f262f567a51659239ff9",
+      "Bytes": 27472
+    },
+    {
+      "File": "headers/SDL3/SDL_messagebox.h",
+      "Sha256": "124139156dc7887b3f6fc5f8dfd45b9711d4d834204baa20dec89aebba522918",
+      "Bytes": 8178
+    },
+    {
+      "File": "headers/SDL3/SDL_metal.h",
+      "Sha256": "0689f189d73dc0b9b314013f77505cbeca10d96b23556a057ee8d676b46d8983",
+      "Bytes": 3354
+    },
+    {
+      "File": "headers/SDL3/SDL_misc.h",
+      "Sha256": "3302ddfec11a0f2a1d9e0eda88f6f23ca189cf93d401a01ca826bfcad160e6ec",
+      "Bytes": 2919
+    },
+    {
+      "File": "headers/SDL3/SDL_mouse.h",
+      "Sha256": "6caff19a4841afc5cab4254e94a73de874a331a6539f87d2d2c61a7c5e5d7e5b",
+      "Bytes": 31719
+    },
+    {
+      "File": "headers/SDL3/SDL_mutex.h",
+      "Sha256": "c0218aeee31ba40f4f2990dfff5184d22cdd39907da834027d31f75f3a50a32e",
+      "Bytes": 36760
+    },
+    {
+      "File": "headers/SDL3/SDL_oldnames.h",
+      "Sha256": "59cb5dde7a441d0b208c52f12f73a949dd747ce6b053f31b356cb64cef20e6dc",
+      "Bytes": 80730
+    },
+    {
+      "File": "headers/SDL3/SDL_opengl_glext.h",
+      "Sha256": "1abb28891c9b0661b6ff3749de2671da5fe12beb5bcb1833b2d6bdf5c89ecdf8",
+      "Bytes": 864070
+    },
+    {
+      "File": "headers/SDL3/SDL_opengl.h",
+      "Sha256": "a8e7681bfff83d2156b4f088b792789c30da791ce4581c7ae64545e80a3522a1",
+      "Bytes": 126683
+    },
+    {
+      "File": "headers/SDL3/SDL_opengles.h",
+      "Sha256": "d0bec38800302d14ae08dfd3afc3a26d409c95555d77ace5efb64ebfaecb2b08",
+      "Bytes": 1244
+    },
+    {
+      "File": "headers/SDL3/SDL_opengles2_gl2.h",
+      "Sha256": "d6ec44b1d73f3afce3a20ac6976db7fb3dac656c5190f0b563e4ce90d79a15aa",
+      "Bytes": 42938
+    },
+    {
+      "File": "headers/SDL3/SDL_opengles2_gl2ext.h",
+      "Sha256": "4fc5b0034dcde9c125922e3e70d01489a6b335076856ee660294e1a6305a3719",
+      "Bytes": 241221
+    },
+    {
+      "File": "headers/SDL3/SDL_opengles2_gl2platform.h",
+      "Sha256": "4779be999acd1904458238f09c86983b7960ac40e612e05db2db97db615f1e0f",
+      "Bytes": 646
+    },
+    {
+      "File": "headers/SDL3/SDL_opengles2_khrplatform.h",
+      "Sha256": "7b1e01aaa7ad8f6fc34b5c7bdf79ebf5189bb09e2c4d2e79fc5d350623d11e83",
+      "Bytes": 11131
+    },
+    {
+      "File": "headers/SDL3/SDL_opengles2.h",
+      "Sha256": "cf3445a371fbe8ed9d1c03c929e050d21e450e853f9c9cde8ed3f7dedb442552",
+      "Bytes": 1615
+    },
+    {
+      "File": "headers/SDL3/SDL_pen.h",
+      "Sha256": "30cf6dacd1a7ce079c4c2e53df32f85ecdf1f4056fce08089abc26208bb32055",
+      "Bytes": 8289
+    },
+    {
+      "File": "headers/SDL3/SDL_pixels.h",
+      "Sha256": "a4c17ec0b7bd9ddd631cad62cb38bae7d3e1f2b9522914a816a5e86433691ade",
+      "Bytes": 59712
+    },
+    {
+      "File": "headers/SDL3/SDL_platform_defines.h",
+      "Sha256": "ab5692c00d4aca81466688a6c9abe7f5154070b6118f48a67490d81dff6ad36e",
+      "Bytes": 12169
+    },
+    {
+      "File": "headers/SDL3/SDL_platform.h",
+      "Sha256": "9a95a10a7f3c3d8f4958ebaded5c5e3b154f75c7351b1002e32429bc7dd28501",
+      "Bytes": 1963
+    },
+    {
+      "File": "headers/SDL3/SDL_power.h",
+      "Sha256": "ed0346c3c7454da4e305feb5a650a0859053442c68b388dc60848e002b86f3e2",
+      "Bytes": 4229
+    },
+    {
+      "File": "headers/SDL3/SDL_process.h",
+      "Sha256": "a52b5af99b1130189c3510269ba73d8288b55feb4b7086a1614cfad395794655",
+      "Bytes": 18490
+    },
+    {
+      "File": "headers/SDL3/SDL_properties.h",
+      "Sha256": "f66e621b2b9d7d9c8126bfbc31a50f90f515ddf9e090b6e1cc6ea24b343bdd4a",
+      "Bytes": 20371
+    },
+    {
+      "File": "headers/SDL3/SDL_rect.h",
+      "Sha256": "f5a5c39fbffd41eadbeb50e2ddfa4ffe655ff14241a23e4f20de4cce48e82d6e",
+      "Bytes": 19081
+    },
+    {
+      "File": "headers/SDL3/SDL_render.h",
+      "Sha256": "29b5c4a477bf5d20043ed58cd3d32cc71d2ea435edde85cbfeeee94d608d626f",
+      "Bytes": 127837
+    },
+    {
+      "File": "headers/SDL3/SDL_revision.h",
+      "Sha256": "86c07ade111c1cb8f89e2d2d57cbebd0372d203bc104f4b6275e2f9e108a0b7a",
+      "Bytes": 2043
+    },
+    {
+      "File": "headers/SDL3/SDL_scancode.h",
+      "Sha256": "d5e3bb25b523b61ed354189919f2bcb058f0f2fa08e0529ce8e21480937c8ca5",
+      "Bytes": 17246
+    },
+    {
+      "File": "headers/SDL3/SDL_sensor.h",
+      "Sha256": "8c91002fc95799b820d07671541c97c012f77bcf8eb16f624e717142fa051c72",
+      "Bytes": 10498
+    },
+    {
+      "File": "headers/SDL3/SDL_stdinc.h",
+      "Sha256": "e0d5fca5b28872c2bb67daed0d4c3ad38d349a5a790b85193f02b917f941ce35",
+      "Bytes": 205971
+    },
+    {
+      "File": "headers/SDL3/SDL_storage.h",
+      "Sha256": "fbb7342d44526e0bb683fb645910eb1d3fcffd1468b9c823b0654ef424ba60f0",
+      "Bytes": 25967
+    },
+    {
+      "File": "headers/SDL3/SDL_surface.h",
+      "Sha256": "8c4c6f4127b663b38167be0e431a6015533d9b792f8df42e213b8ec9a1d3ba96",
+      "Bytes": 70993
+    },
+    {
+      "File": "headers/SDL3/SDL_system.h",
+      "Sha256": "81d78f7a087bb1d122565b2310ad139a3672d372e3d1c4a615b00c2403edeb90",
+      "Bytes": 30121
+    },
+    {
+      "File": "headers/SDL3/SDL_test_assert.h",
+      "Sha256": "016c81211ca7d724e7482d55914900ec25d72efe3117e363f069aa7ae167866a",
+      "Bytes": 3196
+    },
+    {
+      "File": "headers/SDL3/SDL_test_common.h",
+      "Sha256": "8c0c8f322c93a76beebcb69bd73526a0cd8841532c8f8926e61956b8ae881623",
+      "Bytes": 8804
+    },
+    {
+      "File": "headers/SDL3/SDL_test_compare.h",
+      "Sha256": "d4f06234ec5734cea2ecfe0513cb6ecd1c7e13b3bd04a5f5940763dfd0b9c140",
+      "Bytes": 2778
+    },
+    {
+      "File": "headers/SDL3/SDL_test_crc32.h",
+      "Sha256": "7d5b4fc7c7bea9e7355198c1b479700ce078a0e2a6aad4ef1cdd767c06407c16",
+      "Bytes": 3614
+    },
+    {
+      "File": "headers/SDL3/SDL_test_font.h",
+      "Sha256": "14079a136e0399c71e6b148ce80c6a9b0e392cc1851c6ce8ef7736d4b0c9b42b",
+      "Bytes": 5505
+    },
+    {
+      "File": "headers/SDL3/SDL_test_fuzzer.h",
+      "Sha256": "ad78531a4fe77dbff98fe0d9183ee09622a322d0ecff27aa1fdc07acba99d3b1",
+      "Bytes": 13205
+    },
+    {
+      "File": "headers/SDL3/SDL_test_harness.h",
+      "Sha256": "81f1fe6472b312b3e0a3394e2cc39ac84ef06655dbf3c1265c5bc01a7c0c0c06",
+      "Bytes": 5374
+    },
+    {
+      "File": "headers/SDL3/SDL_test_log.h",
+      "Sha256": "001e91743189c4468dd3e93afcb4ccd55f09bd28ed794611323bee41530c7ff7",
+      "Bytes": 2571
+    },
+    {
+      "File": "headers/SDL3/SDL_test_md5.h",
+      "Sha256": "6df30087ddab5d65f291d7f3faa7000eb88ba64c66e971112a8adaf085e9b6dd",
+      "Bytes": 4633
+    },
+    {
+      "File": "headers/SDL3/SDL_test_memory.h",
+      "Sha256": "70cf38368fbf637e191933138a9663097ed22579b73b2382d3290b753c8300c6",
+      "Bytes": 1942
+    },
+    {
+      "File": "headers/SDL3/SDL_test.h",
+      "Sha256": "6d16a15e84da000b0015aebd50ded8f30e519ebcbc02f02a0b8c0f0079cbd86e",
+      "Bytes": 1954
+    },
+    {
+      "File": "headers/SDL3/SDL_thread.h",
+      "Sha256": "b5f2b2d88729338cb0c1e95398f112bccbb343fcf960e2dae080e3695be1be76",
+      "Bytes": 23725
+    },
+    {
+      "File": "headers/SDL3/SDL_time.h",
+      "Sha256": "db6dd02434f0b099748e728d1145486888659087e7742f7367da9e4d1120c771",
+      "Bytes": 8739
+    },
+    {
+      "File": "headers/SDL3/SDL_timer.h",
+      "Sha256": "60a809df30e0c549a91b986f517ff94515ab80a529db95d97655a2c417f0f927",
+      "Bytes": 14683
+    },
+    {
+      "File": "headers/SDL3/SDL_touch.h",
+      "Sha256": "e69c97c2fc210f1e8eab7199173097b4f4196a3ea4a39e1d08a48a145cc92132",
+      "Bytes": 6353
+    },
+    {
+      "File": "headers/SDL3/SDL_tray.h",
+      "Sha256": "00fe9d97cef15acc3adb18a85689a619178c74df12990090da475c4f7e0e12a1",
+      "Bytes": 17471
+    },
+    {
+      "File": "headers/SDL3/SDL_version.h",
+      "Sha256": "07830cb7cb8cb86db52eb00c07b95827385c340bc0d667861cbbb89c360678c1",
+      "Bytes": 5810
+    },
+    {
+      "File": "headers/SDL3/SDL_video.h",
+      "Sha256": "e4a25b506dfb5b0657edc264b7130cfea3bad0abc0265e280e046f9ec4dcaeaf",
+      "Bytes": 142159
+    },
+    {
+      "File": "headers/SDL3/SDL_vulkan.h",
+      "Sha256": "a0d1b8c6a2a7982e419dbdb8ea60fce09e99390238634ca117d82442953a4e1c",
+      "Bytes": 11897
+    },
+    {
+      "File": "headers/SDL3/SDL.h",
+      "Sha256": "d41d33f800f843362af4ec6e22b49691f30d65535ee57c5190429ea00e5136b4",
+      "Bytes": 2986
+    },
+    {
+      "File": "include/starfox/assets/rom.hpp",
+      "Sha256": "920e5555275b5019a7250ae76f54b5695cdff15812e664bd889b6dc39d9717d1",
+      "Bytes": 1307
+    },
+    {
+      "File": "include/starfox/assets/shape.hpp",
+      "Sha256": "99e77d45f1725295b1886c334a43342600f18b709ff3e94004551966b04d5097",
+      "Bytes": 3539
+    },
+    {
+      "File": "include/starfox/compat/bit_cast.hpp",
+      "Sha256": "ff23a92712c09c1ba3316246293a05e30b2b4510e155c6abf83c4a2ae2bc4b1a",
+      "Bytes": 1119
+    },
+    {
+      "File": "include/starfox/render/backdrop_image.hpp",
+      "Sha256": "0fdd890c474bf7a5fcc994f146427999faf036bb262b8c6721daa5a735ac8a81",
+      "Bytes": 14129
+    },
+    {
+      "File": "include/starfox/render/background_renderer.hpp",
+      "Sha256": "c5e6836f7df784e6e2fe3ef39c671a65e01b7b2772a10956ea65f65842b115fe",
+      "Bytes": 3436
+    },
+    {
+      "File": "include/starfox/render/celestial_scroll.hpp",
+      "Sha256": "3ae54125ad5a1a8c829a2a10e164cf0f2c227ab98b3da2b5054742083b482f76",
+      "Bytes": 4433
+    },
+    {
+      "File": "include/starfox/render/city_moon_geometry.hpp",
+      "Sha256": "00374deb0e0efe428b4fe908b20dc8ba4d8cd97dd13b1cfb646aed5e56711459",
+      "Bytes": 803
+    },
+    {
+      "File": "include/starfox/render/cloud_limb_atlas.hpp",
+      "Sha256": "4260e5bea57c5a232c704e26eda9e14ac713a954ce348e6955551b60da733e20",
+      "Bytes": 4338
+    },
+    {
+      "File": "include/starfox/render/cloud_limb_geometry.hpp",
+      "Sha256": "e994192d5398af667239a1ea98ebd73c87b641179d73afbe8abd0e9da5fa6acf",
+      "Bytes": 1351
+    },
+    {
+      "File": "include/starfox/render/dust_renderer.hpp",
+      "Sha256": "ac52bb0058cd2359c669d5d7a47d0cfe13e536dd45a8c0ed4e4b61da56986e24",
+      "Bytes": 2945
+    },
+    {
+      "File": "include/starfox/render/dxr_shadows.hpp",
+      "Sha256": "4df1716e7eeea44aaef796a11393f06218a16115d205d1b9e2e4a13eb16e23e7",
+      "Bytes": 12710
+    },
+    {
+      "File": "include/starfox/render/environment_effects.hpp",
+      "Sha256": "2da56ce337da6c1aee54ebab6ab4fb81c7d6e02e3fa338abbf31d9bcce7cc6d4",
+      "Bytes": 46199
+    },
+    {
+      "File": "include/starfox/render/ex_city_moons.inc",
+      "Sha256": "286e5ad7a6d2430d1ae9e32a8745c10c150d511ab88944cc90ba45d231ef9959",
+      "Bytes": 305
+    },
+    {
+      "File": "include/starfox/render/ex_face_planet_regions.inc",
+      "Sha256": "b1444f15b05cf326737de2092c6518ca1a9b903181a1ca493ffcb7e36e6061f9",
+      "Bytes": 765
+    },
+    {
+      "File": "include/starfox/render/face_material.hpp",
+      "Sha256": "30d94b36f52f2d10049b30a47cb157081095e51e1bb9a63aa54e32601294bbcf",
+      "Bytes": 822
+    },
+    {
+      "File": "include/starfox/render/face_planet_atlas.hpp",
+      "Sha256": "5359b85ff935138074ff6bb8b6637fac2efd4334e6ec53263689c2498302eeff",
+      "Bytes": 2947
+    },
+    {
+      "File": "include/starfox/render/face_planet_geometry.hpp",
+      "Sha256": "49234ecbcf4eb972d812c30255e6f0b2100d0071b14c8f990cb8d0e0246790cd",
+      "Bytes": 1480
+    },
+    {
+      "File": "include/starfox/render/framebuffer.hpp",
+      "Sha256": "f75e8705d24537d95a4d8b474180072715b7b679245eac49a2cab058e47df8a1",
+      "Bytes": 21239
+    },
+    {
+      "File": "include/starfox/render/gpu_background.hpp",
+      "Sha256": "1c2580e9cd1f644c8bd2fe86193d92e195c4c29aaf56b693e801b5d9a67d6c68",
+      "Bytes": 2446
+    },
+    {
+      "File": "include/starfox/render/gpu_colour_warp.hpp",
+      "Sha256": "12dc2eb7002aea469dcdc3d7bd7adb605ef3bba7fe724dabaa4bc8d7182c3353",
+      "Bytes": 1920
+    },
+    {
+      "File": "include/starfox/render/gpu_projection.hpp",
+      "Sha256": "fc314d4a0c85c17d762015e39262d219e9487d8cb8e2317cb84c51fa1a991d57",
+      "Bytes": 12764
+    },
+    {
+      "File": "include/starfox/render/gpu_raster.hpp",
+      "Sha256": "86ae063a59e3e26f7f11ec82ece29d64e023a53a8908903b71d00e3e3d1e19b1",
+      "Bytes": 7862
+    },
+    {
+      "File": "include/starfox/render/gpu_scene.hpp",
+      "Sha256": "683f5ade44aab54214bea676f39a5768dcfdf6158f8d6ee4c112831f30813457",
+      "Bytes": 18385
+    },
+    {
+      "File": "include/starfox/render/grid_line_history.hpp",
+      "Sha256": "84e194b7c95defdf658a197f78071932ae0aa26400c88c1948efb93460f553f5",
+      "Bytes": 1935
+    },
+    {
+      "File": "include/starfox/render/grid_projection.hpp",
+      "Sha256": "01a9871797c9b61774bfb63af38934b3a848b375a3bfe21646d7059de3f46d41",
+      "Bytes": 977
     },
     {
       "File": "include/starfox/render/lava_surface.hpp",
@@ -51,9 +587,9 @@
       "Bytes": 5622
     },
     {
-      "File": "include/starfox/render/metal_material_colour.inc",
-      "Sha256": "ec73381d05ad01b71780abb821d5f25b54080124410e8854a8c52931ea5d9347",
-      "Bytes": 6865
+      "File": "include/starfox/render/metal_hardware_rt.hpp",
+      "Sha256": "d6619b0c16290f4f9b852c84972cf8af9fd77ec23c7a2cc973f59844e2ee961e",
+      "Bytes": 1735
     },
     {
       "File": "include/starfox/render/metal_native_material_coverage.inc",
@@ -61,59 +597,199 @@
       "Bytes": 2717
     },
     {
+      "File": "include/starfox/render/moon_landscape_atlas.hpp",
+      "Sha256": "1fb6154121ec2a4dd6d74fc6b7db1bd120e52a0d14e186a871633e96738cd3f3",
+      "Bytes": 2022
+    },
+    {
+      "File": "include/starfox/render/native_water_layers.hpp",
+      "Sha256": "fb5221fcde67cc3eb1be4e6ef11a17d03d12b4619f704921f2fa901dd7134921",
+      "Bytes": 1309
+    },
+    {
+      "File": "include/starfox/render/packed_bsp.hpp",
+      "Sha256": "11399b5b005f945546e72097cdb747e43cd84448a9b146645b7f461a0b1876e8",
+      "Bytes": 1899
+    },
+    {
+      "File": "include/starfox/render/packed_faces.hpp",
+      "Sha256": "4073c96aac287c3edc3c51c7473034e76edfb9819ae4bdeff2a46c98aac8d492",
+      "Bytes": 5357
+    },
+    {
+      "File": "include/starfox/render/packed_projection.hpp",
+      "Sha256": "5ae41323da78af6569883d0c681c1b572f8c6fc9b82da45d5024a4fa87efcd3c",
+      "Bytes": 4246
+    },
+    {
+      "File": "include/starfox/render/palette.hpp",
+      "Sha256": "b697b5124ec9a2239fa4fba32596decefbe89ad76aba84ae92b7ecaf6c354a2d",
+      "Bytes": 1530
+    },
+    {
+      "File": "include/starfox/render/particle_renderer.hpp",
+      "Sha256": "8bd73c51061784ed9179eae02d80ca0e7668ba17184abc9a20d41b2c8ee7e729",
+      "Bytes": 1178
+    },
+    {
+      "File": "include/starfox/render/portable_shadows.hpp",
+      "Sha256": "a7997a5de6be21d1c483a11fbe8c06a23c245be5c71cc59f04dafa4457ccb951",
+      "Bytes": 1204
+    },
+    {
+      "File": "include/starfox/render/radial_backdrop.hpp",
+      "Sha256": "fbefe27e66e757514f85328bb4312b99985732d5b57d62b8750c69a2314dc444",
+      "Bytes": 2576
+    },
+    {
+      "File": "include/starfox/render/raster_commands.hpp",
+      "Sha256": "e131b73d5bdec4c5344f504f060ec92580e54a163bc2e52ad179b785c8dba5ce",
+      "Bytes": 5104
+    },
+    {
+      "File": "include/starfox/render/ray_materials.hpp",
+      "Sha256": "86a57cd3862ca6fa173f4e7e558206a4ee29eaf4aa89088e4854061584583ab5",
+      "Bytes": 3477
+    },
+    {
+      "File": "include/starfox/render/ray_reflection_history.hpp",
+      "Sha256": "9a078bc824eb18e8937a270723518865c5b81f00a5c606c2d9c6f933e9a6a904",
+      "Bytes": 11448
+    },
+    {
+      "File": "include/starfox/render/row_workers.hpp",
+      "Sha256": "00676bf6b551df2cfd0a1e5b5acaf9009fc534833c51e756db1d913c0686a96f",
+      "Bytes": 2054
+    },
+    {
+      "File": "include/starfox/render/scaled_text_renderer.hpp",
+      "Sha256": "6436aeb0ed35b65e39d47ec8a3e3eb84248e1e2344ae1806b0e4289d2859cb2b",
+      "Bytes": 4128
+    },
+    {
+      "File": "include/starfox/render/sdl_dxr_shadows.hpp",
+      "Sha256": "aace39b21598279782dfa4f43c0c6009a058dc6f4f35f0deb831fb5df474f319",
+      "Bytes": 3317
+    },
+    {
+      "File": "include/starfox/render/shadow_geometry.hpp",
+      "Sha256": "ee0291058a2fc6d0d8cef8107b54b69bd4e4bd2ab69aa6aa96bf3d7bc9403e99",
+      "Bytes": 3655
+    },
+    {
+      "File": "include/starfox/render/shadow_mask.hpp",
+      "Sha256": "815dc98e1e134003a576920d725978cd887357495ef9a7b4472d010da26da097",
+      "Bytes": 5925
+    },
+    {
+      "File": "include/starfox/render/shadow_scene.hpp",
+      "Sha256": "e58c3f828925339748ea87a4e78389ebc837c8c98bdde5bcf8c9df241e921771",
+      "Bytes": 10161
+    },
+    {
+      "File": "include/starfox/render/software_renderer.hpp",
+      "Sha256": "8a6e8f192ff2b658d038d469132335b1e047cfcaa4c0fde5a2f7d393703b73b6",
+      "Bytes": 12539
+    },
+    {
+      "File": "include/starfox/render/water_caustics.hpp",
+      "Sha256": "2badb510302e30721613861aaaec446611eae8f015576a8530a3e7ae6ecbc7f4",
+      "Bytes": 5479
+    },
+    {
+      "File": "include/starfox/render/water_caustics.inc",
+      "Sha256": "5006aefca36b2f52f9240a81778d4fbdfb0d23a8c7f6ca57fd82f650e0063580",
+      "Bytes": 4243
+    },
+    {
+      "File": "include/starfox/render/water_receiver.hpp",
+      "Sha256": "37e6c4aa87bf5f4fd20e1fe0d4a26e82852c90b62ddfeef276f6f80ea9aa91cb",
+      "Bytes": 4991
+    },
+    {
+      "File": "include/starfox/render/water_transmission.hpp",
+      "Sha256": "c195658f74792189a45b6b64ffb0265e820251e49eb4ec3f15f4174ae017f2f8",
+      "Bytes": 214
+    },
+    {
+      "File": "include/starfox/render/water_transmission.inc",
+      "Sha256": "d0ff85882f5fadca201e1a82138b4f5db10c043abc0ad34744055ccb54d1a3af",
+      "Bytes": 663
+    },
+    {
+      "File": "include/starfox/simulation/dust_system.hpp",
+      "Sha256": "6ff388455c14b7bfc890b04bcb6fbac7e78e63570cfdf9666b78f34d4794b126",
+      "Bytes": 1529
+    },
+    {
+      "File": "include/starfox/simulation/math.hpp",
+      "Sha256": "71ec081eb6ac16949fe9f39667fbbff55c68b1efa46dcd526137713096113277",
+      "Bytes": 2452
+    },
+    {
+      "File": "include/starfox/simulation/object_pool.hpp",
+      "Sha256": "696ceb2dea5e80d1f909b63f23079cb908cc79a0ec8b022e3a6e73985e964ec9",
+      "Bytes": 5681
+    },
+    {
+      "File": "include/starfox/simulation/particle_system.hpp",
+      "Sha256": "654b53ea3148a21b63bfaf45c5eabe1ddc1d926e1c6d955be7f1874f90b9f143",
+      "Bytes": 2043
+    },
+    {
+      "File": "include/starfox/simulation/snes_ppu.hpp",
+      "Sha256": "045454598df49523ffb8faceb6a6d30413f2b0218c01389e30154b4e54ba00ba",
+      "Bytes": 1621
+    },
+    {
+      "File": "include/starfox/timing/fixed_step.hpp",
+      "Sha256": "800644bcb27fac7d73f6865223029cbba03d300a50a9fa58e862ee6536b7d6b9",
+      "Bytes": 5614
+    },
+    {
       "File": "LICENSE",
-      "Sha256": "39de075567aee9ce9b1a80a15afe2aa74b5c25cd9cb133cfbecbdcc5a5620e58",
-      "Bytes": 490
+      "Sha256": "ed40fb8f9fe39fbb867fb48aa5d63b29a69949d724fa940560714b1296bc5bbf",
+      "Bytes": 358
     },
     {
       "File": "README.md",
-      "Sha256": "f52b500d5c9b2f1c70d7a6cebdc6a8966af44e0bc6c3e0e56e48088bc8cb8dfd",
-      "Bytes": 2213
+      "Sha256": "5e7d19eb1e88c1c4ae4a0de2f76e829408768344fab5e38e19570a65442b2b37",
+      "Bytes": 1854
     },
     {
-      "File": "src/render/shaders/calibrated_colour.hlsli",
-      "Sha256": "46b0f06ee630c52efb5a9b0c1b003a2d5f19f5d8a070a94f12b6a2ae59383ac2",
-      "Bytes": 4536
+      "File": "src/render/metal_hardware_rt.mm",
+      "Sha256": "a5be1fafbb6dd1c41aee2bfa8d2b12926895b9c08fb757dd87f8a6b4fbbd5251",
+      "Bytes": 57967
     },
     {
-      "File": "src/vr/shaders/scene_colour.hlsli",
-      "Sha256": "5034054f848189c1afe2765298d684e79569106de6560dabc14fea9125430f5d",
-      "Bytes": 1812
+      "File": "src/render/shaders/metal_native_material_shared.hpp.in",
+      "Sha256": "8a7b3bff803d69b3a4a0fc72f2cc3f5facb99f3d9afe1eb8dd16dc66e25e3e37",
+      "Bytes": 347
     },
     {
-      "File": "tests/colour.metal",
-      "Sha256": "cc0d00eebbf13e02de6efccf3880661dcd9db7c43a71af124453e942a4a2fa96",
-      "Bytes": 1464
+      "File": "src/render/shaders/metal_water_shared.hpp.in",
+      "Sha256": "67212acad0bd55914b2be7c9255d048769ee0490b98f4b309b3a0c80bade187e",
+      "Bytes": 304
     },
     {
-      "File": "tests/coverage.cpp",
-      "Sha256": "9fcf1e455ff7f19eece9e3964a6bdd5c1412786db0e4bc5af1ce7e1290ea7ead",
-      "Bytes": 4587
+      "File": "tests/test_metal_shader_sources.py",
+      "Sha256": "d8283256df440a04a37be7523c8380a8502bfb20d9abad7e7ce757cdbd512f28",
+      "Bytes": 4567
     },
     {
-      "File": "tests/coverage.metal",
-      "Sha256": "2fcde801c6368750af9d2f87d6eba6293520bd06bee2986cb2bd9821d8d1986e",
-      "Bytes": 739
+      "File": "tools/check_metal_rt_shaders.py",
+      "Sha256": "eb08b5ab5e8e7bbd64a890195dc7b4b769933566bbb37515f2880e2cba0fedca",
+      "Bytes": 3417
     },
     {
-      "File": "tools/compile_coverage.py",
-      "Sha256": "5189111dc7f8589e6759e8a7711d6f524461ece46cedc1967cf624505452cd66",
-      "Bytes": 11019
+      "File": "tools/check_producer.py",
+      "Sha256": "0111e9c9ef3f4a284e9ee24ef3cdfb0affd7c54d924fc635732d6c4d83050226",
+      "Bytes": 10868
     },
     {
       "File": "tools/compile_metal.py",
       "Sha256": "cc770ea2068978eb0eeb381dc3bbf8983b838c2563f2605678272146f632fbb4",
       "Bytes": 19817
-    },
-    {
-      "File": "tools/metal_material_colour.py",
-      "Sha256": "e6205853232a779e99230b0c332509ce17c1ec3077599335310b1804d2214697",
-      "Bytes": 2013
-    },
-    {
-      "File": "tools/test_metal_material_colour.py",
-      "Sha256": "82e3566b384e85dad8afb6af2f65f2735545d48e37c9a261c3dee077dd8a1f10",
-      "Bytes": 1944
     }
   ]
 }

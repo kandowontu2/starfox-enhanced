@@ -1,11 +1,11 @@
-name: Temporary native material coverage and colour SDK compile (no GPU, no release)
+name: Temporary native shadow producer SDK compile (no GPU, no release)
 on:
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
-  native-coverage:
-    name: Additional material coverage and colour kernels / ${{ matrix.sdk }}
+  native-shadow-producer:
+    name: Whole native shadow producer and runtime shaders / ${{ matrix.sdk }}
     runs-on: macos-15-intel
     strategy:
       fail-fast: false
@@ -17,21 +17,22 @@ jobs:
           persist-credentials: false
           submodules: false
           lfs: false
-      - name: Compile and link held component with original strict flags and native resource observer
+      - name: Compile actual producer and both complete runtime shader sources
         env:
           PYTHONDONTWRITEBYTECODE: '1'
-        run: |
-          python3 tools/test_metal_material_colour.py
-          python3 tools/compile_coverage.py --sdk '${{ matrix.sdk }}' --out '${{ runner.temp }}/coverage-result'
-      - name: Preserve real compiler diagnostics and nonprivate component artifacts
+        run: python3 tools/check_producer.py --sdk '${{ matrix.sdk }}' --out '${{ runner.temp }}/producer-result'
+      - name: Preserve real native compiler outputs and diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: native-material-${{ matrix.sdk }}
+          name: native-shadow-producer-${{ matrix.sdk }}
           path: |
-            ${{ runner.temp }}/coverage-result/*.air
-            ${{ runner.temp }}/coverage-result/*.metallib
-            ${{ runner.temp }}/coverage-result/*.json
-            ${{ runner.temp }}/coverage-result/*.log
+            ${{ runner.temp }}/producer-result/*.o
+            ${{ runner.temp }}/producer-result/*.air
+            ${{ runner.temp }}/producer-result/*.metallib
+            ${{ runner.temp }}/producer-result/*.json
+            ${{ runner.temp }}/producer-result/*.log
+            ${{ runner.temp }}/producer-result/generated/*.hpp
+            ${{ runner.temp }}/producer-result/runtime-sources/*.metal
           if-no-files-found: warn
           retention-days: 7
