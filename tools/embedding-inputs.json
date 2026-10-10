@@ -1,0 +1,488 @@
+{
+  "Repository": "kandowontu2/starfox-enhanced",
+  "SourceRun": 38054247676,
+  "SourceCommit": "144fd04de703c87731240ba92c9d5fe917bbda99",
+  "Recipes": {
+    "tiles": [
+      1,
+      1,
+      1,
+      0,
+      [
+        8,
+        8,
+        1
+      ]
+    ],
+    "reduce": [
+      1,
+      0,
+      1,
+      0,
+      [
+        8,
+        8,
+        1
+      ]
+    ],
+    "query": [
+      1,
+      2,
+      1,
+      0,
+      [
+        64,
+        1,
+        1
+      ]
+    ],
+    "mapping": [
+      1,
+      2,
+      1,
+      0,
+      [
+        64,
+        1,
+        1
+      ]
+    ],
+    "domains": [
+      2,
+      3,
+      1,
+      0,
+      [
+        8,
+        8,
+        1
+      ]
+    ],
+    "frames": [
+      1,
+      3,
+      1,
+      0,
+      [
+        64,
+        1,
+        1
+      ]
+    ],
+    "optical": [
+      3,
+      3,
+      1,
+      0,
+      [
+        64,
+        1,
+        1
+      ]
+    ],
+    "optical_stream": [
+      3,
+      4,
+      1,
+      0,
+      [
+        256,
+        1,
+        1
+      ]
+    ],
+    "optical_schedule": [
+      1,
+      1,
+      3,
+      0,
+      [
+        128,
+        1,
+        1
+      ]
+    ],
+    "jets": [
+      3,
+      4,
+      1,
+      0,
+      [
+        64,
+        1,
+        1
+      ]
+    ],
+    "jets_stream": [
+      3,
+      4,
+      1,
+      0,
+      [
+        64,
+        1,
+        1
+      ]
+    ],
+    "roots_clear": [
+      1,
+      0,
+      1,
+      0,
+      [
+        64,
+        1,
+        1
+      ]
+    ],
+    "witness": [
+      3,
+      3,
+      1,
+      0,
+      [
+        64,
+        1,
+        1
+      ]
+    ],
+    "folds": [
+      2,
+      3,
+      1,
+      0,
+      [
+        64,
+        1,
+        1
+      ]
+    ],
+    "guide": [
+      3,
+      2,
+      1,
+      0,
+      [
+        64,
+        1,
+        1
+      ]
+    ],
+    "colour": [
+      2,
+      3,
+      1,
+      0,
+      [
+        64,
+        1,
+        1
+      ]
+    ],
+    "compose": [
+      2,
+      2,
+      1,
+      0,
+      [
+        64,
+        1,
+        1
+      ]
+    ],
+    "publish": [
+      1,
+      1,
+      1,
+      0,
+      [
+        64,
+        1,
+        1
+      ]
+    ],
+    "publish_diagnostics": [
+      1,
+      1,
+      2,
+      0,
+      [
+        64,
+        1,
+        1
+      ]
+    ],
+    "admission_clear": [
+      1,
+      0,
+      1,
+      0,
+      [
+        64,
+        1,
+        1
+      ]
+    ],
+    "capture": [
+      1,
+      1,
+      1,
+      1,
+      [
+        8,
+        8,
+        1
+      ]
+    ],
+    "history": [
+      1,
+      2,
+      1,
+      1,
+      [
+        8,
+        8,
+        1
+      ]
+    ],
+    "lobes": [
+      1,
+      3,
+      1,
+      1,
+      [
+        8,
+        8,
+        1
+      ]
+    ],
+    "paths": [
+      1,
+      3,
+      1,
+      1,
+      [
+        8,
+        8,
+        1
+      ]
+    ],
+    "curved_paths": [
+      1,
+      3,
+      1,
+      1,
+      [
+        8,
+        8,
+        1
+      ]
+    ]
+  },
+  "Libraries": {
+    "macosx": {
+      "tiles": {
+        "LibrarySha256": "215c082834abbeb005e3632aa344b8038c89ab06f34c79ab7317ac2147cd9967",
+        "ReceiptSha256": "a51b5bab2eb4b312ac611b7909c433853c1988d19ee9edec5ec1bccae1a30f65"
+      },
+      "reduce": {
+        "LibrarySha256": "9a3fc0e8c66a05f25ea99627f82fd14eb52a767ec68707ac9f458dadb3e73184",
+        "ReceiptSha256": "ff774fd6ca0ae5a3ff4a22ee2e17d227dff714ad92b2d6d4fb3dab75d1f27f81"
+      },
+      "query": {
+        "LibrarySha256": "1403dc5cb42db6a2576f5dbb43a0eb7765c173b63100fdb489ef59040977ef58",
+        "ReceiptSha256": "e5319f748df409b1aecd64c8526df57902c729f78ec6ccbbb9cc5467f1847abe"
+      },
+      "mapping": {
+        "LibrarySha256": "f63c62da5149a6b7fc072d62b03e54723cd3bf59b5c508478575998ad17412b1",
+        "ReceiptSha256": "79ff9bd15573c985f1128313a904e934e107322bbb41b227afc336e068402902"
+      },
+      "domains": {
+        "LibrarySha256": "4662a6f230add7e0857d0abb7ccf0ddddbeb0717802546188bacc011dae99d7b",
+        "ReceiptSha256": "83bcb55247bdd3977604f8a64ea0f162032bf67247de2ad0f84bc9c264d6efdf"
+      },
+      "frames": {
+        "LibrarySha256": "cdf4d83896a51cd5acc057c627ff3bb5c1ecaf4ca2a22dc515745d4660e3913c",
+        "ReceiptSha256": "992f5b0269657b4186263781654d08350fb440597d43bda1090a5fd8449e9ccb"
+      },
+      "optical": {
+        "LibrarySha256": "c68d8040b57005b0e03bb623bcbe7b7bb87bcc215575dba266c5969dc3262093",
+        "ReceiptSha256": "f2dc969d57532da378c83b03c01dd618d38da5196ca7b70b15b67158deef5ddf"
+      },
+      "optical_stream": {
+        "LibrarySha256": "ec6127894ae859cc51c7cdd4be76451660e4f0a8c21e21f0b47fc2757758e743",
+        "ReceiptSha256": "ad9da2487a98679d8ada75ff3565b70753db11572b646e327f02f73b61b7e99a"
+      },
+      "optical_schedule": {
+        "LibrarySha256": "7a6f7a150612b81bf7859dff90f9204731e564c98034168cebd55a477c1c83a2",
+        "ReceiptSha256": "77dfa565223afe33650e6b515ccf2bd79737887adf9425e77ce4cc3a0d7f4023"
+      },
+      "jets": {
+        "LibrarySha256": "3719d50d4bd81ebdd9e7603367d104b638e80674886f70171ab840262930fc9d",
+        "ReceiptSha256": "59f703cb485842aaa0099476066b9e6b3f40b3d1f81df358688ff9b65b653f92"
+      },
+      "jets_stream": {
+        "LibrarySha256": "e76d8eca3e155cab2afcb94eac45c3511f082304d506c1394a161c18ff2c120b",
+        "ReceiptSha256": "84f731514dfc7fddbc3af2cf3ac5f7d6849a57e08263caa2a06a4d45f2acdc2a"
+      },
+      "roots_clear": {
+        "LibrarySha256": "1199b9e818775beeab29639004ca3d44070a6f57eafe1c2296fcc1486dfae47d",
+        "ReceiptSha256": "1d5fb4711055d02404216e5a76cdc5b1043d61e8cb521961114dc4adaab2f982"
+      },
+      "witness": {
+        "LibrarySha256": "b1c8f7d07809c77051b439b9f178c0c4e70ba0ef491b4589b72b13064b698e52",
+        "ReceiptSha256": "4cfec224673fab6dc7fd53fa7aa0400558e6894e39977bdaf95827ccdd7f92db"
+      },
+      "folds": {
+        "LibrarySha256": "79921767a28dcf4f5de07ac5050f0cbc36d58152f94acf54cb81c92b7555aea4",
+        "ReceiptSha256": "ebf75ec2357edd16f467d3f9bd8214b44508a1c12af7a2bb469e0b7ee4de7eed"
+      },
+      "guide": {
+        "LibrarySha256": "e15d2f2faec5c230edc64d7372f33471d4678e1bd85c20af28802d6333078999",
+        "ReceiptSha256": "c03a6a0591c36717f8b6b29b3145219db3a28fc013d918a9e56b26c9cd2ede38"
+      },
+      "colour": {
+        "LibrarySha256": "8740f5c07155d60f6da85d9120ac1895b7f208fc92aeed7856fbe475c06c21ce",
+        "ReceiptSha256": "e54be7e521534b9e9b6d968579a43ea18f3174d10856ce321fdbe3a26215d5df"
+      },
+      "compose": {
+        "LibrarySha256": "cc0e3a674c74f2cfc639a9b19c67acc746ebb32507dc01f08af6b2872ed5a0f9",
+        "ReceiptSha256": "36dc1ed51458851e5d979e2c54a33018d16877225b9bd433a84fd09f8315ffca"
+      },
+      "publish": {
+        "LibrarySha256": "bc1f4c609edd6ae9889556203f168d47a4d65caefe02de0e516056606d5ca0a8",
+        "ReceiptSha256": "72781980695355fb7f9941decbeb32448d44dc0a8b2923436bf57ba191e2232e"
+      },
+      "publish_diagnostics": {
+        "LibrarySha256": "9ed3ccd9c2b9e0b24d7239329440f0085d64481007baa81bc06cd07b1d305b6f",
+        "ReceiptSha256": "d1bafae14aa2604a605f18a9c9d32fd9b0d0a6315741eac97ad7267aabcead1c"
+      },
+      "admission_clear": {
+        "LibrarySha256": "0ffed58f9cabd8c704ebab4e2aec0b40de1d7513ac3b7a5300a2d5269d4c1069",
+        "ReceiptSha256": "e36d1d516c8892ef631fb39cb7579258649a78e931d2edc6e4fcfbedebc0dd4c"
+      },
+      "capture": {
+        "LibrarySha256": "1f637c5176c0b5f46a75e3759ee50671f03406a74d5cbfb936603b4547c6c32a",
+        "ReceiptSha256": "13ee8dffde5930a8594f4e6801daad53881d63ac2f48c00d82f18b89df6fe64b"
+      },
+      "history": {
+        "LibrarySha256": "8d0b7f788d2bdba1870012a5d20799850f0dd818718768cdf83610e4a8bad05a",
+        "ReceiptSha256": "d10e5e98afc292442770e8aac4de0b1646b3d1e7b84746176f2ae63bbe90b930"
+      },
+      "lobes": {
+        "LibrarySha256": "c30c9fede0177d134190a6dc63f711ad88e65bfca82a3f7ab1d3b48b28fc86af",
+        "ReceiptSha256": "895af8b7ae34e1c59b7d97387ff3d28557c13d1a2afb0b8eb13e03ec5829afc2"
+      },
+      "paths": {
+        "LibrarySha256": "588e85e6dce28975124f26b6e6d8044efa5873929bdb4d882fce0ded899ed022",
+        "ReceiptSha256": "3f482810ebe179ecc301e80d7a1b7d83ac0090ad998b0b74f87fc2d19fdfd32d"
+      },
+      "curved_paths": {
+        "LibrarySha256": "e17ecaf0c2d123e1738a2c793979474719c7682a1d84db00b26df3e38c936ac7",
+        "ReceiptSha256": "d880c2e384c0acaee79b52629cccd5ab3010560c56d895701350063b01f4c1ef"
+      }
+    },
+    "iphoneos": {
+      "tiles": {
+        "LibrarySha256": "3b50177d684a6d27e03d1e7b982dcbe98b9d3c45448b755851b8459890832a5d",
+        "ReceiptSha256": "7f440b651e4e2019f71b4992c77b78cb5644de348b46b3a25b4465717b055d7e"
+      },
+      "reduce": {
+        "LibrarySha256": "d885bd861c14cb5e4ee9bdc37997e715b180b9a5b3c24b643be2f8b9b7ab390e",
+        "ReceiptSha256": "ad478755cbba4c85c50e01bc2ed12aba9474e4d7af8adea4857146466e57c408"
+      },
+      "query": {
+        "LibrarySha256": "a188caeb34ebde154127f6a3f5381c30cfcaf06d63ad375572387ec1bcfa411c",
+        "ReceiptSha256": "510314d48826c9a7f06990f0e59a10d244aab2a8f89a036f4020cce45e86a313"
+      },
+      "mapping": {
+        "LibrarySha256": "45d7d374f4397255b31127beb44c98c62753606393988934acea195af79e3279",
+        "ReceiptSha256": "0d438fe24d38a99be071cb66414b51ad1e9ebbd475c2bb379c10ec9e56b71944"
+      },
+      "domains": {
+        "LibrarySha256": "e9617213e3cc5ac1df7b8a100856bf3c13aca4709552c7847a5fecca9e9669a6",
+        "ReceiptSha256": "88e875fa5099c85c8e723364e70a83d9f994b9ce083c029222f06cbe551d9163"
+      },
+      "frames": {
+        "LibrarySha256": "ca010570092b564d6222a932a6c03e74070d967751889059acceaf63c2f11d31",
+        "ReceiptSha256": "5bffea0e5a5d06dc4fbeffc3c05aaab9a6ab6c7d64b5994ad5d99f3d033e2ff7"
+      },
+      "optical": {
+        "LibrarySha256": "6863e19958cb5345575094cdd7cc0c4b3c45725f07f2bded46d0cda365a46242",
+        "ReceiptSha256": "93ddb8029061d7370a07513179b2db1f40da2c2051807cf01162626c99aad9d8"
+      },
+      "optical_stream": {
+        "LibrarySha256": "51782affe9c677e5169ab38ca5b979cad17476bf6a3be976da05d4f9f507f4ae",
+        "ReceiptSha256": "41c39fa17e5b2ac51fbc50f67fdcd846fcf80b82174ee91f485eb01857204a6d"
+      },
+      "optical_schedule": {
+        "LibrarySha256": "658037c1c086b569625185848cc18005437c7c318e25abfe5203a76a829d6980",
+        "ReceiptSha256": "500af943e682699f01bb90ce8a7f486ff3182b1ed57870a6545c9cb24c731366"
+      },
+      "jets": {
+        "LibrarySha256": "41347047b8ae2565ccec5ff18974cf1928e2648f20e1a0af578d01ea19a6e0ec",
+        "ReceiptSha256": "f31fcc3be3cdd1053f49e0a12bae8e508f9eb978fee4a3715d2bb9361f8c4a19"
+      },
+      "jets_stream": {
+        "LibrarySha256": "2d018949a322b7aae801ef4bb16aa74d38d05812eebf49d1029b5c2e552f049f",
+        "ReceiptSha256": "da05b8edc0c7b7bafc556e023921e41eb6aeca5e7cccf945d4c19ae4c98c9067"
+      },
+      "roots_clear": {
+        "LibrarySha256": "6997fa9dba321eef231ddd30d73ed89f49ea627a654a2c7e73d04ebb184ff855",
+        "ReceiptSha256": "37a2797ace0bec4423131a858e4f92b168c8502160885f54967545d543fd9aed"
+      },
+      "witness": {
+        "LibrarySha256": "54ff5679737e8e48a2bb06f9727ca508bb45e7b355bccd47b71aca90281d4418",
+        "ReceiptSha256": "e1ab2c901aca7a61534a4d413a022ced352db36420c63f7bd6bfb6928d2d46dd"
+      },
+      "folds": {
+        "LibrarySha256": "dcaa7d29d95a36f81a258622b3f94ae1ca863a762286e3d2431f532e5f778b17",
+        "ReceiptSha256": "c17ea172c331582aad9a7e6a697c15ce251dfa5be8d8a481851aaaa007aa4579"
+      },
+      "guide": {
+        "LibrarySha256": "bfb46abd93cf9e8c4e77ba88e9e072a62798edae857916a76034503b5af2f51d",
+        "ReceiptSha256": "644423a693f5997451c2f559a5beb08b4ee350bad307d8adf2079d320f04af18"
+      },
+      "colour": {
+        "LibrarySha256": "4df384d815d1130bf99e944223f110c50a5fd9833f5d0003046db2d4077c99d6",
+        "ReceiptSha256": "cac438f13bf1cebae228db46349db8646a190a5c0f0bbf4b8245a79114616b31"
+      },
+      "compose": {
+        "LibrarySha256": "8638f3c098dfe7c086b3e2007af4ccbe7c3f97a8440d1f0f84acdfbdfe7a99ec",
+        "ReceiptSha256": "1745f685118f03db6c7a05b95e1ecfa54e6cad1907679642e2254addd3e21d0d"
+      },
+      "publish": {
+        "LibrarySha256": "5b37aca4daffa05ef8df2c98446b8b50c03a9ff445e4b5b46a4a5e02bbb1e767",
+        "ReceiptSha256": "06c8f037d0d9385d1ebf3e45240dc9e336d6b371bdb29a41d42f9a17e78cb278"
+      },
+      "publish_diagnostics": {
+        "LibrarySha256": "851fa85ee4613054a4d270880058dce04a8702a9c5992fbc71a29056d3f06b8f",
+        "ReceiptSha256": "9c612638b7d5773a37171de5e89faab2cc6d2a8c5b28d701796b3f487eb064b7"
+      },
+      "admission_clear": {
+        "LibrarySha256": "9786d28a1e08445a112c5dfed8a466b321f35e618abb58a4d2d427ca869e7b65",
+        "ReceiptSha256": "e3672616aa94a50e73587ccb229a804bfacb2d91295f0d950858b21871a8042d"
+      },
+      "capture": {
+        "LibrarySha256": "261b63bf1bcc16851ca1807bd94f1d6739b4d237a76f2f80839b8aac055f77d0",
+        "ReceiptSha256": "ac0c0683a1063047dfe00f2083fc91f1ffeb77c4cedc62f29728fb5124484bef"
+      },
+      "history": {
+        "LibrarySha256": "ffc105aad5d29389cff76e0e8857e282b585c29ac2d4d2c582f614ae6e1f9449",
+        "ReceiptSha256": "8c71037b550f12d0e78f9e440a1800d863398f73da8421aac571ae7a80d93de1"
+      },
+      "lobes": {
+        "LibrarySha256": "9b2882abeb3769564de7b6a2f330323f3bfb429cb47298a7b10eb2b47e89607f",
+        "ReceiptSha256": "1097ea5f791b7864c1399b251a4cb35521c5081b71615a4580e8edae2d9991b9"
+      },
+      "paths": {
+        "LibrarySha256": "11ecb8b3d022d2c3d935455741c878216965409d8bdc85c0921ae33a1a6d8365",
+        "ReceiptSha256": "c4d6e89270e0dcba2567b40c88891bf4871b25770260c70bc0a3f4f3e06ea2d1"
+      },
+      "curved_paths": {
+        "LibrarySha256": "ba58c3c252d5a91c46a55a1d67e97f078bd79ac401fcfd18d443846f6768d96e",
+        "ReceiptSha256": "ea9f138fd9245bcd7237663b70b71b7e6a038cb76a3acd5dcd09c268aaa9d1f2"
+      }
+    }
+  }
+}

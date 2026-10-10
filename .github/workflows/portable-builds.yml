@@ -1,44 +1,46 @@
-name: Temporary complete Metal reflection shader SDK checks (no release)
+name: Temporary complete Metal embedding checks (no release)
 on:
   workflow_dispatch:
 permissions:
   contents: read
+  actions: read
 jobs:
-  metal-sdk:
-    name: Strict ${{ matrix.sdk }} / ${{ matrix.shader }}
+  metal-embedding:
+    name: Complete25 embedding / ${{ matrix.sdk }}
     runs-on: macos-15-intel
     strategy:
       fail-fast: false
       matrix:
         sdk: [macosx, iphoneos]
-        shader: [tiles, reduce, query, mapping, domains, frames, optical, optical_stream, optical_schedule, jets, jets_stream, roots_clear, witness, folds, guide, colour, compose, publish, publish_diagnostics, admission_clear, capture, history, lobes, paths, curved_paths]
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
           submodules: false
           lfs: false
-      - name: Inspect actual SDK/compiler availability
-        run: |
-          xcodebuild -version
-          sysctl hw.memsize
-          vm_stat
-          sysctl vm.swapusage
-          xcrun --sdk '${{ matrix.sdk }}' --find metal
-          xcrun --sdk '${{ matrix.sdk }}' --find metallib
-      - name: Compile and link the exact complete25 source shaders
-        run: python3 tools/compile_metal.py --sdk '${{ matrix.sdk }}' --shader '${{ matrix.shader }}' --out '${{ runner.temp }}/metal-result'
-      - name: Preserve SDK diagnostics and nonprivate shader artifacts
+      - name: Fetch only the original complete25 public SDK shader results
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 38054247676
+          pattern: metal-${{ matrix.sdk }}-*
+          path: ${{ runner.temp }}/sdk-artifacts
+      - name: Inspect exact native embedding and all available Metal pipeline loads
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/check_embedding.py --sdk '${{ matrix.sdk }}' --artifacts '${{ runner.temp }}/sdk-artifacts' --out '${{ runner.temp }}/embedding-result'
+      - name: Preserve diagnostics and nonprivate native shader artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: metal-${{ matrix.sdk }}-${{ matrix.shader }}
+          name: embedding-${{ matrix.sdk }}
           path: |
-            ${{ runner.temp }}/metal-result/*.metallib
-            ${{ runner.temp }}/metal-result/*.terminal.json
-            ${{ runner.temp }}/metal-result/*.prelaunch.json
-            ${{ runner.temp }}/metal-result/*.stdout.log
-            ${{ runner.temp }}/metal-result/*.stderr.log
-            ${{ runner.temp }}/metal-result/receipt.json
+            ${{ runner.temp }}/embedding-result/*.o
+            ${{ runner.temp }}/embedding-result/probe
+            ${{ runner.temp }}/embedding-result/*.terminal.json
+            ${{ runner.temp }}/embedding-result/*.prelaunch.json
+            ${{ runner.temp }}/embedding-result/*.stdout.log
+            ${{ runner.temp }}/embedding-result/*.stderr.log
+            ${{ runner.temp }}/embedding-result/embedding-receipt.json
           if-no-files-found: warn
           retention-days: 7

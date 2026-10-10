@@ -1,8 +1,27 @@
-# Temporary Metal reflection shader SDK checks
+# Temporary Metal reflection binary embedding checks
 
 This source-only development snapshot is not a playable build, release or
 production merge. It contains no ROM, asset pack or production Git history.
 Its only trigger is manual dispatch; main, tags and releases remain untouched.
+
+The preceding SDK run compiled and linked all25 unchanged programs for both
+macOS11 and iOS15 with the strict Metal2.3 profile. This follow-up downloads
+only those exact public shader artifacts, verifies every original source,
+binary and receipt pin, and embeds all25 libraries per SDK into native
+read-only Mach-O objects. It also compiles an Objective-C++ library/pipeline
+load diagnostic for both target SDKs. The macOS diagnostic attempts all25
+library, kernel and pipeline loads on the actual runner's Metal device. No
+device, unsupported workgroup or any failed pipeline is reported as a runtime
+pass. iOS compilation is not an iPhone execution test.
+
+This follow-up has two jobs, each retaining the complete25-program family.
+It reuses the unchanged SDK observer's real native PID/birth/path and memory
+guards. The original fifty-result SDK run and any failed diagnostics remain
+separate evidence. It does not dispatch shaders, qualify numerical/optical
+parity or frame cost, wire the application, or publish a release. The binary
+bundle avoids compiling shader source on the player's device and avoids huge
+C++ byte-array compiler inputs. Paths and curved_paths remain distinct variants
+even though their exact original kernel entry-point name is shared.
 
 This follow-up translates the current exact sign-corner native candidate.
 It keeps the complete directed interval calculations and original fallbacks;
