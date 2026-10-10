@@ -422,16 +422,16 @@
       "canonical_sha256": "1906b397dd8818bfa8c62c5bfb40353c705d5921dbb00280aee30b03b8730514"
     },
     {
-      "original_sha256": "e04574e100b4470e1df489c720d281f52e2a76dc8dc59f350e02f501af839bb3",
+      "original_sha256": "468a241b427224c93af1c716e137b5d9777c5dc057b3f8051cb9e24658a79505",
       "path": "src/render/shaders/reflection_source_jets_stream.hlsl",
-      "canonical_bytes": 280,
-      "canonical_sha256": "e04574e100b4470e1df489c720d281f52e2a76dc8dc59f350e02f501af839bb3"
+      "canonical_bytes": 316,
+      "canonical_sha256": "468a241b427224c93af1c716e137b5d9777c5dc057b3f8051cb9e24658a79505"
     },
     {
-      "original_sha256": "4af33408f340e2b36b2cb4158158cbfecddfac785d21f1c4825595dcc059a2f0",
+      "original_sha256": "ef0dbf07daee7c0ccd715da146a12786e73ff37ddc7c7f14d0491a541ec73a22",
       "path": "src/render/shaders/reflection_source_jets.hlsl",
-      "canonical_bytes": 8506,
-      "canonical_sha256": "4af33408f340e2b36b2cb4158158cbfecddfac785d21f1c4825595dcc059a2f0"
+      "canonical_bytes": 8607,
+      "canonical_sha256": "ef0dbf07daee7c0ccd715da146a12786e73ff37ddc7c7f14d0491a541ec73a22"
     },
     {
       "original_sha256": "9a01ab4dffe467abea86484f486b651d8f92044fb86a79f2318d2dcd74e670de",

@@ -6,6 +6,9 @@ RWByteAddressBuffer results:register(u0,space1);
 cbuffer RootSettings:register(b1,space2) {uint rootCapacity,rootFrameStride,rootResultStride,rootMode;};
 #include "reflection_source_optical_local_root.hlsli"
 #include "reflection_source_optical_target.hlsli"
+#ifndef STARFOX_SOURCE_ROOT_LANES
+#define STARFOX_SOURCE_ROOT_LANES 64
+#endif
 #if defined(STARFOX_SOURCE_STREAM_ROOTS)
 void stream_root_reject(uint at) {
     // The generic writer reports upstream refusal in EVERY region slot,
@@ -13,7 +16,7 @@ void stream_root_reject(uint at) {
     [loop] for(uint region=0;region<128;++region)results.Store(at+region*192+12,32);
 }
 #endif
-[numthreads(64,1,1)]
+[numthreads(STARFOX_SOURCE_ROOT_LANES,1,1)]
 void feature_jets_main(uint3 id:SV_DispatchThreadID) {
 #if defined(STARFOX_SOURCE_STREAM_ROOTS)
     // The complete-frame stream needs ONE whole-union hull per query, not
