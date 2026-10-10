@@ -1,4 +1,4 @@
-name: Temporary complete SDL Metal payload checks (no GPU, no release)
+name: Temporary actual Metal reflection factory compilation (no GPU, no release)
 on:
   workflow_dispatch:
 permissions:
@@ -6,7 +6,7 @@ permissions:
   actions: read
 jobs:
   metal-embedding:
-    name: Complete25 SDL payload / ${{ matrix.sdk }}
+    name: Complete25 actual factories / ${{ matrix.sdk }}
     runs-on: macos-15-intel
     strategy:
       fail-fast: false
@@ -25,22 +25,21 @@ jobs:
           run-id: 38054247676
           pattern: metal-${{ matrix.sdk }}-*
           path: ${{ runner.temp }}/sdk-artifacts
-      - name: Compile exact SDL payload interface and test every original program
+      - name: Compile actual complete factory graph and SDK program provider
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 tools/check_payload.py --sdk '${{ matrix.sdk }}' --artifacts '${{ runner.temp }}/sdk-artifacts' --out '${{ runner.temp }}/embedding-result'
+        run: python3 tools/check_wiring.py --sdk '${{ matrix.sdk }}' --artifacts '${{ runner.temp }}/sdk-artifacts' --out '${{ runner.temp }}/embedding-result'
       - name: Preserve diagnostics and nonprivate native shader artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: payload-${{ matrix.sdk }}
+          name: wiring-${{ matrix.sdk }}
           path: |
             ${{ runner.temp }}/embedding-result/*.o
-            ${{ runner.temp }}/embedding-result/payload-probe
             ${{ runner.temp }}/embedding-result/*.terminal.json
             ${{ runner.temp }}/embedding-result/*.prelaunch.json
             ${{ runner.temp }}/embedding-result/*.stdout.log
             ${{ runner.temp }}/embedding-result/*.stderr.log
-            ${{ runner.temp }}/embedding-result/payload-receipt.json
+            ${{ runner.temp }}/embedding-result/wiring-receipt.json
           if-no-files-found: warn
           retention-days: 7
