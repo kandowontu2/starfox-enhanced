@@ -99,7 +99,7 @@ struct type_Mapping
     float4 previousCube[3];
 };
 
-kernel void feature_mapping_main(device type_ByteAddressBuffer& current [[buffer(0)]], device type_ByteAddressBuffer& geometry [[buffer(1)]], device type_RWByteAddressBuffer& queries [[buffer(2)]], constant type_Mapping& Mapping [[buffer(3)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+kernel void feature_mapping_main(device type_ByteAddressBuffer& current [[buffer(1)]], device type_ByteAddressBuffer& geometry [[buffer(2)]], device type_RWByteAddressBuffer& queries [[buffer(3)]], constant type_Mapping& Mapping [[buffer(0)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
 {
     do
     {

@@ -153,7 +153,7 @@ struct type_ComposeSettings
     uint composePad;
 };
 
-kernel void feature_compose_main(constant type_Settings& Settings [[buffer(0)]], device type_ByteAddressBuffer& current [[buffer(1)]], device type_ByteAddressBuffer& queries [[buffer(2)]], device type_RWByteAddressBuffer& results [[buffer(3)]], constant type_ComposeSettings& ComposeSettings [[buffer(4)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+kernel void feature_compose_main(constant type_Settings& Settings [[buffer(0)]], device type_ByteAddressBuffer& current [[buffer(2)]], device type_ByteAddressBuffer& queries [[buffer(3)]], device type_RWByteAddressBuffer& results [[buffer(4)]], constant type_ComposeSettings& ComposeSettings [[buffer(1)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
 {
     do
     {

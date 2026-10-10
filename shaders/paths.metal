@@ -89,13 +89,13 @@ struct ReflectionSpecularPlane
     float4 c;
 };
 
-constant bool _171 = {};
+__attribute__((unused)) constant bool _171 = {};
 constant float2 _172 = {};
 constant float4 _173 = {};
 
 constant spvUnsafeArray<float2, 8> _175 = spvUnsafeArray<float2, 8>({ float2(0.5, 0.0), float2(-0.5, 0.0), float2(0.0, 0.5), float2(0.0, -0.5), float2(0.611999988555908203125), float2(-0.611999988555908203125, 0.611999988555908203125), float2(0.611999988555908203125, -0.611999988555908203125), float2(-0.611999988555908203125) });
 
-kernel void reflection_paths_main(device type_ByteAddressBuffer& current [[buffer(0)]], device type_ByteAddressBuffer& history [[buffer(1)]], device type_ByteAddressBuffer& geometry [[buffer(2)]], device type_RWByteAddressBuffer& resolved [[buffer(3)]], constant type_Settings& Settings [[buffer(4)]], texture2d<float> ownership [[texture(0)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+kernel void reflection_paths_main(device type_ByteAddressBuffer& current [[buffer(1)]], device type_ByteAddressBuffer& history [[buffer(2)]], device type_ByteAddressBuffer& geometry [[buffer(3)]], device type_RWByteAddressBuffer& resolved [[buffer(4)]], constant type_Settings& Settings [[buffer(0)]], texture2d<float> ownership [[texture(0)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
 {
     do
     {

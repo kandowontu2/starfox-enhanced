@@ -16,7 +16,7 @@ struct type_AdmissionSettings
     uint admissionReserved2;
 };
 
-kernel void feature_admission_clear_main(device type_RWByteAddressBuffer& admission [[buffer(0)]], constant type_AdmissionSettings& AdmissionSettings [[buffer(1)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+kernel void feature_admission_clear_main(device type_RWByteAddressBuffer& admission [[buffer(1)]], constant type_AdmissionSettings& AdmissionSettings [[buffer(0)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
 {
     do
     {

@@ -3074,10 +3074,10 @@ OpticalJet3 jet_oriented(thread const OpticalJet3& n, thread const OpticalJet3& 
     Interval _11911 = iadd(_11807, _11808, intervalFailed);
     Interval _11809 = _11896;
     Interval _11810 = _11907;
-    Interval _11912 = jet_add_derivative(_11809, _11810, intervalFailed);
+    __attribute__((unused)) Interval _11912 = jet_add_derivative(_11809, _11810, intervalFailed);
     Interval _11811 = _11897;
     Interval _11812 = _11910;
-    Interval _11913 = jet_add_derivative(_11811, _11812, intervalFailed);
+    __attribute__((unused)) Interval _11913 = jet_add_derivative(_11811, _11812, intervalFailed);
     if (_11911.lo > 0.0)
     {
         Interval _11793 = n.x.v;
@@ -3338,14 +3338,14 @@ bool jet_inside_face(thread const ReflectionSpecularPlane& plane, thread const O
     Interval param_var_b_6 = _15852;
     Interval _15881 = idiv(param_var_a_6, param_var_b_6, intervalFailed, interval_divide_upper);
     float _15596 = -9.9999997473787516355514526367188e-06;
-    float _15883 = interval_down(_15596, intervalFailed);
+    __attribute__((unused)) float _15883 = interval_down(_15596, intervalFailed);
     float _15597 = -9.9999997473787516355514526367188e-06;
     float _15884 = interval_up(_15597, intervalFailed);
     bool _15889;
     if (_15867.lo >= _15884)
     {
         float _15594 = -9.9999997473787516355514526367188e-06;
-        float _15886 = interval_down(_15594, intervalFailed);
+        __attribute__((unused)) float _15886 = interval_down(_15594, intervalFailed);
         float _15595 = -9.9999997473787516355514526367188e-06;
         float _15887 = interval_up(_15595, intervalFailed);
         _15889 = _15881.lo >= _15887;
@@ -3363,7 +3363,7 @@ bool jet_inside_face(thread const ReflectionSpecularPlane& plane, thread const O
         float _15592 = 1.000010013580322265625;
         float _15892 = interval_down(_15592, intervalFailed);
         float _15593 = 1.000010013580322265625;
-        float _15893 = interval_up(_15593, intervalFailed);
+        __attribute__((unused)) float _15893 = interval_up(_15593, intervalFailed);
         _15895 = _15890.hi <= _15892;
     }
     else
@@ -12075,7 +12075,7 @@ bool optical_jet_forward(thread const float4& box, thread const ReflectionRoughF
             _6927 = 9.9999999600419720025001879548654e-13;
         }
         float _6074 = _6927;
-        float _6928 = interval_down(_6074, intervalFailed);
+        __attribute__((unused)) float _6928 = interval_down(_6074, intervalFailed);
         float _6075 = _6927;
         float _6929 = interval_up(_6075, intervalFailed);
         if (_6924 <= _6929)
@@ -13728,7 +13728,7 @@ bool optical_jet_forward(thread const float4& box, thread const ReflectionRoughF
             float _5379 = 0.949999988079071044921875;
             float _8235 = interval_down(_5379, intervalFailed);
             float _5380 = 0.949999988079071044921875;
-            float _8236 = interval_up(_5380, intervalFailed);
+            __attribute__((unused)) float _8236 = interval_up(_5380, intervalFailed);
             float _8909;
             float _8910;
             float _8911;
@@ -14236,7 +14236,7 @@ bool optical_jet_forward(thread const float4& box, thread const ReflectionRoughF
                 float _8573;
                 float _8574;
                 float _5168 = 0.949999988079071044921875;
-                float _8238 = interval_down(_5168, intervalFailed);
+                __attribute__((unused)) float _8238 = interval_down(_5168, intervalFailed);
                 float _5169 = 0.949999988079071044921875;
                 float _8239 = interval_up(_5169, intervalFailed);
                 if (_8231 > _8239)
@@ -15588,10 +15588,10 @@ bool optical_jet_forward(thread const float4& box, thread const ReflectionRoughF
             Interval _9484 = iadd(_4520, _4521, intervalFailed);
             Interval _4522 = _9470;
             Interval _4523 = _9478;
-            Interval _9485 = jet_add_derivative(_4522, _4523, intervalFailed);
+            __attribute__((unused)) Interval _9485 = jet_add_derivative(_4522, _4523, intervalFailed);
             Interval _4524 = _9471;
             Interval _4525 = _9483;
-            Interval _9486 = jet_add_derivative(_4524, _4525, intervalFailed);
+            __attribute__((unused)) Interval _9486 = jet_add_derivative(_4524, _4525, intervalFailed);
             float _9509;
             float _9510;
             float _9511;
@@ -16004,10 +16004,10 @@ bool optical_jet_residual(thread const OpticalJetRay& ray, thread const Interval
     }
     Interval _9879 = _10206;
     Interval _9880 = _10181;
-    Interval _10222 = jet_mul_derivative(_9879, _9880, intervalFailed, optical_product_upper);
+    __attribute__((unused)) Interval _10222 = jet_mul_derivative(_9879, _9880, intervalFailed, optical_product_upper);
     Interval _9881 = _10206;
     Interval _9882 = _10182;
-    Interval _10223 = jet_mul_derivative(_9881, _9882, intervalFailed, optical_product_upper);
+    __attribute__((unused)) Interval _10223 = jet_mul_derivative(_9881, _9882, intervalFailed, optical_product_upper);
     float _10228;
     if (finiteTerminal)
     {
@@ -16097,10 +16097,10 @@ bool optical_jet_residual(thread const OpticalJetRay& ray, thread const Interval
         Interval _10283 = iadd(_9820, _9821, intervalFailed);
         Interval _9822 = _10266;
         Interval _9823 = _10277;
-        Interval _10284 = jet_add_derivative(_9822, _9823, intervalFailed);
+        __attribute__((unused)) Interval _10284 = jet_add_derivative(_9822, _9823, intervalFailed);
         Interval _9824 = _10267;
         Interval _9825 = _10282;
-        Interval _10285 = jet_add_derivative(_9824, _9825, intervalFailed);
+        __attribute__((unused)) Interval _10285 = jet_add_derivative(_9824, _9825, intervalFailed);
         _10288 = _10283.lo <= 0.0;
     }
     else
@@ -18736,7 +18736,7 @@ void src_feature_jets_stream_main(thread const uint3& id, constant type_Settings
     }
 }
 
-kernel void feature_jets_stream_main(constant type_Settings& Settings [[buffer(0)]], device type_ByteAddressBuffer& frames [[buffer(1)]], device type_ByteAddressBuffer& regions [[buffer(2)]], device type_ByteAddressBuffer& queries [[buffer(3)]], device type_ByteAddressBuffer& optical [[buffer(4)]], device type_RWByteAddressBuffer& results [[buffer(5)]], constant type_RootSettings& RootSettings [[buffer(6)]], constant type_TargetSettings& TargetSettings [[buffer(7)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+kernel void feature_jets_stream_main(constant type_Settings& Settings [[buffer(0)]], device type_ByteAddressBuffer& frames [[buffer(3)]], device type_ByteAddressBuffer& regions [[buffer(4)]], device type_ByteAddressBuffer& queries [[buffer(5)]], device type_ByteAddressBuffer& optical [[buffer(6)]], device type_RWByteAddressBuffer& results [[buffer(7)]], constant type_RootSettings& RootSettings [[buffer(1)]], constant type_TargetSettings& TargetSettings [[buffer(2)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
 {
     bool intervalFailed = false;
     float optical_product_upper = 0.0;

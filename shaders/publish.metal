@@ -25,7 +25,7 @@ struct type_PublishSettings
     uint publishReserved;
 };
 
-kernel void feature_publish_main(device type_ByteAddressBuffer& packets [[buffer(0)]], device type_RWByteAddressBuffer& image [[buffer(1)]], constant type_PublishSettings& PublishSettings [[buffer(2)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+kernel void feature_publish_main(device type_ByteAddressBuffer& packets [[buffer(1)]], device type_RWByteAddressBuffer& image [[buffer(2)]], constant type_PublishSettings& PublishSettings [[buffer(0)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
 {
     do
     {

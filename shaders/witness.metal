@@ -3337,7 +3337,7 @@ void src_feature_witness_main(thread const uint3& id, constant type_Settings& Se
     results._m0[_2750 + 3u] = _1863;
 }
 
-kernel void feature_witness_main(constant type_Settings& Settings [[buffer(0)]], device type_ByteAddressBuffer& frames [[buffer(1)]], device type_ByteAddressBuffer& queries [[buffer(2)]], device type_ByteAddressBuffer& source [[buffer(3)]], device type_RWByteAddressBuffer& results [[buffer(4)]], constant type_WitnessSettings& WitnessSettings [[buffer(5)]], constant type_TargetSettings& TargetSettings [[buffer(6)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+kernel void feature_witness_main(constant type_Settings& Settings [[buffer(0)]], device type_ByteAddressBuffer& frames [[buffer(3)]], device type_ByteAddressBuffer& queries [[buffer(4)]], device type_ByteAddressBuffer& source [[buffer(5)]], device type_RWByteAddressBuffer& results [[buffer(6)]], constant type_WitnessSettings& WitnessSettings [[buffer(1)]], constant type_TargetSettings& TargetSettings [[buffer(2)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
 {
     bool intervalFailed = false;
     float optical_product_upper = 0.0;

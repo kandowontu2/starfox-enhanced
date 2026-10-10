@@ -1,35 +1,33 @@
 # Temporary Metal reflection shader SDK checks
 
-This is a source-only development snapshot, not a playable build or a release.
-It is not a production merge candidate. Its only trigger is manual dispatch.
+This source-only development snapshot is not a playable build, release or
+production merge. It contains no ROM, asset pack or production Git history.
+Its only trigger is manual dispatch; main, tags and releases remain untouched.
 
-All25 standalone Metal sources were translated from the exact SPIRV shader
-programs bound by the current native reflection candidate:21 native stages
-and4 legacy history/path stages. Native stages retain the complete current
-polynomial, stream, root, guide, publish and diagnostic programs.
+The complete 25-program matrix retains all 21 native reflection stages and
+four legacy history/path programs. SPIRV-Cross at
+`be71ee8c12cd7dc5ca8fa9581f708c2e8561fe2a` translated the pinned SPIRV programs
+to MSL 3.0. Resource annotations now use SDL Metal's uniform-first buffer
+layout, retaining the original reserved slots and workgroup dimensions.
 
-SPIRV-Cross at `be71ee8c12cd7dc5ca8fa9581f708c2e8561fe2a` produced MSL3.0
-with only `--msl --msl-version 30000`. No source arithmetic rewriting or
-invariant-float-math substitution was enabled. `shaders.json` records exact
-input/output hashes and the full matrix; every compiler operation checks it.
+Generated-code diagnostic fixes retain all unused SSA initializers and calls,
+marking only unused return values. Three unsigned self-comparisons use a pure
+identity helper; floating-point comparisons are unchanged. Shared values are
+read by threadgroup reference after the original lane-zero writes and barrier,
+without adding per-lane writes or changing shared storage.
 
-Both macOS and iPhone SDKs compile and link all25 programs with warnings as
-errors, fast math disabled and contraction disabled. Local translation and
-SDK compilation do not prove SDL resource-binding ABI, runtime portability,
-signed-zero/subnormal parity, reflection quality or acceptable frame cost.
+Both SDK jobs attempt all 25 programs with warnings as errors, fast math
+disabled and contraction disabled. SDK compilation does not prove runtime
+binding behavior, numerical parity, optical quality or acceptable frame cost.
+Every operation verifies the complete source hash, byte count and entry point.
 
-The macOS resource monitor uses native microsecond process births/paths and
-whole-owned-tree resident memory. This is explicitly not Windows committed
-private memory. It requires6GiB reclaimable physical memory and physical plus
-free swap before every launch, caps observed owned-tree residency at2GiB,
-and retains1GiB physical/1.5GiB physical-plus-swap running floors. It performs
-no elapsed native kill or automatic unchanged retry.
+The macOS monitor uses native process births/paths and whole-owned-tree
+resident memory, not Windows private committed memory. It requires 6 GiB
+reclaimable physical and physical-plus-free-swap memory before launch, caps
+observed owned-tree residency at 2 GiB, and retains 1 GiB physical/1.5 GiB
+physical-plus-swap running floors. It does not kill a compiler merely for
+elapsed time, or automatically retry an unchanged compilation.
 
-No ROMs, asset packs, player binaries, private transcripts, credentials or
-inherited repository history are included. No main branch, tags or releases
-are modified by this check.
-
-Original project ownership, licensing and credits apply to the shaders;
-this compilation snapshot does not grant a different license. SPIRV-Cross
-is by the Khronos Group contributors under Apache2.0; its license is included
-in `licenses/SPIRV-Cross.txt`.
+Original project ownership, licensing and credits apply to the shaders.
+SPIRV-Cross is by Khronos Group contributors under Apache 2.0; its unmodified
+license is included in `licenses/SPIRV-Cross.txt`.

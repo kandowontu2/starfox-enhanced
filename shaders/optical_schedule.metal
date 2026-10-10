@@ -3,6 +3,11 @@
 
 using namespace metal;
 
+inline uint sfe_shared_uint(const threadgroup uint& value)
+{
+    return value;
+}
+
 struct type_ScheduleSettings
 {
     uint queryCount;
@@ -147,9 +152,9 @@ kernel void feature_optical_schedule_main(constant type_ScheduleSettings& Schedu
             }
         }
         threadgroup_barrier(mem_flags::mem_threadgroup);
-        if (gl_LocalInvocationIndex < workCount)
+        if (gl_LocalInvocationIndex < sfe_shared_uint(workCount))
         {
-            uint _178 = ((workBase + gl_LocalInvocationIndex) * 8u) >> 2u;
+            uint _178 = ((sfe_shared_uint(workBase) + gl_LocalInvocationIndex) * 8u) >> 2u;
             workMap._m0[_178] = gl_WorkGroupID.x;
             workMap._m0[_178 + 1u] = gl_LocalInvocationIndex;
         }

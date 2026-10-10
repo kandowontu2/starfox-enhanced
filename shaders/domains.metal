@@ -149,7 +149,7 @@ struct Point
     float2 y;
 };
 
-constant int _1801 = {};
+__attribute__((unused)) constant int _1801 = {};
 
 kernel void feature_domains_main(constant type_Settings& Settings [[buffer(0)]], constant type_DomainSettings& DomainSettings [[buffer(1)]], device type_ByteAddressBuffer& source [[buffer(2)]], device type_ByteAddressBuffer& queries [[buffer(3)]], device type_ByteAddressBuffer& leaves [[buffer(4)]], device type_RWByteAddressBuffer& regions [[buffer(5)]], uint3 gl_WorkGroupID [[threadgroup_position_in_grid]], uint3 gl_LocalInvocationID [[thread_position_in_threadgroup]], uint gl_LocalInvocationIndex [[thread_index_in_threadgroup]])
 {
@@ -271,7 +271,7 @@ kernel void feature_domains_main(constant type_Settings& Settings [[buffer(0)]],
             }
             if (_1925)
             {
-                uint _1928 = atomic_fetch_or_explicit((threadgroup atomic_uint*)&regionStatus, 128u, memory_order_relaxed);
+                __attribute__((unused)) uint _1928 = atomic_fetch_or_explicit((threadgroup atomic_uint*)&regionStatus, 128u, memory_order_relaxed);
             }
             threadgroup_barrier(mem_flags::mem_threadgroup);
             if (regionStatus != 0u)
@@ -445,7 +445,7 @@ kernel void feature_domains_main(constant type_Settings& Settings [[buffer(0)]],
                         uint _2114 = atomic_fetch_add_explicit((threadgroup atomic_uint*)&workCount, 1u, memory_order_relaxed);
                         if (_2114 >= DomainSettings.supportBudget)
                         {
-                            uint _2120 = atomic_fetch_or_explicit((threadgroup atomic_uint*)&regionStatus, 32u, memory_order_relaxed);
+                            __attribute__((unused)) uint _2120 = atomic_fetch_or_explicit((threadgroup atomic_uint*)&regionStatus, 32u, memory_order_relaxed);
                             _2103 = _2098;
                             continue;
                         }
@@ -466,15 +466,15 @@ kernel void feature_domains_main(constant type_Settings& Settings [[buffer(0)]],
                             uint _2144;
                             if (_2129)
                             {
-                                uint _2135 = 3u;
-                                uint _2136 = 2u;
+                                __attribute__((unused)) uint _2135 = 3u;
+                                __attribute__((unused)) uint _2136 = 2u;
                                 uint _109 = _2124 ? 3u : 2u;
                                 _1809[_2128] = Point{ float2(float(_2105), 0.0), float2(1.0, 0.0) };
                                 uint _2143;
                                 if (_2124)
                                 {
-                                    uint _2140 = 4u;
-                                    uint _2141 = 3u;
+                                    __attribute__((unused)) uint _2140 = 4u;
+                                    __attribute__((unused)) uint _2141 = 3u;
                                     _1809[_109] = Point{ float2(0.0), float2(1.0, 0.0) };
                                     _2143 = _2124 ? 4u : 3u;
                                 }
@@ -2332,8 +2332,8 @@ kernel void feature_domains_main(constant type_Settings& Settings [[buffer(0)]],
                         } while(false);
                         if (_3088 < 0)
                         {
-                            uint _3092 = atomic_fetch_or_explicit((threadgroup atomic_uint*)&regionStatus, 64u, memory_order_relaxed);
-                            uint _3096 = atomic_fetch_or_explicit((threadgroup atomic_uint*)&errorBits, 1u << (uint((-1) - _3088) & 31u), memory_order_relaxed);
+                            __attribute__((unused)) uint _3092 = atomic_fetch_or_explicit((threadgroup atomic_uint*)&regionStatus, 64u, memory_order_relaxed);
+                            __attribute__((unused)) uint _3096 = atomic_fetch_or_explicit((threadgroup atomic_uint*)&errorBits, 1u << (uint((-1) - _3088) & 31u), memory_order_relaxed);
                             _2103 = _3088;
                             continue;
                         }
@@ -2345,7 +2345,7 @@ kernel void feature_domains_main(constant type_Settings& Settings [[buffer(0)]],
                         uint _3100 = atomic_fetch_add_explicit((threadgroup atomic_uint*)&regionCount, 1u, memory_order_relaxed);
                         if (_3100 >= DomainSettings.regionBudget)
                         {
-                            uint _3106 = atomic_fetch_or_explicit((threadgroup atomic_uint*)&regionStatus, 16u, memory_order_relaxed);
+                            __attribute__((unused)) uint _3106 = atomic_fetch_or_explicit((threadgroup atomic_uint*)&regionStatus, 16u, memory_order_relaxed);
                             _2103 = _3088;
                             continue;
                         }

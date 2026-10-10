@@ -6,6 +6,11 @@
 
 using namespace metal;
 
+inline uint sfe_identity_uint(uint value)
+{
+    return value;
+}
+
 template<typename T, size_t Num>
 struct spvUnsafeArray
 {
@@ -5754,7 +5759,7 @@ bool fold_classify(thread const spvUnsafeArray<float3, 4>& features, thread cons
                         if (_63576)
                         {
                             uint _63579 = as_type<uint>(features[_61677].x);
-                            _63581 = _63579 == _63579;
+                            _63581 = _63579 == sfe_identity_uint(_63579);
                         }
                         else
                         {
@@ -6108,7 +6113,7 @@ bool fold_classify(thread const spvUnsafeArray<float3, 4>& features, thread cons
                         if (_63799)
                         {
                             uint _63802 = as_type<uint>(features[_61677].y);
-                            _63804 = _63802 == _63802;
+                            _63804 = _63802 == sfe_identity_uint(_63802);
                         }
                         else
                         {
@@ -6580,7 +6585,7 @@ bool fold_classify(thread const spvUnsafeArray<float3, 4>& features, thread cons
                         if (_64102)
                         {
                             uint _64105 = as_type<uint>(features[_61677].z);
-                            _64107 = _64105 == _64105;
+                            _64107 = _64105 == sfe_identity_uint(_64105);
                         }
                         else
                         {
@@ -11324,12 +11329,12 @@ bool fold_inner(thread const float2& _sample, thread const ReflectionRoughFrame&
                         float _7340 = spvFAdd(spvFSub(_7336, spvFSub(_7337, _7324)), spvFAdd(spvFSub(_7271, spvFSub(_7330, _7331)), spvFSub(_7323, _7331)));
                         float _7341 = spvFAdd(_7337, _7340);
                         float _7343 = spvFSub(_7340, spvFSub(_7341, _7337));
-                        float _65206 = _4325;
-                        float _65207 = _4327;
-                        uint _65208 = 2u;
-                        float _65209 = _4325;
-                        float _65210 = _4327;
-                        uint _65211 = 3u;
+                        __attribute__((unused)) float _65206 = _4325;
+                        __attribute__((unused)) float _65207 = _4327;
+                        __attribute__((unused)) uint _65208 = 2u;
+                        __attribute__((unused)) float _65209 = _4325;
+                        __attribute__((unused)) float _65210 = _4327;
+                        __attribute__((unused)) uint _65211 = 3u;
                         float _7344 = 39.0 / 10000.0;
                         float _7352 = spvFMul(_7344, 10000.0);
                         float _7353 = spvFMul(_7344, 4097.0);
@@ -11386,12 +11391,12 @@ bool fold_inner(thread const float2& _sample, thread const ReflectionRoughFrame&
                         float _7471 = spvFMul(_7468, 4097.0);
                         float _7473 = spvFSub(_7471, spvFSub(_7471, _7468));
                         float _7474 = spvFSub(_7468, _7473);
-                        float _65200 = _5328;
-                        float _65201 = _5330;
-                        uint _65202 = 2u;
-                        float _65203 = _5328;
-                        float _65204 = _5330;
-                        uint _65205 = 3u;
+                        __attribute__((unused)) float _65200 = _5328;
+                        __attribute__((unused)) float _65201 = _5330;
+                        __attribute__((unused)) uint _65202 = 2u;
+                        __attribute__((unused)) float _65203 = _5328;
+                        __attribute__((unused)) float _65204 = _5330;
+                        __attribute__((unused)) uint _65205 = 3u;
                         float _7475 = 1175.0 / 10000.0;
                         float _7483 = spvFMul(_7475, 10000.0);
                         float _7484 = spvFMul(_7475, 4097.0);
@@ -11441,12 +11446,12 @@ bool fold_inner(thread const float2& _sample, thread const ReflectionRoughFrame&
                         float _7593 = spvFAdd(spvFSub(_7589, spvFSub(_7590, _7577)), spvFAdd(spvFSub(_7534, spvFSub(_7583, _7584)), spvFSub(0.0, _7584)));
                         float _7594 = spvFAdd(_7590, _7593);
                         float _7596 = spvFSub(_7593, spvFSub(_7594, _7590));
-                        float _65194 = _5801;
-                        float _65195 = _5803;
-                        uint _65196 = 2u;
-                        float _65197 = _5801;
-                        float _65198 = _5803;
-                        uint _65199 = 3u;
+                        __attribute__((unused)) float _65194 = _5801;
+                        __attribute__((unused)) float _65195 = _5803;
+                        __attribute__((unused)) uint _65196 = 2u;
+                        __attribute__((unused)) float _65197 = _5801;
+                        __attribute__((unused)) float _65198 = _5803;
+                        __attribute__((unused)) uint _65199 = 3u;
                         float _7597 = spvFMul(_7594, 4097.0);
                         float _7599 = spvFSub(_7597, spvFSub(_7597, _7594));
                         float _7600 = spvFSub(_7594, _7599);
@@ -11499,12 +11504,12 @@ bool fold_inner(thread const float2& _sample, thread const ReflectionRoughFrame&
                         float _7719 = spvFAdd(spvFSub(_7715, spvFSub(_7716, _7703)), spvFAdd(spvFSub(_7660, spvFSub(_7709, _7710)), spvFSub(0.0, _7710)));
                         float _7720 = spvFAdd(_7716, _7719);
                         float _7722 = spvFSub(_7719, spvFSub(_7720, _7716));
-                        float _65188 = _6275;
-                        float _65189 = _6277;
-                        uint _65190 = 2u;
-                        float _65191 = _6275;
-                        float _65192 = _6277;
-                        uint _65193 = 3u;
+                        __attribute__((unused)) float _65188 = _6275;
+                        __attribute__((unused)) float _65189 = _6277;
+                        __attribute__((unused)) uint _65190 = 2u;
+                        __attribute__((unused)) float _65191 = _6275;
+                        __attribute__((unused)) float _65192 = _6277;
+                        __attribute__((unused)) uint _65193 = 3u;
                         float _7723 = spvFMul(_7720, 4097.0);
                         float _7725 = spvFSub(_7723, spvFSub(_7723, _7720));
                         float _7726 = spvFSub(_7720, _7725);
@@ -11560,12 +11565,12 @@ bool fold_inner(thread const float2& _sample, thread const ReflectionRoughFrame&
                         float _7849 = spvFMul(_7846, 4097.0);
                         float _7851 = spvFSub(_7849, spvFSub(_7849, _7846));
                         float _7852 = spvFSub(_7846, _7851);
-                        float _65182 = _5328;
-                        float _65183 = _5330;
-                        uint _65184 = 2u;
-                        float _65185 = _5328;
-                        float _65186 = _5330;
-                        uint _65187 = 3u;
+                        __attribute__((unused)) float _65182 = _5328;
+                        __attribute__((unused)) float _65183 = _5330;
+                        __attribute__((unused)) uint _65184 = 2u;
+                        __attribute__((unused)) float _65185 = _5328;
+                        __attribute__((unused)) float _65186 = _5330;
+                        __attribute__((unused)) uint _65187 = 3u;
                         float _7853 = 625.0 / 10000.0;
                         float _7861 = spvFMul(_7853, 10000.0);
                         float _7862 = spvFMul(_7853, 4097.0);
@@ -11615,12 +11620,12 @@ bool fold_inner(thread const float2& _sample, thread const ReflectionRoughFrame&
                         float _7971 = spvFAdd(spvFSub(_7967, spvFSub(_7968, _7955)), spvFAdd(spvFSub(_7912, spvFSub(_7961, _7962)), spvFSub(0.0, _7962)));
                         float _7972 = spvFAdd(_7968, _7971);
                         float _7974 = spvFSub(_7971, spvFSub(_7972, _7968));
-                        float _65176 = _5801;
-                        float _65177 = _5803;
-                        uint _65178 = 2u;
-                        float _65179 = _5801;
-                        float _65180 = _5803;
-                        uint _65181 = 3u;
+                        __attribute__((unused)) float _65176 = _5801;
+                        __attribute__((unused)) float _65177 = _5803;
+                        __attribute__((unused)) uint _65178 = 2u;
+                        __attribute__((unused)) float _65179 = _5801;
+                        __attribute__((unused)) float _65180 = _5803;
+                        __attribute__((unused)) uint _65181 = 3u;
                         float _7975 = spvFMul(_7972, 4097.0);
                         float _7977 = spvFSub(_7975, spvFSub(_7975, _7972));
                         float _7978 = spvFSub(_7972, _7977);
@@ -11673,12 +11678,12 @@ bool fold_inner(thread const float2& _sample, thread const ReflectionRoughFrame&
                         float _8097 = spvFAdd(spvFSub(_8093, spvFSub(_8094, _8081)), spvFAdd(spvFSub(_8038, spvFSub(_8087, _8088)), spvFSub(0.0, _8088)));
                         float _8098 = spvFAdd(_8094, _8097);
                         float _8100 = spvFSub(_8097, spvFSub(_8098, _8094));
-                        float _65170 = _6275;
-                        float _65171 = _6277;
-                        uint _65172 = 2u;
-                        float _65173 = _6275;
-                        float _65174 = _6277;
-                        uint _65175 = 3u;
+                        __attribute__((unused)) float _65170 = _6275;
+                        __attribute__((unused)) float _65171 = _6277;
+                        __attribute__((unused)) uint _65172 = 2u;
+                        __attribute__((unused)) float _65173 = _6275;
+                        __attribute__((unused)) float _65174 = _6277;
+                        __attribute__((unused)) uint _65175 = 3u;
                         float _8101 = spvFMul(_8098, 4097.0);
                         float _8103 = spvFSub(_8101, spvFSub(_8101, _8098));
                         float _8104 = spvFSub(_8098, _8103);
@@ -12144,12 +12149,12 @@ bool fold_inner(thread const float2& _sample, thread const ReflectionRoughFrame&
                         float _9227 = spvFAdd(spvFSub(_9223, spvFSub(_9224, _9211)), spvFAdd(spvFSub(_9168, spvFSub(_9217, _9218)), spvFSub(0.0, _9218)));
                         float _9228 = spvFAdd(_9224, _9227);
                         float _9230 = spvFSub(_9227, spvFSub(_9228, _9224));
-                        float _65158 = _8575;
-                        float _65159 = _8577;
-                        uint _65160 = 2u;
-                        float _65161 = _8575;
-                        float _65162 = _8577;
-                        uint _65163 = 3u;
+                        __attribute__((unused)) float _65158 = _8575;
+                        __attribute__((unused)) float _65159 = _8577;
+                        __attribute__((unused)) uint _65160 = 2u;
+                        __attribute__((unused)) float _65161 = _8575;
+                        __attribute__((unused)) float _65162 = _8577;
+                        __attribute__((unused)) uint _65163 = 3u;
                         float _9231 = spvFMul(_9228, 4097.0);
                         float _9233 = spvFSub(_9231, spvFSub(_9231, _9228));
                         float _9234 = spvFSub(_9228, _9233);
@@ -12202,12 +12207,12 @@ bool fold_inner(thread const float2& _sample, thread const ReflectionRoughFrame&
                         float _9353 = spvFAdd(spvFSub(_9349, spvFSub(_9350, _9337)), spvFAdd(spvFSub(_9294, spvFSub(_9343, _9344)), spvFSub(0.0, _9344)));
                         float _9354 = spvFAdd(_9350, _9353);
                         float _9356 = spvFSub(_9353, spvFSub(_9354, _9350));
-                        float _65152 = _8575;
-                        float _65153 = _8577;
-                        uint _65154 = 2u;
-                        float _65155 = _8575;
-                        float _65156 = _8577;
-                        uint _65157 = 3u;
+                        __attribute__((unused)) float _65152 = _8575;
+                        __attribute__((unused)) float _65153 = _8577;
+                        __attribute__((unused)) uint _65154 = 2u;
+                        __attribute__((unused)) float _65155 = _8575;
+                        __attribute__((unused)) float _65156 = _8577;
+                        __attribute__((unused)) uint _65157 = 3u;
                         float _9357 = spvFMul(_9354, 4097.0);
                         float _9359 = spvFSub(_9357, spvFSub(_9357, _9354));
                         float _9360 = spvFSub(_9354, _9359);
@@ -13889,24 +13894,24 @@ bool fold_inner(thread const float2& _sample, thread const ReflectionRoughFrame&
                         float _13045 = spvFAdd(spvFSub(_13041, spvFSub(_13042, _13029)), spvFAdd(spvFSub(_13028, spvFSub(_13035, _13036)), spvFSub(_66458, _13036)));
                         float _13046 = spvFAdd(_13042, _13045);
                         float _13048 = spvFSub(_13045, spvFSub(_13046, _13042));
-                        float _65134 = _12892;
-                        float _65135 = _12894;
-                        uint _65136 = 0u;
-                        float _65137 = _12892;
-                        float _65138 = _12894;
-                        uint _65139 = 1u;
-                        float _65128 = _12969;
-                        float _65129 = _12971;
-                        uint _65130 = 0u;
-                        float _65131 = _12969;
-                        float _65132 = _12971;
-                        uint _65133 = 1u;
-                        float _65122 = _13046;
-                        float _65123 = _13048;
-                        uint _65124 = 0u;
-                        float _65125 = _13046;
-                        float _65126 = _13048;
-                        uint _65127 = 1u;
+                        __attribute__((unused)) float _65134 = _12892;
+                        __attribute__((unused)) float _65135 = _12894;
+                        __attribute__((unused)) uint _65136 = 0u;
+                        __attribute__((unused)) float _65137 = _12892;
+                        __attribute__((unused)) float _65138 = _12894;
+                        __attribute__((unused)) uint _65139 = 1u;
+                        __attribute__((unused)) float _65128 = _12969;
+                        __attribute__((unused)) float _65129 = _12971;
+                        __attribute__((unused)) uint _65130 = 0u;
+                        __attribute__((unused)) float _65131 = _12969;
+                        __attribute__((unused)) float _65132 = _12971;
+                        __attribute__((unused)) uint _65133 = 1u;
+                        __attribute__((unused)) float _65122 = _13046;
+                        __attribute__((unused)) float _65123 = _13048;
+                        __attribute__((unused)) uint _65124 = 0u;
+                        __attribute__((unused)) float _65125 = _13046;
+                        __attribute__((unused)) float _65126 = _13048;
+                        __attribute__((unused)) uint _65127 = 1u;
                         float _65116 = _12752;
                         float _65117 = _12754;
                         uint _65118 = 2u;
@@ -14171,12 +14176,12 @@ bool fold_inner(thread const float2& _sample, thread const ReflectionRoughFrame&
                         float _13622 = spvFAdd(spvFSub(_13618, spvFSub(_13619, _13606)), spvFAdd(spvFSub(_13605, spvFSub(_13612, _13613)), spvFSub(_66481, _13613)));
                         float _13623 = spvFAdd(_13619, _13622);
                         float _13625 = spvFSub(_13622, spvFSub(_13623, _13619));
-                        float _65074 = _13623;
-                        float _65075 = _13625;
-                        uint _65076 = 0u;
-                        float _65077 = _13623;
-                        float _65078 = _13625;
-                        uint _65079 = 1u;
+                        __attribute__((unused)) float _65074 = _13623;
+                        __attribute__((unused)) float _65075 = _13625;
+                        __attribute__((unused)) uint _65076 = 0u;
+                        __attribute__((unused)) float _65077 = _13623;
+                        __attribute__((unused)) float _65078 = _13625;
+                        __attribute__((unused)) uint _65079 = 1u;
                         float _65068 = _13623;
                         float _65069 = _13625;
                         uint _65070 = 2u;
@@ -21406,12 +21411,12 @@ bool fold_inner(thread const float2& _sample, thread const ReflectionRoughFrame&
                                     float _29598 = spvFAdd(spvFSub(_29594, spvFSub(_29595, _29582)), spvFAdd(spvFSub(_29529, spvFSub(_29588, _29589)), spvFSub(_29581, _29589)));
                                     float _29599 = spvFAdd(_29595, _29598);
                                     float _29601 = spvFSub(_29598, spvFSub(_29599, _29595));
-                                    float _65002 = _26583;
-                                    float _65003 = _26585;
-                                    uint _65004 = 2u;
-                                    float _65005 = _26583;
-                                    float _65006 = _26585;
-                                    uint _65007 = 3u;
+                                    __attribute__((unused)) float _65002 = _26583;
+                                    __attribute__((unused)) float _65003 = _26585;
+                                    __attribute__((unused)) uint _65004 = 2u;
+                                    __attribute__((unused)) float _65005 = _26583;
+                                    __attribute__((unused)) float _65006 = _26585;
+                                    __attribute__((unused)) uint _65007 = 3u;
                                     float _29602 = 39.0 / 10000.0;
                                     float _29610 = spvFMul(_29602, 10000.0);
                                     float _29611 = spvFMul(_29602, 4097.0);
@@ -21468,12 +21473,12 @@ bool fold_inner(thread const float2& _sample, thread const ReflectionRoughFrame&
                                     float _29729 = spvFMul(_29726, 4097.0);
                                     float _29731 = spvFSub(_29729, spvFSub(_29729, _29726));
                                     float _29732 = spvFSub(_29726, _29731);
-                                    float _64996 = _27586;
-                                    float _64997 = _27588;
-                                    uint _64998 = 2u;
-                                    float _64999 = _27586;
-                                    float _65000 = _27588;
-                                    uint _65001 = 3u;
+                                    __attribute__((unused)) float _64996 = _27586;
+                                    __attribute__((unused)) float _64997 = _27588;
+                                    __attribute__((unused)) uint _64998 = 2u;
+                                    __attribute__((unused)) float _64999 = _27586;
+                                    __attribute__((unused)) float _65000 = _27588;
+                                    __attribute__((unused)) uint _65001 = 3u;
                                     float _29733 = 1175.0 / 10000.0;
                                     float _29741 = spvFMul(_29733, 10000.0);
                                     float _29742 = spvFMul(_29733, 4097.0);
@@ -21523,12 +21528,12 @@ bool fold_inner(thread const float2& _sample, thread const ReflectionRoughFrame&
                                     float _29851 = spvFAdd(spvFSub(_29847, spvFSub(_29848, _29835)), spvFAdd(spvFSub(_29792, spvFSub(_29841, _29842)), spvFSub(0.0, _29842)));
                                     float _29852 = spvFAdd(_29848, _29851);
                                     float _29854 = spvFSub(_29851, spvFSub(_29852, _29848));
-                                    float _64990 = _28059;
-                                    float _64991 = _28061;
-                                    uint _64992 = 2u;
-                                    float _64993 = _28059;
-                                    float _64994 = _28061;
-                                    uint _64995 = 3u;
+                                    __attribute__((unused)) float _64990 = _28059;
+                                    __attribute__((unused)) float _64991 = _28061;
+                                    __attribute__((unused)) uint _64992 = 2u;
+                                    __attribute__((unused)) float _64993 = _28059;
+                                    __attribute__((unused)) float _64994 = _28061;
+                                    __attribute__((unused)) uint _64995 = 3u;
                                     float _29855 = spvFMul(_29852, 4097.0);
                                     float _29857 = spvFSub(_29855, spvFSub(_29855, _29852));
                                     float _29858 = spvFSub(_29852, _29857);
@@ -21581,12 +21586,12 @@ bool fold_inner(thread const float2& _sample, thread const ReflectionRoughFrame&
                                     float _29977 = spvFAdd(spvFSub(_29973, spvFSub(_29974, _29961)), spvFAdd(spvFSub(_29918, spvFSub(_29967, _29968)), spvFSub(0.0, _29968)));
                                     float _29978 = spvFAdd(_29974, _29977);
                                     float _29980 = spvFSub(_29977, spvFSub(_29978, _29974));
-                                    float _64984 = _28533;
-                                    float _64985 = _28535;
-                                    uint _64986 = 2u;
-                                    float _64987 = _28533;
-                                    float _64988 = _28535;
-                                    uint _64989 = 3u;
+                                    __attribute__((unused)) float _64984 = _28533;
+                                    __attribute__((unused)) float _64985 = _28535;
+                                    __attribute__((unused)) uint _64986 = 2u;
+                                    __attribute__((unused)) float _64987 = _28533;
+                                    __attribute__((unused)) float _64988 = _28535;
+                                    __attribute__((unused)) uint _64989 = 3u;
                                     float _29981 = spvFMul(_29978, 4097.0);
                                     float _29983 = spvFSub(_29981, spvFSub(_29981, _29978));
                                     float _29984 = spvFSub(_29978, _29983);
@@ -21642,12 +21647,12 @@ bool fold_inner(thread const float2& _sample, thread const ReflectionRoughFrame&
                                     float _30107 = spvFMul(_30104, 4097.0);
                                     float _30109 = spvFSub(_30107, spvFSub(_30107, _30104));
                                     float _30110 = spvFSub(_30104, _30109);
-                                    float _64978 = _27586;
-                                    float _64979 = _27588;
-                                    uint _64980 = 2u;
-                                    float _64981 = _27586;
-                                    float _64982 = _27588;
-                                    uint _64983 = 3u;
+                                    __attribute__((unused)) float _64978 = _27586;
+                                    __attribute__((unused)) float _64979 = _27588;
+                                    __attribute__((unused)) uint _64980 = 2u;
+                                    __attribute__((unused)) float _64981 = _27586;
+                                    __attribute__((unused)) float _64982 = _27588;
+                                    __attribute__((unused)) uint _64983 = 3u;
                                     float _30111 = 625.0 / 10000.0;
                                     float _30119 = spvFMul(_30111, 10000.0);
                                     float _30120 = spvFMul(_30111, 4097.0);
@@ -21697,12 +21702,12 @@ bool fold_inner(thread const float2& _sample, thread const ReflectionRoughFrame&
                                     float _30229 = spvFAdd(spvFSub(_30225, spvFSub(_30226, _30213)), spvFAdd(spvFSub(_30170, spvFSub(_30219, _30220)), spvFSub(0.0, _30220)));
                                     float _30230 = spvFAdd(_30226, _30229);
                                     float _30232 = spvFSub(_30229, spvFSub(_30230, _30226));
-                                    float _64972 = _28059;
-                                    float _64973 = _28061;
-                                    uint _64974 = 2u;
-                                    float _64975 = _28059;
-                                    float _64976 = _28061;
-                                    uint _64977 = 3u;
+                                    __attribute__((unused)) float _64972 = _28059;
+                                    __attribute__((unused)) float _64973 = _28061;
+                                    __attribute__((unused)) uint _64974 = 2u;
+                                    __attribute__((unused)) float _64975 = _28059;
+                                    __attribute__((unused)) float _64976 = _28061;
+                                    __attribute__((unused)) uint _64977 = 3u;
                                     float _30233 = spvFMul(_30230, 4097.0);
                                     float _30235 = spvFSub(_30233, spvFSub(_30233, _30230));
                                     float _30236 = spvFSub(_30230, _30235);
@@ -21755,12 +21760,12 @@ bool fold_inner(thread const float2& _sample, thread const ReflectionRoughFrame&
                                     float _30355 = spvFAdd(spvFSub(_30351, spvFSub(_30352, _30339)), spvFAdd(spvFSub(_30296, spvFSub(_30345, _30346)), spvFSub(0.0, _30346)));
                                     float _30356 = spvFAdd(_30352, _30355);
                                     float _30358 = spvFSub(_30355, spvFSub(_30356, _30352));
-                                    float _64966 = _28533;
-                                    float _64967 = _28535;
-                                    uint _64968 = 2u;
-                                    float _64969 = _28533;
-                                    float _64970 = _28535;
-                                    uint _64971 = 3u;
+                                    __attribute__((unused)) float _64966 = _28533;
+                                    __attribute__((unused)) float _64967 = _28535;
+                                    __attribute__((unused)) uint _64968 = 2u;
+                                    __attribute__((unused)) float _64969 = _28533;
+                                    __attribute__((unused)) float _64970 = _28535;
+                                    __attribute__((unused)) uint _64971 = 3u;
                                     float _30359 = spvFMul(_30356, 4097.0);
                                     float _30361 = spvFSub(_30359, spvFSub(_30359, _30356));
                                     float _30362 = spvFSub(_30356, _30361);
@@ -22226,12 +22231,12 @@ bool fold_inner(thread const float2& _sample, thread const ReflectionRoughFrame&
                                     float _31485 = spvFAdd(spvFSub(_31481, spvFSub(_31482, _31469)), spvFAdd(spvFSub(_31426, spvFSub(_31475, _31476)), spvFSub(0.0, _31476)));
                                     float _31486 = spvFAdd(_31482, _31485);
                                     float _31488 = spvFSub(_31485, spvFSub(_31486, _31482));
-                                    float _64954 = _30833;
-                                    float _64955 = _30835;
-                                    uint _64956 = 2u;
-                                    float _64957 = _30833;
-                                    float _64958 = _30835;
-                                    uint _64959 = 3u;
+                                    __attribute__((unused)) float _64954 = _30833;
+                                    __attribute__((unused)) float _64955 = _30835;
+                                    __attribute__((unused)) uint _64956 = 2u;
+                                    __attribute__((unused)) float _64957 = _30833;
+                                    __attribute__((unused)) float _64958 = _30835;
+                                    __attribute__((unused)) uint _64959 = 3u;
                                     float _31489 = spvFMul(_31486, 4097.0);
                                     float _31491 = spvFSub(_31489, spvFSub(_31489, _31486));
                                     float _31492 = spvFSub(_31486, _31491);
@@ -22284,12 +22289,12 @@ bool fold_inner(thread const float2& _sample, thread const ReflectionRoughFrame&
                                     float _31611 = spvFAdd(spvFSub(_31607, spvFSub(_31608, _31595)), spvFAdd(spvFSub(_31552, spvFSub(_31601, _31602)), spvFSub(0.0, _31602)));
                                     float _31612 = spvFAdd(_31608, _31611);
                                     float _31614 = spvFSub(_31611, spvFSub(_31612, _31608));
-                                    float _64948 = _30833;
-                                    float _64949 = _30835;
-                                    uint _64950 = 2u;
-                                    float _64951 = _30833;
-                                    float _64952 = _30835;
-                                    uint _64953 = 3u;
+                                    __attribute__((unused)) float _64948 = _30833;
+                                    __attribute__((unused)) float _64949 = _30835;
+                                    __attribute__((unused)) uint _64950 = 2u;
+                                    __attribute__((unused)) float _64951 = _30833;
+                                    __attribute__((unused)) float _64952 = _30835;
+                                    __attribute__((unused)) uint _64953 = 3u;
                                     float _31615 = spvFMul(_31612, 4097.0);
                                     float _31617 = spvFSub(_31615, spvFSub(_31615, _31612));
                                     float _31618 = spvFSub(_31612, _31617);
@@ -23965,24 +23970,24 @@ bool fold_inner(thread const float2& _sample, thread const ReflectionRoughFrame&
                                     float _35297 = spvFAdd(spvFSub(_35293, spvFSub(_35294, _35281)), spvFAdd(spvFSub(_35280, spvFSub(_35287, _35288)), spvFSub(_67158, _35288)));
                                     float _35298 = spvFAdd(_35294, _35297);
                                     float _35300 = spvFSub(_35297, spvFSub(_35298, _35294));
-                                    float _64930 = _35144;
-                                    float _64931 = _35146;
-                                    uint _64932 = 0u;
-                                    float _64933 = _35144;
-                                    float _64934 = _35146;
-                                    uint _64935 = 1u;
-                                    float _64924 = _35221;
-                                    float _64925 = _35223;
-                                    uint _64926 = 0u;
-                                    float _64927 = _35221;
-                                    float _64928 = _35223;
-                                    uint _64929 = 1u;
-                                    float _64918 = _35298;
-                                    float _64919 = _35300;
-                                    uint _64920 = 0u;
-                                    float _64921 = _35298;
-                                    float _64922 = _35300;
-                                    uint _64923 = 1u;
+                                    __attribute__((unused)) float _64930 = _35144;
+                                    __attribute__((unused)) float _64931 = _35146;
+                                    __attribute__((unused)) uint _64932 = 0u;
+                                    __attribute__((unused)) float _64933 = _35144;
+                                    __attribute__((unused)) float _64934 = _35146;
+                                    __attribute__((unused)) uint _64935 = 1u;
+                                    __attribute__((unused)) float _64924 = _35221;
+                                    __attribute__((unused)) float _64925 = _35223;
+                                    __attribute__((unused)) uint _64926 = 0u;
+                                    __attribute__((unused)) float _64927 = _35221;
+                                    __attribute__((unused)) float _64928 = _35223;
+                                    __attribute__((unused)) uint _64929 = 1u;
+                                    __attribute__((unused)) float _64918 = _35298;
+                                    __attribute__((unused)) float _64919 = _35300;
+                                    __attribute__((unused)) uint _64920 = 0u;
+                                    __attribute__((unused)) float _64921 = _35298;
+                                    __attribute__((unused)) float _64922 = _35300;
+                                    __attribute__((unused)) uint _64923 = 1u;
                                     float _64912 = _35004;
                                     float _64913 = _35006;
                                     uint _64914 = 2u;
@@ -24247,12 +24252,12 @@ bool fold_inner(thread const float2& _sample, thread const ReflectionRoughFrame&
                                     float _35874 = spvFAdd(spvFSub(_35870, spvFSub(_35871, _35858)), spvFAdd(spvFSub(_35857, spvFSub(_35864, _35865)), spvFSub(_67181, _35865)));
                                     float _35875 = spvFAdd(_35871, _35874);
                                     float _35877 = spvFSub(_35874, spvFSub(_35875, _35871));
-                                    float _64870 = _35875;
-                                    float _64871 = _35877;
-                                    uint _64872 = 0u;
-                                    float _64873 = _35875;
-                                    float _64874 = _35877;
-                                    uint _64875 = 1u;
+                                    __attribute__((unused)) float _64870 = _35875;
+                                    __attribute__((unused)) float _64871 = _35877;
+                                    __attribute__((unused)) uint _64872 = 0u;
+                                    __attribute__((unused)) float _64873 = _35875;
+                                    __attribute__((unused)) float _64874 = _35877;
+                                    __attribute__((unused)) uint _64875 = 1u;
                                     float _64864 = _35875;
                                     float _64865 = _35877;
                                     uint _64866 = 2u;
@@ -31348,7 +31353,7 @@ bool fold_inner(thread const float2& _sample, thread const ReflectionRoughFrame&
     return _68424;
 }
 
-kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], device type_ByteAddressBuffer& frames [[buffer(1)]], device type_ByteAddressBuffer& queries [[buffer(2)]], device type_ByteAddressBuffer& source [[buffer(3)]], device type_RWByteAddressBuffer& results [[buffer(4)]], constant type_WitnessSettings& WitnessSettings [[buffer(5)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+kernel void feature_folds_main(constant type_Settings& Settings [[buffer(0)]], device type_ByteAddressBuffer& frames [[buffer(2)]], device type_ByteAddressBuffer& queries [[buffer(3)]], device type_ByteAddressBuffer& source [[buffer(4)]], device type_RWByteAddressBuffer& results [[buffer(5)]], constant type_WitnessSettings& WitnessSettings [[buffer(1)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
 {
     bool intervalFailed = false;
     float optical_product_upper = 0.0;

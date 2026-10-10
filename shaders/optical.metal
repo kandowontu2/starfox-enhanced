@@ -10853,15 +10853,15 @@ void src_feature_optical_main(thread const uint3& group, thread const uint& lane
         bool excluded = temp_var_logical_33;
         if (excluded)
         {
-            uint _2976 = atomic_fetch_add_explicit((threadgroup atomic_uint*)&excludedCount, 1u, memory_order_relaxed);
+            __attribute__((unused)) uint _2976 = atomic_fetch_add_explicit((threadgroup atomic_uint*)&excludedCount, 1u, memory_order_relaxed);
         }
         else
         {
-            uint _2977 = atomic_fetch_add_explicit((threadgroup atomic_uint*)&keptCount, 1u, memory_order_relaxed);
-            uint _2981 = atomic_fetch_min_explicit((threadgroup atomic_uint*)&hullX0, as_type<uint>(box.x), memory_order_relaxed);
-            uint _2985 = atomic_fetch_min_explicit((threadgroup atomic_uint*)&hullY0, as_type<uint>(box.y), memory_order_relaxed);
-            uint _2989 = atomic_fetch_max_explicit((threadgroup atomic_uint*)&hullX1, as_type<uint>(box.z), memory_order_relaxed);
-            uint _2993 = atomic_fetch_max_explicit((threadgroup atomic_uint*)&hullY1, as_type<uint>(box.w), memory_order_relaxed);
+            __attribute__((unused)) uint _2977 = atomic_fetch_add_explicit((threadgroup atomic_uint*)&keptCount, 1u, memory_order_relaxed);
+            __attribute__((unused)) uint _2981 = atomic_fetch_min_explicit((threadgroup atomic_uint*)&hullX0, as_type<uint>(box.x), memory_order_relaxed);
+            __attribute__((unused)) uint _2985 = atomic_fetch_min_explicit((threadgroup atomic_uint*)&hullY0, as_type<uint>(box.y), memory_order_relaxed);
+            __attribute__((unused)) uint _2989 = atomic_fetch_max_explicit((threadgroup atomic_uint*)&hullX1, as_type<uint>(box.z), memory_order_relaxed);
+            __attribute__((unused)) uint _2993 = atomic_fetch_max_explicit((threadgroup atomic_uint*)&hullY1, as_type<uint>(box.w), memory_order_relaxed);
         }
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -10889,7 +10889,7 @@ void src_feature_optical_main(thread const uint3& group, thread const uint& lane
     }
 }
 
-kernel void feature_optical_main(constant type_Settings& Settings [[buffer(0)]], constant type_OpticalSettings& OpticalSettings [[buffer(1)]], device type_ByteAddressBuffer& regions [[buffer(2)]], device type_ByteAddressBuffer& frames [[buffer(3)]], device type_ByteAddressBuffer& queries [[buffer(4)]], device type_RWByteAddressBuffer& results [[buffer(5)]], constant type_TargetSettings& TargetSettings [[buffer(6)]], uint3 gl_WorkGroupID [[threadgroup_position_in_grid]], uint gl_LocalInvocationIndex [[thread_index_in_threadgroup]])
+kernel void feature_optical_main(constant type_Settings& Settings [[buffer(0)]], constant type_OpticalSettings& OpticalSettings [[buffer(1)]], device type_ByteAddressBuffer& regions [[buffer(3)]], device type_ByteAddressBuffer& frames [[buffer(4)]], device type_ByteAddressBuffer& queries [[buffer(5)]], device type_RWByteAddressBuffer& results [[buffer(6)]], constant type_TargetSettings& TargetSettings [[buffer(2)]], uint3 gl_WorkGroupID [[threadgroup_position_in_grid]], uint gl_LocalInvocationIndex [[thread_index_in_threadgroup]])
 {
     threadgroup uint keptCount;
     threadgroup uint excludedCount;

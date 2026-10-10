@@ -54,7 +54,7 @@ struct type_FrameSettings
 
 constant float4 _311 = {};
 
-kernel void feature_frames_main(device type_ByteAddressBuffer& queries [[buffer(0)]], device type_ByteAddressBuffer& geometry [[buffer(1)]], device type_ByteAddressBuffer& current [[buffer(2)]], device type_RWByteAddressBuffer& frames [[buffer(3)]], constant type_FrameSettings& FrameSettings [[buffer(4)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+kernel void feature_frames_main(device type_ByteAddressBuffer& queries [[buffer(1)]], device type_ByteAddressBuffer& geometry [[buffer(2)]], device type_ByteAddressBuffer& current [[buffer(3)]], device type_RWByteAddressBuffer& frames [[buffer(4)]], constant type_FrameSettings& FrameSettings [[buffer(0)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
 {
     do
     {

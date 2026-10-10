@@ -116,7 +116,7 @@ struct type_ColourSettings
 
 constant bool _338 = {};
 
-kernel void feature_colour_main(constant type_Settings& Settings [[buffer(0)]], device type_ByteAddressBuffer& current [[buffer(1)]], device type_ByteAddressBuffer& source [[buffer(2)]], device type_ByteAddressBuffer& queries [[buffer(3)]], device type_RWByteAddressBuffer& results [[buffer(4)]], constant type_ColourSettings& ColourSettings [[buffer(5)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+kernel void feature_colour_main(constant type_Settings& Settings [[buffer(0)]], device type_ByteAddressBuffer& current [[buffer(2)]], device type_ByteAddressBuffer& source [[buffer(3)]], device type_ByteAddressBuffer& queries [[buffer(4)]], device type_RWByteAddressBuffer& results [[buffer(5)]], constant type_ColourSettings& ColourSettings [[buffer(1)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
 {
     do
     {

@@ -16,7 +16,7 @@ struct type_ClearSettings
     uint clearReserved2;
 };
 
-kernel void feature_roots_clear_main(device type_RWByteAddressBuffer& results [[buffer(0)]], constant type_ClearSettings& ClearSettings [[buffer(1)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+kernel void feature_roots_clear_main(device type_RWByteAddressBuffer& results [[buffer(1)]], constant type_ClearSettings& ClearSettings [[buffer(0)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
 {
     do
     {

@@ -89,14 +89,14 @@ struct type_Settings
     uint padding;
 };
 
-kernel void reflection_history_main(device type_ByteAddressBuffer& current [[buffer(0)]], device type_ByteAddressBuffer& history [[buffer(1)]], device type_RWByteAddressBuffer& resolved [[buffer(2)]], constant type_Settings& Settings [[buffer(3)]], texture2d<float> ownership [[texture(0)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+kernel void reflection_history_main(device type_ByteAddressBuffer& current [[buffer(1)]], device type_ByteAddressBuffer& history [[buffer(2)]], device type_RWByteAddressBuffer& resolved [[buffer(3)]], constant type_Settings& Settings [[buffer(0)]], texture2d<float> ownership [[texture(0)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
 {
     bool _388 = false;
     bool _397 = false;
     bool _441 = false;
     bool _450 = false;
     bool _478 = false;
-    uint3 _574 = gl_GlobalInvocationID;
+    __attribute__((unused)) uint3 _574 = gl_GlobalInvocationID;
     _478 = false;
     do
     {
@@ -120,13 +120,13 @@ kernel void reflection_history_main(device type_ByteAddressBuffer& current [[buf
         uint _649;
         bool _651;
         uint _16 = Settings.width * Settings.height;
-        uint _480 = _16;
+        __attribute__((unused)) uint _480 = _16;
         uint _18 = (gl_GlobalInvocationID.y * Settings.width) + gl_GlobalInvocationID.x;
-        uint _481 = _18;
+        __attribute__((unused)) uint _481 = _18;
         uint _19 = _18 * 4u;
         uint _598 = _19 >> 2u;
         uint _600 = current._m0[_598];
-        uint _482 = _600;
+        __attribute__((unused)) uint _482 = _600;
         uint _21 = _18 * 16u;
         uint _603 = ((_16 * Settings.prefixStride) + _21) >> 2u;
         uint _23 = _603 + 1u;
@@ -148,7 +148,7 @@ kernel void reflection_history_main(device type_ByteAddressBuffer& current [[buf
         uint _37 = _624 + 3u;
         float4 _485 = as_type<float4>(uint4(current._m0[_624], current._m0[_35], current._m0[_36], current._m0[_37]));
         uint2 _487 = gl_GlobalInvocationID.xy;
-        uint _488 = _600;
+        __attribute__((unused)) uint _488 = _600;
         float4 _489 = _485;
         _450 = false;
         bool _840;
@@ -157,15 +157,15 @@ kernel void reflection_history_main(device type_ByteAddressBuffer& current [[buf
             float4 _452 = ownership.read(uint2(int3(int(_487.x), int(_487.y), 0).xy), 0);
             _649 = Settings.flags;
             _651 = (_649 & 4u) != 0u;
-            bool _453 = _651;
+            __attribute__((unused)) bool _453 = _651;
             bool _451;
             if (_651)
             {
-                uint _454 = _16;
+                __attribute__((unused)) uint _454 = _16;
                 uint _150 = (_487.y * Settings.width) + _487.x;
-                uint _455 = _150;
+                __attribute__((unused)) uint _455 = _150;
                 uint _658 = ((_16 * (Settings.prefixStride + 48u)) + (_150 * 4u)) >> 2u;
-                uint _456 = current._m0[_658];
+                __attribute__((unused)) uint _456 = current._m0[_658];
                 uint _157 = _150 * 16u;
                 uint _661 = ((_16 * (Settings.prefixStride + 52u)) + _157) >> 2u;
                 float4 _457 = as_type<float4>(uint4(current._m0[_661], current._m0[_661 + 1u], current._m0[_661 + 2u], current._m0[_661 + 3u]));
@@ -296,15 +296,15 @@ kernel void reflection_history_main(device type_ByteAddressBuffer& current [[buf
             bool _809;
             if (_452.w > 0.5)
             {
-                uint _469 = _600;
+                __attribute__((unused)) uint _469 = _600;
                 float4 _470 = _452;
-                bool _471 = true;
+                __attribute__((unused)) bool _471 = true;
                 _441 = false;
                 bool _808;
                 do
                 {
                     uint _775 = uint(rint(spvFMul(_470.z, 255.0)));
-                    uint _443 = _775;
+                    __attribute__((unused)) uint _443 = _775;
                     bool _444 = true;
                     bool _787;
                     if ((isunordered(_470.x, 0.0) || _470.x > 0.0))
@@ -337,7 +337,7 @@ kernel void reflection_history_main(device type_ByteAddressBuffer& current [[buf
                         break;
                     }
                     uint _790 = _600 >> 24u;
-                    uint _446 = _790;
+                    __attribute__((unused)) uint _446 = _790;
                     if (_790 == 253u)
                     {
                         _441 = true;
@@ -376,7 +376,7 @@ kernel void reflection_history_main(device type_ByteAddressBuffer& current [[buf
                     _808 = _807;
                     break;
                 } while(false);
-                bool _449 = _808;
+                __attribute__((unused)) bool _449 = _808;
                 _468 = _808;
                 _809 = _808;
             }
@@ -450,7 +450,7 @@ kernel void reflection_history_main(device type_ByteAddressBuffer& current [[buf
             _840 = _839;
             break;
         } while(false);
-        bool _477 = _840;
+        __attribute__((unused)) bool _477 = _840;
         bool _490 = false;
         bool _847;
         if (_840)
@@ -487,7 +487,7 @@ kernel void reflection_history_main(device type_ByteAddressBuffer& current [[buf
         {
             _862 = false;
         }
-        bool _486 = _862;
+        __attribute__((unused)) bool _486 = _862;
         uint4 _864 = as_type<uint4>(_483);
         resolved._m0[_603] = _864.x;
         resolved._m0[_23] = _864.y;
@@ -527,7 +527,7 @@ kernel void reflection_history_main(device type_ByteAddressBuffer& current [[buf
         if (_911 ? _903 : true)
         {
             uint _43 = (_16 * (Settings.prefixStride - 16u)) + _21;
-            uint _495 = _43;
+            __attribute__((unused)) uint _495 = _43;
             uint _917 = _43 >> 2u;
             uint _44 = _917 + 1u;
             uint _921 = current._m0[_44];
@@ -540,7 +540,7 @@ kernel void reflection_history_main(device type_ByteAddressBuffer& current [[buf
             resolved._m0[_45] = _923;
             resolved._m0[_46] = _925;
         }
-        bool _496 = _651;
+        __attribute__((unused)) bool _496 = _651;
         uint _498;
         uint _937;
         if (_651)
@@ -554,7 +554,7 @@ kernel void reflection_history_main(device type_ByteAddressBuffer& current [[buf
             _498 = _600;
             _937 = _600;
         }
-        uint _497 = _937;
+        __attribute__((unused)) uint _497 = _937;
         float4 _499 = float4(0.0);
         float4 _500 = float4(0.0);
         float4 _972;
@@ -696,10 +696,10 @@ kernel void reflection_history_main(device type_ByteAddressBuffer& current [[buf
             break;
         }
         int2 _1045 = int2(floor(_507));
-        int2 _509 = _1045;
+        __attribute__((unused)) int2 _509 = _1045;
         float2 _510 = spvFSub(_507, float2(_1045));
         uint _69 = Settings.previousWidth * Settings.previousHeight;
-        uint _511 = _69;
+        __attribute__((unused)) uint _511 = _69;
         float3 _512 = float3(0.0);
         bool _514 = false;
         bool _1061;
@@ -749,7 +749,7 @@ kernel void reflection_history_main(device type_ByteAddressBuffer& current [[buf
         {
             _1073 = false;
         }
-        bool _513 = _1073;
+        __attribute__((unused)) bool _513 = _1073;
         float _518 = 0.0;
         float3 _1078;
         _1078 = float3(0.0);
@@ -809,7 +809,7 @@ kernel void reflection_history_main(device type_ByteAddressBuffer& current [[buf
                             _1112 = _71;
                         }
                         float _72 = spvFMul(_1103, _1112);
-                        float _521 = _72;
+                        __attribute__((unused)) float _521 = _72;
                         if (_72 <= 0.0)
                         {
                             _1087 = _1079;
@@ -823,12 +823,12 @@ kernel void reflection_history_main(device type_ByteAddressBuffer& current [[buf
                         }
                         int2 _524 = min((_1045 + int2(int(_1091), int(_1082))), int2(int(Settings.previousWidth - 1u), int(Settings.previousHeight - 1u)));
                         uint _77 = (uint(_524.y) * Settings.previousWidth) + uint(_524.x);
-                        uint _525 = _77;
+                        __attribute__((unused)) uint _525 = _77;
                         uint _78 = _69 * _26;
                         uint _79 = _77 * 16u;
                         uint _1129 = (_78 + _79) >> 2u;
                         uint4 _1138 = uint4(history._m0[_1129], history._m0[_1129 + 1u], history._m0[_1129 + 2u], history._m0[_1129 + 3u]);
-                        uint4 _526 = _1138;
+                        __attribute__((unused)) uint4 _526 = _1138;
                         uint _84 = _69 * _32;
                         uint _1139 = (_84 + _79) >> 2u;
                         float4 _527 = as_type<float4>(uint4(history._m0[_1139], history._m0[_1139 + 1u], history._m0[_1139 + 2u], history._m0[_1139 + 3u]));
@@ -950,11 +950,11 @@ kernel void reflection_history_main(device type_ByteAddressBuffer& current [[buf
                                     continue;
                                 }
                                 uint _95 = (uint(_537.y) * Settings.previousWidth) + uint(_537.x);
-                                uint _539 = _95;
+                                __attribute__((unused)) uint _539 = _95;
                                 uint _96 = _95 * 16u;
                                 uint _1243 = (_78 + _96) >> 2u;
                                 uint4 _1252 = uint4(history._m0[_1243], history._m0[_1243 + 1u], history._m0[_1243 + 2u], history._m0[_1243 + 3u]);
-                                uint4 _540 = _1252;
+                                __attribute__((unused)) uint4 _540 = _1252;
                                 uint _1253 = (_84 + _96) >> 2u;
                                 float4 _541 = as_type<float4>(uint4(history._m0[_1253], history._m0[_1253 + 1u], history._m0[_1253 + 2u], history._m0[_1253 + 3u]));
                                 bool _542 = false;
@@ -1020,7 +1020,7 @@ kernel void reflection_history_main(device type_ByteAddressBuffer& current [[buf
                             _1313 = 0u;
                         }
                         uint _1314 = (_1313 + (_77 * 4u)) >> 2u;
-                        uint _544 = history._m0[_1314];
+                        __attribute__((unused)) uint _544 = history._m0[_1314];
                         if ((history._m0[_1314] >> 24u) != 255u)
                         {
                             _478 = true;
@@ -1028,9 +1028,9 @@ kernel void reflection_history_main(device type_ByteAddressBuffer& current [[buf
                             _1076 = true;
                             break;
                         }
-                        uint _546 = history._m0[_1314];
+                        __attribute__((unused)) uint _546 = history._m0[_1314];
                         float3 _169 = float3(float(history._m0[_1314] & 255u), float((history._m0[_1314] >> 8u) & 255u), float((history._m0[_1314] >> 16u) & 255u)) / float3(255.0);
-                        float3 _437 = _169;
+                        __attribute__((unused)) float3 _437 = _169;
                         float3 _1366;
                         if ((_649 & 2u) != 0u)
                         {
@@ -1075,7 +1075,7 @@ kernel void reflection_history_main(device type_ByteAddressBuffer& current [[buf
                                 _1364 = _1363;
                             }
                             float3 _1365 = float3(_1344, _1354, _1364);
-                            float3 _436 = _1365;
+                            __attribute__((unused)) float3 _436 = _1365;
                             _438 = _1365;
                             _1366 = _1365;
                         }
@@ -1084,7 +1084,7 @@ kernel void reflection_history_main(device type_ByteAddressBuffer& current [[buf
                             _438 = _169;
                             _1366 = _169;
                         }
-                        float3 _440 = _1366;
+                        __attribute__((unused)) float3 _440 = _1366;
                         float3 _118 = spvFAdd(_1079, _1366 * _72);
                         _512 = _118;
                         _1087 = _118;
@@ -1170,9 +1170,9 @@ kernel void reflection_history_main(device type_ByteAddressBuffer& current [[buf
             _478 = true;
             break;
         }
-        uint _551 = _937;
+        __attribute__((unused)) uint _551 = _937;
         float3 _179 = float3(float(_937 & 255u), float((_937 >> 8u) & 255u), float((_937 >> 16u) & 255u)) / float3(255.0);
-        float3 _429 = _179;
+        __attribute__((unused)) float3 _429 = _179;
         bool _1405 = (_649 & 2u) != 0u;
         float3 _430;
         float3 _1440;
@@ -1222,7 +1222,7 @@ kernel void reflection_history_main(device type_ByteAddressBuffer& current [[buf
                 _1438 = _1437;
             }
             float3 _1439 = float3(_1418, _1428, _1438);
-            float3 _428 = _1439;
+            __attribute__((unused)) float3 _428 = _1439;
             _430 = _1439;
             _1440 = _1439;
         }
@@ -1231,7 +1231,7 @@ kernel void reflection_history_main(device type_ByteAddressBuffer& current [[buf
             _430 = _179;
             _1440 = _179;
         }
-        float3 _432 = _1440;
+        __attribute__((unused)) float3 _432 = _1440;
         float3 _550 = _1440;
         float3 _552 = _1440;
         float3 _1442;
@@ -1263,37 +1263,37 @@ kernel void reflection_history_main(device type_ByteAddressBuffer& current [[buf
             {
                 int2 _555 = clamp(int2(gl_GlobalInvocationID.xy) + int2(_1455, _1447), int2(0), int2(int(Settings.width - 1u), int(Settings.height - 1u)));
                 uint _128 = (uint(_555.y) * Settings.width) + uint(_555.x);
-                uint _556 = _128;
+                __attribute__((unused)) uint _556 = _128;
                 uint _129 = _128 * 16u;
                 uint _1471 = (_27 + _129) >> 2u;
                 uint4 _1480 = uint4(current._m0[_1471], current._m0[_1471 + 1u], current._m0[_1471 + 2u], current._m0[_1471 + 3u]);
-                uint4 _557 = _1480;
+                __attribute__((unused)) uint4 _557 = _1480;
                 uint _1481 = (_33 + _129) >> 2u;
                 float4 _1491 = as_type<float4>(uint4(current._m0[_1481], current._m0[_1481 + 1u], current._m0[_1481 + 2u], current._m0[_1481 + 3u]));
-                float4 _558 = _1491;
+                __attribute__((unused)) float4 _558 = _1491;
                 uint _138 = _128 * 4u;
                 uint _1492 = _138 >> 2u;
-                uint _559 = current._m0[_1492];
+                __attribute__((unused)) uint _559 = current._m0[_1492];
                 bool _560 = true;
                 bool _1706;
                 if (!any(_1480.xy != _484.xy))
                 {
                     uint2 _561 = uint2(_555);
-                    uint _562 = current._m0[_1492];
+                    __attribute__((unused)) uint _562 = current._m0[_1492];
                     float4 _563 = _1491;
                     _397 = false;
                     bool _1704;
                     do
                     {
                         float4 _399 = ownership.read(uint2(int3(int(_561.x), int(_561.y), 0).xy), 0);
-                        bool _400 = _651;
+                        __attribute__((unused)) bool _400 = _651;
                         if (_651)
                         {
-                            uint _401 = _16;
+                            __attribute__((unused)) uint _401 = _16;
                             uint _190 = (_561.y * Settings.width) + _561.x;
-                            uint _402 = _190;
+                            __attribute__((unused)) uint _402 = _190;
                             uint _1522 = ((_16 * (Settings.prefixStride + 48u)) + (_190 * 4u)) >> 2u;
-                            uint _403 = current._m0[_1522];
+                            __attribute__((unused)) uint _403 = current._m0[_1522];
                             uint _197 = _190 * 16u;
                             uint _1525 = ((_16 * (Settings.prefixStride + 52u)) + _197) >> 2u;
                             float4 _404 = as_type<float4>(uint4(current._m0[_1525], current._m0[_1525 + 1u], current._m0[_1525 + 2u], current._m0[_1525 + 3u]));
@@ -1424,15 +1424,15 @@ kernel void reflection_history_main(device type_ByteAddressBuffer& current [[buf
                         bool _1673;
                         if (_399.w > 0.5)
                         {
-                            uint _416 = current._m0[_1492];
+                            __attribute__((unused)) uint _416 = current._m0[_1492];
                             float4 _417 = _399;
-                            bool _418 = true;
+                            __attribute__((unused)) bool _418 = true;
                             _388 = false;
                             bool _1672;
                             do
                             {
                                 uint _1639 = uint(rint(spvFMul(_417.z, 255.0)));
-                                uint _390 = _1639;
+                                __attribute__((unused)) uint _390 = _1639;
                                 bool _391 = true;
                                 bool _1651;
                                 if ((isunordered(_417.x, 0.0) || _417.x > 0.0))
@@ -1464,7 +1464,7 @@ kernel void reflection_history_main(device type_ByteAddressBuffer& current [[buf
                                     break;
                                 }
                                 uint _1654 = current._m0[_1492] >> 24u;
-                                uint _393 = _1654;
+                                __attribute__((unused)) uint _393 = _1654;
                                 if (_1654 == 253u)
                                 {
                                     _388 = true;
@@ -1503,7 +1503,7 @@ kernel void reflection_history_main(device type_ByteAddressBuffer& current [[buf
                                 _1672 = _1671;
                                 break;
                             } while(false);
-                            bool _396 = _1672;
+                            __attribute__((unused)) bool _396 = _1672;
                             _415 = _1672;
                             _1673 = _1672;
                         }
@@ -1577,7 +1577,7 @@ kernel void reflection_history_main(device type_ByteAddressBuffer& current [[buf
                         _1704 = _1703;
                         break;
                     } while(false);
-                    bool _424 = _1704;
+                    __attribute__((unused)) bool _424 = _1704;
                     bool _1705 = !_1704;
                     _560 = _1705;
                     _1706 = _1705;
@@ -1604,10 +1604,10 @@ kernel void reflection_history_main(device type_ByteAddressBuffer& current [[buf
                     _565 = current._m0[_1492];
                     _1715 = current._m0[_1492];
                 }
-                uint _564 = _1715;
-                uint _567 = _1715;
+                __attribute__((unused)) uint _564 = _1715;
+                __attribute__((unused)) uint _567 = _1715;
                 float3 _209 = float3(float(_1715 & 255u), float((_1715 >> 8u) & 255u), float((_1715 >> 16u) & 255u)) / float3(255.0);
-                float3 _384 = _209;
+                __attribute__((unused)) float3 _384 = _209;
                 float3 _1759;
                 if (_1405)
                 {
@@ -1652,7 +1652,7 @@ kernel void reflection_history_main(device type_ByteAddressBuffer& current [[buf
                         _1757 = _1756;
                     }
                     float3 _1758 = float3(_1737, _1747, _1757);
-                    float3 _383 = _1758;
+                    __attribute__((unused)) float3 _383 = _1758;
                     _385 = _1758;
                     _1759 = _1758;
                 }
@@ -1661,8 +1661,8 @@ kernel void reflection_history_main(device type_ByteAddressBuffer& current [[buf
                     _385 = _209;
                     _1759 = _209;
                 }
-                float3 _387 = _1759;
-                float3 _566 = _1759;
+                __attribute__((unused)) float3 _387 = _1759;
+                __attribute__((unused)) float3 _566 = _1759;
                 float3 _1760 = precise::min(_1446, _1759);
                 _550 = _1760;
                 float3 _1761 = precise::max(_1443, _1759);
@@ -1671,8 +1671,8 @@ kernel void reflection_history_main(device type_ByteAddressBuffer& current [[buf
                 _1454 = _1760;
             }
         }
-        uint _569 = _937;
-        float3 _376 = _179;
+        __attribute__((unused)) uint _569 = _937;
+        __attribute__((unused)) float3 _376 = _179;
         float3 _377;
         float3 _1796;
         if (_1405)
@@ -1721,7 +1721,7 @@ kernel void reflection_history_main(device type_ByteAddressBuffer& current [[buf
                 _1794 = _1793;
             }
             float3 _1795 = float3(_1774, _1784, _1794);
-            float3 _375 = _1795;
+            __attribute__((unused)) float3 _375 = _1795;
             _377 = _1795;
             _1796 = _1795;
         }
@@ -1730,14 +1730,14 @@ kernel void reflection_history_main(device type_ByteAddressBuffer& current [[buf
             _377 = _179;
             _1796 = _179;
         }
-        float3 _379 = _1796;
+        __attribute__((unused)) float3 _379 = _1796;
         float3 _1801 = mix(_1796, fast::clamp(_1368, _1445, _1442), float3(Settings.weight));
         float3 _568 = _1801;
         float3 _1858;
         if (_651)
         {
             float3 _570 = _1801;
-            uint _571 = 4278190080u;
+            __attribute__((unused)) uint _571 = 4278190080u;
             float3 _368;
             float3 _1841;
             if (_1405)
@@ -1786,7 +1786,7 @@ kernel void reflection_history_main(device type_ByteAddressBuffer& current [[buf
                     _1838 = _238;
                 }
                 float3 _1839 = float3(_1818, _1828, _1838);
-                float3 _367 = _1839;
+                __attribute__((unused)) float3 _367 = _1839;
                 _368 = _1839;
                 _1841 = _1839;
             }
@@ -1799,7 +1799,7 @@ kernel void reflection_history_main(device type_ByteAddressBuffer& current [[buf
             _570 = _1841;
             uint3 _370 = uint3(floor(spvFAdd(_1841 * 255.0, float3(0.5))));
             uint _1854 = ((_370.x | (_370.y << 8u)) | (_370.z << 16u)) | 4278190080u;
-            uint _371 = _1854;
+            __attribute__((unused)) uint _371 = _1854;
             resolved._m0[((_16 * (Settings.prefixStride + 48u)) + _19) >> 2u] = _1854;
             float3 _148 = spvFAdd(_973.xyz, spvFMul(_1801, _972.xyz));
             _568 = _148;
@@ -1811,7 +1811,7 @@ kernel void reflection_history_main(device type_ByteAddressBuffer& current [[buf
         }
         float3 _572 = _1858;
         uint _1859 = _600 & 4278190080u;
-        uint _573 = _1859;
+        __attribute__((unused)) uint _573 = _1859;
         float3 _360;
         float3 _1896;
         if (_1405)
@@ -1860,7 +1860,7 @@ kernel void reflection_history_main(device type_ByteAddressBuffer& current [[buf
                 _1893 = _249;
             }
             float3 _1894 = float3(_1873, _1883, _1893);
-            float3 _359 = _1894;
+            __attribute__((unused)) float3 _359 = _1894;
             _360 = _1894;
             _1896 = _1894;
         }
@@ -1873,7 +1873,7 @@ kernel void reflection_history_main(device type_ByteAddressBuffer& current [[buf
         _572 = _1896;
         uint3 _362 = uint3(floor(spvFAdd(_1896 * 255.0, float3(0.5))));
         uint _1909 = ((_362.x | (_362.y << 8u)) | (_362.z << 16u)) | _1859;
-        uint _363 = _1909;
+        __attribute__((unused)) uint _363 = _1909;
         resolved._m0[_598] = _1909;
         _478 = true;
         break;
