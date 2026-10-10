@@ -1,8 +1,19 @@
-# Temporary Metal reflection binary embedding checks
+# Temporary complete SDL Metal reflection payload checks
 
 This source-only development snapshot is not a playable build, release or
 production merge. It contains no ROM, asset pack or production Git history.
 Its only trigger is manual dispatch; main, tags and releases remain untouched.
+
+This independent check builds the complete25-program SDL payload selector with
+the actual pinned SDL3-3.4.14 public headers and all original compiled libraries.
+The macOS native test exercises every program, preserves non-Metal descriptors,
+checks shared-entry variants and rejects625 changed descriptors or incomplete
+inventories. iOS compiles the same interface for the actual deployment target.
+Only format/code/size may change after full bundle qualification; reserved
+resource slots, entry points, dispatch dimensions and extension identity stay
+unchanged. No Metal device, pipeline or GPU dispatch is launched by this check.
+It does not restart or substitute for the separately live pipeline diagnostic.
+Neither its success nor iOS compilation would prove full rendering acceptance.
 
 The preceding embedding run compiled both native SDK probes and embedded all50
 libraries exactly, but its macOS runtime stopped after six successful pipelines
