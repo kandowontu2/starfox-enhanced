@@ -38,4 +38,6 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(liquid_optics_source(args.root), encoding="utf-8")
+    # Match the held generated input on every host, not Python's OS-dependent
+    # default. Runtime assembly normalizes text identically on all platforms.
+    args.output.write_text(liquid_optics_source(args.root), encoding="utf-8", newline="\r\n")

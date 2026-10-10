@@ -773,8 +773,8 @@
     },
     {
       "File": "README.md",
-      "Sha256": "b13e419713f0bcb63306f992c492926607be7dd230b2f57c37f011668bb40973",
-      "Bytes": 6611
+      "Sha256": "5fe896b20c45d6de5e051dd1e8fb6a3d064f0efa238f71d699b1eb0b60d1e9a6",
+      "Bytes": 6819
     },
     {
       "File": "src/render/metal_hardware_rt.mm",
@@ -828,13 +828,13 @@
     },
     {
       "File": "tools/metal_liquid_optics.py",
-      "Sha256": "e68e8815adc59a4ed18570c63a3c2126caa3c2bab8a60ea3b4a916da313665b4",
-      "Bytes": 2004
+      "Sha256": "869e598b062c86f8c2379ba2e001c4da4c6394cb8d641d58cde54f2428078548",
+      "Bytes": 2176
     },
     {
       "File": "tools/metal_material_colour.py",
-      "Sha256": "ad2b9e7888251363e50280fa05105e0ff755199a499504cd3da9453212234fca",
-      "Bytes": 2294
+      "Sha256": "1167d6dd14a19860e03285f26e36c276a86c094f1fa93f9689a735f5af76ca9a",
+      "Bytes": 2389
     }
   ]
 }

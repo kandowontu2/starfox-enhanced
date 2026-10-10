@@ -15,6 +15,9 @@ dependencies. The runtime source-check tool accepts the same build-generated
 helper directory. An actual CMake/Ninja NONE-project check verifies byte-exact
 headers/runtime assembly and regeneration after changes to temporary canonical
 input copies. This is build-source wiring, not full application linking.
+The two generator CLIs explicitly use the held CRLF byte format on every host;
+they do not inherit an OS-dependent line-ending default. The original
+byte-exact CMake check is retained, including on Apple CI.
 
 The native owner now provides nonblocking completion polling and cleanup,
 with output-image capacity accounting (not available VRAM). Pending/failed
