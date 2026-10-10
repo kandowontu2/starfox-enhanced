@@ -59,15 +59,14 @@ class Scene {
         } else {
             const auto extent=bounds.high-bounds.low;
             const auto axis=extent.x>extent.y ? (extent.x>extent.z?0:2) : (extent.y>extent.z?1:2);
-            nodes_[index].axis=static_cast<unsigned>(axis);
+            nodes_[index].axis=axis;
             const auto middle=begin+(end-begin)/2;
             const auto center=[axis](const Triangle& t) {
                 const auto c=t.a+t.b+t.c;
                 return axis==0?c.x:axis==1?c.y:c.z;
             };
-            std::nth_element(triangles_.begin()+static_cast<decltype(triangles_)::difference_type>(begin),
-                triangles_.begin()+static_cast<decltype(triangles_)::difference_type>(middle),
-                triangles_.begin()+static_cast<decltype(triangles_)::difference_type>(end),[&](const auto& a,const auto& b){return center(a)<center(b);});
+            std::nth_element(triangles_.begin()+begin,triangles_.begin()+middle,
+                triangles_.begin()+end,[&](const auto& a,const auto& b){return center(a)<center(b);});
             const auto left=build_node(begin,middle), right=build_node(middle,end);
             nodes_[index].left=left; nodes_[index].right=right;
         }

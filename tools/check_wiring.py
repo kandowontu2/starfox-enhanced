@@ -38,6 +38,26 @@ def qualify_factories():
     return edits
 
 
+def qualify_sdk_casts():
+    manifest = json.loads((ROOT / 'tools/sdk-cast-edits.json').read_text())
+    if {row['Path'] for row in manifest['Headers']} != {
+            'include/starfox/render/shadow_scene.hpp', 'include/starfox/render/raster_commands.hpp',
+            'include/starfox/render/framebuffer.hpp'}:
+        raise RuntimeError('SDK conversion change file set differs')
+    for row in manifest['Headers']:
+        original = ROOT / 'tools/held_headers' / (Path(row['Path']).name + '.txt')
+        if sdk.digest(original).upper() != row['OriginalSha256']:
+            raise RuntimeError('Original header conversion bytes changed')
+        restored = (ROOT / row['Path']).read_text()
+        for change in reversed(row['Changes']):
+            if restored.count(change['newText']) != 1:
+                raise RuntimeError('Exact same-type explicit conversion missing/duplicated')
+            restored = restored.replace(change['newText'], change['oldText'])
+        if restored.rstrip() != original.read_text().rstrip():
+            raise RuntimeError('SDK header changes exceed original target-type conversions')
+    return manifest
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--sdk', choices=('macosx', 'iphoneos'), required=True)
@@ -46,6 +66,7 @@ def main():
     parser.add_argument('--self-test', action='store_true')
     args = parser.parse_args()
     edits = qualify_factories()
+    casts = qualify_sdk_casts()
     manifest = json.loads((ROOT / 'shaders.json').read_text())
     sdk.controls(manifest)
     rows = sdk.qualify(manifest)
@@ -54,7 +75,7 @@ def main():
         raise RuntimeError('Original full shader/resource/binary receipt manifest changed')
     payload.qualify_recipes(rows, held)
     if args.self_test:
-        print('PASS exact inverse factory source; all16 sites/full25 original shader, bindings and workgroups; no native launch')
+        print('PASS exact inverse factory and3 explicit same-type header conversions; all16 sites/full25 original shader, bindings and workgroups; no native launch')
         return
     if sys.platform != 'darwin':
         raise RuntimeError('Actual Apple SDK host required')
@@ -103,6 +124,7 @@ def main():
                   'CandidateFactorySha256': sdk.digest(ROOT / 'src/render/gpu_calibrated_reflection_history.cpp'),
                   'SdlArchiveSha256': payload.SDL_SHA, 'SdlGpuHeaderSha256': payload.SDL_GPU_SHA,
                   'PublicHeaderCount': header_count, 'NativeObjectAccepted': object_pass,
+                  'ExplicitSameTypeHeaderFiles': len(casts['Headers']),
                   'ActualFactoryCompileAccepted': failure is None and len(operations) == 3,
                   'Operations': operations, 'Failure': failure, 'GpuLaunched': False, 'ProductionAdopted': False}
         (args.out / 'wiring-receipt.json').write_text(json.dumps(report, indent=2))
