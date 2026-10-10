@@ -1,0 +1,2 @@
+# Preserve exact translator output across Windows/macOS checkouts.
+shaders/*.metal -text
