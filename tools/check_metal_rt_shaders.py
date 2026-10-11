@@ -65,7 +65,10 @@ def main():
         destination.mkdir(parents=True, exist_ok=True)
         for name, source in sources.items():
             path = destination / f"{name.lower()}.metal"
-            path.write_text(source, encoding="utf-8")
+            # The embedded library inspector binds exact source bytes across
+            # Windows emission and Apple SDK compilation. Do not let the
+            # emitting host translate LF into CRLF.
+            path.write_text(source, encoding="utf-8", newline="\n")
             if args.emit_only:
                 print(f"Emitted (NOT compiled): {path}")
             else:

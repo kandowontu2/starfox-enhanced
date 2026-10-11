@@ -12,10 +12,10 @@ import struct
 import zipfile
 
 SOURCES = {
-    'shadow': 'a88d290f7f0ac5521be1b3bea29f4b6afeb177095a404c8a328592a7cbe107ab',
-    'reflection': '7f17f15a744ece3cfef89a4cb8734a1f091ca72d98730015793aa73711931b90',
-    'empty_shadow': 'ec147e2968e1109d189a153f51b921625cb332441f5308e1ae9e396743207427',
-    'empty_reflection': 'bbaf6771fa7fbc47908cd758baac4694065eb9ac7fefc0d2bbcd37cd53f91d3e',
+    'shadow': '5eb459b57e338441c236ba14065e07ce2b7497e4010f6e838b423990c9623c1e',
+    'reflection': 'fcbbb4a36db709929053f68575651a982a38fcdd5d4ffae8ffbc7b8fe5488377',
+    'empty_shadow': 'c597b46ee2908444766fe4bc7ba5a3cb314d44fa77da9743857f151fb79d35c4',
+    'empty_reflection': '5616ec9ca08951cde14a5d5dbda798af9c2e058a96e09a6c381620fa7bf63ec5',
 }
 
 

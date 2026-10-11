@@ -1,5 +1,6 @@
 """Exact-source assembly checks only; NOT Metal compilation or GPU acceptance."""
 from pathlib import Path
+import hashlib
 import re
 import shutil
 import subprocess
@@ -45,6 +46,23 @@ class MetalSourceAssemblyTests(unittest.TestCase):
         self.assertIn("uint4 coverage;", actual)
         self.assertIn("[[buffer(4)]]", actual)
         self.assertNotIn("@STARFOX_", actual)
+
+    def test_complete_sources_have_host_independent_exact_lf_bytes(self):
+        # These pins come from the preserved pre-embedding sources with only
+        # CRLF converted to LF. Do not normalize arbitrary source differences
+        # or derive expectations from the libraries being qualified.
+        expected = {
+            "shadow": (17434, "5eb459b57e338441c236ba14065e07ce2b7497e4010f6e838b423990c9623c1e"),
+            "reflection": (65776, "fcbbb4a36db709929053f68575651a982a38fcdd5d4ffae8ffbc7b8fe5488377"),
+            "empty_shadow": (17471, "c597b46ee2908444766fe4bc7ba5a3cb314d44fa77da9743857f151fb79d35c4"),
+            "empty_reflection": (65813, "5616ec9ca08951cde14a5d5dbda798af9c2e058a96e09a6c381620fa7bf63ec5"),
+        }
+        for name, (size, digest) in expected.items():
+            with self.subTest(program=name):
+                raw = (self.destination / (name + ".metal")).read_bytes()
+                self.assertFalse(b"\r" in raw, "Non-canonical CR byte in " + name)
+                self.assertEqual(len(raw), size)
+                self.assertEqual(hashlib.sha256(raw).hexdigest(), digest)
 
     def test_reflection_has_one_identical_indexed_helper(self):
         actual = (self.destination / "reflection.metal").read_text(encoding="utf-8")
