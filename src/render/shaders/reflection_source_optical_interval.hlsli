@@ -344,10 +344,16 @@ OPTICAL_BOUNDARY Interval3 ilava(Interval x,Interval z,Interval t,Interval footp
     const Interval fa=iband(footprint,iratio(22,1000)),fb=iband(footprint,iratio(54,1000)),fc=iband(footprint,iratio(24,1000));
     Interval h=iadd(iadd(imul(imul(ip(9),isin(a)),fa),imul(imul(ip(2.5),isin(b)),fb)),imul(imul(ip(5),isin(c)),fc));
     const Interval cb=imul(icos(bend),filter);
-    Interval dx=isub(iadd(imul(imul(imul(ip(9),iadd(iratio(18,1000),imul(iratio(39,10000),cb))),icos(a)),fa),imul(imul(iratio(1175,10000),icos(b)),fb)),imul(imul(iratio(45,1000),icos(c)),fc));
-    Interval dz=iadd(isub(imul(imul(imul(ip(9),isub(iratio(11,1000),imul(iratio(52,10000),cb))),icos(a)),fa),imul(imul(iratio(625,10000),icos(b)),fb)),imul(imul(iratio(110,1000),icos(c)),fc));
+    // Invocation-local reuse of identical complete bounds, not sampled waves.
+    // Capture both endpoints before another scalar call overwrites its private
+    // auxiliary endpoint. Every original polynomial/rounding/refusal is retained.
+    const Interval ca=icos(a),cbWave=icos(b),cc=icos(c);
+    Interval dx=isub(iadd(imul(imul(imul(ip(9),iadd(iratio(18,1000),imul(iratio(39,10000),cb))),ca),fa),imul(imul(iratio(1175,10000),cbWave),fb)),imul(imul(iratio(45,1000),cc),fc));
+    Interval dz=iadd(isub(imul(imul(imul(ip(9),isub(iratio(11,1000),imul(iratio(52,10000),cb))),ca),fa),imul(imul(iratio(625,10000),cbWave),fb)),imul(imul(iratio(110,1000),cc),fc));
     const Interval ripple=isub(iadd(imul(x,iratio(173,1000)),imul(z,iratio(129,1000))),imul(t,iratio(73,100))),fr=iband(footprint,iratio(216,1000));
-    h=iadd(h,imul(imul(iratio(38,100),isin(ripple)),fr));dx=iadd(dx,imul(imul(iratio(6574,100000),icos(ripple)),fr));dz=iadd(dz,imul(imul(iratio(4902,100000),icos(ripple)),fr));
+    h=iadd(h,imul(imul(iratio(38,100),isin(ripple)),fr));
+    const Interval cr=icos(ripple);
+    dx=iadd(dx,imul(imul(iratio(6574,100000),cr),fr));dz=iadd(dz,imul(imul(iratio(4902,100000),cr),fr));
     if(footprint.lo<24) {
         const Interval xx=idiv(x,ip(128)),zz=idiv(z,ip(128));
         if(floor(xx.lo)!=floor(xx.hi) || floor(zz.lo)!=floor(zz.hi)) {
