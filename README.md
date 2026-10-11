@@ -13,15 +13,17 @@ SDL Metal buffer bindings. Exact inverse checks preserve the original bodies;
 100 negative descriptor controls reject altered bindings, entry points and
 workgroup sizes. Nineteen programs match the previous accepted MSL byte-for-byte.
 
-The compiler workflow and monitor are unchanged: Metal 3.0, O3, warnings as
-errors, fast math disabled, and contraction disabled. It requires 6 GiB launch
+This follow-up uses the application's existing Metal 2.3 deployment profiles:
+macOS 11 and iOS 15. The workflow and monitor retain O3, warnings as errors,
+fast math disabled, and contraction disabled. It requires 6 GiB launch
 headroom, caps whole-owned-tree residency at the lower of 6 GiB or launch
 headroom minus 3 GiB, and keeps 1 GiB physical/1.5 GiB physical-plus-swap floors.
 Every program's source hash, byte count and entry point are checked. Neither
 empty libraries nor ambiguous process identities qualify as successful links.
 
-These SDK checks target macOS 13/iOS 16. They do not raise the application's
-deployment minimums, or establish runtime compatibility on older operating systems.
+The preceding Metal 3.0/macOS 13/iOS 16 matrix passed all 50 artifact audits.
+That does not establish the application's older deployment compatibility;
+this separate matrix compiles the same 25 programs for the actual minimums.
 Compiler success alone does not prove GPU output, visual quality or frame cost.
 
 Original project ownership, licensing and credits apply. SPIRV-Cross is by
