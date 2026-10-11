@@ -1,2 +1,2 @@
-# Preserve exact translator output across Windows/macOS checkouts.
-shaders/*.metal -text
+# Preserve the exact prepared source and manifest byte pins on every host.
+* -text

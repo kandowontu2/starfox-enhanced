@@ -1,36 +1,31 @@
-name: Temporary complete Metal reflection shader SDK checks (no release)
+name: Temporary complete Metal compositor shaders (no release)
 on:
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
-  metal-sdk:
+  sdk:
     name: Strict ${{ matrix.sdk }} / ${{ matrix.shader }}
     runs-on: macos-15-intel
+    timeout-minutes: 60
     strategy:
       fail-fast: false
+      max-parallel: 4
       matrix:
         sdk: [macosx, iphoneos]
-        shader: [tiles, reduce, query, mapping, domains, frames, optical, optical_stream, optical_schedule, jets, jets_stream, roots_clear, witness, folds, guide, colour, compose, publish, publish_diagnostics, admission_clear, capture, history, lobes, paths, curved_paths]
+        shader: [composite_vertex, composite_fragment, composite_witness, water_guides, water_panel_guides]
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
           submodules: false
           lfs: false
-      - name: Inspect actual SDK/compiler availability
-        run: |
-          xcodebuild -version
-          sysctl hw.memsize
-          vm_stat
-          sysctl vm.swapusage
-          xcrun --sdk '${{ matrix.sdk }}' --find metal
-          xcrun --sdk '${{ matrix.sdk }}' --find metallib
-      - name: Compile and link the exact complete25 source shaders
-        run: python3 tools/compile_metal.py --sdk '${{ matrix.sdk }}' --shader '${{ matrix.shader }}' --out '${{ runner.temp }}/metal-result'
-      - name: Preserve SDK diagnostics and nonprivate shader artifacts
+      - name: Verify the complete original graphics source inventory
+        run: python3 -B tools/compile_metal.py --sdk '${{ matrix.sdk }}' --self-test
+      - name: Compile and link the complete selected shader with the original strict observer
+        run: python3 -B tools/compile_metal.py --sdk '${{ matrix.sdk }}' --shader '${{ matrix.shader }}' --out '${{ runner.temp }}/metal-result'
+      - uses: actions/upload-artifact@v4
         if: always()
-        uses: actions/upload-artifact@v4
         with:
           name: metal-${{ matrix.sdk }}-${{ matrix.shader }}
           path: |

@@ -1,31 +1,15 @@
-# Temporary Metal reflection SDK checks
+# Temporary Metal compositor source validation
 
-This is a source-only development snapshot, not a playable build or release.
-It contains no ROM, private assets or credentials. Main and releases are unchanged.
+Five complete graphics stages from the current game's resident SPIR-V:
+fullscreen vertex, ray/material composition, MRT edge witness, retained liquid
+guides, and the complete analytic water-panel guides. The existing calculations,
+output locations, precision and source function boundaries remain unchanged.
 
-All 25 reflection programs are compiled separately for both macOS and iOS.
-The current stream root solver uses eight threads per group, with the matching
-SDL resource layout. A 64-query batch still processes all 64 queries; optical
-calculations, work bounds, ordering and deadlines are unchanged by scheduling.
+Only entry resource annotations are remapped to SDL's uniforms-first Metal
+buffer convention. Declared-but-unused vertex resources and samplers are not
+invented. Original unused SSA initializers remain with unused-value attributes.
 
-The generated sources preserve the original SPIRV DontInline boundaries and
-SDL Metal buffer bindings. Exact inverse checks preserve the original bodies;
-100 negative descriptor controls reject altered bindings, entry points and
-workgroup sizes. Nineteen programs match the previous accepted MSL byte-for-byte.
-
-This follow-up uses the application's existing Metal 2.3 deployment profiles:
-macOS 11 and iOS 15. The workflow and monitor retain O3, warnings as errors,
-fast math disabled, and contraction disabled. It requires 6 GiB launch
-headroom, caps whole-owned-tree residency at the lower of 6 GiB or launch
-headroom minus 3 GiB, and keeps 1 GiB physical/1.5 GiB physical-plus-swap floors.
-Every program's source hash, byte count and entry point are checked. Neither
-empty libraries nor ambiguous process identities qualify as successful links.
-
-The preceding Metal 3.0/macOS 13/iOS 16 matrix passed all 50 artifact audits.
-That does not establish the application's older deployment compatibility;
-this separate matrix compiles the same 25 programs for the actual minimums.
-Compiler success alone does not prove GPU output, visual quality or frame cost.
-
-Original project ownership, licensing and credits apply. SPIRV-Cross is by
-Khronos Group contributors under Apache 2.0; its license is included in
-`licenses/SPIRV-Cross.txt`.
+The manual ten-job matrix retains the existing O3, warnings-as-errors,
+no-fast-math, contraction-off and resource/identity observer at Metal2.3,
+macOS11/iOS15. This source-only snapshot contains no ROMs, user BINs,
+credentials or release jobs. Compilation is not application/GPU acceptance.

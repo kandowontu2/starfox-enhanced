@@ -13,7 +13,7 @@ import sys
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-NAMES = set("tiles reduce query mapping domains frames optical optical_stream optical_schedule jets jets_stream roots_clear witness folds guide colour compose publish publish_diagnostics admission_clear capture history lobes paths curved_paths".split())
+NAMES = set("composite_vertex composite_fragment composite_witness water_guides water_panel_guides".split())
 FLAGS = {
     'macosx': ["-std=macos-metal2.3", "-O3", "-Werror", "-fno-fast-math", "-ffp-contract=off"],
     'iphoneos': ["-std=ios-metal2.3", "-O3", "-Werror", "-fno-fast-math", "-ffp-contract=off"],
@@ -36,8 +36,8 @@ def digest(path):
 
 def qualify(manifest):
     rows = manifest["Shaders"]
-    if len(rows) != 25 or {r["Name"] for r in rows} != NAMES:
-        raise RuntimeError("Complete25 unique shader programs required")
+    if len(rows) != 5 or {r["Name"] for r in rows} != NAMES:
+        raise RuntimeError("Complete5 unique graphics programs required")
     for row in rows:
         if row["File"] != f"shaders/{row['Name']}.metal":
             raise RuntimeError("Unexpected or escaping source path")
@@ -45,8 +45,9 @@ def qualify(manifest):
         if digest(path).lower() != row["Sha256"].lower() or path.stat().st_size != row["Bytes"]:
             raise RuntimeError("Held complete translated source changed")
         code = path.read_text(encoding="utf-8")
-        if not re.search(r"kernel\s+void\s+" + re.escape(row["Entry"]) + r"\(", code):
-            raise RuntimeError("Complete kernel entry missing")
+        stage = {'vert': 'vertex', 'frag': 'fragment'}.get(row['Stage'])
+        if stage is None or not re.search(r'^' + stage + r'\s+\w+\s+' + re.escape(row['Entry']) + r'\(', code, re.MULTILINE):
+            raise RuntimeError("Complete graphics entry or stage missing")
         if re.search(r'#include\s+"', code):
             raise RuntimeError("Unpinned local compiler include")
     return rows
@@ -93,7 +94,7 @@ def controls(manifest):
         except RuntimeError:
             continue
         raise RuntimeError('Empty/missing-entry library accepted')
-    print("PASS: complete25 actual source pins; missing/duplicate/escaped/changed bytes/entry/size rejected. No SDK compiler launched.")
+    print("PASS: complete5 actual source pins; missing/duplicate/escaped/changed bytes/entry/size rejected. No SDK compiler launched.")
 
 
 class BsdInfo(ctypes.Structure):
@@ -180,9 +181,9 @@ def pin_sdk_executables(frontend):
 def qualify_metallib(data, entry):
     # The old resolved air-lld invocation warned that it ignored the input AIR
     # and produced a 92-byte empty MTLB. Reject that actual failure and a missing
-    # exact kernel NAME token. This is not a GPU library-load/PSO proof.
+    # exact graphics entry NAME token. This is not a GPU library-load/PSO proof.
     if len(data) <= 92 or data[:4] != b'MTLB' or entry.encode('utf-8') + b'\0' not in data:
-        raise RuntimeError('Empty/invalid Metal library or exact kernel entry missing')
+        raise RuntimeError('Empty/invalid Metal library or exact graphics entry missing')
 
 
 def observed_identity(process, expected, library, record, allowed):
@@ -349,10 +350,10 @@ def main():
                "sdk": args.sdk, "sdk_version": subprocess.check_output(["xcrun", "--sdk", args.sdk, "--show-sdk-version"], text=True).strip(),
                "manifest_sha256": digest(ROOT / "shaders.json"), "flags": flags,
                'target': SDK_TARGETS[args.sdk], 'sdk_root': sdk_root, 'selected_shader': args.shader,
-               'full_source_inventory':25, 'expected_compiled_programs':len(selected), "operations": operations,
+               'full_source_inventory':5, 'expected_compiled_programs':len(selected), "operations": operations,
                "accepted": accepted, "failed": failed, "success": len(accepted) == len(selected) and not failed}
     (args.out / "receipt.json").write_text(json.dumps(receipt, indent=2), encoding="utf-8")
-    print(f"Actual {args.sdk}: {len(accepted)}/{len(selected)} selected SDK programs compiled+linked; complete25 source pins checked; failures={len(failed)}")
+    print(f"Actual {args.sdk}: {len(accepted)}/{len(selected)} selected SDK programs compiled+linked; complete5 source pins checked; failures={len(failed)}")
     if not receipt["success"]:
         raise SystemExit(1)
 
