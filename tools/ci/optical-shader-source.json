@@ -434,10 +434,10 @@
       "canonical_sha256": "29d876e121257cfc454d9471c79bdd70d55ab88123aca909589a7bb38aeeff6f"
     },
     {
-      "original_sha256": "0fafc11d077d3206d0b29f5f6510b28d301abdbf057a5c80a727116717ecddee",
+      "original_sha256": "1219e15371dec495998a45c42e16a7f27a7d90430b18ca79865b9210c1c7d59e",
       "path": "src/render/shaders/reflection_source_optical_interval.hlsli",
-      "canonical_bytes": 35512,
-      "canonical_sha256": "0fafc11d077d3206d0b29f5f6510b28d301abdbf057a5c80a727116717ecddee"
+      "canonical_bytes": 35893,
+      "canonical_sha256": "1219e15371dec495998a45c42e16a7f27a7d90430b18ca79865b9210c1c7d59e"
     },
     {
       "original_sha256": "4569a14e8c8e65cafd7082104fadfc0d9197594b462001567f679b37613ee7ad",

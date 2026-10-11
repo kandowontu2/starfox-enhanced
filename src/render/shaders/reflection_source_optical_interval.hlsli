@@ -72,10 +72,11 @@ uint interval_product_extrema(float alo,float ahi,float blo,float bhi) {
 // endpoint storage. DXIL uses the shared scalar-only non-entry ABI below.
 #if defined(__spirv__)
 Interval iadd(Interval a,Interval b) {
-    if(interval_finite_ordered(a) && interval_finite_ordered(b)) {
-        if(interval_exact_point(a,0))return b;
-        if(interval_exact_point(b,0))return a;
-    }
+    // Exact bitwise point identities already prove that operand finite/ordered.
+    // Check the other operand only after a matching identity; invalid inputs
+    // still use the identical directed arithmetic below.
+    if(interval_exact_point(a,0) && interval_finite_ordered(b))return b;
+    if(interval_exact_point(b,0) && interval_finite_ordered(a))return a;
     return iv(optical_add_bound(a.lo,b.lo,false),optical_add_bound(a.hi,b.hi,true));
 }
 #else
@@ -89,10 +90,8 @@ OPTICAL_SCALAR_BOUNDARY float interval_add_pair(float alo,float ahi,float blo,fl
     // Keep an existing enclosure unchanged rather than adding fictitious ULPs
     // at every zero entry of an exact axis/calibration matrix. Invalid inputs
     // never enter the fast path; all nonidentity arithmetic stays outward.
-    if(interval_finite_ordered(a) && interval_finite_ordered(b)) {
-        if(interval_exact_point(a,0)){interval_add_upper=b.hi;return b.lo;}
-        if(interval_exact_point(b,0)){interval_add_upper=a.hi;return a.lo;}
-    }
+    if(interval_exact_point(a,0) && interval_finite_ordered(b)){interval_add_upper=b.hi;return b.lo;}
+    if(interval_exact_point(b,0) && interval_finite_ordered(a)){interval_add_upper=a.hi;return a.lo;}
     const float resultLo=optical_add_bound(a.lo,b.lo,false);
     interval_add_upper=optical_add_bound(a.hi,b.hi,true);return resultLo;
 }
@@ -111,11 +110,12 @@ Interval ineg(Interval a) {
 Interval isub(Interval a,Interval b) {return iadd(a,ineg(b));}
 #if defined(__spirv__)
 Interval imul(Interval a,Interval b) {
-    if(interval_finite_ordered(a) && interval_finite_ordered(b)) {
-        if(interval_exact_point(a,0) || interval_exact_point(b,0))return ip(0);
-        if(interval_exact_point(a,1))return b;if(interval_exact_point(b,1))return a;
-        if(interval_exact_point(a,-1))return ineg(b);if(interval_exact_point(b,-1))return ineg(a);
-    }
+    if(interval_exact_point(a,0) && interval_finite_ordered(b))return ip(0);
+    if(interval_exact_point(b,0) && interval_finite_ordered(a))return ip(0);
+    if(interval_exact_point(a,1) && interval_finite_ordered(b))return b;
+    if(interval_exact_point(b,1) && interval_finite_ordered(a))return a;
+    if(interval_exact_point(a,-1) && interval_finite_ordered(b))return ineg(b);
+    if(interval_exact_point(b,-1) && interval_finite_ordered(a))return ineg(a);
     // Reuse only bit-identical corner inputs of finite ordered intervals.
     // The four mathematical corners and their exact directed values remain;
     // invalid intervals still execute the original four calls in original order.
@@ -146,16 +146,15 @@ Interval imul(Interval a,Interval b) {
 static float interval_multiply_upper=0;
 OPTICAL_SCALAR_BOUNDARY float interval_multiply_pair(float alo,float ahi,float blo,float bhi) {
     const Interval a=iv(alo,ahi),b=iv(blo,bhi);
-    if(interval_finite_ordered(a) && interval_finite_ordered(b)) {
-        if(interval_exact_point(a,0) || interval_exact_point(b,0)){interval_multiply_upper=0;return 0;}
-        if(interval_exact_point(a,1)){interval_multiply_upper=b.hi;return b.lo;}
-        if(interval_exact_point(b,1)){interval_multiply_upper=a.hi;return a.lo;}
-        if(interval_exact_point(a,-1)){
-            const Interval result=ineg(b);interval_multiply_upper=result.hi;return result.lo;
-        }
-        if(interval_exact_point(b,-1)){
-            const Interval result=ineg(a);interval_multiply_upper=result.hi;return result.lo;
-        }
+    if((interval_exact_point(a,0) && interval_finite_ordered(b))
+        || (interval_exact_point(b,0) && interval_finite_ordered(a))){interval_multiply_upper=0;return 0;}
+    if(interval_exact_point(a,1) && interval_finite_ordered(b)){interval_multiply_upper=b.hi;return b.lo;}
+    if(interval_exact_point(b,1) && interval_finite_ordered(a)){interval_multiply_upper=a.hi;return a.lo;}
+    if(interval_exact_point(a,-1) && interval_finite_ordered(b)){
+        const Interval result=ineg(b);interval_multiply_upper=result.hi;return result.lo;
+    }
+    if(interval_exact_point(b,-1) && interval_finite_ordered(a)){
+        const Interval result=ineg(a);interval_multiply_upper=result.hi;return result.lo;
     }
     // Reuse only bit-identical corner inputs of finite ordered intervals.
     // The four mathematical corners and their exact directed values remain;
