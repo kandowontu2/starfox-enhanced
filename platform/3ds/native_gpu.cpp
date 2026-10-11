@@ -1,5 +1,6 @@
 #include "native_gpu.hpp"
 #include "starfox/platform/nintendo_3ds/pica_residency.hpp"
+#include "starfox/platform/nintendo_3ds/startup_trace.hpp"
 #include <atomic>
 #include <cstring>
 extern "C" {
@@ -27,7 +28,11 @@ struct GpuLease {
 struct FrameEnd {
     // All changed buffers/textures are explicitly flushed. Do not flush the
     // entire linear heap (including unrelated PCM/unchanged art) every frame.
-    ~FrameEnd() {C3D_FrameEnd(GX_CMDLIST_FLUSH);}
+    ~FrameEnd() {
+        STARFOX_3DS_STARTUP_MARK(gpu_submit);
+        C3D_FrameEnd(GX_CMDLIST_FLUSH);
+        STARFOX_3DS_STARTUP_MARK(gpu_submit_complete);
+    }
 };
 u32 clear_colour(Rgb colour) {return (u32(colour.r)<<24)|(u32(colour.g)<<16)|(u32(colour.b)<<8)|255;}
 void upload_matrix(int location,const PicaMatrix& rows) {
@@ -233,7 +238,9 @@ NativeGpu::NativeGpu(std::span<const std::uint8_t> shader):impl_(std::make_uniqu
 NativeGpu::~NativeGpu()=default;
 void NativeGpu::present(const PicaFrame& frame,ImageView lower) {
     validate_pica_frame(frame,lower);
+    STARFOX_3DS_STARTUP_MARK(gpu_wait);
     if(!C3D_FrameBegin(C3D_FRAME_SYNCDRAW)) throw std::runtime_error("3DS GPU frame unavailable");
+    STARFOX_3DS_STARTUP_MARK(gpu_wait_complete);
     FrameEnd end; // Includes failure exits; uploads complete before targets are marked used.
     update_pica_texture_residency(frame.textures,{lower.pixels,lower.width,lower.height,lower.pitch,3},
         std::span(impl_->textures),impl_->dashboard);
