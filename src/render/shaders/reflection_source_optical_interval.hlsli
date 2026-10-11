@@ -200,16 +200,56 @@ Interval iclamp(Interval a,Interval lo,Interval hi) {return imin(imax(a,lo),hi);
 bool izero(Interval a) {return a.lo<=0 && a.hi>=0;}
 // Checking the exact float product avoids assuming a driver's divide/sqrt
 // estimate has a particular accuracy. Unbracketed results fail the whole box.
+// BEGIN EXACT PRODUCT ORDER
+// 0 means use the complete existing compensated-product fallback. Otherwise
+// bit0 marks an exact comparison, bit1 is product<target, bit2 product>target.
+// Normal factors in [2^-30,2^30] have a complete48-bit integer significand
+// product. Compare that dyadic value directly with the target's exact float
+// representation; no native multiply, rounding estimate or residual is used.
+uint interval_product_order(float x,float y,float target) {
+    const uint xx=asuint(x)&0x7fffffffU,yy=asuint(y)&0x7fffffffU,tt=asuint(target)&0x7fffffffU;
+    if(xx<0x30800000U || xx>0x4e800000U || yy<0x30800000U || yy>0x4e800000U || tt>=0x7f800000U)return 0;
+    const bool negative=((asuint(x)^asuint(y))&0x80000000U)!=0;
+    const bool targetNegative=tt!=0 && (asuint(target)&0x80000000U)!=0;
+    if(negative!=targetNegative)return negative?3U:5U;
+    // The product is >=2^-60 in magnitude, so every zero/subnormal target is
+    // strictly smaller in magnitude. Signed zero still denotes exact zero.
+    if(tt<0x00800000U)return negative?3U:5U;
+    const uint xm=(xx&0x7fffffU)|0x800000U,ym=(yy&0x7fffffU)|0x800000U;
+    const uint xl=xm&0xffffU,xh=xm>>16,yl=ym&0xffffU,yh=ym>>16;
+    const uint base=xl*yl,cross=xl*yh+xh*yl,low=base+(cross<<16);
+    const uint high=xh*yh+(cross>>16)+(low<base?1U:0U);
+    const int productExponent=int((xx>>23)+(yy>>23))-300+(high>=0x8000U?47:46);
+    const int targetExponent=int(tt>>23)-127;
+    bool less=false,greater=false;
+    if(productExponent<targetExponent)less=true;
+    else if(productExponent>targetExponent)greater=true;
+    else {
+        const uint shift=(tt>>23)+150U-(xx>>23)-(yy>>23);
+        if(shift<23U || shift>24U)return 0;
+        const uint tm=(tt&0x7fffffU)|0x800000U;
+        const uint targetLow=tm<<shift,targetHigh=tm>>(32U-shift);
+        less=high<targetHigh || (high==targetHigh && low<targetLow);
+        greater=high>targetHigh || (high==targetHigh && low>targetLow);
+    }
+    return 1U | ((negative?greater:less)?2U:0U) | ((negative?less:greater)?4U:0U);
+}
+// END EXACT PRODUCT ORDER
 OPTICAL_SCALAR_BOUNDARY float quotient_bound(float a,float b,bool upper) {
     float q=a/b;
     [loop] for(uint n=0;n<8;++n) {
         if(!isfinite(q) || abs(q)>1.e30) {intervalFailed=true;return q;}
         // Identical compensated product, kept as scalar SSA so the DXIL
         // non-entry ABI can share this full checked core without vector ops.
-        const CurvedScalar product=curved_dd_mul_core(q,0,b,0);
-        if(!isfinite(product.high) || !isfinite(product.low)) {intervalFailed=true;return q;}
-        const bool below=product.high<a || (product.high==a && product.low<0),
+        const uint order=interval_product_order(q,b,a);
+        bool below=false,above=false;
+        if(order) {below=(order&2U)!=0;above=(order&4U)!=0;}
+        else {
+            const CurvedScalar product=curved_dd_mul_core(q,0,b,0);
+            if(!isfinite(product.high) || !isfinite(product.low)) {intervalFailed=true;return q;}
+            below=product.high<a || (product.high==a && product.low<0);
             above=a<product.high || (a==product.high && 0<product.low);
+        }
         if(b<0) {if(upper?!above:!below)return q;}
         else if(upper?!below:!above)return q;
         q=upper?interval_up(q):interval_down(q);
@@ -261,10 +301,15 @@ OPTICAL_BOUNDARY Interval idiv(Interval a,Interval b) {
 OPTICAL_SCALAR_BOUNDARY float sqrt_bound(float a,bool upper) {
     float q=sqrt(a);
     [loop] for(uint n=0;n<8;++n) {
-        const CurvedScalar square=curved_dd_mul_core(q,0,q,0);
-        if(!isfinite(square.high) || !isfinite(square.low)) {intervalFailed=true;return q;}
-        const bool below=square.high<a || (square.high==a && square.low<0),
+        const uint order=interval_product_order(q,q,a);
+        bool below=false,above=false;
+        if(order) {below=(order&2U)!=0;above=(order&4U)!=0;}
+        else {
+            const CurvedScalar square=curved_dd_mul_core(q,0,q,0);
+            if(!isfinite(square.high) || !isfinite(square.low)) {intervalFailed=true;return q;}
+            below=square.high<a || (square.high==a && square.low<0);
             above=a<square.high || (a==square.high && 0<square.low);
+        }
         if(upper?!below:!above)return q;
         q=upper?interval_up(q):max(0,interval_down(q));
     }
