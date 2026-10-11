@@ -200,13 +200,42 @@ Interval iclamp(Interval a,Interval lo,Interval hi) {return imin(imax(a,lo),hi);
 bool izero(Interval a) {return a.lo<=0 && a.hi>=0;}
 // Checking the exact float product avoids assuming a driver's divide/sqrt
 // estimate has a particular accuracy. Unbracketed results fail the whole box.
+// BEGIN GUARDED NATIVE FP64 CHECKED PRODUCT
+#if !defined(__spirv__)
+// Optional D3D12 variant: a production owner must check
+// DoublePrecisionFloatShaderOps and retain the original binary32 pipelines.
+// Only normal operands in [2^-30,2^30] use native double arithmetic. Their
+// exact product has at most48 significant bits (double has53), and every
+// nonzero low word is normal binary32 (at least2^-108). No FTZ/DAZ premise,
+// divide estimate, iteration limit or enclosure test is changed. Out-of-range
+// operands retain the complete original compensated core.
+static float optical_checked_product_low=0;
+OPTICAL_SCALAR_BOUNDARY float optical_checked_product(float a,float b) {
+    const uint aa=asuint(a)&0x7fffffffU,bb=asuint(b)&0x7fffffffU;
+    if(aa>=0x30800000U && aa<=0x4e800000U && bb>=0x30800000U && bb<=0x4e800000U) {
+        precise double exact=(double)a*(double)b;
+        precise float nearest=(float)exact;
+        precise double residual=exact-(double)nearest;
+        precise float error=(float)residual;
+        precise float high=nearest+error,low=error-(high-nearest);
+        optical_checked_product_low=low;return high;
+    }
+    const CurvedScalar result=curved_dd_mul_core(a,0,b,0);
+    optical_checked_product_low=result.low;return result.high;
+}
+#endif
+// END GUARDED NATIVE FP64 CHECKED PRODUCT
 OPTICAL_SCALAR_BOUNDARY float quotient_bound(float a,float b,bool upper) {
     float q=a/b;
     [loop] for(uint n=0;n<8;++n) {
         if(!isfinite(q) || abs(q)>1.e30) {intervalFailed=true;return q;}
         // Identical compensated product, kept as scalar SSA so the DXIL
         // non-entry ABI can share this full checked core without vector ops.
+#if !defined(__spirv__)
+        CurvedScalar product;product.high=optical_checked_product(q,b);product.low=optical_checked_product_low;
+#else
         const CurvedScalar product=curved_dd_mul_core(q,0,b,0);
+#endif
         if(!isfinite(product.high) || !isfinite(product.low)) {intervalFailed=true;return q;}
         const bool below=product.high<a || (product.high==a && product.low<0),
             above=a<product.high || (a==product.high && 0<product.low);
@@ -261,7 +290,11 @@ OPTICAL_BOUNDARY Interval idiv(Interval a,Interval b) {
 OPTICAL_SCALAR_BOUNDARY float sqrt_bound(float a,bool upper) {
     float q=sqrt(a);
     [loop] for(uint n=0;n<8;++n) {
+#if !defined(__spirv__)
+        CurvedScalar square;square.high=optical_checked_product(q,q);square.low=optical_checked_product_low;
+#else
         const CurvedScalar square=curved_dd_mul_core(q,0,q,0);
+#endif
         if(!isfinite(square.high) || !isfinite(square.low)) {intervalFailed=true;return q;}
         const bool below=square.high<a || (square.high==a && square.low<0),
             above=a<square.high || (a==square.high && 0<square.low);
