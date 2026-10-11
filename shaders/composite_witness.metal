@@ -154,11 +154,11 @@ constant bool _5611 = {};
 constant spvUnsafeArray<int3, 5> _5613 = spvUnsafeArray<int3, 5>({ int3(8, 5, 40), int3(65, 20, 150), int3(220, 30, 70), int3(255, 150, 15), int3(255, 255, 210) });
 constant spvUnsafeArray<int3, 4> _5614 = spvUnsafeArray<int3, 4>({ int3(0), int3(0, 170, 170), int3(170, 0, 170), int3(255) });
 constant spvUnsafeArray<int3, 4> _5615 = spvUnsafeArray<int3, 4>({ int3(15, 56, 15), int3(48, 98, 48), int3(139, 172, 15), int3(155, 188, 15) });
-constant spvUnsafeArray<uint, 8> _5616 = spvUnsafeArray<uint, 8>({ 0u, 1u, 2u, 3u, 4u, 5u, 6u, 7u });
+__attribute__((unused)) constant spvUnsafeArray<uint, 8> _5616 = spvUnsafeArray<uint, 8>({ 0u, 1u, 2u, 3u, 4u, 5u, 6u, 7u });
 constant spvUnsafeArray<int2, 4> _5617 = spvUnsafeArray<int2, 4>({ int2(-1, 0), int2(1, 0), int2(0, -1), int2(0, 1) });
 constant spvUnsafeArray<int, 16> _5618 = spvUnsafeArray<int, 16>({ 0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5 });
-constant spvUnsafeArray<int, 4> _5619 = spvUnsafeArray<int, 4>({ 0, 0, 0, 0 });
-constant spvUnsafeArray<int3, 4> _5620 = spvUnsafeArray<int3, 4>({ int3(0), int3(0), int3(0), int3(0) });
+__attribute__((unused)) constant spvUnsafeArray<int, 4> _5619 = spvUnsafeArray<int, 4>({ 0, 0, 0, 0 });
+__attribute__((unused)) constant spvUnsafeArray<int3, 4> _5620 = spvUnsafeArray<int3, 4>({ int3(0), int3(0), int3(0), int3(0) });
 
 struct composite_witness_main_out
 {

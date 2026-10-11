@@ -78,8 +78,8 @@
       "Samplers": 2,
       "InputSpirvSha256": "3a87bf28d069bae42a972ebefef5ab1ce67ec641a31ee4af5d2d414e9434dc0b",
       "File": "shaders/composite_fragment.metal",
-      "Sha256": "06d2bc0ae7f272bd4be186ea09b9a79bc1ca01961572cf5322840bb56dd6dac2",
-      "Bytes": 1712623,
+      "Sha256": "f0f3cc5795f1da99c43e92df4f06f1795d66e164154ba8476db7e1e1ebe72e82",
+      "Bytes": 1712695,
       "ResourceMappings": [
         {
           "name": "shadows",
@@ -1305,7 +1305,12 @@
         "exact_inverse_matches_original": true
       },
       "PreservedDontInlineBoundaries": [],
-      "ExactInverseMatchesOriginal": true
+      "ExactInverseMatchesOriginal": true,
+      "RetainedUnusedConstantArrayAttributes": [
+        "_5609",
+        "_5612",
+        "_5613"
+      ]
     },
     {
       "Name": "composite_witness",
@@ -1316,8 +1321,8 @@
       "Samplers": 3,
       "InputSpirvSha256": "5ed00227f58dec4338ae679bf036aebb44254abadf39fb3801337e177cc7bddf",
       "File": "shaders/composite_witness.metal",
-      "Sha256": "25248271df513d46adcd637a773a0e142cbbe71fb5ebd846bfe2330ae3163637",
-      "Bytes": 1714680,
+      "Sha256": "4dc60cb4e85668fb1e8b729d260a1140902b59c4c43d1e228bb67a4c8611a48b",
+      "Bytes": 1714752,
       "ResourceMappings": [
         {
           "name": "shadows",
@@ -2557,7 +2562,12 @@
         "exact_inverse_matches_original": true
       },
       "PreservedDontInlineBoundaries": [],
-      "ExactInverseMatchesOriginal": true
+      "ExactInverseMatchesOriginal": true,
+      "RetainedUnusedConstantArrayAttributes": [
+        "_5616",
+        "_5619",
+        "_5620"
+      ]
     },
     {
       "Name": "water_guides",
