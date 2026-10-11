@@ -6,6 +6,10 @@
 #include "starfox/render/vulkan_hardware_rt.hpp"
 #include "metal_water_shared.hpp"
 #include "metal_native_material_shared.hpp"
+#if defined(STARFOX_EMBED_NATIVE_METAL_RT)
+#include "starfox/render/native_metal_rt_programs.hpp"
+#include <dispatch/dispatch.h>
+#endif
 #include "starfox/render/gpu_background.hpp"
 #include "starfox/render/environment_effects.hpp"
 #include <algorithm>
@@ -925,6 +929,16 @@ kernel void starfox_hardware_reflection(
         return [device supportsFamily:MTLGPUFamilyApple9];
     return false;
 }
+#if defined(STARFOX_EMBED_NATIVE_METAL_RT)
+id<MTLLibrary> embedded_rt_library(id<MTLDevice> device,NativeMetalRtProgram program,NSError** error) {
+    const auto bytes=native_metal_rt_program(program);
+    if(bytes.empty()) throw std::runtime_error("Missing or invalid embedded native Metal RT library");
+    dispatch_data_t data=dispatch_data_create(bytes.data(),bytes.size(),
+        dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),DISPATCH_DATA_DESTRUCTOR_DEFAULT);
+    if(!data) throw std::runtime_error("Could not allocate embedded Metal library data");
+    return [device newLibraryWithData:data error:error];
+}
+#endif
 } // namespace
 
 struct MetalHardwareRt::Impl {
@@ -1032,6 +1046,9 @@ struct MetalHardwareRt::Impl {
         if(!hardware_ray_tracing(metal))
             throw std::runtime_error("This Metal device has no dedicated ray-tracing hardware");
         NSError* error=nil;
+#if defined(STARFOX_EMBED_NATIVE_METAL_RT)
+        id<MTLLibrary> library=embedded_rt_library(metal,NativeMetalRtProgram::shadow,&error);
+#else
         NSString* source=[[NSString stringWithUTF8String:starfox_metal_native_material_shared]
             stringByAppendingString:[NSString stringWithUTF8String:kIndexedShader]];
         source=[source stringByAppendingString:[NSString stringWithUTF8String:kShadowShader]];
@@ -1039,8 +1056,10 @@ struct MetalHardwareRt::Impl {
         if(@available(iOS 18.0, macOS 15.0, *)) options.mathMode=MTLMathModeSafe;
         else options.fastMathEnabled=NO;
         id<MTLLibrary> library=[metal newLibraryWithSource:source options:options error:&error];
+#endif
         if(!library) throw std::runtime_error(metal_error(error));
         id<MTLFunction> function=[library newFunctionWithName:@"starfox_hardware_shadow"];
+        if(!function) throw std::runtime_error("Native Metal shadow kernel is missing");
         shadow_pipeline=[metal newComputePipelineStateWithFunction:function error:&error];
         if(!shadow_pipeline) throw std::runtime_error(metal_error(error));
         device=next;
@@ -1049,6 +1068,9 @@ struct MetalHardwareRt::Impl {
     void ensure_reflection_pipeline() {
         if(reflection_pipeline) return;
         NSError* error=nil;
+#if defined(STARFOX_EMBED_NATIVE_METAL_RT)
+        id<MTLLibrary> library=embedded_rt_library(metal,NativeMetalRtProgram::reflection,&error);
+#else
         NSString* source=[[NSString stringWithUTF8String:starfox_metal_water_shared]
             stringByAppendingString:[NSString stringWithUTF8String:starfox_metal_native_material_shared]];
         source=[source stringByAppendingString:[NSString stringWithUTF8String:kIndexedShader]];
@@ -1057,8 +1079,10 @@ struct MetalHardwareRt::Impl {
         if(@available(iOS 18.0, macOS 15.0, *)) options.mathMode=MTLMathModeSafe;
         else options.fastMathEnabled=NO;
         id<MTLLibrary> library=[metal newLibraryWithSource:source options:options error:&error];
+#endif
         if(!library) throw std::runtime_error(metal_error(error));
         id<MTLFunction> function=[library newFunctionWithName:@"starfox_hardware_reflection"];
+        if(!function) throw std::runtime_error("Native Metal reflection kernel is missing");
         reflection_pipeline=[metal newComputePipelineStateWithFunction:function error:&error];
         if(!reflection_pipeline) throw std::runtime_error(metal_error(error));
     }
@@ -1070,6 +1094,10 @@ struct MetalHardwareRt::Impl {
         auto& pipeline=reflection?empty_reflection_pipeline:empty_shadow_pipeline;
         if(pipeline)return;
         NSError* error=nil;
+#if defined(STARFOX_EMBED_NATIVE_METAL_RT)
+        id<MTLLibrary> library=embedded_rt_library(metal,reflection?NativeMetalRtProgram::empty_reflection:
+            NativeMetalRtProgram::empty_shadow,&error);
+#else
         NSString* source=[NSString stringWithUTF8String:kEmptyScenePrefix];
         if(reflection)source=[source stringByAppendingString:[NSString stringWithUTF8String:starfox_metal_water_shared]];
         source=[source stringByAppendingString:[NSString stringWithUTF8String:starfox_metal_native_material_shared]];
@@ -1079,8 +1107,10 @@ struct MetalHardwareRt::Impl {
         if(@available(iOS 18.0, macOS 15.0, *)) options.mathMode=MTLMathModeSafe;
         else options.fastMathEnabled=NO;
         id<MTLLibrary> library=[metal newLibraryWithSource:source options:options error:&error];
+#endif
         if(!library)throw std::runtime_error(metal_error(error));
         id<MTLFunction> function=[library newFunctionWithName:reflection?@"starfox_hardware_reflection":@"starfox_hardware_shadow"];
+        if(!function) throw std::runtime_error("Native Metal empty-scene kernel is missing");
         pipeline=[metal newComputePipelineStateWithFunction:function error:&error];
         if(!pipeline)throw std::runtime_error(metal_error(error));
     }

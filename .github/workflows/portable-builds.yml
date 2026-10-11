@@ -1,4 +1,4 @@
-name: Temporary full Metal game integration (no release)
+name: Temporary actual game with embedded native Metal RT libraries (no release)
 on:
   workflow_dispatch:
     inputs:
@@ -24,6 +24,18 @@ jobs:
           persist-credentials: false
           submodules: false
           lfs: false
+      - name: Check actual native provider selection and rejection (fake bytes, no GPU)
+        shell: bash
+        run: |
+          for mode in valid invalid; do
+            flags=()
+            if [[ "$mode" == invalid ]]; then flags+=(-DTEST_BAD_PAYLOAD=1); fi
+            clang++ -std=c++20 -O3 -fno-fast-math -ffp-contract=off \
+              -Wall -Wextra -Wconversion -Werror "${flags[@]}" -I include \
+              src/render/native_metal_rt_programs.cpp tests/native_metal_rt_provider_tests.cpp \
+              -o "${RUNNER_TEMP}/native-provider-${mode}"
+            "${RUNNER_TEMP}/native-provider-${mode}"
+          done
       - name: Configure the complete game graph
         shell: bash
         run: |
@@ -80,6 +92,12 @@ jobs:
             ditto -c -k --sequesterRsrc --keepParent "${app}" \
               StarFoxEnhanced-metal-integration-macos.zip
           fi
+          package=StarFoxEnhanced-metal-integration-macos.zip
+          if [[ "${sdk}" == iphoneos ]]; then
+            package=StarFoxEnhanced-metal-integration-unsigned.ipa
+          fi
+          python3 tools/check_native_metal_library_embedding.py --sdk "${sdk}" \
+            --generated-dir "build/${sdk}/generated/native-metal-rt" --package "${package}"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -89,6 +107,9 @@ jobs:
             build.log
             build/${{ matrix.sdk }}/CMakeCache.txt
             build/${{ matrix.sdk }}/generated/*.hpp
+            build/${{ matrix.sdk }}/generated/native-metal-rt/*.metal
+            build/${{ matrix.sdk }}/generated/native-metal-rt/*.metallib
+            build/${{ matrix.sdk }}/generated/native-metal-rt/native-library-embedding.json
             StarFoxEnhanced-metal-integration-unsigned.ipa
             StarFoxEnhanced-metal-integration-macos.zip
           if-no-files-found: warn
