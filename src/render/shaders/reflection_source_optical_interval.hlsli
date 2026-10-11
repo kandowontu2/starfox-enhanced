@@ -19,6 +19,14 @@ static bool intervalFailed=false;
 #else
 #define OPTICAL_SCALAR_BOUNDARY [noinline]
 #endif
+// Placement-only candidate: retain the complete shared scalar arithmetic, but
+// let DXIL inline the checked divide/sqrt steps into their actual callers.
+// Vulkan preserves its existing helper boundaries and all checked bodies.
+#if defined(__spirv__)
+#define OPTICAL_CHECKED_BOUNDARY OPTICAL_SCALAR_BOUNDARY
+#else
+#define OPTICAL_CHECKED_BOUNDARY
+#endif
 float interval_down(float x) {
     if(!isfinite(x)) {intervalFailed=true;return x;}
     if(x==0)return -asfloat(0x00800000U);
@@ -200,7 +208,7 @@ Interval iclamp(Interval a,Interval lo,Interval hi) {return imin(imax(a,lo),hi);
 bool izero(Interval a) {return a.lo<=0 && a.hi>=0;}
 // Checking the exact float product avoids assuming a driver's divide/sqrt
 // estimate has a particular accuracy. Unbracketed results fail the whole box.
-OPTICAL_SCALAR_BOUNDARY float quotient_bound(float a,float b,bool upper) {
+OPTICAL_CHECKED_BOUNDARY float quotient_bound(float a,float b,bool upper) {
     float q=a/b;
     [loop] for(uint n=0;n<8;++n) {
         if(!isfinite(q) || abs(q)>1.e30) {intervalFailed=true;return q;}
@@ -258,7 +266,7 @@ OPTICAL_BOUNDARY Interval idiv(Interval a,Interval b) {
     const float lo=interval_divide_pair(a.lo,a.hi,b.lo,b.hi);
     return iv(interval_down(lo),interval_up(interval_divide_upper));
 }
-OPTICAL_SCALAR_BOUNDARY float sqrt_bound(float a,bool upper) {
+OPTICAL_CHECKED_BOUNDARY float sqrt_bound(float a,bool upper) {
     float q=sqrt(a);
     [loop] for(uint n=0;n<8;++n) {
         const CurvedScalar square=curved_dd_mul_core(q,0,q,0);
