@@ -432,6 +432,62 @@ bool outside_face(ReflectionSpecularPlane p,Interval3 hit) {
     const Interval x=idiv(isub(imul(bb,ra),imul(ab,rb)),det),y=idiv(isub(imul(aa,rb),imul(ab,ra)),det);
     return x.hi<ic(-.00001).lo || y.hi<ic(-.00001).lo || iadd(x,y).lo>ic(1.00001).hi;
 }
+#if defined(STARFOX_NATIVE_SOURCE_OPTICAL)
+// BEGIN SHARED FIXED PLANE GEOMETRY
+// The validated frame/ordered plane set is uniform within this source group.
+// Share only fixed plane terms, never hit/ray/cell values. Every valid group
+// clears and replaces its five-stage geometry before any original cell runs.
+groupshared Interval3 opticalPlaneNormals[5],opticalPlaneU[5],opticalPlaneV[5];
+groupshared Interval opticalPlaneAA[5],opticalPlaneAB[5],opticalPlaneBB[5],opticalPlaneDet[5];
+groupshared uint opticalPlaneReady[5],opticalPlaneNormalFailed[5],opticalPlaneGramFailed[5];
+void prepare_optical_plane_geometry(ReflectionRoughFrame receiver,ReflectionSpecularPlane planes[4],uint4 control,uint lane) {
+    const bool prior=intervalFailed;
+    if(!lane) {
+        [unroll] for(uint stage=0;stage<5;++stage)opticalPlaneReady[stage]=0;
+        [loop] for(uint stage=0;stage<=control.x;++stage) {
+            const bool primary=stage==0,curved=primary?control.z!=0:(control.y&(1U<<(stage-1)))!=0;
+            if(curved)continue;
+            ReflectionSpecularPlane plane;
+            if(primary) {plane.a=receiver.a;plane.b=receiver.b;plane.c=receiver.c;}
+            else plane=planes[stage-1];
+            intervalFailed=false;
+            opticalPlaneNormals[stage]=plane_normal(plane);
+            opticalPlaneNormalFailed[stage]=intervalFailed?1U:0U;
+            opticalPlaneReady[stage]=1U;
+            if(!reflection_specular_analytic(plane)) {
+                intervalFailed=false;
+                const Interval3 u=vsub(p3(plane.b.xyz),p3(plane.a.xyz)),v=vsub(p3(plane.c.xyz),p3(plane.a.xyz));
+                const Interval aa=vdot(u,u),ab=vdot(u,v),bb=vdot(v,v),det=isub(imul(aa,bb),isquare(ab));
+                opticalPlaneU[stage]=u;opticalPlaneV[stage]=v;
+                opticalPlaneAA[stage]=aa;opticalPlaneAB[stage]=ab;opticalPlaneBB[stage]=bb;opticalPlaneDet[stage]=det;
+                opticalPlaneGramFailed[stage]=intervalFailed?1U:0U;
+                opticalPlaneReady[stage]|=2U;
+            }
+        }
+    }
+    GroupMemoryBarrierWithGroupSync();
+    intervalFailed=prior;
+}
+Interval3 prepared_optical_plane_normal(ReflectionSpecularPlane plane,uint stage) {
+    if(stage>=5)return plane_normal(plane);
+    // Certified sqrt/divide widths depend on the incoming failure flag.
+    // Recalculate every failed/unprepared case with its ORIGINAL prior state;
+    // a cached successful normal must never narrow an already-failed path.
+    if(intervalFailed || (opticalPlaneReady[stage]&1U)==0 || opticalPlaneNormalFailed[stage]!=0)return plane_normal(plane);
+    return opticalPlaneNormals[stage];
+}
+bool prepared_optical_outside_face(ReflectionSpecularPlane plane,Interval3 hit,uint stage) {
+    if(reflection_specular_analytic(plane))return false;
+    if(stage>=5)return outside_face(plane,hit);
+    if(intervalFailed || (opticalPlaneReady[stage]&2U)==0 || opticalPlaneGramFailed[stage]!=0)return outside_face(plane,hit);
+    const Interval3 u=opticalPlaneU[stage],v=opticalPlaneV[stage],r=vsub(hit,p3(plane.a.xyz));
+    const Interval aa=opticalPlaneAA[stage],ab=opticalPlaneAB[stage],bb=opticalPlaneBB[stage],ra=vdot(r,u),rb=vdot(r,v),det=opticalPlaneDet[stage];
+    if(det.lo<=0)return false;
+    const Interval x=idiv(isub(imul(bb,ra),imul(ab,rb)),det),y=idiv(isub(imul(aa,rb),imul(ab,ra)),det);
+    return x.hi<ic(-.00001).lo || y.hi<ic(-.00001).lo || iadd(x,y).lo>ic(1.00001).hi;
+}
+// END SHARED FIXED PLANE GEOMETRY
+#endif
 OPTICAL_BOUNDARY Interval3 liquid_normal(ReflectionLiquidFrame f,Interval3 direction,Interval distance,Interval footprint,inout Interval3 hit) {
     Interval3 p=vadd(vrow(hit,f),p3(float3(f.rotation0.w,f.rotation1.w,f.rotation2.w)));const Interval t=ip(f.settings.x);Interval dx,dz;
     if(f.settings.y==3) {
@@ -470,7 +526,14 @@ OPTICAL_BOUNDARY bool optical_excluded_target(float4 box,ReflectionRoughFrame re
         ReflectionSpecularPlane plane;
         if(primary) {plane.a=receiver.a;plane.b=receiver.b;plane.c=receiver.c;}
         else plane=planes[stage-1];
-        Interval3 n;if(curved)n=p3(liquid.planeNormal.xyz);else n=oriented(plane_normal(plane),outgoing);
+        Interval3 n;if(curved)n=p3(liquid.planeNormal.xyz);
+        else {
+#if defined(STARFOX_NATIVE_SOURCE_OPTICAL)
+            n=oriented(prepared_optical_plane_normal(plane,stage),outgoing);
+#else
+            n=oriented(plane_normal(plane),outgoing);
+#endif
+        }
         const Interval denominator=vdot(outgoing,n),distance=idiv(vdot(vsub(p3(curved?liquid.planePoint.xyz:plane.a.xyz),origin),n),denominator);
         if(primary) {
             const Interval depth=imul(distance,outgoing.z);
@@ -481,7 +544,13 @@ OPTICAL_BOUNDARY bool optical_excluded_target(float4 box,ReflectionRoughFrame re
             Interval radius;if(primary)radius=distance;else radius=vlength(hit);
             const Interval footprint=idiv(idiv(radius,ip(max(liquid.projection.x,1))),imax(iabs(denominator),iratio(4,100)));
             n=liquid_normal(liquid,outgoing,distance,footprint,hit);
-        } else if(outside_face(plane,hit))return !intervalFailed;
+        } else {
+#if defined(STARFOX_NATIVE_SOURCE_OPTICAL)
+            if(prepared_optical_outside_face(plane,hit,stage))return !intervalFailed;
+#else
+            if(outside_face(plane,hit))return !intervalFailed;
+#endif
+        }
         bias=imax(iratio(primary && !curved && !reflection_specular_analytic(plane)?1:5,100),imul(distance,iratio(1,100000)));
         origin=vadd(hit,vmul(n,bias));outgoing=vreflect(outgoing,n);
         if(primary && !curved && receiver.settings.x!=0) {

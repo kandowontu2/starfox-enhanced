@@ -91,6 +91,7 @@ void feature_optical_main(uint3 group:SV_GroupID,uint lane:SV_GroupIndex) {
 #if defined(STARFOX_NATIVE_SOURCE_OPTICAL)
     intervalFailed=false;const Interval3 enclosedTarget=native_target(at,terminal);
     const bool targetFailed=intervalFailed;
+    prepare_optical_plane_geometry(receiver,planes,control,lane);
 #endif
     // Complete closed-box coverage, evaluated in parallel. This has the same
     // bounded 1/64-pixel endpoint scale as the depth-12 adaptive cover but no
