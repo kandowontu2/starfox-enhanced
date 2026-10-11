@@ -50,6 +50,16 @@ times. GPU queue pressure appears in `gpu_wait`; do not infer a GPU bottleneck
 from the parent `present` duration alone. Markers do not change submission,
 queue ownership, source cadence or stereo policy.
 
+Changed RGBA/RGB uploads now compare logical pixels against successful native
+residency and repack only dirty 8x8 Morton tiles. One enclosing, tile-aligned
+cache-flush range includes every write. Initial/layout-change uploads, released
+allocations and retries after a failed flush fully initialize the texture;
+broad/dense changes retain the complete packer. Row padding, clamped/repeated
+edge texels and alpha are preserved. A8 source ownership keeps its existing
+validation/upload path. Sparse packing uses bounded reusable scratch, not a
+new whole-image staging allocation. Host byte/flush-range tests and packing
+benchmarks do not establish Citro3D execution cost or New-console FPS.
+
 The same CSV header is retained; consumers must allow all thirty-two phase
 names and reject unknown names rather than silently ignoring malformed data.
 The terrain rows are children of `layers`; a cache-hit count is not a console

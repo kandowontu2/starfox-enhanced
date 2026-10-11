@@ -1,5 +1,6 @@
 #include "starfox/platform/nintendo_3ds/pica_frame.hpp"
 #include "starfox/platform/nintendo_3ds/pica_residency.hpp"
+#include "starfox/platform/nintendo_3ds/pica_texture_update.hpp"
 #include <iostream>
 #include <cstdlib>
 #include <new>
@@ -265,6 +266,110 @@ void full_size_texture_upload() {
             require(pixels==original_pixels && layers==original_layers,"Packing mutated borrowed artwork");
         }
     }
+}
+void changed_tile_upload() {
+    constexpr std::array<std::array<unsigned,2>,12> sizes{{{1,1},{4,4},{7,9},{8,8},{9,17},
+        {32,16},{320,240},{400,240},{511,255},{1024,9},{9,1024},{1023,1023}}};
+    for(const auto size:sizes) for(unsigned channels:{3U,4U}) for(bool repeat:{false,true}) {
+        const auto width=size[0],height=size[1],pitch=width*channels+13;
+        if(repeat && (!std::has_single_bit(width) || !std::has_single_bit(height)))continue;
+        std::vector<std::uint8_t> source(std::size_t(pitch)*(height-1)+width*channels,0xA7);
+        for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x)for(unsigned c=0;c<channels;++c)
+            source[std::size_t(y)*pitch+x*channels+c]=std::uint8_t(x*19+y*37+c*53);
+        PicaImage image{source,width,height,pitch,channels,repeat};
+        const auto layout=pica_texture_layout(image);
+        PicaTexturePacker packer;
+        std::vector<std::uint8_t> packed(layout.bytes+2,0xDC),oracle(layout.bytes),previous(width*height*channels);
+        const auto destination=std::span(packed).subspan(1,layout.bytes);
+        const auto save=[&] {
+            for(unsigned y=0;y<height;++y)std::copy_n(source.data()+std::size_t(y)*pitch,width*channels,
+                previous.data()+std::size_t(y)*width*channels);
+        };
+        const auto initial=packer.pack(image,{},destination);save();
+        require(initial.offset==0 && initial.bytes==layout.bytes && initial.tiles==layout.bytes/256,
+            "Missing successful residency did not fully initialize padded GPU bytes");
+        const auto equal=[&](PicaTextureUploadRange range,const std::vector<std::uint8_t>& old) {
+            pack_pica_texture(image,oracle);
+            require(std::equal(destination.begin(),destination.end(),oracle.begin()),
+                "Changed-tile upload differs from complete Morton/ABGR packing");
+            require(packed.front()==0xDC && packed.back()==0xDC,"Changed upload crossed GPU allocation guards");
+            require(range.offset<=layout.bytes && range.bytes<=layout.bytes-range.offset
+                && range.offset%256==0 && range.bytes%256==0 && range.tiles<=layout.bytes/256,
+                "Changed upload returned an unbounded/unaligned cache flush range");
+            for(unsigned i=0;i<layout.bytes;++i)if(i<range.offset || i>=range.offset+range.bytes)
+                require(destination[i]==old[i+1],"Changed upload modified bytes outside its flush range");
+        };
+        for(const auto point:std::array<std::array<unsigned,2>,6>{{{0,0},{width-1,height-1},
+            {width/2,height/2},{std::min(7U,width-1),std::min(7U,height-1)},
+            {std::min(8U,width-1),std::min(8U,height-1)},{width-1,height/2}}}) {
+            const auto old=packed;
+            const auto pixel=std::size_t(point[1])*pitch+point[0]*channels;
+            source[pixel+(point[0]+point[1])%channels]^=0x6B;
+            const auto range=packer.pack(image,previous,destination);equal(range,old);save();
+            require(range.tiles>0,"Changed source pixel was mistaken for held residency");
+            if(width==400 && point==std::array<unsigned,2>{width/2,height/2})
+                require(range.tiles==1 && range.bytes==256,"One HUD tile still repacked/flushed the full LCD texture");
+            const auto held=packed;const auto no_change=packer.pack(image,previous,destination);
+            require(!no_change.tiles && !no_change.bytes && packed==held,"Held texture was rewritten");
+        }
+        // Source pitch/padding is not a residency identity. Padding-only edits
+        // and a compact replacement must leave the uploaded logical image held.
+        if(height>1)source[width*channels]^=0x7F;
+        require(packer.pack(image,previous,destination).bytes==0,"Row-padding edit triggered a texture write");
+        auto compact=image;compact.pixels=previous;compact.pitch=width*channels;
+        require(packer.pack(compact,previous,destination).bytes==0,"Equivalent row stride changed native texture bytes");
+        const auto old=packed;
+        for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x)source[std::size_t(y)*pitch+x*channels]^=0xA3;
+        const auto dense=packer.pack(image,previous,destination);equal(dense,old);
+        require(dense.offset==0 && dense.bytes==layout.bytes,"Dense palette change bypassed full packing fallback");
+        const auto invalid_before=packed;
+        rejects([&]{packer.pack(image,std::span(previous).first(previous.size()-1),destination);},
+            "Truncated successful-residency base accepted");
+        rejects([&]{packer.pack(image,previous,destination.first(destination.size()-1));},
+            "Truncated changed-upload destination accepted");
+        require(packed==invalid_before,"Invalid upload changed existing native bytes");
+        packer.release();require(!packer.capacity(),"Retired tile scratch retained peak allocation");
+    }
+    // Cache validity, not mere equality/padded allocation size, controls use
+    // of the incremental base. A partially failed flush must be fully repaired.
+    std::vector<std::uint8_t> source(400*240*4,255),gpu(512*256*4);
+    PicaImage image{source,400,240,400*4,4};PicaTextureResidency residency;PicaTexturePacker packer;
+    bool fail=false;PicaTextureUploadRange changed;
+    const auto update=[&] {
+        const auto previous=residency.colour_base(image);
+        return residency.prepare(image,[&](PicaImage next,PicaTextureLayout) {
+            changed=packer.pack(next,previous,gpu);
+            if(fail)throw std::runtime_error("Injected changed-tile flush failure");
+        },[](PicaImage,PicaTextureLayout,unsigned){});
+    };
+    require(residency.colour_base(image).empty() && update() && changed.bytes==gpu.size(),
+        "Initial incremental cache fabricated a successful base");
+    const auto original=source;source[101*1600+201*4]^=31;fail=true;bool failed=false;
+    try{update();}catch(const std::runtime_error&){failed=true;}
+    require(failed && changed.tiles==1 && residency.colour_base(image).empty(),
+        "Failed sparse flush retained a usable residency base");
+    source=original;image.pixels=source;fail=false;
+    require(update() && changed.offset==0 && changed.bytes==gpu.size(),"Retry skipped complete failed-upload repair");
+    // Warm the sparse scratch once, then count real residency/packing calls.
+    source[101*1600+201*4]^=31;update();
+    texture_allocations=0;count_texture_allocations=true;
+    for(unsigned i=0;i<180;++i) {
+        source[101*1600+201*4]^=31;
+        require(update() && changed.tiles==1 && changed.bytes==256,"Warm sparse edit lost its exact one-tile update");
+    }
+    count_texture_allocations=false;
+    require(texture_allocations==0,"Warm changed-tile uploads allocate staging storage every frame");
+    std::vector<std::uint8_t> complete(gpu.size());pack_pica_texture(image,complete);
+    require(gpu==complete,"Warm changed-tile residency lost complete-image byte equivalence");
+    auto reshaped=image;reshaped.width=399;reshaped.pitch=400*4;
+    auto rgb=image;rgb.channels=3;
+    auto wrapping=image;wrapping.repeat=true;
+    require(residency.colour_base(reshaped).empty() && residency.colour_base(rgb).empty()
+        && residency.colour_base(wrapping).empty(),"Logical layout change reused an incompatible residency base");
+    residency.release_colour();require(residency.colour_base(image).empty(),"Released GPU texture retained an incremental base");
+    PicaImage alias{gpu,512,256,512*4,4};
+    rejects([&]{packer.pack(alias,{},gpu);},"Changed upload accepted source/native aliasing");
+    rejects([&]{packer.pack(image,gpu,gpu);},"Changed upload accepted old-base/native aliasing");
 }
 void texture_residency() {
     struct Ledger {
@@ -557,7 +662,7 @@ STARFOX_TEXTURE_NOINLINE void operator delete(void* memory,std::size_t) noexcept
 STARFOX_TEXTURE_NOINLINE void operator delete[](void* memory,std::size_t) noexcept {std::free(memory);}
 #undef STARFOX_TEXTURE_NOINLINE
 int main() try {
-    texture_upload();full_size_texture_upload();texture_residency();reusable_texture_cache();vertex_residency();projection_and_draws();layer_upload();sampled_texture_orientation();
+    texture_upload();full_size_texture_upload();changed_tile_upload();texture_residency();reusable_texture_cache();vertex_residency();projection_and_draws();layer_upload();sampled_texture_orientation();
     require(pica_uv_mode(false,false)==std::array<float,4>{1,0,0,0},"Ordinary texture projection changed");
     require(pica_uv_mode(true,false)==std::array<float,4>{0,1,0,0},"LCD parity texture lost its homogeneous Q");
     require(pica_uv_mode(false,true)==std::array<float,4>{0,0,1,0},"Source terrain mode zeroed ordinary UVs before projection");

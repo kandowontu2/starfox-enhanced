@@ -68,6 +68,14 @@ public:
             && image.channels==channels_ && image.repeat==repeat_
             && rows_equal(image.pixels,image.pitch,image.width*image.channels,image.height,pixels_);
     }
+    // Borrow only a successful residency base with identical logical layout.
+    // prepare() cannot reallocate this same-sized cache before its upload
+    // callback; a failed flush/released allocation never provides a base.
+    std::span<const std::uint8_t> colour_base(PicaImage image) const noexcept {
+        if(!colour_valid_ || image.width!=width_ || image.height!=height_
+            || image.channels!=channels_ || image.repeat!=repeat_)return {};
+        return pixels_;
+    }
     bool layers_match(PicaImage image) const noexcept {
         if(!layers_valid_)return false;
         if(image.source_layers.empty())return layers_.empty();

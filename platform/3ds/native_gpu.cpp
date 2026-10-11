@@ -1,5 +1,6 @@
 #include "native_gpu.hpp"
 #include "starfox/platform/nintendo_3ds/pica_residency.hpp"
+#include "starfox/platform/nintendo_3ds/pica_texture_update.hpp"
 #include "starfox/platform/nintendo_3ds/pica_program_binding.hpp"
 #include "starfox/platform/nintendo_3ds/startup_trace.hpp"
 #include "starfox/platform/nintendo_3ds/frame_profile.hpp"
@@ -75,6 +76,7 @@ struct ResidentTexture {
     C3D_Tex texture{};
     C3D_Tex layers{};
     PicaTextureResidency cache;
+    PicaTexturePacker packer;
     unsigned width{},height{},channels{};
     unsigned layer_width{},layer_height{},layer_classes{};
     bool ready{},repeat{};
@@ -85,7 +87,7 @@ struct ResidentTexture {
     }
     void release_colour() noexcept {
         if(ready) C3D_TexDelete(&texture);
-        texture={};ready=false;cache.release_colour();width=height=channels=0;repeat=false;
+        texture={};ready=false;cache.release_colour();packer.release();width=height=channels=0;repeat=false;
     }
     void release() noexcept {
         release_colour();
@@ -98,6 +100,7 @@ struct ResidentTexture {
         if(!keep.layers) release_layers();
     }
     void update(PicaImage image) {
+        const auto previous=cache.colour_base(image);
         cache.prepare(image,[&](PicaImage source,PicaTextureLayout layout) {
             if(!ready || texture.width!=layout.width || texture.height!=layout.height) {
                 if(ready) C3D_TexDelete(&texture);
@@ -106,10 +109,13 @@ struct ResidentTexture {
                     throw std::runtime_error("3DS GPU texture allocation failed");
                 ready=true;
             }
-            pack_pica_texture(source,{static_cast<std::uint8_t*>(texture.data),layout.bytes});
+            const auto changed=packer.pack(source,previous,
+                {static_cast<std::uint8_t*>(texture.data),layout.bytes});
             C3D_TexSetFilter(&texture,GPU_NEAREST,GPU_NEAREST);
             C3D_TexSetWrap(&texture,image.repeat?GPU_REPEAT:GPU_CLAMP_TO_EDGE,image.repeat?GPU_REPEAT:GPU_CLAMP_TO_EDGE);
-            C3D_TexFlush(&texture);
+            if(changed.bytes && R_FAILED(GSPGPU_FlushDataCache(
+                static_cast<std::uint8_t*>(texture.data)+changed.offset,changed.bytes)))
+                throw std::runtime_error("3DS GPU changed texture flush failed");
             width=image.width;height=image.height;channels=image.channels;repeat=image.repeat;
         },[&](PicaImage source,PicaTextureLayout layout,unsigned classes) {
             if(source.source_layers.empty()) {
