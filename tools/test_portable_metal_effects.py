@@ -1,6 +1,7 @@
 import unittest
+from pathlib import Path
 
-from check_portable_metal_effects import BINDINGS, runtime_source
+from check_portable_metal_effects import BINDINGS, metal_compile_command, runtime_source
 
 
 class EmbeddedMetalSourceTests(unittest.TestCase):
@@ -38,6 +39,24 @@ class EmbeddedMetalSourceTests(unittest.TestCase):
     def test_duplicate_entry(self):
         with self.assertRaisesRegex(RuntimeError, 'entry point'):
             runtime_source(self.header(self.source()+'\nkernel void main0() {}'))
+
+
+class MetalCompileInvocationTests(unittest.TestCase):
+    def test_iphoneos_keeps_metal21_and_precise_math(self):
+        source, air = Path('shader folder/input.metal'), Path('output folder/input.air')
+        self.assertEqual(metal_compile_command('iphoneos', source, air),
+                         ['xcrun', '--sdk', 'iphoneos', 'metal', '-std=ios-metal2.1',
+                          '-fno-fast-math', '-c', str(source), '-o', str(air)])
+
+    def test_macosx_keeps_metal21_and_precise_math(self):
+        source, air = Path('shader folder/input.metal'), Path('output folder/input.air')
+        self.assertEqual(metal_compile_command('macosx', source, air),
+                         ['xcrun', '--sdk', 'macosx', 'metal', '-std=macos-metal2.1',
+                          '-fno-fast-math', '-c', str(source), '-o', str(air)])
+
+    def test_unknown_sdk_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, 'Unsupported Apple SDK'):
+            metal_compile_command('unverified-sdk', Path('input.metal'), Path('input.air'))
 
 
 if __name__ == '__main__':

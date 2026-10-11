@@ -19,6 +19,14 @@ BINDINGS = {'Settings': 0, 'SceneSettings': 1, 'layerTags': 2, 'indexedPixels': 
             'surfaces': 4, 'shadowMask': 5, 'scalefxPixels': 6, 'setupPixels': 7}
 
 
+def metal_compile_command(sdk, source, air):
+    standards = {'macosx': 'macos-metal2.1', 'iphoneos': 'ios-metal2.1'}
+    if sdk not in standards:
+        raise ValueError(f'Unsupported Apple SDK: {sdk}')
+    return ['xcrun', '--sdk', sdk, 'metal', f'-std={standards[sdk]}',
+            '-fno-fast-math', '-c', str(source), '-o', str(air)]
+
+
 def runtime_source(header):
     matches = re.findall(r'inline constexpr char metal\[\]=R"SFXMETAL\((.*?)\)SFXMETAL";', header, re.S)
     if len(matches) != 1:
@@ -52,8 +60,7 @@ def main():
                       'buffer_bindings': BINDINGS, 'sdk_compiled': False}
             if not args.emit_only:
                 air = output / f'effects_{variant}.air'
-                subprocess.run(['xcrun', '--sdk', args.sdk, 'metal', '-std=metal2.1',
-                                '-fno-fast-math', '-c', str(path), '-o', str(air)], check=True)
+                subprocess.run(metal_compile_command(args.sdk, path, air), check=True)
                 if not air.is_file() or air.stat().st_size == 0:
                     raise RuntimeError('Apple compiler did not produce an actual AIR program')
                 record.update(sdk_compiled=True, air_sha256=hashlib.sha256(air.read_bytes()).hexdigest())

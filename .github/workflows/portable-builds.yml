@@ -1,4 +1,4 @@
-name: Temporary current Apple preview and bloom verification (no release)
+name: Temporary Apple platform-qualified Metal verification (no release)
 on:
   workflow_dispatch:
     inputs:
@@ -36,6 +36,13 @@ jobs:
               -o "${RUNNER_TEMP}/native-provider-${mode}"
             "${RUNNER_TEMP}/native-provider-${mode}"
           done
+      - name: Compile both exact embedded SDL effects programs with the Apple SDK
+        shell: bash
+        run: |
+          python3 tools/test_portable_shader_bindings.py
+          python3 tools/test_portable_metal_effects.py
+          python3 tools/check_portable_metal_effects.py --sdk '${{ matrix.sdk }}' \
+            --output-directory 'build/${{ matrix.sdk }}/generated/portable-effects'
       - name: Configure the complete game graph
         shell: bash
         run: |
@@ -56,13 +63,6 @@ jobs:
               -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0)
           fi
           cmake "${args[@]}" 2>&1 | tee configure.log
-      - name: Compile both exact embedded SDL effects programs with the Apple SDK
-        shell: bash
-        run: |
-          python3 tools/test_portable_shader_bindings.py
-          python3 tools/test_portable_metal_effects.py
-          python3 tools/check_portable_metal_effects.py --sdk '${{ matrix.sdk }}' \
-            --output-directory 'build/${{ matrix.sdk }}/generated/portable-effects'
       - name: Check all four complete native runtime shader programs
         shell: bash
         env:
