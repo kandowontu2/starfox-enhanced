@@ -1,6 +1,7 @@
 #pragma once
 #include "starfox/platform/nintendo_3ds/pica_projection.hpp"
 #include <bit>
+#include <cstring>
 
 namespace starfox::platform::nintendo_3ds {
 inline constexpr unsigned pica_vertex_limit=32'766,pica_draw_limit=256;
@@ -143,6 +144,21 @@ inline constexpr auto pica_morton_coordinates=[] {
     }
     return result;
 }();
+// Preserve the four source bytes exactly, including alpha. memcpy keeps both
+// sides legal for unaligned rows and uint8_t storage. The unsigned expression
+// reverses bytes on either native endian order and can lower to ARM's REV.
+inline void pica_store_abgr(std::uint8_t* destination,const std::uint8_t* pixel,unsigned channels) noexcept {
+    if(channels==4) {
+        std::uint32_t word;
+        std::memcpy(&word,pixel,sizeof(word));
+        const auto reversed=(word<<24)|((word<<8)&0x00ff0000U)
+            |((word>>8)&0x0000ff00U)|(word>>24);
+        std::memcpy(destination,&reversed,sizeof(reversed));
+    } else {
+        destination[0]=255;destination[1]=pixel[2];
+        destination[2]=pixel[1];destination[3]=pixel[0];
+    }
+}
 template<class Store>
 inline void pack_pica_plane(PicaTextureLayout layout,unsigned width,unsigned height,
     unsigned pitch,unsigned channels,bool repeat,const std::uint8_t* source,Store store) {
@@ -176,9 +192,7 @@ inline void pack_pica_texture(PicaImage source,std::span<std::uint8_t> destinati
         // The shader converts top-left V to 1-V, and PICA's texture sampler
         // then addresses rows from bottom to top. Store source rows directly;
         // reversing them here as well flips uploaded artwork on both LCDs.
-        const auto to=texel*4;
-        destination[to]=source.channels==4?pixel[3]:255; // ABGR bytes.
-        destination[to+1]=pixel[2];destination[to+2]=pixel[1];destination[to+3]=pixel[0];
+        detail::pica_store_abgr(destination.data()+texel*4,pixel,source.channels);
     });
 }
 // Validate provenance on changed uploads only. Frame/eye validation is O(draws),

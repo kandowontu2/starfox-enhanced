@@ -83,8 +83,7 @@ public:
             for(const auto& xy:detail::pica_morton_coordinates) {
                 const auto* pixel=source_rows[xy[1]]+source_columns[xy[0]];
                 const auto to=offset+4*texel++;
-                destination[to]=image.channels==4?pixel[3]:255;
-                destination[to+1]=pixel[2];destination[to+2]=pixel[1];destination[to+3]=pixel[0];
+                detail::pica_store_abgr(destination.data()+to,pixel,image.channels);
             }
         }
         result.bytes=end-result.offset;

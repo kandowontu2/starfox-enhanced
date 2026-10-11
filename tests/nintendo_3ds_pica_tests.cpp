@@ -13,6 +13,30 @@ unsigned checks{};
 std::size_t texture_allocations{};
 bool count_texture_allocations{};
 void require(bool value,const char* message) {++checks;if(!value) throw std::runtime_error(message);}
+void word_texture_store() {
+    std::uint32_t random=0x142857abU;
+    for(unsigned channels:{3U,4U}) for(unsigned source_offset=0;source_offset<8;++source_offset)
+        for(unsigned destination_offset=0;destination_offset<8;++destination_offset)
+            for(unsigned sample=0;sample<2048;++sample) {
+                std::array<std::uint8_t,16> source{},destination{},expected{};
+                source.fill(0xa5);destination.fill(0x5a);expected=destination;
+                std::array<std::uint8_t,4> pixel{};
+                if(sample<1024) {
+                    pixel={0x01,0x23,0x45,0x67};pixel[sample/256]=std::uint8_t(sample);
+                } else {
+                    random^=random<<13;random^=random>>17;random^=random<<5;
+                    for(unsigned i=0;i<4;++i)pixel[i]=std::uint8_t(random>>(i*8));
+                }
+                std::copy_n(pixel.begin(),channels,source.begin()+source_offset);
+                const auto retained=source;
+                expected[destination_offset]=channels==4?pixel[3]:255;
+                expected[destination_offset+1]=pixel[2];expected[destination_offset+2]=pixel[1];
+                expected[destination_offset+3]=pixel[0];
+                detail::pica_store_abgr(destination.data()+destination_offset,source.data()+source_offset,channels);
+                require(destination==expected,"Word upload changed a source byte, alpha or surrounding destination guard");
+                require(source==retained,"Word upload mutated borrowed source bytes");
+            }
+}
 template<class F> void rejects(F action,const char* message) {
     bool rejected=false;try {action();} catch(const std::invalid_argument&) {rejected=true;}
     require(rejected,message);
@@ -803,6 +827,7 @@ STARFOX_TEXTURE_NOINLINE void operator delete(void* memory,std::size_t) noexcept
 STARFOX_TEXTURE_NOINLINE void operator delete[](void* memory,std::size_t) noexcept {std::free(memory);}
 #undef STARFOX_TEXTURE_NOINLINE
 int main() try {
+    word_texture_store();
     validated_composition_handoff();
     vertex_validation_bits();vertex_validation_draw_policy();texture_upload();full_size_texture_upload();changed_tile_upload();texture_residency();reusable_texture_cache();vertex_residency();projection_and_draws();layer_upload();sampled_texture_orientation();
     require(pica_uv_mode(false,false)==std::array<float,4>{1,0,0,0},"Ordinary texture projection changed");

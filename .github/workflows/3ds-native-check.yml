@@ -80,6 +80,13 @@ jobs:
           g++ -std=c++20 -O2 -Wall -Wextra -Wpedantic -Werror -I include \
             tests/nintendo_3ds_pica_tests.cpp -o "$RUNNER_TEMP/starfox-pica-contracts"
           "$RUNNER_TEMP/starfox-pica-contracts"
+      - name: Compare exact changing-frame texture uploads with the frozen byte baseline
+        shell: bash
+        run: |
+          mkdir -p build/3ds-texture-pack
+          g++ -std=c++20 -O2 -Wall -Wextra -Wpedantic -Werror -I include -I tests \
+            tests/3ds_texture_pack_benchmark.cpp -o "$RUNNER_TEMP/starfox-texture-pack-benchmark"
+          "$RUNNER_TEMP/starfox-texture-pack-benchmark" | tee build/3ds-texture-pack/host-pack-benchmark.log
       - name: Verify shared source geometry and native conversion
         shell: bash
         run: |
@@ -151,6 +158,19 @@ jobs:
             '
           python3 tools/check_3ds_stack.py build/3ds-native
           python3 tools/check_3ds_shader.py build/3ds-native/pica_scene.shbin
+      - name: Inspect texture packing with the exact native GPU compiler settings
+        shell: bash
+        run: |
+          docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
+            -v "$GITHUB_WORKSPACE:/src" -w /src "$CTR_IMAGE" \
+            python3 tools/check_3ds_texture_pack.py build/3ds-native build/3ds-texture-pack
+      - name: Upload isolated texture-packing diagnostics, not console performance acceptance
+        uses: actions/upload-artifact@v4
+        with:
+          name: StarFoxEnhanced-3ds-texture-pack-diagnostics
+          path: build/3ds-texture-pack/*
+          if-no-files-found: error
+          retention-days: 7
       - name: Validate and package the New Nintendo 3DS-family test candidate
         shell: bash
         run: |
