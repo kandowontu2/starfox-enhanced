@@ -149,11 +149,14 @@ if(STARFOX_3DS_BUILD_NATIVE)
         endif()
         set(pica_shader "${CMAKE_CURRENT_BINARY_DIR}/pica_scene.shbin")
         ctr_add_shader_library(starfox_3ds_pica_shader OUTPUT "${pica_shader}" pica_scene.v.pica)
+        find_package(Python3 COMPONENTS Interpreter REQUIRED)
+        set(pica_shader_check "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/check_3ds_shader.py")
         set(pica_header "${CMAKE_CURRENT_BINARY_DIR}/generated/pica_scene_shader.hpp")
         add_custom_command(OUTPUT "${pica_header}"
+            COMMAND "${Python3_EXECUTABLE}" "${pica_shader_check}" "${pica_shader}"
             COMMAND "${CMAKE_COMMAND}" "-DINPUT=${pica_shader}" "-DOUTPUT=${pica_header}"
                 -P "${CMAKE_CURRENT_SOURCE_DIR}/embed_shader.cmake"
-            DEPENDS starfox_3ds_pica_shader "${pica_shader}" "${CMAKE_CURRENT_SOURCE_DIR}/embed_shader.cmake"
+            DEPENDS starfox_3ds_pica_shader "${pica_shader}" "${pica_shader_check}" "${CMAKE_CURRENT_SOURCE_DIR}/embed_shader.cmake"
             VERBATIM)
         add_library(starfox_3ds_native_gpu STATIC native_gpu.cpp)
         target_link_libraries(starfox_3ds_native_gpu PUBLIC starfox_3ds_frontend
@@ -337,6 +340,8 @@ elseif(STARFOX_3DS_BUILD_HOST_TESTS)
         add_test(NAME starfox_bus_transfer_tests COMMAND starfox_bus_transfer_tests)
         add_test(NAME starfox_3ds_test_package_contract
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_3ds_package.py")
+        add_test(NAME starfox_3ds_shader_output_contract
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_3ds_shader.py")
         add_executable(starfox_3ds_game_assets_tests ../../tests/nintendo_3ds_game_assets_tests.cpp "${companion_header}")
         target_include_directories(starfox_3ds_game_assets_tests PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
         target_link_libraries(starfox_3ds_game_assets_tests PRIVATE starfox_3ds_cartridge_core)

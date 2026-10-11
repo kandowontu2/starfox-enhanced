@@ -22,13 +22,17 @@
     dp4 r2.w, transform[3], r0
     mov out_position, r2
     mov out_colour, in_colour
+    ; Write each enabled output register completely, exactly once. PICA's
+    ; output FIFO is not an emulator vec4: do not leave unused lanes pending
+    ; or initialize an output and overwrite some of its components later.
+    mov r1, constants.xxxx
     mul r1.xy, uv_scale, in_uv
     add r1.y, constants.y, -r1.y
     add r4.z, r5.x, r5.z
     mul r1.xy, r4.z, r1
     ; Unit 1's A8 source-layer mask uses its own UV set, never the screen
     ; projection checker coordinates. It shares padding with the RGBA image.
-    mov out_layers.xy, r1
+    mov out_layers, r1
     ; Source terrain UVs are authored in the mono source raster. Multiply UV
     ; and Q by depth so the projector cancels perspective stretching, while
     ; the independently projected world plane still gives each eye real depth.
@@ -40,9 +44,12 @@
     add r3.x, r2.w, -r2.y
     add r3.y, r2.w, r2.x
     mul r3.xy, screen_scale, r3
-    mad out_uv.x, r3.x, r5.y, r1.x
-    mad out_uv.y, r3.y, r5.y, r1.y
+    mov r6, constants.xxxx
+    mad r6.x, r3.x, r5.y, r1.x
+    mad r6.y, r3.y, r5.y, r1.y
+    mov out_uv, r6
     mul r4.x, r5.y, r2.w
-    add out_q.x, r4.y, r4.x
+    add r4.x, r4.y, r4.x
+    mov out_q, r4.xxxx
     end
 .end
