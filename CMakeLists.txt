@@ -1230,6 +1230,8 @@ if(STARFOX_BUILD_RUNTIME)
                     "${CMAKE_CURRENT_BINARY_DIR}/generated/metal_native_material_shared.hpp"
                     "${CMAKE_CURRENT_BINARY_DIR}/generated/metal_liquid_optics.inc"
                     "${CMAKE_CURRENT_BINARY_DIR}/generated/metal_material_colour.inc"
+                    include/starfox/render/metal_native_material_coverage.inc
+                    include/starfox/render/metal_native_material_colour.inc
                     include/starfox/render/lava_surface.inc include/starfox/render/water_caustics.inc
                     include/starfox/render/water_transmission.inc
                 VERBATIM)
@@ -1247,10 +1249,10 @@ if(STARFOX_BUILD_RUNTIME)
         endif()
         target_include_directories(starfox_pc PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
         target_sources(starfox_pc PRIVATE src/render/metal_hardware_rt.mm)
-        if(STARFOX_METAL_INTEROP)
-            include(cmake/NativeMetalRtLibraries.cmake)
-            starfox_embed_native_metal_rt(starfox_pc)
-        endif()
+        # APPLE already installs our pinned SDL Metal interop above. Do not
+        # hide embedding behind a test-branch-only, undefined cache variable.
+        include(cmake/NativeMetalRtLibraries.cmake)
+        starfox_embed_native_metal_rt(starfox_pc)
         set_source_files_properties(src/render/metal_hardware_rt.mm
             PROPERTIES COMPILE_FLAGS "-fobjc-arc")
         target_link_libraries(starfox_pc PRIVATE "-framework Metal")
@@ -1611,6 +1613,20 @@ if(STARFOX_BUILD_RUNTIME)
 endif()
 
 if(STARFOX_BUILD_TESTS)
+    # These portable tests exercise the real read-only library provider with
+    # fake payloads; they do not claim SDK compilation or GPU execution.
+    foreach(variant IN ITEMS valid invalid)
+        add_executable(starfox_native_metal_provider_${variant}_tests
+            tests/native_metal_rt_provider_tests.cpp
+            src/render/native_metal_rt_programs.cpp)
+        target_include_directories(starfox_native_metal_provider_${variant}_tests PRIVATE include)
+        target_compile_features(starfox_native_metal_provider_${variant}_tests PRIVATE cxx_std_20)
+        if(variant STREQUAL "invalid")
+            target_compile_definitions(starfox_native_metal_provider_${variant}_tests PRIVATE TEST_BAD_PAYLOAD=1)
+        endif()
+        add_test(NAME starfox_native_metal_provider_${variant}_tests
+            COMMAND starfox_native_metal_provider_${variant}_tests)
+    endforeach()
     add_executable(starfox_sr_platform_policy_tests tests/sr_platform_policy_tests.cpp)
     target_include_directories(starfox_sr_platform_policy_tests PRIVATE include)
     target_compile_features(starfox_sr_platform_policy_tests PRIVATE cxx_std_20)

@@ -10,6 +10,9 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "tools"))
+from metal_liquid_optics import liquid_optics_source
+from metal_material_colour import material_colour_source
 
 
 class MetalSourceAssemblyTests(unittest.TestCase):
@@ -17,8 +20,15 @@ class MetalSourceAssemblyTests(unittest.TestCase):
     def setUpClass(cls):
         cls.temporary = tempfile.TemporaryDirectory(prefix="starfox-metal-assembly-")
         cls.destination = Path(cls.temporary.name)
+        cls.generated = cls.destination / "generated"
         cls.addClassCleanup(cls.temporary.cleanup)
+        for script, name in (("metal_liquid_optics", "metal_liquid_optics.inc"),
+                             ("metal_material_colour", "metal_material_colour.inc")):
+            subprocess.run([sys.executable, str(ROOT / "tools" / (script + ".py")),
+                            "--root", str(ROOT), "--output", str(cls.generated / name)],
+                           check=True, capture_output=True)
         subprocess.run([sys.executable, str(ROOT / "tools/check_metal_rt_shaders.py"),
+                        "--generated-dir", str(cls.generated),
                         "--emit-only", str(cls.destination)], check=True, capture_output=True)
         cls.implementation = (ROOT / "src/render/metal_hardware_rt.mm").read_text(encoding="utf-8")
 
@@ -33,7 +43,7 @@ class MetalSourceAssemblyTests(unittest.TestCase):
         template = template.replace("@STARFOX_METAL_NATIVE_COVERAGE_SOURCE@",
             (ROOT / "include/starfox/render/metal_native_material_coverage.inc").read_text(encoding="utf-8"))
         template = template.replace("@STARFOX_METAL_MATERIAL_COLOUR_SOURCE@",
-            (ROOT / "include/starfox/render/metal_material_colour.inc").read_text(encoding="utf-8"))
+            (self.generated / "metal_material_colour.inc").read_text(encoding="utf-8"))
         template = template.replace("@STARFOX_METAL_NATIVE_COLOUR_SOURCE@",
             (ROOT / "include/starfox/render/metal_native_material_colour.inc").read_text(encoding="utf-8"))
         match = re.search(r'R"SF_NATIVE\((.*?)\)SF_NATIVE"', template, re.S)
@@ -254,9 +264,7 @@ class MetalSourceAssemblyTests(unittest.TestCase):
         self.assertNotIn("pixels*4",allocation)
 
     def test_canonical_liquid_geometry_and_full_transmission(self):
-        sys.path.insert(0,str(ROOT / "tools"))
-        from metal_liquid_optics import liquid_optics_source
-        generated=(ROOT / "include/starfox/render/metal_liquid_optics.inc").read_text(encoding="utf-8")
+        generated=(self.generated / "metal_liquid_optics.inc").read_text(encoding="utf-8")
         self.assertEqual(generated,liquid_optics_source(ROOT))
         actual=(self.destination / "reflection.metal").read_text(encoding="utf-8")
         self.assertIn(generated,actual)
@@ -305,7 +313,22 @@ class MetalSourceAssemblyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="starfox-metal-cmake-") as temporary:
             project=Path(temporary)
             copied=project / "public-source"
-            shutil.copytree(ROOT,copied,ignore=shutil.ignore_patterns("__pycache__"))
+            # Copy the exact source-assembly closure, not the working repo,
+            # build folders, ROMs, credentials, other projects or Git state.
+            closure=("cmake/NativeMetalMaterialSource.cmake", "tools/metal_liquid_optics.py",
+                "tools/metal_material_colour.py", "tools/check_metal_rt_shaders.py",
+                "src/render/metal_hardware_rt.mm", "src/render/shaders/liquid_optics.hlsli",
+                "src/render/shaders/calibrated_colour.hlsli", "src/vr/shaders/scene_colour.hlsli",
+                "src/render/shaders/metal_native_material_shared.hpp.in",
+                "src/render/shaders/metal_water_shared.hpp.in",
+                "include/starfox/render/lava_surface.inc", "include/starfox/render/water_caustics.inc",
+                "include/starfox/render/water_transmission.inc",
+                "include/starfox/render/metal_native_material_coverage.inc",
+                "include/starfox/render/metal_native_material_colour.inc")
+            for name in closure:
+                destination=copied / name
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(ROOT / name, destination)
             build=project / "build"
             (project / "CMakeLists.txt").write_text(
                 'cmake_minimum_required(VERSION 3.24)\nproject(MetalEmbedding NONE)\n'
@@ -316,7 +339,7 @@ class MetalSourceAssemblyTests(unittest.TestCase):
                 check=True,capture_output=True,text=True)
             generated=build / "generated"
             for name in ("metal_material_colour.inc","metal_liquid_optics.inc"):
-                self.assertEqual((generated / name).read_bytes(),(ROOT / "include/starfox/render" / name).read_bytes())
+                self.assertEqual((generated / name).read_bytes(),(self.generated / name).read_bytes())
             for name in ("water","native_material"):
                 actual=(generated / f"metal_{name}_shared.hpp").read_text(encoding="utf-8")
                 self.assertNotIn("@STARFOX_",actual)
@@ -352,6 +375,29 @@ class MetalSourceAssemblyTests(unittest.TestCase):
         self.assertNotIn("intersection_query",native_empty)
         self.assertIn("#define SF_KERNEL_SCENE constant uint& scene [[buffer(0)]]",shader)
         self.assertEqual(code.count("SF_KERNEL_SCENE,"),2)
+
+    def test_default_assembly_matches_build_generated_helpers(self):
+        with tempfile.TemporaryDirectory(prefix="starfox-metal-direct-") as temporary:
+            destination=Path(temporary)
+            subprocess.run([sys.executable, str(ROOT / "tools/check_metal_rt_shaders.py"),
+                "--emit-only", str(destination)], check=True, capture_output=True)
+            for name in ("shadow", "reflection", "empty_shadow", "empty_reflection"):
+                self.assertEqual((destination / (name + ".metal")).read_bytes(),
+                                 (self.destination / (name + ".metal")).read_bytes())
+
+    def test_actual_app_embeds_all_four_libraries_on_apple(self):
+        cmake=(ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
+        apple=cmake.split("    if(APPLE)\n        enable_language(OBJCXX)", 1)[1].split("    if(IOS)", 1)[0]
+        self.assertIn("include(cmake/NativeMetalMaterialSource.cmake)", apple)
+        self.assertIn("include(cmake/NativeMetalRtLibraries.cmake)", apple)
+        self.assertIn("starfox_embed_native_metal_rt(starfox_pc)", apple)
+        self.assertNotIn("if(STARFOX_METAL_INTEROP)", apple)
+        libraries=(ROOT / "cmake/NativeMetalRtLibraries.cmake").read_text(encoding="utf-8")
+        self.assertIn("shadow reflection empty_shadow empty_reflection", libraries)
+        self.assertIn("-fno-fast-math -ffp-contract=off", libraries)
+        self.assertIn("STARFOX_EMBED_NATIVE_METAL_RT=1", libraries)
+        self.assertEqual((self.generated / "metal_material_colour.inc").read_text(encoding="utf-8"),
+                         material_colour_source(ROOT))
 
     def test_empty_header_contract_no_synthetic_triangle_or_as(self):
         code=self.implementation

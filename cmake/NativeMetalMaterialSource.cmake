@@ -1,5 +1,5 @@
-# Public source embedding fragment for the candidate. Apply only after full
-# producer/source validation, not as a replacement for the app's CMake graph.
+# Generate the ordinary Apple runtime's shared material and liquid sources.
+# Both adapters preserve the canonical equations and fail on unsupported syntax.
 if(NOT DEFINED STARFOX_METAL_SOURCE_ROOT)
     set(STARFOX_METAL_SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
 endif()

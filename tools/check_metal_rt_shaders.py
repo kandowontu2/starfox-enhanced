@@ -8,6 +8,8 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+from metal_liquid_optics import liquid_optics_source
+from metal_material_colour import material_colour_source
 
 
 def main():
@@ -15,10 +17,12 @@ def main():
     parser.add_argument("--sdk", choices=("macosx", "iphoneos"), default="iphoneos")
     parser.add_argument("--emit-only", type=Path)
     parser.add_argument("--generated-dir", type=Path,
-                        help="Build-generated canonical Metal helpers; default is the held source inventory")
+                        help="Build-generated canonical Metal helpers; otherwise adapt canonical sources in memory")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
-    generated = args.generated_dir or root / "include/starfox/render"
+    def helper(name, generate):
+        return ((args.generated_dir / name).read_text(encoding="utf-8")
+                if args.generated_dir else generate(root))
     implementation = (root / "src/render/metal_hardware_rt.mm").read_text(encoding="utf-8")
     prefix=re.search(r'constexpr char kEmptyScenePrefix\[\]=("(?:[^"\\]|\\.)*");',implementation)
     if not prefix:
@@ -31,7 +35,7 @@ def main():
         template = template.replace(f"@STARFOX_WATER_{token}_SOURCE@",
                                     (root / f"include/starfox/render/{name}.inc").read_text(encoding="utf-8"))
     template = template.replace("@STARFOX_LIQUID_OPTICS_SOURCE@",
-        (generated / "metal_liquid_optics.inc").read_text(encoding="utf-8"))
+        helper("metal_liquid_optics.inc", liquid_optics_source))
     if re.search(r"@STARFOX_[A-Z_]+@", template):
         raise RuntimeError("Unresolved shared Metal shader source token")
     shared = re.search(r'R"SF_WATER\((.*?)\)SF_WATER"', template, re.S)
@@ -41,7 +45,7 @@ def main():
     native_template = native_template.replace("@STARFOX_METAL_NATIVE_COVERAGE_SOURCE@",
         (root / "include/starfox/render/metal_native_material_coverage.inc").read_text(encoding="utf-8"))
     native_template = native_template.replace("@STARFOX_METAL_MATERIAL_COLOUR_SOURCE@",
-        (generated / "metal_material_colour.inc").read_text(encoding="utf-8"))
+        helper("metal_material_colour.inc", material_colour_source))
     native_template = native_template.replace("@STARFOX_METAL_NATIVE_COLOUR_SOURCE@",
         (root / "include/starfox/render/metal_native_material_colour.inc").read_text(encoding="utf-8"))
     if re.search(r"@STARFOX_[A-Z_]+@", native_template):
