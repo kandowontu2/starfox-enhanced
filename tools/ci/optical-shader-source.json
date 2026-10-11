@@ -440,10 +440,10 @@
       "canonical_sha256": "f2c4e5d18874e58c5a7f9bbe963c0d5b290d56a230358aad018a62c7f864734f"
     },
     {
-      "original_sha256": "8124743ae284e5f9339c7dc791c163d7dfeddf907562f478191098cbf921e800",
+      "original_sha256": "4569a14e8c8e65cafd7082104fadfc0d9197594b462001567f679b37613ee7ad",
       "path": "src/render/shaders/reflection_source_optical_jet.hlsli",
-      "canonical_bytes": 24651,
-      "canonical_sha256": "8124743ae284e5f9339c7dc791c163d7dfeddf907562f478191098cbf921e800"
+      "canonical_bytes": 25585,
+      "canonical_sha256": "4569a14e8c8e65cafd7082104fadfc0d9197594b462001567f679b37613ee7ad"
     },
     {
       "original_sha256": "414e704ddfd0a1e487262def24f45bf22cbf8329c6d9706376e2458bcda98915",

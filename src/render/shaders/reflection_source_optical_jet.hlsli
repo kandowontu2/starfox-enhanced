@@ -96,26 +96,40 @@ OpticalJet jhash(int x,int z) {
     const bool was=intervalFailed;const Interval value=ihash(x,z);
     jet_record_failure(was,7,ip(x),ip(z));return jconstant(value);
 }
+// BEGIN CHECKED LAVA TRIG PAIRS
+// The height's existing sine already checks both complete polynomials. Keep
+// those raw intervals within this invocation. Cosine derivative products stay
+// at their original use: never evaluate them early or cache across cells.
+OpticalJet jsin_keep(OpticalJet a,out Interval sine,out Interval cosine) {
+    cosine=icos(a.v);sine=isin(a.v);
+    return jet(sine,jet_mul_derivative(cosine,a.dx),jet_mul_derivative(cosine,a.dy));
+}
+OpticalJet jcos_kept(OpticalJet a,Interval sine,Interval cosine) {
+    const Interval derivative=ineg(sine);
+    return jet(cosine,jet_mul_derivative(derivative,a.dx),jet_mul_derivative(derivative,a.dy));
+}
+// END CHECKED LAVA TRIG PAIRS
 OPTICAL_JET_FUNCTION_BOUNDARY OpticalJet3 jlava(OpticalJet x,OpticalJet z,OpticalJet t,OpticalJet footprint) {
+    Interval sinBend,cosBend,sinA,cosA,sinB,cosB,sinC,cosC,sinR,cosR;
     const OpticalJet bend=ja(js(jm(x,jr(6,1000)),jm(z,jr(8,1000))),jm(t,jr(11,100))),filter=jband(footprint,jr(10,1000));
-    const OpticalJet a=ja(js(ja(jm(x,jr(18,1000)),jm(z,jr(11,1000))),jm(t,jr(45,100))),jm(jm(jr(65,100),jsin(bend)),filter));
+    const OpticalJet a=ja(js(ja(jm(x,jr(18,1000)),jm(z,jr(11,1000))),jm(t,jr(45,100))),jm(jm(jr(65,100),jsin_keep(bend,sinBend,cosBend)),filter));
     const OpticalJet b=ja(js(jm(x,jr(47,1000)),jm(z,jr(25,1000))),jm(t,jr(60,100)));
     const OpticalJet c=js(js(jm(z,jr(22,1000)),jm(x,jr(9,1000))),jm(t,jr(32,100)));
     const OpticalJet fa=jband(footprint,jr(22,1000)),fb=jband(footprint,jr(54,1000)),fc=jband(footprint,jr(24,1000));
-    OpticalJet h=ja(ja(jm(jm(jp(9),jsin(a)),fa),jm(jm(jp(2.5),jsin(b)),fb)),jm(jm(jp(5),jsin(c)),fc));
-    const OpticalJet cb=jm(jcos(bend),filter);
+    OpticalJet h=ja(ja(jm(jm(jp(9),jsin_keep(a,sinA,cosA)),fa),jm(jm(jp(2.5),jsin_keep(b,sinB,cosB)),fb)),jm(jm(jp(5),jsin_keep(c,sinC,cosC)),fc));
+    const OpticalJet cb=jm(jcos_kept(bend,sinBend,cosBend),filter);
     // BEGIN LOCAL LAVA TRIG REUSE
     // These immutable phases have already had both trigonometric
     // polynomials checked by the height evaluation above. Reuse
     // the identical complete cosine result within THIS wave only;
     // no cross-cell/frame cache, estimate or missing wave evaluation.
-    const OpticalJet ca=jcos(a),ccB=jcos(b),ccC=jcos(c);
+    const OpticalJet ca=jcos_kept(a,sinA,cosA),ccB=jcos_kept(b,sinB,cosB),ccC=jcos_kept(c,sinC,cosC);
     // END LOCAL LAVA TRIG REUSE
     OpticalJet dx=js(ja(jm(jm(jm(jp(9),ja(jr(18,1000),jm(jr(39,10000),cb))),ca),fa),jm(jm(jr(1175,10000),ccB),fb)),jm(jm(jr(45,1000),ccC),fc));
     OpticalJet dz=ja(js(jm(jm(jm(jp(9),js(jr(11,1000),jm(jr(52,10000),cb))),ca),fa),jm(jm(jr(625,10000),ccB),fb)),jm(jm(jr(110,1000),ccC),fc));
     const OpticalJet ripple=js(ja(jm(x,jr(173,1000)),jm(z,jr(129,1000))),jm(t,jr(73,100))),fr=jband(footprint,jr(216,1000));
-    h=ja(h,jm(jm(jr(38,100),jsin(ripple)),fr));
-    const OpticalJet cr=jcos(ripple);
+    h=ja(h,jm(jm(jr(38,100),jsin_keep(ripple,sinR,cosR)),fr));
+    const OpticalJet cr=jcos_kept(ripple,sinR,cosR);
     dx=ja(dx,jm(jm(jr(6574,100000),cr),fr));dz=ja(dz,jm(jm(jr(4902,100000),cr),fr));
     if(footprint.v.lo<24) {
         if(footprint.v.hi>=24){jetBranchKnown=false;return j3(h,dx,dz);}
