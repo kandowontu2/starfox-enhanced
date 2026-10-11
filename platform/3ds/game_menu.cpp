@@ -160,6 +160,11 @@ GameMenuEditor GameMenu::editor(PregamePage page,unsigned selection,input::TickI
     default:return GameMenuEditor::none;
     }
 }
+bool GameMenu::launch_gesture(PregamePage page,unsigned selection,bool runtime,input::TickInput input) {
+    if(runtime || page!=PregamePage::main) return false;
+    return (input.pressed&input::start)
+        || (destination(page,selection,input)==15 && (input.pressed&(input::a|input::b)));
+}
 bool GameMenu::update(const GameMenuState& state) {
     if(initialized_ && state_==state) return false;
     if(state.visible) {

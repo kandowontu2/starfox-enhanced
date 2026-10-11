@@ -256,7 +256,9 @@ struct NativeGpu::Impl {
 NativeGpu::NativeGpu(std::span<const std::uint8_t> shader):impl_(std::make_unique<Impl>(shader)) {}
 NativeGpu::~NativeGpu()=default;
 void NativeGpu::present(const PicaFrame& frame,ImageView lower) {
+    STARFOX_3DS_STARTUP_MARK(gpu_frame_validate);
     validate_pica_frame(frame,lower);
+    STARFOX_3DS_STARTUP_MARK(gpu_frame_validate_complete);
     // Separate the two waits: FrameBegin(SYNCDRAW) hides both VBlank and queue
     // retirement behind one receipt, making a real-device stall ambiguous.
     STARFOX_3DS_STARTUP_MARK(gpu_vblank_wait);
@@ -266,6 +268,7 @@ void NativeGpu::present(const PicaFrame& frame,ImageView lower) {
     if(!C3D_FrameBegin(0)) throw std::runtime_error("3DS GPU frame unavailable");
     STARFOX_3DS_STARTUP_MARK(gpu_wait_complete);
     FrameEnd end; // Includes failure exits; uploads complete before targets are marked used.
+    STARFOX_3DS_STARTUP_MARK(gpu_upload);
     update_pica_texture_residency(frame.textures,{lower.pixels,lower.width,lower.height,lower.pitch,3},
         std::span(impl_->textures),impl_->dashboard);
     impl_->vertices.prepare(frame.vertices,[&](std::span<const PicaVertex> source) {
@@ -273,8 +276,12 @@ void NativeGpu::present(const PicaFrame& frame,ImageView lower) {
         if(R_FAILED(GSPGPU_FlushDataCache(impl_->vbo,source.size_bytes())))
             throw std::runtime_error("3DS GPU geometry flush failed");
     });
+    STARFOX_3DS_STARTUP_MARK(gpu_upload_complete);
+    STARFOX_3DS_STARTUP_MARK(gpu_shader_bind);
     if(frame.plan.stereo && !impl_->top[1]) impl_->top[1]=Impl::make_target(top_width,GFX_TOP,GFX_RIGHT,true);
     impl_->configure();gfxSet3D(frame.plan.stereo);
+    STARFOX_3DS_STARTUP_MARK(gpu_shader_bind_complete);
+    STARFOX_3DS_STARTUP_MARK(gpu_draw);
     for(unsigned eye=0;eye<frame.plan.eye_count;++eye) {
         auto* target=impl_->top[eye];C3D_RenderTargetClear(target,C3D_CLEAR_ALL,clear_colour(frame.clear),0);
         if(!C3D_FrameDrawOn(target)) throw std::runtime_error("3DS GPU eye target unavailable");
@@ -324,5 +331,6 @@ void NativeGpu::present(const PicaFrame& frame,ImageView lower) {
     C3D_StencilOp(GPU_STENCIL_KEEP,GPU_STENCIL_KEEP,GPU_STENCIL_KEEP);
     impl_->material(&impl_->dashboard,false,false,false);
     C3D_DrawArrays(GPU_TRIANGLES,pica_vertex_limit,6);
+    STARFOX_3DS_STARTUP_MARK(gpu_draw_complete);
 }
 } // namespace starfox::platform::nintendo_3ds

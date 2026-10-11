@@ -255,6 +255,7 @@ int main() {
 #if defined(STARFOX_3DS_CORE_PICA)
     const auto ensure_gpu=[&] {
         if(!gpu) {
+            STARFOX_3DS_STARTUP_RESTART(first_gpu_frame);
             STARFOX_3DS_STARTUP_MARK(gpu_initialize);
             gpu=std::make_unique<ctr::NativeGpu>(ctr::pica_scene_shader);
             STARFOX_3DS_STARTUP_MARK(gpu_initialize_complete);

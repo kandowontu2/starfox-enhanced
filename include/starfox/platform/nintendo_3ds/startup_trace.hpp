@@ -5,8 +5,8 @@
 
 namespace starfox::platform::nintendo_3ds {
 // A phase-entry receipt survives a stall, unlike completed-frame CSV totals.
-// Only the owner thread writes. Each source replacement rearms a bounded
-// window, so enabling Preview after a minute in the menu is still observable.
+// Only the owner thread writes. Source replacement, ordinary Start and first
+// GPU initialization rearm a bounded window, including after menu idle time.
 // Repeated audio entries have their own budget: preroll cannot consume the
 // phase receipts needed to distinguish VBlank from GPU queue completion.
 // SD failures disable diagnostics rather than interrupting the game.
@@ -55,6 +55,12 @@ private:
 };
 }
 #if defined(STARFOX_3DS_PROFILE_FRAMES)
+#define STARFOX_3DS_STARTUP_RESTART(name) do { \
+    if(::starfox::platform::nintendo_3ds::active_startup_trace) { \
+        ::starfox::platform::nintendo_3ds::active_startup_trace->restart_window(); \
+        ::starfox::platform::nintendo_3ds::active_startup_trace->write(#name); \
+    } \
+} while(false)
 #define STARFOX_3DS_STARTUP_MARK(name) do { \
     if(::starfox::platform::nintendo_3ds::active_startup_trace) \
         ::starfox::platform::nintendo_3ds::active_startup_trace->write(#name); \
@@ -64,6 +70,7 @@ private:
         ::starfox::platform::nintendo_3ds::active_startup_trace->write_detail(#name); \
 } while(false)
 #else
+#define STARFOX_3DS_STARTUP_RESTART(name) ((void)0)
 #define STARFOX_3DS_STARTUP_MARK(name) ((void)0)
 #define STARFOX_3DS_STARTUP_DETAIL_MARK(name) ((void)0)
 #endif

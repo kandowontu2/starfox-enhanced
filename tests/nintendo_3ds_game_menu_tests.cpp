@@ -123,7 +123,32 @@ void native_editor_chords() {
     require(opened && ignored,"Native editor table lacks opened and ignored actions");
 }
 }
+void launch_diagnostic_contract() {
+    using simulation::PregamePage;
+    constexpr std::array<input::ButtonMask,3> navigation{0,input::up,input::down};
+    constexpr std::array<input::ButtonMask,6> actions{0,input::a,input::b,input::start,input::left,input::select};
+    for(auto page:{PregamePage::main,PregamePage::options,PregamePage::cheats,
+        PregamePage::two_d,PregamePage::three_d,PregamePage::global,PregamePage::stereo}) {
+        const auto order=simulation::pregame_menu_order(page);
+        for(std::size_t row=0;row<order.size();++row) {
+            for(auto nav:navigation) {
+                const auto target=nav?order[(row+((nav&input::up)?order.size()-1:1))%order.size()]:order[row];
+                for(auto action:actions) {
+                    input::TickInput edge;edge.pressed=edge.held=input::ButtonMask(nav|action);
+                    const bool expected=page==PregamePage::main
+                        && (action==input::start || (target==15 && (action==input::a || action==input::b)));
+                    require(GameMenu::launch_gesture(page,order[row],false,edge)==expected,
+                        "Direct-Start diagnostics ignored same-tick source navigation or armed for a nonlaunch row");
+                    require(!GameMenu::launch_gesture(page,order[row],true,edge),"Runtime Back armed a startup trace");
+                    edge.pressed=0;
+                    require(!GameMenu::launch_gesture(page,order[row],false,edge),"Held launch action repeatedly armed diagnostics");
+                }
+            }
+        }
+    }
+}
 int main() try {
+    launch_diagnostic_contract();
     settings_reset_contract();
     menu_capability_chords();
     native_editor_chords();

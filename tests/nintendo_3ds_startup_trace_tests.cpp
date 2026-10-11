@@ -26,6 +26,21 @@ int main() try {
 #else
     require(output.str().empty() && tick == 0,"Disabled marker performed I/O or clock work");
 #endif
+    std::ostringstream launch_rows;
+    StartupTrace launch_trace(launch_rows,clock_tick);
+    for(unsigned frame=0;frame<1000;++frame) launch_trace.begin_frame();
+    const auto launch_clock=tick;
+    {
+        ScopedStartupTraceActivation activation(launch_trace);
+        STARFOX_3DS_STARTUP_RESTART(game_start_input);
+        STARFOX_3DS_STARTUP_MARK(source_advance);
+    }
+#if defined(STARFOX_3DS_PROFILE_FRAMES)
+    require(tick>launch_clock && launch_rows.str().find("game_start_input\n")!=std::string::npos
+        && launch_rows.str().ends_with("source_advance\n"),"Direct Start after menu idle lost its diagnostic window");
+#else
+    require(launch_rows.str().empty() && tick==launch_clock,"Disabled Start rearming performed clock work or I/O");
+#endif
     std::ostringstream nested;
     StartupTrace second(nested,clock_tick);
     {

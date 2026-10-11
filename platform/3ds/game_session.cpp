@@ -318,6 +318,12 @@ GameAdvance GameSession::advance(std::int64_t time,input::ButtonMask held,bool f
                     // a held Start that could pause the newly launched stage.
                     controls.held|=input::start;controls.pressed|=input::start;start_after_preview_=false;
                 }
+#if defined(STARFOX_3DS_PROFILE_FRAMES)
+                if(game_.in_setup_menu() && GameMenu::launch_gesture(game_.pregame_page(),
+                    game_.pregame_selection(),runtime,controls)) {
+                    STARFOX_3DS_STARTUP_RESTART(game_start_input);
+                }
+#endif
                 const auto tick=[&] {
                     STARFOX_3DS_FRAME_PHASE(logic);
                     return game_.tick(controls);

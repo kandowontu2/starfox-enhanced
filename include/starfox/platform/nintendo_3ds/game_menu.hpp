@@ -36,6 +36,10 @@ public:
     // Native editors replace an action on the destination source row, not
     // navigation itself. Back/Start chords must not open a host editor.
     [[nodiscard]] static GameMenuEditor editor(simulation::PregamePage,unsigned selection,input::TickInput);
+    // Diagnostic observation only; never launches or changes source state.
+    // Account for same-tick navigation, as the real source menu does.
+    [[nodiscard]] static bool launch_gesture(simulation::PregamePage,unsigned selection,
+        bool runtime,input::TickInput);
     // Rebuild only when the observed page/values change, never per eye/slider.
     bool update(const GameMenuState&);
     [[nodiscard]] PicaFrame frame(const FramePlan&) const;
