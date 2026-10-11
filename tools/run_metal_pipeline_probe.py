@@ -45,7 +45,12 @@ def qualify(compiled):
         # object is compared as a whole, not a partial entry token.
         if constants.count(expected) != 1 or (address + constants.find(expected)) % 16:
             raise RuntimeError('Driver consumer lacks its full actual read-only native SDK bundle')
-    return probe
+    # check_link.py intentionally makes a non-executable artifact copy. Run
+    # the actual CMake-linked executable, not that copy with invented modes.
+    native = (compiled / 'build/starfox_metal_sdl_pipeline_check').resolve(strict=True)
+    if sdk.digest(native) != sdk.digest(probe):
+        raise RuntimeError('Actual CMake-linked driver executable differs from validated artifact bytes')
+    return native
 
 
 def main():
