@@ -1,0 +1,180 @@
+{
+  "encoding": "sRGB integer RGB; flat unlit preview; convert according to runtime target",
+  "materials": {
+    "silver_7594a5": [
+      117,
+      148,
+      165
+    ],
+    "silver_3e586c": [
+      62,
+      88,
+      108
+    ],
+    "silver_15202e": [
+      21,
+      32,
+      46
+    ],
+    "silver_bec7c9": [
+      190,
+      199,
+      201
+    ],
+    "silver_b8c1c3": [
+      184,
+      193,
+      195
+    ],
+    "silver_bbc5c6": [
+      187,
+      197,
+      198
+    ],
+    "silver_b1babb": [
+      177,
+      186,
+      187
+    ],
+    "silver_b1babc": [
+      177,
+      186,
+      188
+    ],
+    "silver_b3bcbe": [
+      179,
+      188,
+      190
+    ],
+    "silver_b7c0c2": [
+      183,
+      192,
+      194
+    ],
+    "silver_b9c2c4": [
+      185,
+      194,
+      196
+    ],
+    "silver_bcc6c7": [
+      188,
+      198,
+      199
+    ],
+    "silver_c0cacc": [
+      192,
+      202,
+      204
+    ],
+    "silver_c0cacb": [
+      192,
+      202,
+      203
+    ],
+    "silver_b2bbbc": [
+      178,
+      187,
+      188
+    ],
+    "panel_left_sidewall": [
+      62,
+      88,
+      108
+    ],
+    "edge_left_sidewall": [
+      46,
+      66,
+      81
+    ],
+    "panel_left_rim": [
+      189,
+      205,
+      213
+    ],
+    "edge_left_rim": [
+      142,
+      154,
+      160
+    ],
+    "panel_left_inset": [
+      34,
+      50,
+      64
+    ],
+    "edge_left_inset": [
+      26,
+      38,
+      48
+    ],
+    "panel_right_sidewall": [
+      62,
+      88,
+      108
+    ],
+    "edge_right_sidewall": [
+      46,
+      66,
+      81
+    ],
+    "panel_right_rim": [
+      189,
+      205,
+      213
+    ],
+    "edge_right_rim": [
+      142,
+      154,
+      160
+    ],
+    "panel_right_inset": [
+      34,
+      50,
+      64
+    ],
+    "edge_right_inset": [
+      26,
+      38,
+      48
+    ],
+    "panel_floor": [
+      21,
+      32,
+      46
+    ],
+    "edge_floor": [
+      16,
+      24,
+      34
+    ],
+    "panel_rear_bulkhead": [
+      34,
+      50,
+      64
+    ],
+    "edge_rear_bulkhead": [
+      46,
+      66,
+      81
+    ],
+    "panel_rear_rim": [
+      189,
+      205,
+      213
+    ],
+    "edge_rear_rim": [
+      142,
+      154,
+      160
+    ],
+    "panel_rear_hoop": [
+      190,
+      199,
+      201
+    ],
+    "edge_rear_hoop": [
+      142,
+      154,
+      160
+    ]
+  }
+}
