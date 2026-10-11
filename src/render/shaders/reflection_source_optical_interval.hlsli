@@ -216,6 +216,38 @@ OPTICAL_SCALAR_BOUNDARY float quotient_bound(float a,float b,bool upper) {
     }
     intervalFailed=true;return q;
 }
+// BEGIN PAIRED QUOTIENT SEED
+// Lower/upper start from the SAME divide estimate and compensated first product.
+// Reuse that identical first step only. Each direction retains its own complete
+// eight-attempt loop, guards, comparisons and endpoint steps; no native accuracy
+// assumption, new approximation or tolerance changes either bound or refusal.
+OPTICAL_SCALAR_BOUNDARY float quotient_bound_from_seed(float a,float b,bool upper,
+    float q,float productHigh,float productLow) {
+    [loop] for(uint n=0;n<8;++n) {
+        if(!isfinite(q) || abs(q)>1.e30) {intervalFailed=true;return q;}
+        CurvedScalar product;
+        if(!n){product.high=productHigh;product.low=productLow;}
+        else product=curved_dd_mul_core(q,0,b,0);
+        if(!isfinite(product.high) || !isfinite(product.low)) {intervalFailed=true;return q;}
+        const bool below=product.high<a || (product.high==a && product.low<0),
+            above=a<product.high || (a==product.high && 0<product.low);
+        if(b<0) {if(upper?!above:!below)return q;}
+        else if(upper?!below:!above)return q;
+        q=upper?interval_up(q):interval_down(q);
+    }
+    intervalFailed=true;return q;
+}
+static float quotient_seed_upper=0;
+OPTICAL_SCALAR_BOUNDARY float quotient_bounds(float a,float b) {
+    const float q=a/b;
+    CurvedScalar product;product.high=0;product.low=0;
+    // Respect the original pre-product guard, including nonfinite estimates.
+    if(isfinite(q) && abs(q)<=1.e30)product=curved_dd_mul_core(q,0,b,0);
+    const float lo=quotient_bound_from_seed(a,b,false,q,product.high,product.low);
+    quotient_seed_upper=quotient_bound_from_seed(a,b,true,q,product.high,product.low);
+    return lo;
+}
+// END PAIRED QUOTIENT SEED
 // Keep the complete eight checked quotient evaluations at one scalar-only
 // non-entry boundary. DXIL can share this body rather than cloning it into
 // every automatic-differentiation operation. The auxiliary upper endpoint is
@@ -229,15 +261,15 @@ OPTICAL_SCALAR_BOUNDARY float interval_divide_pair(float alo,float ahi,float blo
     const bool finiteCorners=interval_finite_ordered(iv(alo,ahi)) && interval_finite_ordered(iv(blo,bhi));
     const bool sameA=finiteCorners && asuint(alo)==asuint(ahi);
     const bool sameB=finiteCorners && asuint(blo)==asuint(bhi);
-    const float p=quotient_bound(alo,blo,false),u=quotient_bound(alo,blo,true);
+    const float p=quotient_bounds(alo,blo),u=quotient_seed_upper;
     float q=p,v=u;
-    if(!sameB){q=quotient_bound(alo,bhi,false);v=quotient_bound(alo,bhi,true);}
+    if(!sameB){q=quotient_bounds(alo,bhi);v=quotient_seed_upper;}
     float r=p,w=u;
-    if(!sameA){r=quotient_bound(ahi,blo,false);w=quotient_bound(ahi,blo,true);}
+    if(!sameA){r=quotient_bounds(ahi,blo);w=quotient_seed_upper;}
     float s=q,x=v;
     if(!sameA){
         if(sameB){s=r;x=w;}
-        else{s=quotient_bound(ahi,bhi,false);x=quotient_bound(ahi,bhi,true);}
+        else{s=quotient_bounds(ahi,bhi);x=quotient_seed_upper;}
     }
     // Retain the original initial sentinels and left-to-right corner folds.
     const float lo=min(min(min(min(1.e30,p),q),r),s);
