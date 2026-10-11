@@ -22,7 +22,16 @@ void feature_optical_schedule_main(uint3 group:SV_GroupID,uint lane:SV_GroupInde
             base+=regions.Load(at+4)?0:min(regions.Load(at),capacity);
         }
         workBase=base;workCount=status?0:min(count,capacity);
-        if(q+1==queryCount)dispatchArgs.Store3(0,uint3(base+workCount,1,1));
+        // BEGIN BOUNDED OPTICAL DISPATCH
+        if(q+1==queryCount) {
+            const uint total=base+workCount;
+            [unroll] for(uint chunk=0;chunk<32;++chunk) {
+                const uint offset=chunk*2048;
+                const uint tasks=total>offset?min(total-offset,2048U):0;
+                dispatchArgs.Store3(chunk*12,uint3(tasks,1,1));
+            }
+        }
+        // END BOUNDED OPTICAL DISPATCH
     }
     GroupMemoryBarrierWithGroupSync();
     if(lane<workCount)workMap.Store2((workBase+lane)*8,uint2(q,lane));

@@ -25,8 +25,14 @@ float split_axis(float lo,float hi,uint cell,uint count) {
 [numthreads(STARFOX_SOURCE_OPTICAL_LANES,1,1)]
 void feature_optical_main(uint3 group:SV_GroupID,uint lane:SV_GroupIndex) {
 #if defined(STARFOX_SOURCE_OPTICAL_STREAM)
-    if(group.x>=504*128 || group.y || group.z)return;
-    const uint2 task=workMap.Load2(group.x*8);
+    // BEGIN BOUNDED OPTICAL STREAM
+    // opticalUnused carries only the resident task-page base. All per-task
+    // checked optics below are unchanged; no host readback or task selection.
+    if(group.x>=2048 || group.y || group.z || opticalUnused>=504*128
+        || opticalUnused%2048)return;
+    const uint taskIndex=opticalUnused+group.x;if(taskIndex>=504*128)return;
+    const uint2 task=workMap.Load2(taskIndex*8);
+    // END BOUNDED OPTICAL STREAM
     const uint q=task.x,r=task.y;if(q>=queryCount || r>=capacity)return;
 #else
     const uint q=group.y,r=group.x;if(q>=queryCount || r>=capacity)return;
