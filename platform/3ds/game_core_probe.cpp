@@ -557,7 +557,7 @@ int main() {
         top.clear({8,15,28});
         top.text(12,12,"STAR FOX ENHANCED / ACTUAL SOURCE CORE",{183,224,240});
 #if defined(STARFOX_3DS_TEST_PLAYER)
-        top.text(12,38,"EXPERIMENTAL / ORIGINAL 3DS TEST BUILD",{240,181,86});
+        top.text(12,38,"EXPERIMENTAL / NEW 3DS FAMILY TEST BUILD",{240,181,86});
 #else
         top.text(12,38,"BRING-UP ONLY / FULL FLOW PENDING",{240,181,86});
 #endif

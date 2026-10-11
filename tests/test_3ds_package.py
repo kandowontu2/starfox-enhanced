@@ -131,6 +131,15 @@ class PackageTests(unittest.TestCase):
         self.pack()
         self.assertEqual(self.output.read_bytes(), first)
 
+    def test_new_family_native_labels(self):
+        cmake = (ROOT / "platform/3ds/CMakeLists.txt").read_text(encoding="utf-8")
+        player = (ROOT / "platform/3ds/game_core_probe.cpp").read_text(encoding="utf-8")
+        self.assertIn("Experimental New 3DS/XL stereo / New 2DS XL mono", cmake)
+        self.assertIn("EXPERIMENTAL / NEW 3DS FAMILY TEST BUILD", player)
+        self.assertNotIn("old 3DS mono", cmake)
+        self.assertNotIn("original models mono", cmake)
+        self.assertNotIn("ORIGINAL 3DS TEST BUILD", player)
+
 
 if __name__ == "__main__":
     unittest.main()

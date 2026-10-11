@@ -10,7 +10,7 @@ GameCartridge read_game_cartridge(std::istream& input,std::uint32_t manifest,
     input.seekg(0,std::ios::end);
     const auto size=input.tellg();
     if(!input || size<48 || size>static_cast<std::streamoff>(maximum_companion_bytes))
-        throw std::runtime_error("Starfox-Assets.BIN is missing, truncated or too large for original 3DS");
+        throw std::runtime_error("Starfox-Assets.BIN is missing, truncated or exceeds the 3DS data limit");
     input.seekg(0,std::ios::beg);
     std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size));
     input.read(reinterpret_cast<char*>(bytes.data()),static_cast<std::streamsize>(bytes.size()));
