@@ -30,9 +30,13 @@ def main():
     args = list(unit["arguments"]) if "arguments" in unit else shlex.split(unit["command"])
     if not Path(args[0]).name.startswith("arm-none-eabi-"):
         raise RuntimeError("Not the real ARM compiler")
-    if "-O2" not in args or any(arg.startswith("-O") and arg != "-O2" for arg in args):
-        raise RuntimeError("Native optimization differs from the accepted O2 baseline")
-    if "-flto" in args or not any(arg == "-mfloat-abi=hard" for arg in args):
+    # The SDK supplies O2, then the already-accepted project graph appends O3.
+    # GCC uses the final optimization flag. Preserve the entire actual command;
+    # never strip/replace a prior flag or pretend the SDK default is effective.
+    optimization = [arg for arg in args if arg.startswith("-O")]
+    if not optimization or optimization[-1] != "-O3":
+        raise RuntimeError("Native effective optimization differs from the accepted project O3 baseline")
+    if any(arg.startswith("-flto") for arg in args) or not any(arg == "-mfloat-abi=hard" for arg in args):
         raise RuntimeError("Native IPO/ABI differs from the accepted baseline")
     output.mkdir(parents=True, exist_ok=True)
     probe = output / "texture-pack-probe.cpp"
@@ -99,6 +103,7 @@ extern "C" __attribute__((noinline)) PicaTextureUploadRange texture_pack_baselin
             native / "compile_commands.json", object_path, probe, assembly, disassembly]
     report.write_text(json.dumps({"scope": "Exact ARM compiler assembly inspection only; not native runtime or FPS acceptance",
                                  "original_compile_unit": unit, "inspection_arguments": inspect_args,
+                                 "optimization_flags_in_order": optimization, "effective_optimization": optimization[-1],
                                  "files_sha256": {str(p): digest(p) for p in held}}, indent=2) + "\n")
     print("PASS: actual native GPU object and same-settings byte/full/changed ARM packing assembly captured; no console FPS claim.")
 
