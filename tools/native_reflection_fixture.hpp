@@ -114,7 +114,6 @@ inline PathResult reflection_path(const Fixture& fixture,const Parameters& p,
 template<class Dispatch>
 void run(const Fixture& fixture,Dispatch dispatch) {
     const auto& vertices=fixture.vertices;
-    const auto& palette=fixture.palette;
     unsigned samples=0,edges=0,ground_hops=0,model_hops=0,repeated=0,changes=0,sentinels=0,max_error=0;
     std::array<unsigned,5> selected{};
     for(unsigned variant=0;variant<5;++variant) for(unsigned eye=0;eye<2;++eye) {

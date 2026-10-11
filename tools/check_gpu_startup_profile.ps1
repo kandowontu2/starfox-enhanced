@@ -8,7 +8,7 @@ param([string]$Binary='build/release/starfox_pc.exe',
     [ValidateRange(0,20000)][int]$RendererPipelineDelayMs=0,
     [ValidateRange(100,5000)][int]$MaxUnresponsiveMs=5000,
     [switch]$CaptureUnresponsiveStack,
-    [ValidateSet('saved-profile-plain','saved-profile-preview','standard-profile-preview','native-profile-preview')]
+    [ValidateSet('saved-profile-plain','saved-profile-preview','standard-profile-preview','dlss45-profile-preview','native-profile-preview')]
     [string[]]$ScenarioNames=@(),
     [switch]$WithoutDlssRuntime,
     [switch]$StartGame,
@@ -111,6 +111,7 @@ try {
         @{name='saved-profile-plain';preview=$false;model='saved'},
         @{name='saved-profile-preview';preview=$true;model='saved'},
         @{name='standard-profile-preview';preview=$true;model='standard'},
+        @{name='dlss45-profile-preview';preview=$true;model='dlss45'},
         @{name='native-profile-preview';preview=$true;model='off'})
     if($Isolation -ne 'All') {$scenarios=@(@{name="isolation-$Isolation";preview=$true;model='saved'})}
     elseif($ScenarioNames.Count) {$scenarios=@($scenarios | Where-Object {$_.name -in $ScenarioNames})}
@@ -174,7 +175,7 @@ try {
         }
         if($scenario.model -ne 'saved') {
             $settings.STARFOX_TEST_DLSS_SELECTION=$(if($scenario.model -eq 'standard'){'1'}else{'0'})
-            $settings.STARFOX_TEST_DLSS45_SELECTION='0'
+            $settings.STARFOX_TEST_DLSS45_SELECTION=$(if($scenario.model -eq 'dlss45'){'1'}else{'0'})
         }
         $process=$null
         $log=Join-Path $directory 'runtime.log'
@@ -266,7 +267,7 @@ try {
                 if(!$BlockingGpuPreparation -and ($preparationJobs -lt 1 -or $preparationPumps -lt $preparationJobs)) {
                     throw 'Preview did not use joined responsive shader preparation'
                 }
-                $expectNeural=$scenario.model -eq 'standard' -or ($scenario.model -eq 'saved' -and $savedNeural)
+                $expectNeural=$scenario.model -in @('standard','dlss45') -or ($scenario.model -eq 'saved' -and $savedNeural)
                 if($expectNeural -and $text -match 'dlss-lifecycle: actual game GPU bound' -and $text -notmatch 'dlss-gameplay: evaluated') {
                     throw 'Supported selected DLSS never reconstructed the preview'
                 }

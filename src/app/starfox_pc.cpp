@@ -5056,6 +5056,8 @@ public:
         if (effects.setup_overlay) {
             const auto& overlay = *effects.setup_overlay;
             const auto origin = (framebuffer.width() - 256U) / 2U;
+            const bool protect_bloom_ink=bloom_layer_ready_
+                && bloom_base_rgba_.size()==rgba_.size() && bloom_glow_rgba_.size()==rgba_.size();
             for (std::uint32_t y = 0; y < framebuffer.stored_height(); ++y) {
                 for (std::uint32_t x = 0; x < framebuffer.stored_width(); ++x) {
                     const auto sx = x / render_scale;
@@ -5073,6 +5075,12 @@ public:
                         : std::array<std::uint8_t, 3>{180, 200, 215};
                     for (unsigned c = 0; c < 3; ++c)
                         rgba_[i + c] = static_cast<std::uint8_t>(rgb[c] * effects.setup_brightness / 15U);
+                    if(protect_bloom_ink) {
+                        // Ink can equal clipped world bloom. Give the splitter
+                        // explicit host ownership instead of relying on RGB.
+                        std::copy_n(rgba_.data()+i,4,bloom_base_rgba_.data()+i);
+                        std::copy_n(rgba_.data()+i,4,bloom_glow_rgba_.data()+i);
+                    }
                 }
             }
         }

@@ -1619,7 +1619,18 @@ cross-compiled or tested on hardware: this machine had no devkitPro 3DS SDK,
 and the official package endpoint still returned HTTP 403 on recheck. No WSL installation,
 remote CI run, release publication or console installation was performed.
 
-## Remaining port work, in order (October 6)
+## Historical port checklist (October 6)
+
+This checklist records the earlier R45 checkpoint, not the current source or
+tester package. Use R180 and the current candidate/quick-start sections above.
+The real pre-game menu, remapping, HUD editor, state slots, EX player-two
+counters and PICA game-pass compositor are now connected in the current code.
+What remains to verify is their console behavior and visual fidelity, not
+reimplementing those already connected owners. In particular, test New-model
+stereo versus original-model mono, audio, Home/sleep, SD failure recovery,
+corridor entry/exit and complete Original/EX scene transitions, with separately
+measured memory and performance. Emulator/source results do not establish
+those physical-device outcomes.
 
 1. The authorized R45 source-only workflow on `codex/3ds-followup-r45-20261007`
    completed successfully at run `37596400405`, audited head
@@ -1691,8 +1702,10 @@ devkitARM/libctru/Citro3D remains the intended native stack.
 
 Gekkou's `BG_5_2Z` and `BG_5_2A` now use their source-linked `LTUNNEL_`
 dimensions. The unused `KTUNNEL_` constants are not substituted for those
-backgrounds. Scripted cameras outside the physical tube remain an explicit
-unfinished exterior policy, without clamping the camera or stereo controls.
+backgrounds. Scripted cameras outside/on the physical tube now use the signed-
+face/frustum path in `GameScenery`, without clamping the camera or stereo
+controls. Entry/exit occlusion and disoccluded exterior artwork still need
+visual/device acceptance; the original source has no separate outside-tube plate.
 
 `BG_2_6A` now has its own open-left colony receiver. `COLONY_MINX` is a player
 movement limit, not a wall: only the right wall, ceiling and floor receive

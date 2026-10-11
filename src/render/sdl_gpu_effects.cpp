@@ -964,7 +964,13 @@ struct SdlGpuEffects::Impl {
             capture_pending=true;
         } else download_texture(work[current],0);
         if(glow) {
-            dispatch(p,16,work[current],work[1-current],nullptr,nullptr,nullptr,nullptr,side);advance();copy(side,glow);
+            auto split=p;
+            split.pad0=s.setup_overlay?1:0;
+            if(s.setup_overlay) {
+                split.surface_width=s.setup_overlay->frame->width();
+                split.surface_height=s.setup_overlay->frame->height();
+            }
+            dispatch(split,16,work[current],work[1-current],nullptr,nullptr,nullptr,nullptr,side);advance();copy(side,glow);
         }
         if(model) {
             dispatch(p,17,work[current],work[1-current],nullptr,nullptr,nullptr,nullptr,side);advance();copy(side,model);

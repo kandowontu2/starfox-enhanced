@@ -1643,6 +1643,10 @@ if(STARFOX_BUILD_TESTS)
         list(APPEND STARFOX_SMOKE_BASELINE "STARFOX_TEST_${setting}=0")
     endforeach()
     enable_testing()
+    add_executable(starfox_native_metal_fixture_parameter_tests tests/native_metal_fixture_parameter_tests.cpp)
+    target_include_directories(starfox_native_metal_fixture_parameter_tests PRIVATE tools include)
+    target_compile_features(starfox_native_metal_fixture_parameter_tests PRIVATE cxx_std_20)
+    add_test(NAME starfox_native_metal_fixture_parameter_tests COMMAND starfox_native_metal_fixture_parameter_tests)
     add_test(NAME starfox_sdl_d3d12_copy_ordering_patch_tests
         COMMAND "${CMAKE_COMMAND}" "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
             "-DTEST_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/sdl-copy-ordering-fixtures"
@@ -2431,6 +2435,13 @@ if(STARFOX_BUILD_TESTS)
 
     find_package(Python3 COMPONENTS Interpreter)
     if(Python3_Interpreter_FOUND)
+        if(WIN32 AND NOT WINDOWS_STORE AND NOT CMAKE_CROSSCOMPILING)
+            add_executable(starfox_pcvr_launcher_fixture tests/pcvr_launcher_exit_fixture.cpp)
+            target_compile_features(starfox_pcvr_launcher_fixture PRIVATE cxx_std_17)
+            add_test(NAME starfox_pcvr_launcher_exit_codes
+                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_pcvr_launcher.py"
+                    "$<TARGET_FILE:starfox_pcvr_launcher_fixture>")
+        endif()
         add_test(NAME starfox_metal_source_assembly
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_metal_shader_sources.py")
         add_test(NAME starfox_vulkan_material_colour_adapter
