@@ -20,6 +20,31 @@ struct PicaVertex {
     bool operator==(const PicaVertex&) const=default;
 };
 static_assert(sizeof(PicaVertex)==9*sizeof(float));
+namespace detail {
+enum class PicaVertexError : unsigned {none,position,colour,uv};
+// IEEE binary32's unsigned magnitude is monotonic for nonnegative values.
+// Classify the same finite/range envelope with integer loads/comparisons;
+// never transform, quantize or approximate a submitted vertex. Both signed
+// zeros remain valid, while every infinity/NaN encoding remains rejected.
+inline PicaVertexError pica_vertex_error(const PicaVertex& vertex,bool clamp_uv) noexcept {
+    static_assert(sizeof(float)==sizeof(std::uint32_t)
+        && std::numeric_limits<float>::is_iec559 && std::numeric_limits<float>::digits==24);
+    for(float value:vertex.position)
+        if((std::bit_cast<std::uint32_t>(value)&0x7fffffffU)>=0x7f800000U)
+            return PicaVertexError::position;
+    for(float value:vertex.colour) {
+        const auto bits=std::bit_cast<std::uint32_t>(value);
+        if(bits>0x3f800000U && bits!=0x80000000U)
+            return PicaVertexError::colour;
+    }
+    for(float value:vertex.uv) {
+        const auto bits=std::bit_cast<std::uint32_t>(value),magnitude=bits&0x7fffffffU;
+        if(clamp_uv?(bits>0x3f800000U && bits!=0x80000000U):magnitude>0x47800000U)
+            return PicaVertexError::uv;
+    }
+    return PicaVertexError::none;
+}
+} // namespace detail
 enum class PicaSpace {world,screen,scenery}; // Scenery is at infinity, not HUD depth.
 struct PicaClip {
     int left{},top{},right{int(top_width)},bottom{int(screen_height)}; // LCD pixels; right/bottom exclusive.
@@ -275,16 +300,19 @@ inline void validate_pica_group(const PicaFrame& frame,unsigned reserved_texture
                 static_cast<void>(pica_multiply(projections[eye],draw.model));
             else static_cast<void>(pica_draw_matrix(frame.plan,eye,draw));
         }
+        const bool clamp_uv=draw.texture!=pica_no_texture && !frame.textures[draw.texture].repeat;
+        const bool opaque_layers=draw.texture!=pica_no_texture && !frame.textures[draw.texture].source_layers.empty();
         for(unsigned i=cursor;i<cursor+draw.count;++i) {
             const auto& vertex=frame.vertices[i];
-            for(float value:vertex.position) if(!std::isfinite(value)) throw std::invalid_argument("Non-finite 3DS vertex");
-            for(float value:vertex.colour) if(!std::isfinite(value) || value<0 || value>1) throw std::invalid_argument("Invalid 3DS vertex colour");
-            for(float value:vertex.uv) if(!std::isfinite(value) || std::abs(value)>65536
-                || (draw.texture!=pica_no_texture && !frame.textures[draw.texture].repeat && (value<0 || value>1)))
-                throw std::invalid_argument("Invalid 3DS texture coordinate");
+            switch(detail::pica_vertex_error(vertex,clamp_uv)) {
+            case detail::PicaVertexError::position:throw std::invalid_argument("Non-finite 3DS vertex");
+            case detail::PicaVertexError::colour:throw std::invalid_argument("Invalid 3DS vertex colour");
+            case detail::PicaVertexError::uv:throw std::invalid_argument("Invalid 3DS texture coordinate");
+            case detail::PicaVertexError::none:break;
+            }
             if(draw.colour_op && (vertex.colour!=frame.vertices[cursor].colour || vertex.colour[3]!=1))
                 throw std::invalid_argument("3DS fixed-colour operation cannot interpolate different colours");
-            if(draw.texture!=pica_no_texture && !frame.textures[draw.texture].source_layers.empty() && vertex.colour[3]!=1)
+            if(opaque_layers && vertex.colour[3]!=1)
                 throw std::invalid_argument("3DS source layer artwork cannot interpolate opacity");
         }
         cursor+=draw.count;

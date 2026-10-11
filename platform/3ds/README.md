@@ -9,8 +9,8 @@ New-family devices request libctru's CPU/cache speedup; old or unknown models do
 The request is reapplied after Home/sleep and disabled on exit. Cartridge
 timing, audio rates and the real pre-game menu remain unchanged.
 Fresh native settings use separation 16 and convergence 512. At full slider
-this puts infinite scenery eight LCD pixels behind the screen, twice the prior
-default disparity, while finite models/terrain retain the same off-axis camera
+this gives infinite scenery eight LCD pixels of behind-screen binocular disparity,
+twice the prior default disparity, while finite models/terrain retain the same off-axis camera
 projection. Slider zero and New 2DS XL remain mono. Existing saved separation
 and convergence are not changed; both remain adjustable in Stereoscopic 3D.
 This directory contains a host-verified cartridge game session and native

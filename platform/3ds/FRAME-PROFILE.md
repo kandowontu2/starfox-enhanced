@@ -60,6 +60,21 @@ validation/upload path. Sparse packing uses bounded reusable scratch, not a
 new whole-image staging allocation. Host byte/flush-range tests and packing
 benchmarks do not establish Citro3D execution cost or New-console FPS.
 
+R382 classifies the existing vertex envelope using exact IEEE binary32 bit
+ranges: finite position, [0,1] colour, absolute UV <= 65536, and [0,1] UV for
+non-repeating textures. Signed zero stays valid; all infinity/NaN encodings
+remain rejected. Draw ownership, opacity, fixed-colour equality, matrix,
+submission-range and budget checks remain. No vertex or sample is modified.
+An independent floating-point oracle exercises every exponent/sign, boundary
+neighbors and randomized encodings in all nine lanes, with textured/repeating/
+untextured draw integration checks. The full PICA suite passes 106,491,655 checks.
+Alternating host benchmarks include an unchanged R381 full composition baseline,
+24,576 vertices, 32 draws, two eyes and ordinary changing geometry. The revised
+candidate's composition throughput is 1.64--1.79x the baseline in that fixture;
+the earlier helper-only-fast candidate actually regressed full composition and
+was corrected before publication. These host measurements are not ARM timings,
+whole-game speed gains or New-console FPS. Other project compilers keep running.
+
 The same CSV header is retained; consumers must allow all thirty-two phase
 names and reject unknown names rather than silently ignoring malformed data.
 The terrain rows are children of `layers`; a cache-hit count is not a console

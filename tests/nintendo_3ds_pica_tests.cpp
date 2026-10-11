@@ -15,6 +15,76 @@ template<class F> void rejects(F action,const char* message) {
     bool rejected=false;try {action();} catch(const std::invalid_argument&) {rejected=true;}
     require(rejected,message);
 }
+void vertex_validation_bits() {
+    // Independent previous floating-point contract, not another bit classifier.
+    const auto reference=[](const PicaVertex& vertex,bool clamp_uv) {
+        for(float value:vertex.position) if(!std::isfinite(value)) return 1U;
+        for(float value:vertex.colour) if(!std::isfinite(value) || value<0 || value>1) return 2U;
+        for(float value:vertex.uv) if(!std::isfinite(value) || std::abs(value)>65536
+            || (clamp_uv && (value<0 || value>1))) return 3U;
+        return 0U;
+    };
+    const auto check=[&](std::uint32_t bits) {
+        const float value=std::bit_cast<float>(bits);
+        for(unsigned lane=0;lane<9;++lane) for(bool clamp_uv:{false,true}) {
+            PicaVertex vertex{};
+            if(lane<3) vertex.position[lane]=value;
+            else if(lane<7) vertex.colour[lane-3]=value;
+            else vertex.uv[lane-7]=value;
+            require(unsigned(detail::pica_vertex_error(vertex,clamp_uv))==reference(vertex,clamp_uv),
+                "Integer vertex envelope differs from independent floating-point contract");
+        }
+    };
+    // Every exponent/sign with representative mantissas, including signaling
+    // and quiet NaNs, subnormals, signed zero and both largest finite values.
+    for(unsigned sign:{0U,0x80000000U}) for(unsigned exponent=0;exponent<256;++exponent)
+        for(unsigned mantissa:{0U,1U,0x3fffffU,0x400000U,0x7ffffeU,0x7fffffU})
+            check(sign|(exponent<<23)|mantissa);
+    for(unsigned boundary:{0U,0x00800000U,0x3f800000U,0x47800000U,0x7f7fffffU,0x7f800000U})
+        for(unsigned delta:{0U,1U,2U}) for(unsigned sign:{0U,0x80000000U}) {
+            check(sign|(boundary+delta));
+            if(boundary>=delta) check(sign|(boundary-delta));
+        }
+    std::uint32_t random=0x962de84bU;
+    for(unsigned sample=0;sample<131072;++sample) {
+        random^=random<<13;random^=random>>17;random^=random<<5;check(random);
+    }
+    // Preserve first-error ownership when several fields are invalid together.
+    PicaVertex bad{};bad.position[0]=std::numeric_limits<float>::infinity();bad.colour[0]=-1;bad.uv[0]=70000;
+    require(detail::pica_vertex_error(bad,true)==detail::PicaVertexError::position,"Position error was reordered");
+    bad.position[0]=0;
+    require(detail::pica_vertex_error(bad,true)==detail::PicaVertexError::colour,"Colour error was reordered");
+    bad.colour[0]=1;
+    require(detail::pica_vertex_error(bad,true)==detail::PicaVertexError::uv,"UV error was lost");
+}
+void vertex_validation_draw_policy() {
+    Canvas lower;
+    std::array<PicaVertex,3> vertices{};
+    std::array<std::uint8_t,8*8*4> pixels{};pixels.fill(255);
+    std::array<std::uint8_t,8*8> layers{};layers.fill(2);
+    PicaImage image{pixels,8,8,8*4,4};
+    PicaDraw draw;draw.count=3;draw.texture=0;
+    PicaFrame frame{plan_frame(1,true,ScreenUse::world),vertices,std::span(&draw,1),std::span(&image,1)};
+    const auto valid=[&]{validate_pica_frame(frame,lower.view());};
+    for(float uv:{-65536.F,-1.F,-0.F,0.F,1.F,2.F,65536.F}) {
+        vertices.back().uv={uv,uv};image.repeat=false;
+        if(uv<0 || uv>1) rejects(valid,"Clamped draw accepted out-of-range UVs");else valid();
+        image.repeat=true;valid(); // Signed/large UVs are valid on the repeat sampler.
+        draw.texture=pica_no_texture;valid();draw.texture=0;
+    }
+    vertices.back().uv={std::nextafter(65536.F,std::numeric_limits<float>::infinity()),0};
+    rejects(valid,"Repeat UV exceeded the original absolute envelope");
+    draw.texture=pica_no_texture;rejects(valid,"Untextured UV exceeded the original absolute envelope");
+    draw.texture=0;vertices.back().uv={0,0};image.repeat=false;
+    draw.space=PicaSpace::screen;draw.depth_test=draw.depth_write=false;
+    image.source_layers=layers;image.layer_pitch=8;
+    vertices.back().colour[3]=.5F;rejects(valid,"Opaque source provenance allowed interpolated opacity");
+    vertices.back().colour[3]=1;valid();
+    image.source_layers={};image.layer_pitch=0;vertices.back().colour[3]=.5F;valid();
+    vertices.back().colour[3]=1;draw.texture=pica_no_texture;draw.source_layer=0;
+    draw.colour_op=PicaColourOp{false,false,1};valid();
+    vertices.back().colour[0]=.5F;rejects(valid,"Fixed colour-operation equality check was omitted");
+}
 void vertex_residency() {
     PicaVertexResidency cache;
     std::vector<PicaVertex> source(96),gpu;
@@ -662,7 +732,7 @@ STARFOX_TEXTURE_NOINLINE void operator delete(void* memory,std::size_t) noexcept
 STARFOX_TEXTURE_NOINLINE void operator delete[](void* memory,std::size_t) noexcept {std::free(memory);}
 #undef STARFOX_TEXTURE_NOINLINE
 int main() try {
-    texture_upload();full_size_texture_upload();changed_tile_upload();texture_residency();reusable_texture_cache();vertex_residency();projection_and_draws();layer_upload();sampled_texture_orientation();
+    vertex_validation_bits();vertex_validation_draw_policy();texture_upload();full_size_texture_upload();changed_tile_upload();texture_residency();reusable_texture_cache();vertex_residency();projection_and_draws();layer_upload();sampled_texture_orientation();
     require(pica_uv_mode(false,false)==std::array<float,4>{1,0,0,0},"Ordinary texture projection changed");
     require(pica_uv_mode(true,false)==std::array<float,4>{0,1,0,0},"LCD parity texture lost its homogeneous Q");
     require(pica_uv_mode(false,true)==std::array<float,4>{0,0,1,0},"Source terrain mode zeroed ordinary UVs before projection");
