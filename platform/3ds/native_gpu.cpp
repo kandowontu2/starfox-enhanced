@@ -3,6 +3,7 @@
 #include "starfox/platform/nintendo_3ds/pica_residency.hpp"
 #include "starfox/platform/nintendo_3ds/pica_texture_update.hpp"
 #include "starfox/platform/nintendo_3ds/pica_program_binding.hpp"
+#include "starfox/platform/nintendo_3ds/pica_display_sync.hpp"
 #include "starfox/platform/nintendo_3ds/startup_trace.hpp"
 #include "starfox/platform/nintendo_3ds/frame_profile.hpp"
 #include <atomic>
@@ -146,6 +147,7 @@ struct NativeGpu::Impl {
     bool initialized{};
     PicaVertex* vbo{};
     PicaVertexResidency vertices;
+    PicaDisplaySync display_sync;
     std::unique_ptr<NativeShaderProgram> shader_program;
     int transform_location{-1},uv_location{-1},uv_mode_location{-1};
     std::array<C3D_RenderTarget*,2> top{};
@@ -277,10 +279,16 @@ void NativeGpu::present(const PicaValidatedFrame& prepared,ImageView lower) {
     present_checked(frame,lower);
 }
 void NativeGpu::present_checked(const PicaFrame& frame,ImageView lower) {
-    // Separate the two waits: FrameBegin(SYNCDRAW) hides both VBlank and queue
-    // retirement behind one receipt, making a real-device stall ambiguous.
+    // Keep display pacing separate from queue retirement. If preparation has
+    // already crossed BOTH LCD refresh intervals, no extra refresh sleep is
+    // needed. FrameBegin(0) still retires the prior GPU use before any upload.
     STARFOX_3DS_STARTUP_MARK(gpu_vblank_wait);
-    { STARFOX_3DS_FRAME_PHASE(gpu_sync);C3D_FrameSync(); }
+    {
+        STARFOX_3DS_FRAME_PHASE(gpu_sync);
+        impl_->display_sync.synchronize([] {
+            return std::array<std::uint32_t,2>{C3D_FrameCounter(0),C3D_FrameCounter(1)};
+        },[] {C3D_FrameSync();});
+    }
     STARFOX_3DS_STARTUP_MARK(gpu_vblank_wait_complete);
     STARFOX_3DS_STARTUP_MARK(gpu_wait);
     {

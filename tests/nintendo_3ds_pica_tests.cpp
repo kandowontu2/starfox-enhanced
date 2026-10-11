@@ -2,6 +2,7 @@
 #include "starfox/platform/nintendo_3ds/pica_composite.hpp"
 #include "starfox/platform/nintendo_3ds/pica_residency.hpp"
 #include "starfox/platform/nintendo_3ds/pica_texture_update.hpp"
+#include "starfox/platform/nintendo_3ds/pica_display_sync.hpp"
 #include <iostream>
 #include <cstdlib>
 #include <new>
@@ -13,6 +14,35 @@ unsigned checks{};
 std::size_t texture_allocations{};
 bool count_texture_allocations{};
 void require(bool value,const char* message) {++checks;if(!value) throw std::runtime_error(message);}
+void display_sync() {
+    PicaDisplaySync sync;
+    std::array<std::uint32_t,2> counters{0xfffffffeU,0xfffffffdU};
+    unsigned waits{};
+    const auto run=[&](bool expected_wait) {
+        const auto before=waits;
+        sync.synchronize([&] {return counters;},[&] {++waits;++counters[0];++counters[1];});
+        require(waits-before==unsigned(expected_wait),"Display pacing skipped a required wait or added a redundant refresh");
+    };
+    run(true); // First presentation retains the ordinary initial sync.
+    run(true); // No LCD progress: both must advance.
+    ++counters[0];run(true); // Advancing only one LCD never admits a frame.
+    ++counters[1];run(true);
+    ++counters[0];++counters[1];run(false);
+    counters[0]+=37;counters[1]+=11;run(false); // Late preparation needs no extra sleep.
+    run(true); // The late presentation arms the current counters, not stale ones.
+    std::uint32_t random=0x76543210U;
+    for(unsigned i=0;i<100000;++i) {
+        random^=random<<13;random^=random>>17;random^=random<<5;
+        const unsigned top=random&3U,bottom=(random>>2)&3U;
+        counters[0]+=top;counters[1]+=bottom;
+        run(!top || !bottom);
+    }
+    // A fresh GPU presenter does not inherit an old presenter's pacing lease.
+    PicaDisplaySync replacement;
+    const auto before=waits;
+    replacement.synchronize([&] {return counters;},[&] {++waits;++counters[0];++counters[1];});
+    require(waits==before+1,"Replacement presenter inherited stale LCD pacing");
+}
 void word_texture_store() {
     std::uint32_t random=0x142857abU;
     for(unsigned channels:{3U,4U}) for(unsigned source_offset=0;source_offset<8;++source_offset)
@@ -827,6 +857,7 @@ STARFOX_TEXTURE_NOINLINE void operator delete(void* memory,std::size_t) noexcept
 STARFOX_TEXTURE_NOINLINE void operator delete[](void* memory,std::size_t) noexcept {std::free(memory);}
 #undef STARFOX_TEXTURE_NOINLINE
 int main() try {
+    display_sync();
     word_texture_store();
     validated_composition_handoff();
     vertex_validation_bits();vertex_validation_draw_policy();texture_upload();full_size_texture_upload();changed_tile_upload();texture_residency();reusable_texture_cache();vertex_residency();projection_and_draws();layer_upload();sampled_texture_orientation();
