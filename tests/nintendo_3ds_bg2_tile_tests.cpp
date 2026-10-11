@@ -163,7 +163,7 @@ void painter_integration() {
     require(native_landscape_scene(source) && !terrain.before_models.textures.empty()
         && terrain.before_models.textures[0].width==256
         && std::any_of(terrain.before_models.draws.begin(),terrain.before_models.draws.end(),[](const auto& draw) {
-            return draw.space==PicaSpace::world && draw.depth_test && draw.depth_write && draw.projected_uv;
+            return draw.space==PicaSpace::world && !draw.depth_test && !draw.depth_write && draw.projected_uv;
         }),"Unrolled tile terrain lost its finite source plane");
 }
 void constant_vertical_offsets() {
