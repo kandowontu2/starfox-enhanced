@@ -65,11 +65,11 @@ SOURCE_FOLD_BOUNDARY bool fold_inner(float2 sample,ReflectionRoughFrame receiver
 void fold_refuse(uint at,uint reason,uint cells,uint traces) {results.Store4(at,uint4(0,intervalFailed?8:reason,cells,traces));}
 [numthreads(64,1,1)]
 void feature_folds_main(uint3 id:SV_DispatchThreadID) {
-    const uint q=id.x;if(q>=queryCount || q>=64)return;
+    const uint q=id.x;if(q>=queryCount || q>=504)return;
     const uint rootAt=q*24576,at=rootAt+256,frameAt=q*512;
     [unroll] for(uint n=0;n<4;++n)results.Store4(at+n*16,0);
     intervalFailed=false;
-    if(queryCount>64 || witnessStride!=24576 || witnessOffset!=256 || witnessBytes!=64 || witnessReserved
+    if(queryCount>504 || witnessStride!=24576 || witnessOffset!=256 || witnessBytes!=64 || witnessReserved
         || (pathStride!=52 && pathStride!=64) || !width || !height || width>16384 || height>16384
         || (lobes!=1 && lobes!=8) || any(frames.Load4(frameAt+496)!=uint4(1,0,0,0)))
         {fold_refuse(at,8,0,0);return;}

@@ -27,7 +27,7 @@ void feature_jets_main(uint3 id:SV_DispatchThreadID) {
     const uint q=id.y,r=id.x;
 #define sourceRootMode rootMode
 #endif
-    if(q>=queryCount || q>=64 || r>=128)return;
+    if(q>=queryCount || q>=504 || r>=128)return;
     const uint outAt=(q*128+r)*192,input=q*6160,at=q*512;
 #if defined(STARFOX_SOURCE_STREAM_ROOTS)
     // The owner zeroes all unused region records ONCE before the full stream.
@@ -41,7 +41,7 @@ void feature_jets_main(uint3 id:SV_DispatchThreadID) {
     [unroll] for(uint n=0;n<12;++n)results.Store4(outAt+n*16,0);
 #endif
     const uint count=regions.Load(input),status=regions.Load(input+4);
-    if(queryCount>64 || rootCapacity!=128 || rootFrameStride!=512 || rootResultStride!=192 || rootMode>1
+    if(queryCount>504 || rootCapacity!=128 || rootFrameStride!=512 || rootResultStride!=192 || rootMode>1
         || count>128 || status) {
 #if defined(STARFOX_SOURCE_STREAM_ROOTS)
         stream_root_reject(outAt);

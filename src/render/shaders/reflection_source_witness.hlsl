@@ -56,11 +56,11 @@ void witness_refuse(uint outAt,uint bits,uint reason,uint cells) {
 #if !defined(STARFOX_SOURCE_WITNESS_LIBRARY)
 [numthreads(64,1,1)]
 void feature_witness_main(uint3 id:SV_DispatchThreadID) {
-    const uint q=id.x;if(q>=queryCount || q>=64)return;
+    const uint q=id.x;if(q>=queryCount || q>=504)return;
     const uint rootAt=q*24576,outAt=rootAt+192,frameAt=q*512;
     [unroll] for(uint n=0;n<4;++n)results.Store4(outAt+n*16,0);
     intervalFailed=false;
-    if(queryCount>64 || witnessStride!=24576 || witnessOffset!=192 || witnessBytes!=64 || witnessReserved
+    if(queryCount>504 || witnessStride!=24576 || witnessOffset!=192 || witnessBytes!=64 || witnessReserved
         || (pathStride!=52 && pathStride!=64) || !width || !height || width>16384 || height>16384
         || (lobes!=1 && lobes!=8) || any(frames.Load4(frameAt+496)!=uint4(1,0,0,0)))
         {witness_refuse(outAt,0,8,0);return;}

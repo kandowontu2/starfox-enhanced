@@ -25,7 +25,7 @@ float split_axis(float lo,float hi,uint cell,uint count) {
 [numthreads(STARFOX_SOURCE_OPTICAL_LANES,1,1)]
 void feature_optical_main(uint3 group:SV_GroupID,uint lane:SV_GroupIndex) {
 #if defined(STARFOX_SOURCE_OPTICAL_STREAM)
-    if(group.x>=64*128 || group.y || group.z)return;
+    if(group.x>=504*128 || group.y || group.z)return;
     const uint2 task=workMap.Load2(group.x*8);
     const uint q=task.x,r=task.y;if(q>=queryCount || r>=capacity)return;
 #else

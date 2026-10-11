@@ -25,12 +25,12 @@ void compose_status(uint first,uint count,uint valid,uint reason,uint pixel,uint
 void feature_compose_main(uint3 id:SV_DispatchThreadID) {
     // One thread owns a complete pixel. No atomic half-pixel/lobe publication.
     if(composeLobes!=1 && composeLobes!=8)return;
-    const uint first=id.x*composeLobes;if(first>=composeCount || first>=64)return;
-    const uint count=min(composeLobes,min(composeCount-first,64-first));
+    const uint first=id.x*composeLobes;if(first>=composeCount || first>=504)return;
+    const uint count=min(composeLobes,min(composeCount-first,504-first));
     [loop] for(uint l=0;l<count;++l) {
         const uint at=(first+l)*24576+512;[unroll] for(uint n=0;n<4;++n)results.Store4(at+n*16,0);
     }
-    if(composeCount!=queryCount || composeCount>64 || count!=composeLobes || composeCount%composeLobes
+    if(composeCount!=queryCount || composeCount>504 || count!=composeLobes || composeCount%composeLobes
         || composeFirst%composeLobes || composeStride!=24576 || composeOffset!=512 || composeBytes!=64
         || composeReserved || composePad || composeFlags>15 || composeLobes!=lobes || composePathStride!=pathStride
         || (pathStride!=52 && pathStride!=64) || !currentWidth || !currentHeight

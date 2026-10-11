@@ -10,7 +10,7 @@ static const uint capacity=128,regionStride=16+capacity*48,resultStride=capacity
 [numthreads(128,1,1)]
 void feature_optical_schedule_main(uint3 group:SV_GroupID,uint lane:SV_GroupIndex) {
     const uint q=group.x;
-    if(!queryCount || queryCount>64 || q>=queryCount || group.y || group.z
+    if(!queryCount || queryCount>504 || q>=queryCount || group.y || group.z
         || reserved0 || reserved1 || reserved2)return;
     const uint count=regions.Load(q*regionStride),status=regions.Load(q*regionStride+4);
     const uint output=q*resultStride+lane*32;

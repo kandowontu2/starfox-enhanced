@@ -8,10 +8,10 @@
 void guide_refuse(uint at,uint reason) {results.Store4(at,uint4(0,reason,0,0));}
 [numthreads(64,1,1)]
 void feature_guide_main(uint3 id:SV_DispatchThreadID) {
-    const uint q=id.x;if(q>=queryCount || q>=64)return;
+    const uint q=id.x;if(q>=queryCount || q>=504)return;
     const uint rootAt=q*24576,at=rootAt+320,frameAt=q*512;
     [unroll] for(uint n=0;n<4;++n)results.Store4(at+n*16,0);
-    if(queryCount>64 || witnessStride!=24576 || witnessOffset!=320 || witnessBytes!=64 || witnessReserved
+    if(queryCount>504 || witnessStride!=24576 || witnessOffset!=320 || witnessBytes!=64 || witnessReserved
         || (pathStride!=52 && pathStride!=64) || !width || !height || width>16384 || height>16384
         || (lobes!=1 && lobes!=8) || any(frames.Load4(frameAt+496)!=uint4(1,0,0,0)))
         {guide_refuse(at,2);return;}

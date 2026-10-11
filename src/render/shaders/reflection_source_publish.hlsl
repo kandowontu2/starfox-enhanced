@@ -15,7 +15,7 @@ void feature_publish_main(uint3 id:SV_DispatchThreadID) {
     if((publishLobes!=1 && publishLobes!=8) || !publishWidth || !publishHeight
         || publishWidth>16384 || publishHeight>16384 || publishReserved
         || (publishPathStride!=52 && publishPathStride!=64) || publishRecords>64
-        || !publishCount || publishCount>64 || publishCount%publishLobes || publishFirst%publishLobes)return;
+        || !publishCount || publishCount>504 || publishCount%publishLobes || publishFirst%publishLobes)return;
     const uint first=id.x*publishLobes;if(first>=publishCount)return;
     const uint record=publishFirst+first,pixel=record/publishLobes,total=publishWidth*publishHeight;
     if(record<publishFirst || pixel>=total)return;
