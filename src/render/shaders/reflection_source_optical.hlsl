@@ -83,6 +83,7 @@ void feature_optical_main(uint3 group:SV_GroupID,uint lane:SV_GroupIndex) {
     if(!lane) {keptCount=excludedCount=0;hullX0=hullY0=asuint(1.e30);hullX1=hullY1=0;}
     GroupMemoryBarrierWithGroupSync();
 #if defined(STARFOX_NATIVE_SOURCE_OPTICAL)
+    prepare_optical_plane_normals(receiver,planes,control,lane);
     intervalFailed=false;const Interval3 enclosedTarget=native_target(at,terminal);
     const bool targetFailed=intervalFailed;
 #endif

@@ -383,6 +383,36 @@ Interval3 plane_normal(ReflectionSpecularPlane p) {
     if(reflection_specular_analytic(p))return vunit(p3(p.b.xyz));
     return vunit(vcross(vsub(p3(p.b.xyz),p3(p.a.xyz)),vsub(p3(p.c.xyz),p3(p.a.xyz))));
 }
+#if defined(STARFOX_NATIVE_SOURCE_OPTICAL)
+// The accepted frame/ordered planes are uniform within one optical group.
+// Evaluate the SAME complete normal bounds once, not once per closed source
+// cell. Keep each normal's failure separate: an unused/later plane must not
+// poison a path which the original forward program excludes before reaching it.
+groupshared Interval3 opticalPlaneNormals[5];
+groupshared uint opticalPlaneNormalFailures[5];
+void prepare_optical_plane_normals(ReflectionRoughFrame receiver,
+    ReflectionSpecularPlane planes[4],uint4 control,uint lane) {
+    const bool initialFailed=intervalFailed;
+    if(!lane) {
+        [loop] for(uint stage=0;stage<=control.x;++stage) {
+            const bool primary=stage==0,curved=primary?control.z!=0:(control.y&(1U<<(stage-1)))!=0;
+            if(curved)continue;
+            ReflectionSpecularPlane plane;
+            if(primary) {plane.a=receiver.a;plane.b=receiver.b;plane.c=receiver.c;}
+            else plane=planes[stage-1];
+            intervalFailed=false;
+            opticalPlaneNormals[stage]=plane_normal(plane);
+            opticalPlaneNormalFailures[stage]=uint(intervalFailed);
+        }
+    }
+    GroupMemoryBarrierWithGroupSync();
+    intervalFailed=initialFailed;
+}
+Interval3 prepared_optical_plane_normal(uint stage) {
+    intervalFailed=intervalFailed || opticalPlaneNormalFailures[stage]!=0;
+    return opticalPlaneNormals[stage];
+}
+#endif
 bool outside_face(ReflectionSpecularPlane p,Interval3 hit) {
     if(reflection_specular_analytic(p))return false;
     const Interval3 u=vsub(p3(p.b.xyz),p3(p.a.xyz)),v=vsub(p3(p.c.xyz),p3(p.a.xyz)),r=vsub(hit,p3(p.a.xyz));
@@ -429,7 +459,14 @@ OPTICAL_BOUNDARY bool optical_excluded_target(float4 box,ReflectionRoughFrame re
         ReflectionSpecularPlane plane;
         if(primary) {plane.a=receiver.a;plane.b=receiver.b;plane.c=receiver.c;}
         else plane=planes[stage-1];
-        Interval3 n;if(curved)n=p3(liquid.planeNormal.xyz);else n=oriented(plane_normal(plane),outgoing);
+        Interval3 n;if(curved)n=p3(liquid.planeNormal.xyz);
+        else {
+#if defined(STARFOX_NATIVE_SOURCE_OPTICAL)
+            n=oriented(prepared_optical_plane_normal(stage),outgoing);
+#else
+            n=oriented(plane_normal(plane),outgoing);
+#endif
+        }
         const Interval denominator=vdot(outgoing,n),distance=idiv(vdot(vsub(p3(curved?liquid.planePoint.xyz:plane.a.xyz),origin),n),denominator);
         if(primary) {
             const Interval depth=imul(distance,outgoing.z);
