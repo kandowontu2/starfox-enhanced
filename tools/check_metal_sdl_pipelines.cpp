@@ -1,6 +1,8 @@
 #include "starfox/render/sdl_metal_reflection_payload.hpp"
 #include "starfox/render/embedded_metal_reflection_programs.hpp"
 #include "starfox/render/gpu_calibrated_reflection_history.hpp"
+#include "starfox/render/gpu_calibrated_ray_composite.hpp"
+#include "starfox/render/sdl_metal_composite_payload.hpp"
 #include "starfox/render/gpu_preparation.hpp"
 #include <SDL3/SDL.h>
 #include <array>
@@ -27,13 +29,78 @@ struct Resources {
     SDL_GPUDevice* device{};
     SDL_PropertiesID props{};
     std::array<SDL_GPUComputePipeline*,25> pipelines{};
+    std::array<SDL_GPUShader*,5> shaders{};
+    std::array<SDL_GPUGraphicsPipeline*,4> graphics{};
     ~Resources() {
+        for(auto* pipeline:graphics) if(pipeline) SDL_ReleaseGPUGraphicsPipeline(device,pipeline);
+        for(auto* shader:shaders) if(shader) SDL_ReleaseGPUShader(device,shader);
         for(auto* pipeline:pipelines) if(pipeline) SDL_ReleaseGPUComputePipeline(device,pipeline);
         if(props) SDL_DestroyProperties(props);
         if(device) SDL_DestroyGPUDevice(device);
         SDL_Quit();
     }
 };
+
+bool load_graphics(Resources& resources) {
+    const auto programs=metal_composite::programs_for_sdk();
+    if(programs.size()!=resources.shaders.size()) {
+        std::fprintf(stderr,"COMPLETE5_GRAPHICS_PROGRAMS_REQUIRED\n");return false;
+    }
+    SDL_GPUShader* vertex=nullptr;
+    unsigned created=0;
+    for(std::size_t i=0;i<programs.size();++i) {
+        const auto& p=programs[i];
+        std::printf("SDL_GRAPHICS_SHADER_BEGIN %s / %s\n",p.name,p.entry);std::fflush(stdout);
+        SDL_GPUShaderCreateInfo info{};info.format=SDL_GPU_SHADERFORMAT_METALLIB;
+        info.entrypoint=p.entry;info.stage=p.stage;info.num_samplers=p.samplers;
+        info.num_storage_buffers=p.storage_buffers;info.num_uniform_buffers=p.uniforms;
+        if(!metal_composite::select(info,SDL_GetGPUShaderFormats(resources.device),p.name)) {
+            std::fprintf(stderr,"SDL_GRAPHICS_PAYLOAD_REFUSED %s: %s\n",p.name,SDL_GetError());continue;
+        }
+        resources.shaders[i]=create_gpu_shader(resources.device,&info);
+        if(!resources.shaders[i]) {
+            std::fprintf(stderr,"SDL_GRAPHICS_SHADER_FAILED %s: %s\n",p.name,SDL_GetError());continue;
+        }
+        if(p.stage==SDL_GPU_SHADERSTAGE_VERTEX) {
+            if(vertex) {std::fprintf(stderr,"DUPLICATE_GRAPHICS_VERTEX\n");return false;}
+            vertex=resources.shaders[i];
+        }
+        ++created;std::printf("SDL_GRAPHICS_SHADER_PASS %s\n",p.name);std::fflush(stdout);
+    }
+    if(created!=5 || !vertex) return false;
+    unsigned count=0;
+    for(std::size_t i=0;i<programs.size();++i) {
+        const auto& p=programs[i];
+        if(p.stage!=SDL_GPU_SHADERSTAGE_FRAGMENT) continue;
+        SDL_GPUColorTargetDescription targets[2]{};
+        targets[0].format=SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+        const bool witness=std::strcmp(p.name,"composite_witness")==0;
+        const bool liquid=std::strcmp(p.name,"water_guides")==0 || std::strcmp(p.name,"water_panel_guides")==0;
+        targets[1].format=witness?SDL_GPU_TEXTUREFORMAT_R32_FLOAT:SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT;
+        SDL_GPUGraphicsPipelineCreateInfo info{};info.vertex_shader=vertex;info.fragment_shader=resources.shaders[i];
+        info.primitive_type=SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+        info.rasterizer_state.fill_mode=SDL_GPU_FILLMODE_FILL;info.rasterizer_state.cull_mode=SDL_GPU_CULLMODE_NONE;
+        info.multisample_state.sample_count=SDL_GPU_SAMPLECOUNT_1;
+        info.target_info.color_target_descriptions=targets;info.target_info.num_color_targets=(witness||liquid)?2U:1U;
+        std::printf("SDL_GRAPHICS_PIPELINE_BEGIN %s targets=%u\n",p.name,info.target_info.num_color_targets);std::fflush(stdout);
+        if(count>=resources.graphics.size()) {std::fprintf(stderr,"EXCESS_GRAPHICS_PIPELINE\n");return false;}
+        resources.graphics[count]=create_gpu_graphics_pipeline(resources.device,&info);
+        if(!resources.graphics[count]) {
+            std::fprintf(stderr,"SDL_GRAPHICS_PIPELINE_FAILED %s: %s\n",p.name,SDL_GetError());return false;
+        }
+        ++count;std::printf("SDL_GRAPHICS_PIPELINE_PASS %s\n",p.name);std::fflush(stdout);
+    }
+    if(count!=4) return false;
+    {
+        GpuCalibratedRayComposite owner;
+        if(!owner.initialize(resources.device,SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM)) {
+            std::fprintf(stderr,"ACTUAL_COMPOSITE_OWNER_FAILED: %s\n",owner.status().c_str());return false;
+        }
+        owner.release_device();
+        std::printf("ACTUAL_COMPOSITE_OWNER_INITIALIZATION_PASS\n");
+    }
+    std::printf("ALL5_ACTUAL_SDL_METAL_GRAPHICS_PIPELINES_PASS\n");return true;
+}
 }
 
 int main(int argc,char** argv) {
@@ -119,5 +186,7 @@ int main(int argc,char** argv) {
         std::printf("ACTUAL_HISTORY_OWNER_INITIALIZATION_PASS\n");
     }
     std::printf("ALL25_ACTUAL_SDL_METAL_PIPELINES_PASS; no dispatch/numerical/frame-cost/game acceptance\n");
+    if(!load_graphics(resources)) return 1;
+    std::printf("ALL30_ACTUAL_SDL_METAL_PROGRAMS_PASS; no draw/dispatch/numerical/frame-cost/game acceptance\n");
     return 0;
 }

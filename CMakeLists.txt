@@ -42,7 +42,8 @@ target_compile_options(starfox_metal_sdl_pipeline_check PRIVATE
     -O3 -fno-fast-math -ffp-contract=off -Wall -Wextra -Wconversion -Werror)
 target_compile_definitions(starfox_metal_sdl_pipeline_check PRIVATE
     SDL_MAIN_HANDLED=1 STARFOX_REFLECTION_METAL_EXACT_WORKGROUP=1)
+target_compile_definitions(starfox_metal_sdl_pipeline_check PRIVATE STARFOX_CALIBRATED_COMPOSITE_METAL=1)
 target_link_libraries(starfox_metal_sdl_pipeline_check PRIVATE
-    starfox_metal_reflection_history SDL3::SDL3)
+    starfox_metal_reflection_history starfox_metal_composite SDL3::SDL3)
 # This native link consumer creates no SDL/Metal device or window. iOS is
 # compiled/linked only; no simulator output is mislabeled as physical evidence.

@@ -1,4 +1,4 @@
-name: Temporary combined Metal factory linking (no GPU, no release)
+name: Temporary complete Metal driver investigation (no release)
 on:
   workflow_dispatch:
 permissions:
@@ -6,12 +6,12 @@ permissions:
   actions: read
 jobs:
   metal-embedding:
-    name: Complete30 real Metal factories / ${{ matrix.sdk }}
+    name: Complete30 native factories and actual driver / ${{ matrix.sdk }}
     runs-on: macos-15-intel
     strategy:
       fail-fast: false
       matrix:
-        sdk: [macosx, iphoneos]
+        sdk: [macosx]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -36,6 +36,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 tools/check_link.py --sdk '${{ matrix.sdk }}' --artifacts '${{ runner.temp }}/sdk-artifacts' --graphics-artifacts '${{ runner.temp }}/graphics-artifacts' --out '${{ runner.temp }}/embedding-result'
+      - name: Attempt all 30 programs with the actual Metal driver (unavailability is not a pass)
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python3 tools/run_metal_pipeline_probe.py --compiled '${{ runner.temp }}/embedding-result' --out '${{ runner.temp }}/driver-result'
       - name: Preserve diagnostics and nonprivate native shader artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -55,5 +59,8 @@ jobs:
             ${{ runner.temp }}/embedding-result/patched-SDL_gpu_metal.m
             ${{ runner.temp }}/embedding-result/libstarfox_metal_reflection_history.a
             ${{ runner.temp }}/embedding-result/libstarfox_metal_composite.a
+            ${{ runner.temp }}/driver-result/*.json
+            ${{ runner.temp }}/driver-result/*.stdout.log
+            ${{ runner.temp }}/driver-result/*.stderr.log
           if-no-files-found: warn
           retention-days: 7
