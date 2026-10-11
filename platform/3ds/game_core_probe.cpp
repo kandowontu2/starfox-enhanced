@@ -531,7 +531,7 @@ int main() {
                 const auto artwork=[&] { STARFOX_3DS_FRAME_PHASE(layers);return layers->prepare(source,tile_budget); }();
                 const auto frame=[&] {
                     STARFOX_3DS_FRAME_PHASE(composite);
-                    return composite.prepare(source.plan,
+                    return composite.prepare_validated(source.plan,
                         std::array{artwork.before_models,dot_frame,model_frame,artwork.after_models,math,mask,label,menu_frame},dashboard,artwork.clear);
                 }();
                 { STARFOX_3DS_FRAME_PHASE(present);gpu->present(frame,dashboard); }

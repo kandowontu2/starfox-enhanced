@@ -1,4 +1,5 @@
 #include "native_gpu.hpp"
+#include "starfox/platform/nintendo_3ds/pica_composite.hpp"
 #include "starfox/platform/nintendo_3ds/pica_residency.hpp"
 #include "starfox/platform/nintendo_3ds/pica_texture_update.hpp"
 #include "starfox/platform/nintendo_3ds/pica_program_binding.hpp"
@@ -267,6 +268,15 @@ void NativeGpu::present(const PicaFrame& frame,ImageView lower) {
     STARFOX_3DS_STARTUP_MARK(gpu_frame_validate);
     validate_pica_frame(frame,lower);
     STARFOX_3DS_STARTUP_MARK(gpu_frame_validate_complete);
+    present_checked(frame,lower);
+}
+void NativeGpu::present(const PicaValidatedFrame& prepared,ImageView lower) {
+    STARFOX_3DS_STARTUP_MARK(gpu_frame_validate);
+    const auto& frame=prepared.checked_frame(lower);
+    STARFOX_3DS_STARTUP_MARK(gpu_frame_validate_complete);
+    present_checked(frame,lower);
+}
+void NativeGpu::present_checked(const PicaFrame& frame,ImageView lower) {
     // Separate the two waits: FrameBegin(SYNCDRAW) hides both VBlank and queue
     // retirement behind one receipt, making a real-device stall ambiguous.
     STARFOX_3DS_STARTUP_MARK(gpu_vblank_wait);

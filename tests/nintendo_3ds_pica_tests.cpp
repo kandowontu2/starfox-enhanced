@@ -1,9 +1,11 @@
 #include "starfox/platform/nintendo_3ds/pica_frame.hpp"
+#include "starfox/platform/nintendo_3ds/pica_composite.hpp"
 #include "starfox/platform/nintendo_3ds/pica_residency.hpp"
 #include "starfox/platform/nintendo_3ds/pica_texture_update.hpp"
 #include <iostream>
 #include <cstdlib>
 #include <new>
+#include <type_traits>
 
 namespace {
 using namespace starfox::platform::nintendo_3ds;
@@ -14,6 +16,75 @@ void require(bool value,const char* message) {++checks;if(!value) throw std::run
 template<class F> void rejects(F action,const char* message) {
     bool rejected=false;try {action();} catch(const std::invalid_argument&) {rejected=true;}
     require(rejected,message);
+}
+void validated_composition_handoff() {
+    static_assert(!std::is_default_constructible_v<PicaValidatedFrame>);
+    static_assert(!std::is_constructible_v<PicaValidatedFrame,PicaFrame>);
+    static_assert(!std::is_copy_constructible_v<PicaComposite>
+        && !std::is_move_constructible_v<PicaComposite>);
+    Canvas lower;
+    std::array<PicaVertex,6> vertices{};
+    std::array<PicaDraw,2> draws{};
+    std::array<std::uint8_t,8*8*4> pixels{};pixels.fill(255);
+    std::array<std::uint8_t,8*8> layers{};layers.fill(2);
+    PicaImage image{pixels,8,8,8*4,4};
+    draws[0].count=draws[1].count=3;draws[1].first=3;draws[1].texture=0;
+    for(const auto plan:{plan_frame(0,false,ScreenUse::world),plan_frame(0,true,ScreenUse::world),
+        plan_frame(1,true,ScreenUse::world,StereoSettings{1,16,512})}) {
+        PicaFrame source{plan,vertices,draws,std::span(&image,1)};
+        PicaComposite composite;
+        auto prepared=composite.prepare_validated(plan,std::span(&source,1),lower.view(),{3,5,7});
+        const auto& frame=prepared.checked_frame(lower.view());
+        require(frame.vertices.data()!=vertices.data() && frame.draws.data()!=draws.data()
+            && frame.textures.data()!=&image,"Validated geometry/metadata still aliases mutable inputs");
+        require(std::equal(frame.vertices.begin(),frame.vertices.end(),vertices.begin())
+            && frame.draws[1].first==3 && frame.draws[1].texture==0
+            && frame.textures[0].pixels.data()==pixels.data() && same_pica_plan(frame.plan,plan)
+            && frame.clear==Rgb{3,5,7},"Validated handoff changed geometry/metadata/borrowed art/eye plan");
+        validate_pica_frame(frame,lower.view()); // Independent ordinary submission gate.
+        auto bad_lower=lower.view();bad_lower.width=319;
+        rejects([&]{static_cast<void>(prepared.checked_frame(bad_lower));},"Validated handoff accepted wrong lower LCD extent");
+        bad_lower=lower.view();bad_lower.pixels={};
+        rejects([&]{static_cast<void>(prepared.checked_frame(bad_lower));},"Validated handoff accepted missing lower LCD bytes");
+        vertices[0].position[0]=std::numeric_limits<float>::infinity();draws[1].texture=99;image.width=0;
+        validate_pica_frame(prepared.checked_frame(lower.view()),lower.view());
+        require(frame.vertices[0].position[0]==0 && frame.draws[1].texture==0 && frame.textures[0].width==8,
+            "Mutating source metadata changed already-owned validated composition");
+        rejects([&]{composite.prepare_validated(plan,std::span(&source,1),lower.view());},
+            "Invalid input minted a validated composition");
+        static_cast<void>(prepared.checked_frame(lower.view())); // Failed publication keeps the previous complete frame.
+        vertices[0].position[0]=0;draws[1].texture=0;image.width=8;
+        composite.prepare_layers(plan,std::span(&source,1));
+        rejects([&]{static_cast<void>(prepared.checked_frame(lower.view()));},"Layer-only publication did not expire the prior handle");
+        prepared=composite.prepare_validated(plan,std::span(&source,1),lower.view());
+        composite.prepare(plan,std::span(&source,1),lower.view());
+        rejects([&]{static_cast<void>(prepared.checked_frame(lower.view()));},"Ordinary publication did not expire the prior handle");
+        prepared=composite.prepare_validated(plan,std::span(&source,1),lower.view());
+        auto moved=std::move(prepared);static_cast<void>(moved.checked_frame(lower.view()));
+        rejects([&]{static_cast<void>(prepared.checked_frame(lower.view()));},"Moved-from handle was accepted or dereferenced");
+        auto copy=moved;
+        composite.prepare_validated(plan,std::span(&source,1),lower.view());
+        rejects([&]{static_cast<void>(moved.checked_frame(lower.view()));},"Validated publication left an older handle live");
+        rejects([&]{static_cast<void>(copy.checked_frame(lower.view()));},"Copied handle escaped publication invalidation");
+        const auto doomed=[&] {
+            PicaComposite temporary;
+            return temporary.prepare_validated(plan,std::span(&source,1),lower.view());
+        }();
+        rejects([&]{static_cast<void>(doomed.checked_frame(lower.view()));},"Destroyed owner left borrowed geometry readable");
+        image.source_layers=layers;image.layer_pitch=8;
+        draws[1].space=PicaSpace::screen;draws[1].depth_test=draws[1].depth_write=false;
+        vertices[3].colour[3]=.5F;
+        rejects([&]{composite.prepare_validated(plan,std::span(&source,1),lower.view());},
+            "Validated handoff bypassed source-layer opacity validation");
+        vertices[3].colour[3]=1;
+        auto opaque=composite.prepare_validated(plan,std::span(&source,1),lower.view());
+        validate_pica_frame(opaque.checked_frame(lower.view()),lower.view());
+        pixels[3]=0;
+        rejects([&]{validate_pica_layers(opaque.checked_frame(lower.view()).textures[0]);},
+            "Borrowed changed artwork escaped the existing upload ownership/opacity gate");
+        pixels[3]=255;image.source_layers={};image.layer_pitch=0;draws[1].space=PicaSpace::world;
+        draws[1].depth_test=draws[1].depth_write=true;
+    }
 }
 void vertex_validation_bits() {
     // Independent previous floating-point contract, not another bit classifier.
@@ -732,6 +803,7 @@ STARFOX_TEXTURE_NOINLINE void operator delete(void* memory,std::size_t) noexcept
 STARFOX_TEXTURE_NOINLINE void operator delete[](void* memory,std::size_t) noexcept {std::free(memory);}
 #undef STARFOX_TEXTURE_NOINLINE
 int main() try {
+    validated_composition_handoff();
     vertex_validation_bits();vertex_validation_draw_policy();texture_upload();full_size_texture_upload();changed_tile_upload();texture_residency();reusable_texture_cache();vertex_residency();projection_and_draws();layer_upload();sampled_texture_orientation();
     require(pica_uv_mode(false,false)==std::array<float,4>{1,0,0,0},"Ordinary texture projection changed");
     require(pica_uv_mode(true,false)==std::array<float,4>{0,1,0,0},"LCD parity texture lost its homogeneous Q");

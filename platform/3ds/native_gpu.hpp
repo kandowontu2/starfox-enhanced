@@ -3,6 +3,7 @@
 #include <memory>
 
 namespace starfox::platform::nintendo_3ds {
+class PicaValidatedFrame;
 // NativeDisplay owns gfx/HID; this owns the sole Citro3D presenter. Do not call
 // NativeDisplay::present/gfxSwapBuffers while this renderer is alive.
 class NativeGpu {
@@ -16,7 +17,11 @@ public:
     // Validates then waits for the previous GPU queue BEFORE overwriting any
     // VBO/texture. Geometry uploads once, projection/draw recording per eye.
     void present(const PicaFrame&,ImageView dashboard);
+    // Trusted composition still checks its owner/generation and dashboard;
+    // changed texture bytes retain every residency/provenance check.
+    void present(const PicaValidatedFrame&,ImageView dashboard);
 private:
+    void present_checked(const PicaFrame&,ImageView dashboard);
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
