@@ -1,6 +1,12 @@
 name: Temporary full Metal game integration (no release)
 on:
   workflow_dispatch:
+    inputs:
+      sdk:
+        description: Application SDK to build (no release)
+        type: choice
+        default: both
+        options: [both, macosx, iphoneos]
 permissions:
   contents: read
 jobs:
@@ -11,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        sdk: [macosx, iphoneos]
+        sdk: ${{ fromJSON(inputs.sdk == 'macosx' && '["macosx"]' || inputs.sdk == 'iphoneos' && '["iphoneos"]' || '["macosx","iphoneos"]') }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -58,9 +64,15 @@ jobs:
           directory=Release
           if [[ "${sdk}" == iphoneos ]]; then directory=Release-iphoneos; fi
           app="build/${sdk}/${directory}/StarFoxEnhanced.app"
-          test -s "${app}/StarFoxEnhanced"
-          plutil -lint "${app}/Info.plist"
-          lipo -archs "${app}/StarFoxEnhanced"
+          executable="${app}/Contents/MacOS/StarFoxEnhanced"
+          plist="${app}/Contents/Info.plist"
+          if [[ "${sdk}" == iphoneos ]]; then
+            executable="${app}/StarFoxEnhanced"
+            plist="${app}/Info.plist"
+          fi
+          test -s "${executable}"
+          plutil -lint "${plist}"
+          lipo -archs "${executable}"
           if [[ "${sdk}" == iphoneos ]]; then
             python3 tools/package_ios.py --app "${app}" \
               --output StarFoxEnhanced-metal-integration-unsigned.ipa
