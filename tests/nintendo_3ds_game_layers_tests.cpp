@@ -1,5 +1,6 @@
 #include "starfox/platform/nintendo_3ds/game_layers.hpp"
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <new>
 
@@ -360,6 +361,117 @@ void atlas_landscape_depth() {
             "Finite geometry overflow was not rejected atomically");
         require(old.size()==accepted->vertices.size() && std::equal(old.begin(),old.end(),accepted->vertices.begin()),
             "Failed receiver preparation invalidated a previous borrowed complete frame");
+        const auto exact=[&](const PicaFrame& actual,const PicaFrame& expected) {
+            require(actual.vertices.size()==expected.vertices.size()
+                && std::memcmp(actual.vertices.data(),expected.vertices.data(),actual.vertices.size_bytes())==0,
+                "Reused terrain differs from a fresh complete mesh");
+            require(actual.draws.size()==expected.draws.size() && actual.textures.size()==expected.textures.size()
+                && actual.clear==expected.clear && same_pica_plan(actual.plan,expected.plan),
+                "Reused terrain lost its current plan, painter groups or clear");
+            for(unsigned i=0;i<actual.draws.size();++i) {
+                const auto& a=actual.draws[i];const auto& b=expected.draws[i];
+                require(a.first==b.first && a.count==b.count && a.texture==b.texture && a.model==b.model
+                    && a.space==b.space && a.depth_test==b.depth_test && a.depth_write==b.depth_write
+                    && a.alpha_blend==b.alpha_blend && a.screen_dither==b.screen_dither && a.dither_odd==b.dither_odd
+                    && a.clip==b.clip && a.source_layer==b.source_layer && a.colour_op==b.colour_op
+                    && a.projected_uv==b.projected_uv,"Reused terrain changed draw ownership or depth");
+            }
+            for(unsigned i=0;i<actual.textures.size();++i) {
+                const auto& a=actual.textures[i];const auto& b=expected.textures[i];
+                require(a.width==b.width && a.height==b.height && a.pitch==b.pitch && a.channels==b.channels
+                    && a.repeat==b.repeat && a.layer_pitch==b.layer_pitch
+                    && std::equal(a.pixels.begin(),a.pixels.end(),b.pixels.begin(),b.pixels.end())
+                    && std::equal(a.source_layers.begin(),a.source_layers.end(),b.source_layers.begin(),b.source_layers.end()),
+                    "Reused terrain retained obsolete texture metadata/artwork");
+            }
+        };
+        auto input=*tiles;
+        std::array<PicaImage,1> images{input.textures.front()};input.textures=images;
+        std::vector<std::uint8_t> pixels(images[0].pixels.begin(),images[0].pixels.end());
+        pixels[0]^=0x7f;images[0].pixels=pixels;input.clear={41,73,101};
+        const auto compare_fresh=[&] {
+            input.plan=frame.plan;
+            GameScenery fresh;
+            const auto reference=fresh.prepare_tiles(frame,input,owner.coverage_guard(),pica_vertex_limit);
+            const auto reused=receiver.prepare_tiles(frame,input,owner.coverage_guard(),pica_vertex_limit);
+            require(reference && reused,"Terrain reuse fixture lost complete atlas acceptance");
+            exact(*reused,*reference);
+        };
+        const auto before_reuse=receiver.atlas_geometry_work();
+        for(float slider:{0.F,.5F,1.F}) {
+            frame.plan=plan_frame(slider,true,ScreenUse::world);compare_fresh();
+        }
+        require(receiver.atlas_geometry_work().builds==before_reuse.builds
+            && receiver.atlas_geometry_work().reuses==before_reuse.reuses+3,
+            "Slider/borrowed-art changes rebuilt the identical terrain mesh");
+        // Even unused accepted draw metadata must come from this frame,
+        // rather than leaking a previous source group's TEV constant.
+        std::array<PicaDraw,1> current_draw{input.draws.front()};
+        current_draw[0].dither_odd={17,29,43,255};input.draws=current_draw;
+        compare_fresh();
+        require(receiver.atlas_geometry_work().builds==before_reuse.builds
+            && receiver.atlas_geometry_work().reuses==before_reuse.reuses+4,
+            "Current source draw metadata rebuilt identical terrain");
+        // Plane and every geometry projection dependency must invalidate reuse.
+        for(unsigned field=0;field<4;++field) {
+            if(field==0)frame.plan.focal_x*=.75F;
+            if(field==1)frame.plan.focal_y*=1.25F;
+            if(field==2)frame.plan.near_plane*=2;
+            if(field==3)frame.plan.far_plane*=.5F;
+            const auto builds=receiver.atlas_geometry_work().builds;compare_fresh();
+            require(receiver.atlas_geometry_work().builds==builds+1,"Changed projection reused stale terrain");
+            compare_fresh();require(receiver.atlas_geometry_work().builds==builds+1,
+                "Held changed projection rebuilt terrain twice");
+        }
+        scene->landscape_grid_height=-200;
+        auto builds=receiver.atlas_geometry_work().builds;compare_fresh();
+        require(receiver.atlas_geometry_work().builds==builds+1,"Changed source plane reused stale terrain");
+        std::vector<PicaVertex> changed(input.vertices.begin(),input.vertices.end());
+        for(unsigned i:{0U,3U,5U})changed[i].position[0]+=.125F;
+        input.vertices=changed;builds=receiver.atlas_geometry_work().builds;compare_fresh();
+        require(receiver.atlas_geometry_work().builds==builds+1,"Changed source tile reused stale terrain");
+        // A failure on the hot path must not mutate borrowed current geometry
+        // or texture headers, and a valid retry should retain that cache.
+        const auto held=receiver.prepare_tiles(frame,input,owner.coverage_guard(),pica_vertex_limit);
+        const auto held_vertices=std::vector<PicaVertex>(held->vertices.begin(),held->vertices.end());
+        const auto held_image=held->textures[0];
+        std::vector<std::uint8_t> excessive(1024*1024*4);
+        images[0]={excessive,1024,1024,4096,4};bool refused=false;
+        try {static_cast<void>(receiver.prepare_tiles(frame,input,owner.coverage_guard(),pica_vertex_limit));}
+        catch(const std::invalid_argument&){refused=true;}
+        require(refused && held->textures[0].pixels.data()==held_image.pixels.data()
+            && std::equal(held_vertices.begin(),held_vertices.end(),held->vertices.begin(),held->vertices.end()),
+            "Hot terrain preflight exceeded residency budget or mutated previous borrowed state");
+        images[0]=held_image;builds=receiver.atlas_geometry_work().builds;compare_fresh();
+        require(receiver.atlas_geometry_work().builds==builds,"Rejected hot-path input discarded valid terrain reuse");
+        // Previously validated vertices cannot bypass a later, narrower
+        // declared source bound, even when that bound covers the eye receivers.
+        auto wider=changed;const auto wide_guard=owner.coverage_guard()+8;
+        for(unsigned i:{0U,3U,5U})wider[i].position[0]=-float(wide_guard);
+        input.vertices=wider;
+        const auto wide=receiver.prepare_tiles(frame,input,wide_guard,pica_vertex_limit);
+        require(bool(wide),"Wider terrain bounds fixture failed");
+        const auto wide_vertices=std::vector<PicaVertex>(wide->vertices.begin(),wide->vertices.end());
+        refused=false;
+        try {static_cast<void>(receiver.prepare_tiles(frame,input,owner.coverage_guard(),pica_vertex_limit));}
+        catch(const std::invalid_argument&){refused=true;}
+        require(refused && std::equal(wide_vertices.begin(),wide_vertices.end(),wide->vertices.begin(),wide->vertices.end()),
+            "Cached terrain bypassed narrowed source bounds or changed borrowed geometry on failure");
+        input.vertices=changed;compare_fresh();
+        // A successful different receiver replaces this owner's mesh. It
+        // must invalidate terrain reuse even when the next atlas is identical.
+        auto water_frame=source(simulation::GameFlowState::gameplay,1);
+        auto water_scene=std::make_shared<vr::GameSceneSnapshot>(*water_frame.current);
+        water_scene->background_water_surround=true;water_scene->camera.y=-96;water_scene->shadow_height=0;
+        water_frame.current=water_frame.previous=water_scene;
+        PpuBatch water_batch;water_batch.passes={{PpuLayer::bg2}};
+        water_batch.space=PicaSpace::scenery;water_batch.expand_horizontal=true;
+        PicaRaster water_raster;
+        const auto water_input=water_raster.prepare(water_frame.raster->ppu,water_batch,water_frame.plan,15,0,
+            source_water_guard(water_frame));
+        static_cast<void>(receiver.prepare_water(water_frame,water_input,water_raster.coverage_guard()));
+        builds=receiver.atlas_geometry_work().builds;compare_fresh();
+        require(receiver.atlas_geometry_work().builds==builds+1,"Water publication reused a stale terrain bank");
     }
 }
 void landscape_bg1_priority() {

@@ -26,6 +26,8 @@ the following work:
 | `gpu_upload` | Residency comparisons, changed texture packing/uploads and VBO flush |
 | `gpu_record` | CPU-side shader/state setup and eye/lower-LCD command encoding |
 | `gpu_submit` | CPU-side FrameEnd command flush/submission |
+| `terrain_build` | Landscape-atlas clipping/unprojection/publication, including declined attempts |
+| `terrain_reuse` | Reuse of the identical validated landscape mesh with current borrowed artwork |
 
 Parents include children. In particular, `cpu` also occurs inside strategies,
 view/cull/audio IRQ and video work; the two stem rows contain their SPC rows.
@@ -48,10 +50,15 @@ times. GPU queue pressure appears in `gpu_wait`; do not infer a GPU bottleneck
 from the parent `present` duration alone. Markers do not change submission,
 queue ownership, source cadence or stereo policy.
 
-The same CSV header is retained; consumers must allow all thirty phase
+The same CSV header is retained; consumers must allow all thirty-two phase
 names and reject unknown names rather than silently ignoring malformed data.
+The terrain rows are children of `layers`; a cache-hit count is not a console
+FPS claim. The first thirty enum indices remain unchanged. Finite vertices
+are retained only when the plane, focal/near/far limits and exact source atlas
+vertices match. Eye/slider changes still apply through their current matrices;
+guard coverage, resident byte budgets and transactional failure behavior remain.
 
 `starfox_3ds_cpu_timing_check` prints every observed phase but still requires
 the original logic/video/capture/audio timers. Its default complete-state/PCM
 hashing and source-cadence assertions remain intact. This diagnostic is not a
-substitute for physical Original-3DS performance/audio/slider acceptance.
+substitute for physical New-3DS-family performance/audio/slider acceptance.

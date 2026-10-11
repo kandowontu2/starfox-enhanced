@@ -47,11 +47,14 @@ class PackageTests(unittest.TestCase):
         self.assertFalse(info["private_assets_included"])
         self.assertEqual(info["source_commit"], COMMIT)
         self.assertIn("New Nintendo 3DS", info["target"])
+        self.assertNotIn("original", info["target"].lower())
+        self.assertEqual(info["supported_models"],
+                         ["New Nintendo 3DS", "New Nintendo 3DS XL", "New Nintendo 2DS XL"])
         self.assertEqual(info["hardware_policy"], {
             "new_3ds": "CPU/cache speedup and slider-controlled stereo",
             "new_2ds_xl": "CPU/cache speedup, mono",
-            "original_3ds_xl_2ds": "standard CPU, mono; slider ignored",
-            "unknown": "standard CPU, mono"})
+            "original_3ds_xl_2ds": "unsupported; legacy standard-CPU mono fallback, slider ignored",
+            "unknown": "unsupported; conservative standard-CPU mono fallback"})
         with zipfile.ZipFile(self.output) as archive:
             self.assertEqual(set(archive.namelist()), {MODULE.APP_DIR + "starfox-enhanced.3dsx",
                 MODULE.APP_DIR + "starfox-enhanced.smdh", "README.txt", "BUILD-INFO.json", "SHA256SUMS.txt"})
@@ -67,6 +70,7 @@ class PackageTests(unittest.TestCase):
                             instructions.index(b"## Current build and validation"))
             self.assertIn(b"/3ds/starfox-enhanced/Starfox-Assets.BIN", instructions)
             self.assertIn(b"pre-game menu", instructions)
+            self.assertIn(b"Original\n3DS/3DS XL/2DS are unsupported", instructions)
             for line in archive.read("SHA256SUMS.txt").decode().splitlines():
                 digest, name = line.split("  ", 1)
                 self.assertEqual(hashlib.sha256(archive.read(name)).hexdigest(), digest)

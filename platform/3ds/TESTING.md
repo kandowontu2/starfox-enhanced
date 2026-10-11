@@ -1,9 +1,21 @@
-# Star Fox Enhanced — New 3DS stereo / original-model mono test candidate
+# Star Fox Enhanced — New Nintendo 3DS-family test candidate
 
 ## Quick start for testers
 
-1. Download the current `StarFoxEnhanced-3ds-test.zip` experimental player
-   (or its numbered tester ZIP) and extract it to the SD card's root.
+Supported targets are **New 3DS, New 3DS XL and New 2DS XL**. Original
+3DS/3DS XL/2DS are unsupported: the owner reports only 2--3 FPS. Please do not
+request further old-model performance tests. Legacy mono code and historical
+results below are retained, but no longer describe the supported target.
+For now, development/regression testing remains emulator-led rather than
+requesting a hardware test for each incremental candidate.
+
+1. Use `StarFoxEnhanced-3ds-test-r376.zip` with its companion
+   `StarFoxEnhanced-3ds-test-r376-START-HERE.txt`, or download the experimental
+   `StarFoxEnhanced-3ds-test.zip` artifact from
+   [ARM run 38154475650](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38154475650).
+   Extract the ZIP to the SD card's root, keeping its folder structure. When
+   updating an earlier build, replace only the `.3dsx` and `.smdh`; preserve the existing
+   BIN, settings, saves and diagnostics.
 2. Put your own `Starfox-Assets.BIN` in `/3ds/starfox-enhanced/`.
    The final path must be `/3ds/starfox-enhanced/Starfox-Assets.BIN`.
    Do not put a ROM in that folder instead of the generated BIN.
@@ -11,9 +23,15 @@
    console's `/3ds/dspfirm.cdc`; it is not included in the download.
 4. In Homebrew Launcher, launch **Star Fox Enhanced - TEST**. Keep the
    pre-game menu and choose **START GAME** normally.
-5. Try Training and Corneria. On New 3DS/XL, start with the slider low, then
-   compare slider off and halfway. Original 3DS/XL and 2DS intentionally stay
-   mono. Check sound, pause/resume, and Select + Start to exit.
+5. R376 is confirmed running on New 3DS XL with sound, slider and HOME/exit.
+   Its remaining reported problems are ground hiding lights/model bottoms and
+   low presentation FPS. Start with Preview OFF and the slider down, then
+   compare slider off/halfway and enable the FPS counter. Preserve the newest
+   `native-frame-profile-*.csv` for performance investigation. If a hard freeze
+   recurs, stop repeating it and send the newest startup/frame CSVs.
+6. Once ordinary Start is stable, try Training and Corneria. On New 3DS/XL, start with the slider low, then
+   compare slider off and halfway. New 2DS XL uses mono with the same faster
+   CPU/cache profile. Check sound, pause/resume, and Select + Start to exit.
 
 Back up existing `/3ds/starfox-enhanced/` saves/settings first. If boot fails,
 photograph the on-screen error; it should remain visible. Report console model,
@@ -39,7 +57,88 @@ still required.
 
 ## Current build and validation
 
-The current functional baseline is `build/StarFoxEnhanced-3ds-test-r149.zip`.
+The current candidate is `build/StarFoxEnhanced-3ds-test-r376.zip`
+(1,127,314 bytes), source `454e8fb8839d021c7482e41cfe8b224ccba84947`.
+ZIP SHA256: `385b9c99de7ed9694c0ffa77828f548a1dfef776bd42c0fc5a6c43fb3fb815d2`.
+Its [source-only ARM run 38154475650](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38154475650)
+passes all 47 host tests, native compilation, compiled shader output, stack and
+package gates. Independent local checks verify all ZIP members, CRCs, native
+ELF/3DSX/SMDH and the identical local/CI compiled shader.
+
+The exact native binary passes default Original A-confirmed Start, a minute
+of rendering and normal exit in strict Azahar 2126.2. Physical R375 froze at
+the second-frame GPU queue wait; the owner now confirms R376 works on New
+3DS XL, including sound, the slider and HOME/exit. Ground occlusion and low
+presentation FPS still need correction; sleep/resume and long-run stability
+are not established by that report.
+The same R376 binary also passes EX Preview ON/OFF/ON, ordinary Start,
+a minute of rendering and normal guest/host shutdown with exit code 0.
+The original-model emulator configuration also passes fresh default
+A-confirmed Start, a minute of rendering and normal guest/host exit code 0.
+Original-console performance and HOME/sleep remain unverified.
+
+## Earlier R373 validation
+
+The earlier follow-up is `build/StarFoxEnhanced-3ds-test-r373.zip`
+(1,125,193 bytes), from source `f5876fc1bfd153a044ea0232c6c9350f2c3b0a33`.
+ZIP SHA256: `0adbdd501fe58379972f5e607454741bb57c7eb4b6eebe0545885f680d8d9116`.
+Its [source-only ARM run 38148953720](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38148953720)
+passes all 46 host tests, native ARM, stack and package gates. Independent
+download checks verify the five asset-free members and native 3DSX/SMDH hashes.
+
+Azahar 2126.2 with accurate GPU timings, accurate shader multiplication,
+synchronous shader/presentation work and memory exceptions found a null read
+inside Citro3D's shader rebinding after Preview. R373 keeps the previous CPU
+shader alive until rebinding completes, while still freeing its GPU targets,
+textures and vertex buffer. The strict native-binary retest passed Preview
+ON/OFF/ON, Start, a minute of post-menu PICA/audio work and normal exit.
+This does not establish real-console stability or FPS, or prove that the
+tester's initial Preview stall has the same cause.
+
+For equivalent emulator testing, use Azahar 2126.2 or newer; 2125.1.2 ignores
+`simulate_3ds_gpu_timings`. Enable `simulate_3ds_gpu_timings` and
+`shaders_accurate_mul` under Renderer, and `enable_exception_handler` under
+Debugging. Set each corresponding `\default=false` when editing INI directly.
+Disable asynchronous shaders/presentation and use New 3DS at 100% CPU clock.
+Verify the enabled values in the actual boot log. Unmapped-memory exceptions
+do not detect every buffer overrun within otherwise valid guest RAM.
+
+R180 freezes on a tester's real New 3DS XL while displaying the loading image.
+The supplied CSV shows loading finished and one GPU presentation returned;
+it does not prove GPU completion or identify the precise subsequent stall.
+R371/R373 use direct LCD presentation for Preview-OFF menus and initialize PICA
+only for a real preview, game or editor. It adds `native-startup-*.csv` phase
+receipts. R373 rearms a bounded trace window for each source replacement,
+reserves high-level receipts during audio preroll, and separates display-sync
+from GPU-queue waits. Preview is session-only and always starts OFF, including
+with older saved Preview-ON settings. If startup still freezes, send the
+newest startup CSV and `native-frame-profile-*.csv`, along with where it stopped.
+Retain existing data and old diagnostics. The ZIP's README contains earlier
+history; use `BUILD-INFO.json` and the R373 companion instructions for this build.
+
+## Earlier R180 validation and physical failure
+
+The earlier tester package is `build/StarFoxEnhanced-3ds-test-r180.zip`
+(1,120,357 bytes), from source `bbc5d96956291e5ffa8647cd462f2d99fb0bced5`.
+ZIP SHA256: `2d633592020ee7667d1f659e983ed8f0453c2bdf4c7662cee9c66eccce83d31d`.
+Its [source-only ARM run 38000160275](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38000160275)
+passes all 43 host tests and seven native targets, including stack and package
+checks. The five ZIP members, payload checksums and 81 actual ARM compiler
+commands were independently checked. The strict Release-O3 build keeps source
+game timing and does not enable fast-math, Ofast or LTO.
+
+This exact package completes all 42 ordinary emulator input events, gameplay,
+guest audio/GPU/kernel shutdown and normal host exit, with settings restored.
+That is functional evidence, not console FPS, audible output, slider or
+Home/sleep acceptance. New 3DS/XL stereo and Original/2DS mono remain the policy.
+Use your own BIN and DSP firmware. This is an experimental homebrew 3DSX,
+not a CIA or release; full console and campaign testing remains required.
+Check `BUILD-INFO.json` for the package's source rather than assuming the current
+working tree includes every staged change used by this candidate.
+
+## Earlier build validation
+
+The earlier functional baseline is `build/StarFoxEnhanced-3ds-test-r149.zip`.
 It reuses clipped terrain/water corner calculations while keeping the exact
 emitted geometry. The complete fresh host build and all 43 tests pass. An
 independent comparison against R148 matches every serialized vertex float and
@@ -64,7 +163,7 @@ Use the quick-start steps above and your own BIN/DSP firmware. New 3DS/XL stereo
 and old-model mono policy remain unchanged. Native full-game, audio, sleep and
 sustained performance testing is still required. No release is published.
 
-The newer strict native Release-O3 experiment is available separately as
+The earlier strict native Release-O3 experiment is available separately as
 `build/StarFoxEnhanced-3ds-test-r153.zip`, from
 [run 37936446669](https://github.com/kandowontu2/starfox-enhanced/actions/runs/37936446669)
 at source `28a28d010551944eade72d8e432964c69abb07f0`.
@@ -74,7 +173,7 @@ The full host tests, ARM/stack/package gates, five-member package audit and all
 strict arithmetic and no fast-math/IPO/LTO. Its ordinary emulator route stops
 after 26/42 input edges at the unchanged host-memory floor; it has no full
 runtime, console or measured performance verdict. Use R149 as the functional
-baseline when comparing this experimental build, and retain your save backup.
+baseline when comparing that historical experiment, and retain your save backup.
 
 The isolated R148 background follow-up passes all43 current host tests and
 24,584,446 BG2 pixel, palette, ownership, HDMA, budget and cache checks. It avoids

@@ -11,6 +11,9 @@ struct LandscapePlane {
 };
 LandscapePlane source_landscape_plane(const GamePresentation&);
 unsigned source_landscape_guard(const GamePresentation&);
+struct SceneryGeometryWork {
+    std::uint64_t builds{},reuses{};
+};
 bool native_landscape_scene(const GamePresentation&) noexcept;
 bool native_water_scene(const GamePresentation&) noexcept;
 double source_water_height(const GamePresentation&);
@@ -40,6 +43,7 @@ public:
     PicaFrame prepare_water(const GamePresentation&,const PicaFrame& bg2,unsigned available_guard);
     PicaFrame prepare_corridor(const GamePresentation&,const PicaFrame& bg2,unsigned available_guard);
     std::size_t working_geometry_bytes() const noexcept;
+    [[nodiscard]] SceneryGeometryWork atlas_geometry_work() const noexcept {return atlas_work_;}
 private:
     void ensure_vertex_space(std::size_t needed);
     PicaFrame publish(const GamePresentation&,const PicaFrame& source);
@@ -52,5 +56,14 @@ private:
     std::vector<PicaVertex> pending_vertices_;
     std::vector<PicaDraw> pending_draws_;
     std::vector<PicaImage> pending_images_;
+    struct AtlasGeometryKey {
+        LandscapePlane plane;
+        std::array<float,4> projection; // Focal X/Y, near/far; eye offsets do not change the shared mesh.
+        std::size_t source_vertices{};
+        unsigned available_guard{}; // Revalidate source bounds when the declared atlas coverage changes.
+        bool operator==(const AtlasGeometryKey&) const=default;
+    };
+    std::optional<AtlasGeometryKey> atlas_key_;
+    SceneryGeometryWork atlas_work_;
 };
 } // namespace starfox::platform::nintendo_3ds

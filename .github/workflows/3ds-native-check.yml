@@ -66,7 +66,7 @@ permissions:
   contents: read
 jobs:
   native-diagnostics:
-    name: New 3DS stereo / old-model mono native checks and test package
+    name: New Nintendo 3DS-family native checks and test package
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
@@ -151,7 +151,7 @@ jobs:
             '
           python3 tools/check_3ds_stack.py build/3ds-native
           python3 tools/check_3ds_shader.py build/3ds-native/pica_scene.shbin
-      - name: Validate and package the New 3DS stereo / old-model mono test candidate
+      - name: Validate and package the New Nintendo 3DS-family test candidate
         shell: bash
         run: |
           python3 tools/package_3ds_test.py \

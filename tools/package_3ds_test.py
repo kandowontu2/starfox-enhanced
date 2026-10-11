@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Package an explicit New 3DS stereo / original-model mono test, never private assets."""
+"""Package an explicit New Nintendo 3DS-family test, never private assets."""
 from __future__ import annotations
 
 import argparse
@@ -54,11 +54,12 @@ def package(elf: Path, three_dsx: Path, smdh: Path, source_commit: str, output: 
         raise ValueError("Output must be a new .zip file; existing packages are never overwritten")
     info = validate_native(elf, three_dsx, smdh)
     info.update(source_commit=source_commit, experimental=True, hardware_accepted=False,
-                target="New Nintendo 3DS / New 3DS XL stereo; original 3DS / XL and 2DS mono",
+                target="New Nintendo 3DS / New 3DS XL stereo; New Nintendo 2DS XL mono",
+                supported_models=["New Nintendo 3DS", "New Nintendo 3DS XL", "New Nintendo 2DS XL"],
                 hardware_policy={"new_3ds": "CPU/cache speedup and slider-controlled stereo",
                                  "new_2ds_xl": "CPU/cache speedup, mono",
-                                 "original_3ds_xl_2ds": "standard CPU, mono; slider ignored",
-                                 "unknown": "standard CPU, mono"},
+                                 "original_3ds_xl_2ds": "unsupported; legacy standard-CPU mono fallback, slider ignored",
+                                 "unknown": "unsupported; conservative standard-CPU mono fallback"},
                 private_assets_included=False)
     instructions = Path(__file__).resolve().parents[1] / "platform/3ds/TESTING.md"
     attribution = instructions.with_name("UPSTREAM-STARWING.md")
@@ -104,7 +105,7 @@ def main() -> None:
         parser.exit(1, f"3DS package rejected: {error}\n")
     print(f"Validated experimental 3DS package: {args.output}")
     print(f"3DSX {info['three_dsx_bytes']} bytes SHA256 {info['three_dsx_sha256']}")
-    print("New 3DS stereo / original-model mono hardware acceptance and full-flow validation remain required.")
+    print("New 3DS-family mono/stereo hardware acceptance and full-flow validation remain required; old models are unsupported.")
 
 
 if __name__ == "__main__":

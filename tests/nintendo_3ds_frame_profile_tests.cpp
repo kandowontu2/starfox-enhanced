@@ -34,6 +34,7 @@ int main() try {
     static_assert(unsigned(FramePhase::present) == 13);
     static_assert(unsigned(FramePhase::bg_colour) == 24);
     static_assert(unsigned(FramePhase::gpu_sync) == 25);
+    static_assert(unsigned(FramePhase::terrain_build) == 30);
     static_assert(frame_phase_names.size() == unsigned(FramePhase::count));
     for(unsigned i = 0; i < frame_phase_names.size(); ++i) {
         require(!frame_phase_names[i].empty(), "Empty phase name");
@@ -109,8 +110,10 @@ int main() try {
         { STARFOX_3DS_FRAME_PHASE(gpu_upload); tick += 14; }
         { STARFOX_3DS_FRAME_PHASE(gpu_record); tick += 15; }
         { STARFOX_3DS_FRAME_PHASE(gpu_submit); tick += 16; }
+        { STARFOX_3DS_FRAME_PHASE(terrain_build); tick += 17; }
+        { STARFOX_3DS_FRAME_PHASE(terrain_reuse); tick += 18; }
 #if defined(STARFOX_3DS_PROFILE_FRAMES)
-        require(clock_calls == before + 32, "Detailed macros lost clock boundaries");
+        require(clock_calls == before + 36, "Detailed macros lost clock boundaries");
         for(unsigned i = unsigned(FramePhase::cpu); i < unsigned(FramePhase::count); ++i) {
             const std::uint64_t duration = i - unsigned(FramePhase::cpu) + 1U;
             require(details.totals()[i] == FramePhaseTotals{1, duration, duration},
