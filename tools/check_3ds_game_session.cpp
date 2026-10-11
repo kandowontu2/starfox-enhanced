@@ -81,6 +81,7 @@ struct SourceOracle {
             ?simulation::Experience::original:simulation::Experience::starfox_ex);
         game.set_timing_mode(simulation::TimingMode::original_speed);game.set_shape_face_counts(&counts);
         game.set_msu1_available(false); // Same platform capability, not source timing.
+        game.set_stereo_separation(16);game.set_stereo_convergence(512); // Native host optics, not VM writes.
         const auto uploads=game.map().take_apu_port_writes();
         if(!uploads.empty()) {
             static_cast<void>(spc.prime_upload_sequence(uploads));
@@ -112,6 +113,38 @@ struct SourceOracle {
         }
     }
 };
+void native_depth_preferences(const assets::RomImage& rom,const assets::SymbolMap& symbols) {
+    for(const auto map:{"BOOT","LEVEL1_1"}) {
+        CheckedSession fresh(rom,symbols,[](auto){},map);
+        SourceOracle source(rom,symbols,map);
+        require(fresh.preferences().separation==16 && fresh.preferences().convergence==512
+            && fresh.stereo_settings().separation==16 && fresh.stereo_settings().convergence==512,
+            "Native session without saved preferences inherited desktop depth defaults");
+        require(fresh.game().save_state()==source.game.save_state()
+            && fresh.audio().save_state()==source.spc.save_state(),
+            "Native depth default changed cartridge/SPC state beyond declared host preferences");
+        for(const std::uint16_t convergence:{16,512,1024,4096,65535}) {
+            GameSessionOptions options;options.preferences=GamePreferences{};
+            options.preferences->convergence=convergence;
+            CheckedSession saved(rom,symbols,[](auto){},map,{},options);
+            require(saved.preferences().convergence==convergence && saved.stereo_settings().convergence==convergence,
+                "Native constructor overrode saved/custom convergence");
+            const auto state=saved.save_state();const auto restored=saved.restored_state(state);
+            require(restored->save_state()==state && restored->preferences().convergence==convergence,
+                "Native state restore migrated saved/custom convergence");
+            const auto before=saved.game().save_state(),audio=saved.audio().save_state();
+            for(float slider:{0.F,.125F,.5F,1.F}) for(bool hardware:{false,true}) {
+                const auto frame=saved.presentation(slider,hardware,saved.stereo_settings());
+                const bool world=std::string_view(map)!="BOOT";
+                require(frame.plan.convergence==convergence && frame.plan.eye_count==(world && hardware && slider>0?2U:1U),
+                    "Native presentation ignored saved convergence or mono/setup policy");
+            }
+            require(saved.game().save_state()==before && saved.audio().save_state()==audio,
+                "Native slider/depth inspection advanced the cartridge or audio");
+        }
+    }
+    std::cout<<"  Native depth: fresh-session defaults, saved/custom values, full-state restore, mono/setup and slider continuity checked\n";
+}
 void parity(const assets::RomImage& rom,const assets::SymbolMap& symbols,const std::string& map,unsigned polls=720) {
     require(polls>=720 && polls<=14400 && polls%120==0,"Invalid native session parity duration");
     std::vector<std::int16_t> pcm;
@@ -574,7 +607,7 @@ void presentation_cadence(const assets::RomImage& rom,const assets::SymbolMap& s
         // setters (including cartridge RAM writes and pending laser state).
         // Give the independent oracle those same user choices, not just FPS.
         source.game.set_god_mode(false);source.game.set_default_laser(0);source.game.set_language(0);
-        source.game.set_selected_level(0);source.game.set_stereo_separation(16);source.game.set_stereo_convergence(1024);
+        source.game.set_selected_level(0);source.game.set_stereo_separation(16);source.game.set_stereo_convergence(512);
         source.game.set_presentation_fps(static_cast<std::uint16_t>(rate));source.game.set_show_fps(true);
         require(session.game().save_state()==source.game.save_state(),"Output cadence fixture initialized different source preferences");
         PresentationClock gate;PresentationRate measured;session.advance(0,0);
@@ -1517,6 +1550,7 @@ int main(int argc,char** argv) {
 #endif
         const bool states_only=argc==4 && std::string_view(argv[3])=="--states-only";
         const bool capabilities_only=argc==4 && std::string_view(argv[3])=="--capabilities-only";
+        const bool depth_only=argc==4 && std::string_view(argv[3])=="--native-depth-only";
         const bool sweep=argc==4 && std::string_view(argv[3])=="--stage-sweep";
         const bool fortuna_route=argc==4 && std::string_view(argv[3])=="--fortuna-source-route";
         const bool corneria_route=argc==4 && std::string_view(argv[3])=="--corneria-source-route";
@@ -1527,9 +1561,13 @@ int main(int argc,char** argv) {
         const bool death_route=argc==4 && std::string_view(argv[3])=="--death-source-route";
         const bool continue_yes=argc==4 && std::string_view(argv[3])=="--continue-yes-source-route";
         const bool continue_no=argc==4 && std::string_view(argv[3])=="--continue-no-source-route";
-        if(argc!=3 && !states_only && !capabilities_only && !sweep && !fortuna_route && !corneria_route && !carrier_route && !runtime_editors && !editor_chords && !fps_chords && !death_route && !continue_yes && !continue_no && !(argc==5 && std::string_view(argv[3])=="--capture"))
-            throw std::invalid_argument("Usage: game_session_check ROM SYMBOLS [--capture DIRECTORY | --states-only | --capabilities-only | --stage-sweep | --fortuna-source-route | --corneria-source-route | --attack-carrier-source-route | --runtime-editor-parity | --editor-chords | --fps-chords | --death-source-route | --continue-yes-source-route | --continue-no-source-route]");
+        if(argc!=3 && !states_only && !capabilities_only && !depth_only && !sweep && !fortuna_route && !corneria_route && !carrier_route && !runtime_editors && !editor_chords && !fps_chords && !death_route && !continue_yes && !continue_no && !(argc==5 && std::string_view(argv[3])=="--capture"))
+            throw std::invalid_argument("Usage: game_session_check ROM SYMBOLS [--capture DIRECTORY | --states-only | --capabilities-only | --native-depth-only | --stage-sweep | --fortuna-source-route | --corneria-source-route | --attack-carrier-source-route | --runtime-editor-parity | --editor-chords | --fps-chords | --death-source-route | --continue-yes-source-route | --continue-no-source-route]");
         const auto rom=assets::RomImage::load(argv[1]);const auto symbols=assets::SymbolMap::load(argv[2]);
+        if(depth_only) {
+            native_depth_preferences(rom,symbols);
+            std::cout<<"3DS native depth preferences: "<<checks<<" checks passed; host source/state parity, not physical stereo acceptance\n";return 0;
+        }
         if(continue_yes || continue_no) {
             natural_death_restart(rom,symbols,continue_yes);
             std::cout<<"3DS natural game-over/Continue source/composition parity: "<<checks<<" checks passed\n";return 0;
@@ -1565,6 +1603,7 @@ int main(int argc,char** argv) {
             full_state_parity(rom,symbols);
             std::cout<<"3DS actual full states: "<<checks<<" checks passed; host source parity, not console acceptance\n";return 0;
         }
+        native_depth_preferences(rom,symbols);
         parity(rom,symbols,"BOOT");parity(rom,symbols,"LEVEL1_1");handoff(rom,symbols);
         presentation_cadence(rom,symbols);
         native_capability_restore(rom,symbols);

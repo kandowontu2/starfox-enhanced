@@ -1,4 +1,5 @@
 #include "starfox/platform/nintendo_3ds/game_storage.hpp"
+#include "starfox/platform/nintendo_3ds/pica_frame.hpp"
 #include "starfox/state/archive.hpp"
 #include "starfox/state/container.hpp"
 #include <chrono>
@@ -55,6 +56,67 @@ GameSaveData fixture() {
     data.ex_rom_crc=0x12345678;data.ex_sram.resize(GameStorage::ex_sram_bytes);
     for(std::size_t i=0;i<data.ex_sram.size();++i) data.ex_sram[i]=std::uint8_t(i*73U+19U);
     return data;
+}
+void native_stereo_defaults() {
+    const GamePreferences defaults;
+    require(defaults.separation==16 && defaults.convergence==512,"Fresh native depth defaults changed");
+    // Independent native LCD expectations, including the actual PICA matrix
+    // and infinity draw matrix. HUD remains at screen depth, not at the new
+    // convergence distance. There is no added background-only disparity.
+    StereoSettings settings;settings.separation=defaults.separation;settings.convergence=defaults.convergence;
+    PicaDraw scenery;scenery.space=PicaSpace::scenery;
+    PicaDraw hud;hud.space=PicaSpace::screen;
+    const auto pixel_x=[](const PicaMatrix& matrix,float x,float z) {
+        double cy=matrix[1][3],cw=matrix[3][3];
+        for(unsigned i=0;i<3;++i) {
+            const double position=i==0?x:i==2?z:0;
+            cy+=matrix[1][i]*position;cw+=matrix[3][i]*position;
+        }
+        return 200*(1-cy/cw);
+    };
+    for(float slider:{0.F,.125F,.5F,1.F}) for(bool stereo_hardware:{false,true}) {
+        const auto frame=plan_frame(slider,stereo_hardware,ScreenUse::world,settings);
+        const double effective=stereo_hardware?slider:0;
+        require(frame.eye_count==(effective?2U:1U),"Fresh depth settings changed mono/slider-off policy");
+        for(unsigned eye=0;eye<frame.eye_count;++eye) {
+            const double offset=(eye?4:-4)*effective;
+            require(std::abs(background_offset(frame,eye)-offset)<1.e-5,"Native infinity disparity is incorrect");
+            // PICA uniforms are float32; retain a sub-0.0001-LCD-pixel
+            // roundoff allowance when multiplying the native screen matrix.
+            require(std::abs(pixel_x(pica_draw_matrix(frame,eye,scenery),200,0)-(200+offset))<1.e-4,
+                "PICA background did not use the same infinity projection");
+            require(pica_draw_matrix(frame,eye,hud)==pica_screen_matrix(top_width),"Depth default moved the screen HUD");
+            for(float z:{64.F,256.F,512.F,1024.F,4096.F,65536.F}) {
+                const double eye_x=(eye?8:-8)*effective;
+                const double expected=200+256*(17-eye_x)/z+offset;
+                const auto cpu=project(frame,eye,17,0,z);
+                require(cpu && std::abs((*cpu)[0]-expected)<1.e-4,"Native finite depth does not match parallel cameras");
+                require(std::abs(pixel_x(PicaProjection(frame,eye).rows(),17,z)-expected)<1.e-4,
+                    "Native GPU finite depth differs from CPU/infinity depth");
+            }
+        }
+        if(frame.stereo) {
+            const auto left=project(frame,0,0,0,512),right=project(frame,1,0,0,512);
+            require(left && right && (*left)[0]==(*right)[0],"New convergence plane is not screen depth");
+            require(background_offset(frame,1)-background_offset(frame,0)==8*slider,
+                "Infinity depth must scale continuously with the slider");
+        }
+    }
+    // All prior schemas stored convergence explicitly. Changing fresh defaults
+    // must not migrate a valid old/custom value, rewrite a slot or reset SRAM.
+    for(unsigned version:{1U,2U,3U,4U}) for(unsigned convergence:{16U,512U,1024U,4096U,65535U}) {
+        Temporary temp;constexpr std::uint32_t manifest=0x33445054;
+        auto old=fixture();old.preferences.convergence=static_cast<std::uint16_t>(convergence);
+        const auto original=envelope(9,old,manifest,version==1,version);
+        GameStorage store(temp.path.generic_string(),manifest);replace(store.slot_path(0),original);
+        require(store.load().data==old && store.current().data.preferences.convergence==convergence,
+            "Native fresh defaults overwrote stored stereo preferences");
+        require(bytes(store.slot_path(0))==original && !std::filesystem::exists(store.slot_path(1)),
+            "Reading an old stereo preference rewrote its journal");
+        const auto reset=default_game_settings(old);
+        require(reset.preferences.convergence==512 && reset.ex_sram==old.ex_sram && reset.ex_rom_crc==old.ex_rom_crc,
+            "Explicit native settings reset lost game progress or retained an old default");
+    }
 }
 void normal_and_recovery() {
     Temporary temp;constexpr std::uint32_t manifest=0x81234567;
@@ -256,6 +318,7 @@ void hud_layout_migration() {
 }
 }
 int main() try {
+    native_stereo_defaults();
     normal_and_recovery();invalid_and_io();settings_reset_keeps_game_save();binding_migration();presentation_migration();hud_layout_migration();
     std::cout<<"3DS SD settings/EX SRAM journal: "<<checks<<" checks passed; synthetic public saves, not physical SD power-loss acceptance\n";
 } catch(const std::exception& error) {std::cerr<<"3DS SD journal: "<<error.what()<<'\n';return 1;}

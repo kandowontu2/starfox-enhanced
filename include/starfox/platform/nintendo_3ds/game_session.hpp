@@ -31,7 +31,10 @@ struct GamePreferences {
     simulation::TimingMode timing{simulation::TimingMode::original_speed};
     std::uint8_t music{100},sfx{100},language{},laser{},level{};
     bool swap{},god{},bombs{},boost{},lives{},planet_cheat{};
-    std::uint16_t separation{16},convergence{1024};
+    // Native 400-pixel LCD defaults: 8 pixels of infinity disparity at full
+    // slider, with the same parallel cameras for finite terrain/models. Saved
+    // convergence remains authoritative; this is not a background-only shift.
+    std::uint16_t separation{16},convergence{512};
     std::uint8_t render_fps{60};
     bool show_fps{};
     CockpitLayout hud_layout{};

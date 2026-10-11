@@ -8,6 +8,11 @@ code, but no old-model optimization or performance qualification is planned.
 New-family devices request libctru's CPU/cache speedup; old or unknown models do not.
 The request is reapplied after Home/sleep and disabled on exit. Cartridge
 timing, audio rates and the real pre-game menu remain unchanged.
+Fresh native settings use separation 16 and convergence 512. At full slider
+this puts infinite scenery eight LCD pixels behind the screen, twice the prior
+default disparity, while finite models/terrain retain the same off-axis camera
+projection. Slider zero and New 2DS XL remain mono. Existing saved separation
+and convergence are not changed; both remain adjustable in Stereoscopic 3D.
 This directory contains a host-verified cartridge game session and native
 LCD/input/audio and PICA200 GPU diagnostics. The new cartridge-core bring-up
 target connects the actual simulation, SPC and dashboard to a console entry
@@ -1691,7 +1696,10 @@ remote CI run, release publication or console installation was performed.
 ## Historical port checklist (October 6)
 
 This checklist records the earlier R45 checkpoint, not the current source or
-tester package. Use R180 and the current candidate/quick-start sections above.
+tester package. Use the current candidate/quick-start sections above. Its
+old-model test and profiling requests are historical only: the supported
+target is now New 3DS/XL and New 2DS XL, with no further original-model
+performance qualification.
 The real pre-game menu, remapping, HUD editor, state slots, EX player-two
 counters and PICA game-pass compositor are now connected in the current code.
 What remains to verify is their console behavior and visual fidelity, not

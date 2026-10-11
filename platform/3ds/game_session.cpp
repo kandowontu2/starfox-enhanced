@@ -52,6 +52,11 @@ GameSession::GameSession(assets::RomImage rom,assets::SymbolMap symbols,PcmSink 
     // Native cartridge audio remains available; MSU support must not be
     // advertised without a decoder/streaming adapter connected to this owner.
     game_.set_msu1_available(false);
+    // Match a fresh native SD journal even for hosts constructing a session
+    // without preferences. Do not change shared desktop/VR stereo defaults.
+    const GamePreferences native_defaults;
+    game_.set_stereo_separation(native_defaults.separation);
+    game_.set_stereo_convergence(native_defaults.convergence);
     const auto boot_writes=game_.map().take_apu_port_writes();
     if(!boot_writes.empty()) {
         static_cast<void>(audio_.prime_upload_sequence(boot_writes));

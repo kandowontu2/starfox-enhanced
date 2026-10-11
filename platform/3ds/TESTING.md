@@ -8,6 +8,10 @@ request further old-model performance tests. Legacy mono code and historical
 results below are retained, but no longer describe the supported target.
 For now, development/regression testing remains emulator-led rather than
 requesting a hardware test for each incremental candidate.
+Fresh settings use stereo separation 16 and convergence 512; existing saved
+values are preserved. The Stereoscopic 3D menu still controls both. The new
+default increases distant-background depth without moving HUD/menu text or
+changing the one-eye slider-off/New 2DS XL path.
 
 1. Use `StarFoxEnhanced-3ds-test-r376.zip` with its companion
    `StarFoxEnhanced-3ds-test-r376-START-HERE.txt`, or download the experimental
@@ -779,8 +783,9 @@ small report if the result fails. Select + Start exits. Do not mistake this
 result for sustained FPS, streaming audio, full process-RAM or hardware
 acceptance of the player.
 
-1. Prefer a New 3DS/New 3DS XL with an existing homebrew setup and Homebrew Launcher.
-   Original 3DS/XL and 2DS use the same package in mono.
+1. Use a New 3DS, New 3DS XL or New 2DS XL with an existing homebrew setup
+   and Homebrew Launcher. Original 3DS/XL/2DS are unsupported; their retained
+   legacy mono fallback is not a supported performance target.
    This package does not modify firmware or install a CIA.
 2. Extract the ZIP to the SD card root. The program is
    `/3ds/starfox-enhanced/starfox-enhanced.3dsx`.
@@ -805,23 +810,24 @@ Back up existing `starfox-enhanced` settings/save files before testing.
 - Face buttons and L/R follow the SNES/Nintendo physical arrangement.
 - Circle Pad and D-pad steer. Start pauses the game.
 - On New 3DS/XL the 3D slider changes stereo strength without advancing the
-  game twice. Slider zero skips the right eye. On Original 3DS/XL the slider
-  is ignored, including during preview and gameplay; the top screen stays mono.
-  Slider-off and 2DS use one mono eye. Begin testing at modest separation.
+  game twice. Slider zero skips the right eye. New 2DS XL always uses one
+  mono eye. Begin testing at modest separation.
 - Select + Y opens the native quick menu (resume/options/save/load).
 - Select + Start exits. Home/sleep should suspend and resume safely.
 - Pre-game Options includes controller remapping and **CUSTOMIZE SCREEN** for
   the lower HUD. Hold the mapped in-game L+R in setup for five seconds to reset
   settings; cartridge saves are retained.
 
-## Check on New 3DS/XL; separately check old-model mono
+## New-family acceptance checks
+
+Development remains emulator-led for now; this checklist is for a consolidated
+hardware candidate, not a request to test every incremental build.
 
 Please report model, build commit from `BUILD-INFO.json`, Original/EX,
 stage/scene, model, render FPS setting and stereo separation/convergence.
-On New 3DS/XL compare slider 0, halfway and full. On Original 3DS/XL verify
-both slider extremes stay mono. On New 2DS XL verify mono gameplay. Check
-Home-menu return, lid-close/wake and clean exit on each model. Do not compare
-New and old emulator timings as though they were the same hardware baseline.
+On New 3DS/XL compare slider 0, halfway and full. On New 2DS XL verify mono
+gameplay. Check Home-menu return, lid-close/wake and clean exit on supported
+models. Old-model performance and slider qualification are no longer required.
 
 - Preview OFF should keep the plain menu responsive; preview ON should show
   RENDERING during preparation. Start Game, experience switching and restart
