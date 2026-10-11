@@ -1,6 +1,9 @@
 // Consume actual GPU supports; exclude empty optical boxes over a continuum.
 // Remaining hulls are UNRESOLVED, not roots or colour-history certificates.
 #include "reflection_source_index_settings.hlsli"
+#if defined(STARFOX_NATIVE_SOURCE_OPTICAL)
+#define STARFOX_PRIMARY_PLANE_CACHE 1
+#endif
 #include "reflection_source_optical_interval.hlsli"
 #ifndef STARFOX_SOURCE_OPTICAL_LANES
 #define STARFOX_SOURCE_OPTICAL_LANES 64
@@ -85,6 +88,7 @@ void feature_optical_main(uint3 group:SV_GroupID,uint lane:SV_GroupIndex) {
 #if defined(STARFOX_NATIVE_SOURCE_OPTICAL)
     intervalFailed=false;const Interval3 enclosedTarget=native_target(at,terminal);
     const bool targetFailed=intervalFailed;
+    reset_primary_plane_cache();
 #endif
     // Complete closed-box coverage, evaluated in parallel. This has the same
     // bounded 1/64-pixel endpoint scale as the depth-12 adaptive cover but no

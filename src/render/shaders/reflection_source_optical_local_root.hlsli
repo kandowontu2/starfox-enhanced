@@ -13,6 +13,9 @@ void write_optical_local_root(uint outAt,float4 box,ReflectionRoughFrame receive
     Interval tight00=ip(0),tight01=ip(0),tight10=ip(0),tight11=ip(0);
     uint axis=0;OpticalLocalRoot root;root.status=0;root.enclosure=0;root.contraction=1.e30;root.evaluated=false;
     const uint extra=min(refinements,2U);const bool refreshDerivative=extra==2;
+#if defined(STARFOX_PRIMARY_PLANE_CACHE)
+    reset_primary_plane_cache();
+#endif
     // One static full forward/wave call site, at most FOUR evaluations as
     // before. After the original whole-domain unique proof, use the two
     // reserved evaluations for J(certified enclosure), then its midpoint.

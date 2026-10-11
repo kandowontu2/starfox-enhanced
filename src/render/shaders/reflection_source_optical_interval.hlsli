@@ -391,6 +391,53 @@ bool outside_face(ReflectionSpecularPlane p,Interval3 hit) {
     const Interval x=idiv(isub(imul(bb,ra),imul(ab,rb)),det),y=idiv(isub(imul(aa,rb),imul(ab,ra)),det);
     return x.hi<ic(-.00001).lo || y.hi<ic(-.00001).lo || iadd(x,y).lo>ic(1.00001).hi;
 }
+#if defined(STARFOX_PRIMARY_PLANE_CACHE)
+// One immutable primary plane per optical group/root invocation. Cache only
+// coordinate-dependent values: orientation, hit coordinates and face tests
+// are still evaluated for every original cell/forward evaluation. Separate
+// lazy flags prevent an unused face or later plane from poisoning a path.
+struct PrimaryPlaneGram {Interval3 u,v;Interval aa,ab,bb,det;};
+static bool primaryNormalReady=false,primaryNormalFailed=false;
+static bool primaryGramReady=false,primaryGramFailed=false;
+static Interval3 primaryNormal;
+static PrimaryPlaneGram primaryGram;
+void reset_primary_plane_cache() {primaryNormalReady=false;primaryGramReady=false;}
+Interval3 primary_plane_normal(ReflectionSpecularPlane p,uint stage) {
+    if(stage)return plane_normal(p);
+    if(!primaryNormalReady) {
+        const bool prior=intervalFailed;intervalFailed=false;
+        primaryNormal=plane_normal(p);primaryNormalFailed=intervalFailed;
+        intervalFailed=prior;primaryNormalReady=true;
+    }
+    intervalFailed=intervalFailed || primaryNormalFailed;
+    return primaryNormal;
+}
+PrimaryPlaneGram primary_plane_gram(ReflectionSpecularPlane p) {
+    if(!primaryGramReady) {
+        const bool prior=intervalFailed;intervalFailed=false;
+        primaryGram.u=vsub(p3(p.b.xyz),p3(p.a.xyz));
+        primaryGram.v=vsub(p3(p.c.xyz),p3(p.a.xyz));
+        primaryGram.aa=vdot(primaryGram.u,primaryGram.u);
+        primaryGram.ab=vdot(primaryGram.u,primaryGram.v);
+        primaryGram.bb=vdot(primaryGram.v,primaryGram.v);
+        primaryGram.det=isub(imul(primaryGram.aa,primaryGram.bb),isquare(primaryGram.ab));
+        primaryGramFailed=intervalFailed;intervalFailed=prior;primaryGramReady=true;
+    }
+    intervalFailed=intervalFailed || primaryGramFailed;
+    return primaryGram;
+}
+bool primary_outside_face(ReflectionSpecularPlane p,Interval3 hit,uint stage) {
+    if(stage)return outside_face(p,hit);
+    if(reflection_specular_analytic(p))return false;
+    const PrimaryPlaneGram g=primary_plane_gram(p);
+    const Interval3 r=vsub(hit,p3(p.a.xyz));
+    const Interval ra=vdot(r,g.u),rb=vdot(r,g.v);
+    if(g.det.lo<=0)return false;
+    const Interval x=idiv(isub(imul(g.bb,ra),imul(g.ab,rb)),g.det),
+        y=idiv(isub(imul(g.aa,rb),imul(g.ab,ra)),g.det);
+    return x.hi<ic(-.00001).lo || y.hi<ic(-.00001).lo || iadd(x,y).lo>ic(1.00001).hi;
+}
+#endif
 OPTICAL_BOUNDARY Interval3 liquid_normal(ReflectionLiquidFrame f,Interval3 direction,Interval distance,Interval footprint,inout Interval3 hit) {
     Interval3 p=vadd(vrow(hit,f),p3(float3(f.rotation0.w,f.rotation1.w,f.rotation2.w)));const Interval t=ip(f.settings.x);Interval dx,dz;
     if(f.settings.y==3) {
@@ -429,7 +476,14 @@ OPTICAL_BOUNDARY bool optical_excluded_target(float4 box,ReflectionRoughFrame re
         ReflectionSpecularPlane plane;
         if(primary) {plane.a=receiver.a;plane.b=receiver.b;plane.c=receiver.c;}
         else plane=planes[stage-1];
-        Interval3 n;if(curved)n=p3(liquid.planeNormal.xyz);else n=oriented(plane_normal(plane),outgoing);
+        Interval3 n;if(curved)n=p3(liquid.planeNormal.xyz);
+        else {
+#if defined(STARFOX_PRIMARY_PLANE_CACHE)
+            n=oriented(primary_plane_normal(plane,stage),outgoing);
+#else
+            n=oriented(plane_normal(plane),outgoing);
+#endif
+        }
         const Interval denominator=vdot(outgoing,n),distance=idiv(vdot(vsub(p3(curved?liquid.planePoint.xyz:plane.a.xyz),origin),n),denominator);
         if(primary) {
             const Interval depth=imul(distance,outgoing.z);
@@ -440,7 +494,13 @@ OPTICAL_BOUNDARY bool optical_excluded_target(float4 box,ReflectionRoughFrame re
             Interval radius;if(primary)radius=distance;else radius=vlength(hit);
             const Interval footprint=idiv(idiv(radius,ip(max(liquid.projection.x,1))),imax(iabs(denominator),iratio(4,100)));
             n=liquid_normal(liquid,outgoing,distance,footprint,hit);
-        } else if(outside_face(plane,hit))return !intervalFailed;
+        } else {
+#if defined(STARFOX_PRIMARY_PLANE_CACHE)
+            if(primary_outside_face(plane,hit,stage))return !intervalFailed;
+#else
+            if(outside_face(plane,hit))return !intervalFailed;
+#endif
+        }
         bias=imax(iratio(primary && !curved && !reflection_specular_analytic(plane)?1:5,100),imul(distance,iratio(1,100000)));
         origin=vadd(hit,vmul(n,bias));outgoing=vreflect(outgoing,n);
         if(primary && !curved && receiver.settings.x!=0) {

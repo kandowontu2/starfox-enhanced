@@ -202,6 +202,34 @@ bool jet_inside_face(ReflectionSpecularPlane plane,OpticalJet3 hit) {
     const Interval x=idiv(isub(imul(bb,ra),imul(ab,rb)),det),y=idiv(isub(imul(aa,rb),imul(ab,ra)),det);
     return x.lo>=ic(-.00001).hi && y.lo>=ic(-.00001).hi && iadd(x,y).hi<=ic(1.00001).lo;
 }
+#if defined(STARFOX_PRIMARY_PLANE_CACHE)
+OpticalJet3 jet_primary_plane_normal(ReflectionSpecularPlane plane,uint stage) {
+    if(stage)return jet_plane_normal(plane);
+    const Interval3 normal=primary_plane_normal(plane,stage);
+    // Preserve the ORIGINAL axis-correlation guard, including prior refusal.
+    if(!intervalFailed && !reflection_specular_analytic(plane)) {
+        [unroll] for(uint axis=0;axis<3;++axis) {
+            if(plane.a[axis]!=plane.b[axis] || plane.a[axis]!=plane.c[axis])continue;
+            Interval component=normal.z;if(axis==0)component=normal.x;else if(axis==1)component=normal.y;
+            if(component.lo<=0 && component.hi>=0)continue;
+            float3 exact=0;exact[axis]=component.lo>0?1:-1;
+            return jp3(exact);
+        }
+    }
+    return jconstant3(normal);
+}
+bool jet_primary_inside_face(ReflectionSpecularPlane plane,OpticalJet3 hit,uint stage) {
+    if(stage)return jet_inside_face(plane,hit);
+    if(reflection_specular_analytic(plane))return true;
+    const PrimaryPlaneGram g=primary_plane_gram(plane);
+    const Interval3 r=vsub(i3(hit.x.v,hit.y.v,hit.z.v),p3(plane.a.xyz));
+    const Interval ra=vdot(r,g.u),rb=vdot(r,g.v);
+    if(g.det.lo<=0)return false;
+    const Interval x=idiv(isub(imul(g.bb,ra),imul(g.ab,rb)),g.det),
+        y=idiv(isub(imul(g.aa,rb),imul(g.ab,ra)),g.det);
+    return x.lo>=ic(-.00001).hi && y.lo>=ic(-.00001).hi && iadd(x,y).hi<=ic(1.00001).lo;
+}
+#endif
 struct OpticalJetRay {OpticalJet3 origin,outgoing;OpticalJet depth,bias;};
 OPTICAL_JET_FUNCTION_BOUNDARY bool optical_jet_forward(float4 box,ReflectionRoughFrame receiver,ReflectionLiquidFrame liquid,
     ReflectionSpecularPlane planes[4],uint4 control,out OpticalJetRay ray) {
@@ -218,7 +246,14 @@ OPTICAL_JET_FUNCTION_BOUNDARY bool optical_jet_forward(float4 box,ReflectionRoug
         const bool primary=stage==0,curved=primary?control.z!=0:(control.y&(1U<<(stage-1)))!=0;
         ReflectionSpecularPlane plane;
         if(primary){plane.a=receiver.a;plane.b=receiver.b;plane.c=receiver.c;}else plane=planes[stage-1];
-        OpticalJet3 n;if(curved)n=jp3(liquid.planeNormal.xyz);else n=jet_oriented(jet_plane_normal(plane),outgoing);
+        OpticalJet3 n;if(curved)n=jp3(liquid.planeNormal.xyz);
+        else {
+#if defined(STARFOX_PRIMARY_PLANE_CACHE)
+            n=jet_oriented(jet_primary_plane_normal(plane,stage),outgoing);
+#else
+            n=jet_oriented(jet_plane_normal(plane),outgoing);
+#endif
+        }
         const OpticalJet den=jdot(outgoing,n);OpticalJet distance;OpticalJet3 hit;
         if(iabs(den.v).lo<=ic(!primary && curved?1.e-8:1.e-12).hi)return false;
         if(primary) {
@@ -251,7 +286,13 @@ OPTICAL_JET_FUNCTION_BOUNDARY bool optical_jet_forward(float4 box,ReflectionRoug
             OpticalJet radius;if(primary)radius=distance;else radius=jlength(hit);
             const OpticalJet footprint=jd(jd(radius,jp(max(liquid.projection.x,1))),jmax(jabs(den),jr(4,100)));
             n=jet_liquid_normal(liquid,outgoing,distance,footprint,hit);
-        }else if(!jet_inside_face(plane,hit))return false;
+        }else {
+#if defined(STARFOX_PRIMARY_PLANE_CACHE)
+            if(!jet_primary_inside_face(plane,hit,stage))return false;
+#else
+            if(!jet_inside_face(plane,hit))return false;
+#endif
+        }
         bias=jmax(jr(primary && !curved && !reflection_specular_analytic(plane)?1:5,100),jm(distance,jr(1,100000)));
         origin=jadd3(hit,jscale(n,bias));outgoing=jreflect(outgoing,n);
         if(primary && !curved && receiver.settings.x!=0) {

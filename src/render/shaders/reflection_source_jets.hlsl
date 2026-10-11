@@ -1,6 +1,7 @@
 // Consume real GPU optical frames and complete retained support hulls. No host
 // endpoint, authored box, inverse seed, old colour or downloaded root input.
 #include "reflection_source_index_settings.hlsli"
+#define STARFOX_PRIMARY_PLANE_CACHE 1
 ByteAddressBuffer frames:register(t0,space0),regions:register(t1,space0),queries:register(t2,space0),optical:register(t3,space0);
 RWByteAddressBuffer results:register(u0,space1);
 cbuffer RootSettings:register(b1,space2) {uint rootCapacity,rootFrameStride,rootResultStride,rootMode;};
