@@ -54,18 +54,19 @@ OPTICAL_DIRECTED_BOUNDARY float optical_product_bounds(float a,float b) {
         }
         if(aa<0x00800000U || bb<0x00800000U)intervalFailed=true;
         // Same [2^-30,2^30] range: the rounded product is always normal.
-        // Each normalized significand has exactly24 bits. Split16+8 yields
-        // its exact48-bit product in two uint32 limbs using four products:
-        // low16*low16 <= 0xfffe0001; cross < 2^25; high8*high8 <= 65025.
-        // uint32 wrap plus the explicit carry is intentional, not float error.
+        // Each normalized significand has exactly24 bits. Split one operand
+        // into16+8 and reconstruct the exact48-bit product with THREE uint32
+        // products: base=low16*low16, middle=low16*high8+high8*full24.
+        // The largest middle is4294901250 (<2^32); only the shifted low-limb
+        // addition wraps, with its explicit carry. No float estimate or int64.
         if(aa>=0x30800000U && aa<=0x4e800000U
             && bb>=0x30800000U && bb<=0x4e800000U) {
             precise float product=a*b;
             const uint am=(aa&0x7fffffU)|0x800000U,bm=(bb&0x7fffffU)|0x800000U;
             const uint al=am&0xffffU,ah=am>>16,bl=bm&0xffffU,bh=bm>>16;
-            const uint base=al*bl,cross=al*bh+ah*bl;
-            const uint exactLow=base+(cross<<16);
-            const uint exactHigh=ah*bh+(cross>>16)+(exactLow<base?1U:0U);
+            const uint base=al*bl,middle=al*bh+ah*bm;
+            const uint exactLow=base+(middle<<16);
+            const uint exactHigh=(middle>>16)+(exactLow<base?1U:0U);
             const uint rounded=asuint(product)&0x7fffffffU;
             const uint shift=(rounded>>23)-(aa>>23)-(bb>>23)+150U;
             // Normal24-bit significands multiply into [2^46,2^48).

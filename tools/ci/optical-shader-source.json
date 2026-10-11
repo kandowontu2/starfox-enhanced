@@ -374,10 +374,10 @@
       "canonical_sha256": "e7a460192254d36b43b79ca6ed9fe0b053ac436683dc6013241204c31a59b96a"
     },
     {
-      "original_sha256": "d69410165522bb2604443fd7ace1cd76b3794faa41daa9dd415021aff9542aaa",
+      "original_sha256": "b3792cd71f1655aef395d5802a42f8fefbd700bd46af44866f6120041a443aac",
       "path": "src/render/shaders/reflection_source_directed_rounding.hlsli",
-      "canonical_bytes": 5339,
-      "canonical_sha256": "d69410165522bb2604443fd7ace1cd76b3794faa41daa9dd415021aff9542aaa"
+      "canonical_bytes": 5415,
+      "canonical_sha256": "b3792cd71f1655aef395d5802a42f8fefbd700bd46af44866f6120041a443aac"
     },
     {
       "original_sha256": "b7a28fbf3f42257e76c322189135b8c97335881f1155de02cfc9f3173f94e502",
