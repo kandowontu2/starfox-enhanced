@@ -278,6 +278,11 @@ PicaFrame GameScenery::prepare(const GamePresentation& source,const PicaFrame& b
         }
         if(next.size()>first) {
             PicaDraw ground;ground.first=first;ground.count=unsigned(next.size())-first;ground.texture=strip;
+            // BG2's authored horizon is a stereo receiver, not a model-depth
+            // occluder. Its entry-height/HDMA plane is independent of the live
+            // BG1 camera/grid/BSP geometry. Preserve the cartridge's painter
+            // priority, otherwise ground swallows grid lights and model bases.
+            ground.depth_test=ground.depth_write=false;
             ground.source_layer=2;ground.projected_uv=true;draws.push_back(ground);
         }
     }
@@ -363,6 +368,10 @@ std::optional<PicaFrame> GameScenery::prepare_tiles(const GamePresentation& sour
     // in the raster receiver. Never interleave far artwork over another tile.
     if(vertices.size()>bg2.vertices.size()) {
         PicaDraw ground;ground.first=unsigned(bg2.vertices.size());ground.count=unsigned(vertices.size())-ground.first;
+        // Same BG2-under-BG1 contract as the raster fallback above. Finite
+        // vertices still provide real per-eye parallax without writing a
+        // conflicting reconstructed landscape depth into the model buffer.
+        ground.depth_test=ground.depth_write=false;
         ground.texture=0;ground.source_layer=2;ground.projected_uv=true;draws.push_back(ground);
     }
     auto& images=pending_images_;images.assign(bg2.textures.begin(),bg2.textures.end());

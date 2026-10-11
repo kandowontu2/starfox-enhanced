@@ -11,13 +11,15 @@ enum class FramePhase : unsigned {
     frame, advance, video, logic, capture, audio, raster, checkpoint, menu,
     models, layers, dots, composite, present,
     cpu, strategies, view, cull, audio_irq, music, effects, spc_emulate,
-    spc_filter, bg_decode, bg_colour, count
+    spc_filter, bg_decode, bg_colour,
+    gpu_sync, gpu_wait, gpu_upload, gpu_record, gpu_submit, count
 };
 inline constexpr std::array<std::string_view, unsigned(FramePhase::count)> frame_phase_names{
     "frame", "advance", "video", "logic", "capture", "audio", "raster",
     "checkpoint", "menu", "models", "layers", "dots", "composite", "present",
     "cpu", "strategies", "view", "cull", "audio_irq", "music", "effects",
-    "spc_emulate", "spc_filter", "bg_decode", "bg_colour"
+    "spc_emulate", "spc_filter", "bg_decode", "bg_colour",
+    "gpu_sync", "gpu_wait", "gpu_upload", "gpu_record", "gpu_submit"
 };
 struct FramePhaseTotals {
     std::uint64_t calls{}, ticks{}, maximum{};

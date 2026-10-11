@@ -31,10 +31,18 @@ public:
 private:
     PicaFrame prepare_groups(const FramePlan& plan,std::span<const PicaFrame> groups,
         unsigned reserved_texture_bytes,Rgb clear) {
+        // Validate the plan even when there are no painter groups. Each input
+        // is then checked exactly once, including all vertices, against the
+        // cumulative resident budget. Concatenation only rebases already
+        // checked ranges/texture indices; a second whole-vertex walk of that
+        // identical output added substantial CPU work on the handheld.
+        validate_pica_group({plan,{},{},{}},reserved_texture_bytes);
+        unsigned resident_bytes=reserved_texture_bytes;
         std::size_t vertex_count=0,draw_count=0,texture_count=0;
         for(const auto& group:groups) {
             if(!same_pica_plan(plan,group.plan)) throw std::invalid_argument("3DS painter groups belong to different eye plans");
-            validate_pica_group(group,reserved_texture_bytes);
+            validate_pica_group(group,resident_bytes);
+            for(const auto& image:group.textures) resident_bytes+=pica_resident_texture_bytes(image);
             vertex_count+=group.vertices.size();draw_count+=group.draws.size();texture_count+=group.textures.size();
             if(vertex_count>pica_vertex_limit || draw_count>pica_draw_limit || texture_count>pica_texture_limit)
                 throw std::length_error("3DS composed geometry/draw budget exceeded");
@@ -51,7 +59,6 @@ private:
             }
             textures.insert(textures.end(),group.textures.begin(),group.textures.end());
         }
-        validate_pica_group({plan,vertices,draws,textures,clear},reserved_texture_bytes);
         vertices_.swap(vertices);draws_.swap(draws);textures_.swap(textures);
         return {plan,vertices_,draws_,textures_,clear};
     }

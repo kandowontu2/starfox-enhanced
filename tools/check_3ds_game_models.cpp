@@ -684,8 +684,8 @@ void fixture(const assets::RomImage& rom,const assets::SymbolMap& symbols,const 
             unsigned finite=0;
             for(const auto* group:{&ordered.before_models,&ordered.after_models}) for(const auto& draw:group->draws) {
                 if(draw.space!=PicaSpace::world || draw.source_layer!=2) continue;
-                require(draw.projected_uv && draw.depth_test && draw.depth_write,
-                    "Actual Fortuna water lost its finite depth/UV receiver");
+                require(draw.projected_uv && !draw.depth_test && !draw.depth_write,
+                    "Actual Fortuna landscape lost its finite UV receiver or occludes BG1");
                 for(unsigned at=draw.first;at<draw.first+draw.count;++at) {
                     const auto p=group->vertices[at].position;
                     const double residual=p[1]+plane.slope*source.plan.focal_x/source.plan.focal_y*p[0]

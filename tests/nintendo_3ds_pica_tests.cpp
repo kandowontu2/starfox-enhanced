@@ -365,6 +365,10 @@ void projection_and_draws() {
     draws[1].texture=0;rejects(valid,"Unknown texture rejected");draws[1].texture=pica_no_texture;
     draws[0].model[0][0]=std::numeric_limits<float>::quiet_NaN();rejects(valid,"Non-finite model rejected");draws[0].model=pica_identity;
     draws[0].model[3][0]=1;rejects(valid,"Non-affine model rejected");draws[0].model=pica_identity;
+    draws[0].model[0][0]=std::numeric_limits<float>::max();
+    frame.plan.focal_x=1000;
+    rejects(valid,"Reused eye projection failed to reject overflowing model uniforms");
+    draws[0].model=pica_identity;frame.plan=plan_frame(1,true,ScreenUse::world);
     vertices[0].position[2]=std::numeric_limits<float>::infinity();rejects(valid,"Invalid position rejected");vertices[0].position[2]=512;
     vertices[0].colour[0]=1.1F;rejects(valid,"Invalid vertex colour rejected");vertices[0].colour[0]=1;
     frame.plan.eye_count=0;rejects(valid,"Missing eye rejected");frame.plan.eye_count=3;rejects(valid,"Third eye rejected");frame.plan.eye_count=2;

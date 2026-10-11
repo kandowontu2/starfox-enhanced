@@ -2,6 +2,7 @@
 #include "starfox/platform/nintendo_3ds/pica_residency.hpp"
 #include "starfox/platform/nintendo_3ds/pica_program_binding.hpp"
 #include "starfox/platform/nintendo_3ds/startup_trace.hpp"
+#include "starfox/platform/nintendo_3ds/frame_profile.hpp"
 #include <atomic>
 #include <cstring>
 extern "C" {
@@ -30,6 +31,7 @@ struct FrameEnd {
     // All changed buffers/textures are explicitly flushed. Do not flush the
     // entire linear heap (including unrelated PCM/unchanged art) every frame.
     ~FrameEnd() {
+        STARFOX_3DS_FRAME_PHASE(gpu_submit);
         STARFOX_3DS_STARTUP_MARK(gpu_submit);
         C3D_FrameEnd(GX_CMDLIST_FLUSH);
         STARFOX_3DS_STARTUP_MARK(gpu_submit_complete);
@@ -262,22 +264,29 @@ void NativeGpu::present(const PicaFrame& frame,ImageView lower) {
     // Separate the two waits: FrameBegin(SYNCDRAW) hides both VBlank and queue
     // retirement behind one receipt, making a real-device stall ambiguous.
     STARFOX_3DS_STARTUP_MARK(gpu_vblank_wait);
-    C3D_FrameSync();
+    { STARFOX_3DS_FRAME_PHASE(gpu_sync);C3D_FrameSync(); }
     STARFOX_3DS_STARTUP_MARK(gpu_vblank_wait_complete);
     STARFOX_3DS_STARTUP_MARK(gpu_wait);
-    if(!C3D_FrameBegin(0)) throw std::runtime_error("3DS GPU frame unavailable");
+    {
+        STARFOX_3DS_FRAME_PHASE(gpu_wait);
+        if(!C3D_FrameBegin(0)) throw std::runtime_error("3DS GPU frame unavailable");
+    }
     STARFOX_3DS_STARTUP_MARK(gpu_wait_complete);
     FrameEnd end; // Includes failure exits; uploads complete before targets are marked used.
     STARFOX_3DS_STARTUP_MARK(gpu_upload);
-    update_pica_texture_residency(frame.textures,{lower.pixels,lower.width,lower.height,lower.pitch,3},
-        std::span(impl_->textures),impl_->dashboard);
-    impl_->vertices.prepare(frame.vertices,[&](std::span<const PicaVertex> source) {
-        std::memcpy(impl_->vbo,source.data(),source.size_bytes());
-        if(R_FAILED(GSPGPU_FlushDataCache(impl_->vbo,source.size_bytes())))
-            throw std::runtime_error("3DS GPU geometry flush failed");
-    });
+    {
+        STARFOX_3DS_FRAME_PHASE(gpu_upload);
+        update_pica_texture_residency(frame.textures,{lower.pixels,lower.width,lower.height,lower.pitch,3},
+            std::span(impl_->textures),impl_->dashboard);
+        impl_->vertices.prepare(frame.vertices,[&](std::span<const PicaVertex> source) {
+            std::memcpy(impl_->vbo,source.data(),source.size_bytes());
+            if(R_FAILED(GSPGPU_FlushDataCache(impl_->vbo,source.size_bytes())))
+                throw std::runtime_error("3DS GPU geometry flush failed");
+        });
+    }
     STARFOX_3DS_STARTUP_MARK(gpu_upload_complete);
     STARFOX_3DS_STARTUP_MARK(gpu_shader_bind);
+    STARFOX_3DS_FRAME_PHASE(gpu_record); // CPU command encoding, not GPU execution time.
     if(frame.plan.stereo && !impl_->top[1]) impl_->top[1]=Impl::make_target(top_width,GFX_TOP,GFX_RIGHT,true);
     impl_->configure();gfxSet3D(frame.plan.stereo);
     STARFOX_3DS_STARTUP_MARK(gpu_shader_bind_complete);

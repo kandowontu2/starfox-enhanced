@@ -238,9 +238,9 @@ void landscape_depth() {
         Canvas lower;validate_pica_frame(prepared.before_models,lower.view());
         const auto& group=prepared.before_models;
         require(group.draws.size()==2 && group.draws[0].space==PicaSpace::scenery
-            && group.draws[1].space==PicaSpace::world && group.draws[1].depth_test && group.draws[1].depth_write
+            && group.draws[1].space==PicaSpace::world && !group.draws[1].depth_test && !group.draws[1].depth_write
             && group.draws[1].projected_uv && group.draws[0].source_layer==2 && group.draws[1].source_layer==2,
-            "Native landscape stayed a screen-depth HUD image or lost source ownership/depth");
+            "Native landscape lost stereo geometry/source ownership or occludes the BG1 model layer");
         require(group.textures.size()==1 && group.textures[0].source_layers.empty(),"Landscape duplicated the entire texture or retained an unnecessary mixed-layer mask");
         const std::vector<PicaVertex> saved(group.vertices.begin(),group.vertices.end());
         for(unsigned i=6;i<saved.size();++i) {
@@ -315,8 +315,8 @@ void atlas_landscape_depth() {
         const auto& group=gpu.before_models;
         require(group.draws.size()==2 && group.draws[0].space==PicaSpace::scenery
             && group.draws[1].space==PicaSpace::world && group.draws[1].projected_uv
-            && group.draws[1].depth_test && group.draws[1].depth_write,
-            "Atlas terrain lost source depth, infinity ordering or projected UV");
+            && !group.draws[1].depth_test && !group.draws[1].depth_write,
+            "Atlas terrain lost stereo geometry/order/UV or writes conflicting BG1 occlusion depth");
         require(group.textures[0].source_layers.empty() && group.vertices.size()<pica_vertex_limit,
             "Atlas terrain duplicated provenance or exceeded native geometry capacity");
         const auto plane=source_landscape_plane(frame);const auto& finite=group.draws[1];
@@ -360,6 +360,76 @@ void atlas_landscape_depth() {
             "Finite geometry overflow was not rejected atomically");
         require(old.size()==accepted->vertices.size() && std::equal(old.begin(),old.end(),accepted->vertices.begin()),
             "Failed receiver preparation invalidated a previous borrowed complete frame");
+    }
+}
+void landscape_bg1_priority() {
+    // BG2's fixed entry-height/HDMA reconstruction can be in front of live
+    // camera-local BG1 ink. It must retain stereo parallax but cannot turn
+    // that difference into new occlusion absent from the cartridge painter.
+    auto frame=source(simulation::GameFlowState::gameplay,2);
+    auto scene=std::make_shared<vr::GameSceneSnapshot>(*frame.current);
+    scene->background_landscape=true;scene->landscape_grid_height=-145;
+    scene->landscape_atlas_origin=232;scene->camera.y=-512;
+    frame.current=frame.previous=scene;
+    auto ppu=std::make_shared<simulation::SnesPpuState>(*frame.raster->ppu);
+    ppu->main_screen=2;ppu->bg2_scroll_y=232;
+    for(unsigned i=0;i<1024;++i) {ppu->vram[0x6400+i*2]=1;ppu->vram[0x6401+i*2]=8;}
+    auto raster=std::make_shared<GameRasterSnapshot>(*frame.raster);raster->ppu=ppu;frame.raster=raster;
+    Canvas lower;
+    for(float slider:{0.F,.5F,1.F}) for(unsigned budget:{0U,pica_vertex_limit}) {
+        frame.plan=plan_frame(slider,true,ScreenUse::world);
+        GameLayers layers;const auto art=layers.prepare(frame,budget);
+        std::vector<PicaVertex> ink;
+        const auto quad=[&](double x0,double y0,double x1,double y1,double z) {
+            const std::array<std::array<double,2>,4> corners{{{x0,y0},{x1,y0},{x1,y1},{x0,y1}}};
+            for(unsigned k:{0U,1U,2U,0U,2U,3U}) ink.push_back({
+                {float((corners[k][0]-200)*z/frame.plan.focal_x),
+                    float((120-corners[k][1])*z/frame.plan.focal_y),float(z)}, {1,1,1,1},{}});
+        };
+        quad(195,180,196,181,2048); // A one-source-pixel ground light.
+        quad(210,140,216,230,2048); // Gate/post whose base must remain visible.
+        PicaDraw ink_draw;ink_draw.count=unsigned(ink.size());
+        const PicaFrame bg1{frame.plan,ink,std::span(&ink_draw,1),{}};
+        PicaComposite compositor;
+        const auto composed=compositor.prepare(frame.plan,std::array{art.before_models,bg1},lower.view());
+        validate_pica_frame(composed,lower.view());
+        for(unsigned eye=0;eye<frame.plan.eye_count;++eye) for(const auto mono:
+            std::array<std::array<double,2>,3>{{{195.5,180.5},{213,150},{213,220}}}) {
+            const auto clip=PicaProjection(frame.plan,eye).clip_position({
+                float((mono[0]-200)*2048/frame.plan.focal_x),
+                float((120-mono[1])*2048/frame.plan.focal_y),2048});
+            require(bool(clip),"BG1 priority fixture has invalid eye geometry");
+            const std::array<double,2> sample{200*(1-(*clip)[1]/(*clip)[3]),120*(1-(*clip)[0]/(*clip)[3])};
+            const auto visible_layer=[&](bool former_ground_depth) {
+                double stored=0;unsigned layer=32;
+                for(const auto& draw:composed.draws) for(unsigned i=draw.first;i<draw.first+draw.count;i+=3) {
+                    std::array<PicaProjection::ClipPoint,3> points{};
+                    std::array<std::array<double,2>,3> screen{};
+                    const auto matrix=pica_draw_matrix(frame.plan,eye,draw);
+                    for(unsigned k=0;k<3;++k) {
+                        const auto p=composed.vertices[i+k].position;
+                        for(unsigned r=0;r<4;++r) {
+                            points[k][r]=matrix[r][3];
+                            for(unsigned c=0;c<3;++c) points[k][r]+=matrix[r][c]*double(p[c]);
+                        }
+                        screen[k]={200*(1-points[k][1]/points[k][3]),120*(1-points[k][0]/points[k][3])};
+                    }
+                    const auto cross=[](auto a,auto b,auto p) {return (b[0]-a[0])*(p[1]-a[1])-(b[1]-a[1])*(p[0]-a[0]);};
+                    const auto area=cross(screen[0],screen[1],screen[2]);if(std::abs(area)<1.e-12) continue;
+                    const std::array w{cross(screen[1],screen[2],sample)/area,
+                        cross(screen[2],screen[0],sample)/area,cross(screen[0],screen[1],sample)/area};
+                    if(std::any_of(w.begin(),w.end(),[](double a){return a< -1.e-6;})) continue;
+                    double depth=0;for(unsigned k=0;k<3;++k) depth-=w[k]*points[k][2]/points[k][3];
+                    const bool former=former_ground_depth && draw.source_layer==2 && draw.space==PicaSpace::world;
+                    if((draw.depth_test || former) && depth+1.e-9<stored) continue;
+                    layer=draw.source_layer;
+                    if(draw.depth_write || former) stored=depth;
+                }
+                return layer;
+            };
+            require(visible_layer(false)==1,"Stereo landscape swallowed a BG1 light or model base");
+            require(visible_layer(true)==2,"Negative control did not reproduce conflicting ground-depth occlusion");
+        }
     }
 }
 void unique_landscape_policy() {
@@ -436,8 +506,8 @@ void results_landscape_priorities() {
         unsigned finite=0,screen=0;
         for(const auto& draw:native.draws) {
             if(draw.space==PicaSpace::world) {
-                ++finite;require(draw.source_layer==2 && draw.projected_uv && draw.depth_test && draw.depth_write,
-                    "Results finite ground lost homogeneous source UV or depth ownership");
+                ++finite;require(draw.source_layer==2 && draw.projected_uv && !draw.depth_test && !draw.depth_write,
+                    "Results finite ground lost source UV or occludes the BG1 model layer");
             } else if(draw.space==PicaSpace::screen) {
                 ++screen;require(!draw.depth_test && !draw.depth_write && (draw.source_layer==16
                     || (draw.texture!=pica_no_texture && validate_pica_layers(native.textures[draw.texture])==16)),
@@ -1112,7 +1182,7 @@ void offscreen_landscape_receiver() {
             const auto prepared=layers.prepare(frame);validate_pica_frame(prepared.before_models,lower.view());
             unsigned receivers=0;
             for(const auto& draw:prepared.before_models.draws) if(draw.space==PicaSpace::world) {
-                ++receivers;require(draw.source_layer==2 && draw.projected_uv && draw.depth_test,
+                ++receivers;require(draw.source_layer==2 && draw.projected_uv && !draw.depth_test && !draw.depth_write,
                     "Partially offscreen terrain lost finite source-owned geometry");
             }
             require((receivers!=0)==(horizon<240),"Terrain outside the LCD invented a receiver or visible terrain lost it");
@@ -1402,7 +1472,7 @@ STARFOX_SCENERY_NOINLINE void operator delete[](void* memory,std::size_t) noexce
 #undef STARFOX_SCENERY_NOINLINE
 int main(int argc,char** argv) try {
     if(argc==2 && std::string_view(argv[1])=="--scenery-only") {warmed_scenery_storage();return 0;}
-    priority_pixels();map_single_occurrence();policy_contracts();margins_and_cache();landscape_depth();atlas_landscape_depth();unique_landscape_policy();results_landscape_priorities();atlas_water_depth();water_depth();water_priority_pixels();water_eye_coverage();corridor_source_symbols();corridor_depth();corridor_eye_coverage();corridor_eye_coverage(true);corridor_eye_coverage(false,true);corridor_eye_coverage(true,true);corridor_eye_coverage(false,true,true);corridor_eye_coverage(true,true,true);colony_depth();panorama_depth();panorama_atlas_priority_pixels();offscreen_landscape_receiver();ex_menu_panorama_depth();receiver_eye_coverage();
+    priority_pixels();map_single_occurrence();policy_contracts();margins_and_cache();landscape_depth();atlas_landscape_depth();landscape_bg1_priority();unique_landscape_policy();results_landscape_priorities();atlas_water_depth();water_depth();water_priority_pixels();water_eye_coverage();corridor_source_symbols();corridor_depth();corridor_eye_coverage();corridor_eye_coverage(true);corridor_eye_coverage(false,true);corridor_eye_coverage(true,true);corridor_eye_coverage(false,true,true);corridor_eye_coverage(true,true,true);colony_depth();panorama_depth();panorama_atlas_priority_pixels();offscreen_landscape_receiver();ex_menu_panorama_depth();receiver_eye_coverage();
     warmed_scenery_storage();
     std::cout<<checks<<" 3DS actual source painter-policy checks passed; not full terrain/menu/hardware acceptance\n";
 } catch(const std::exception& error) {count_scenery_allocations=false;std::cerr<<scenario<<error.what()<<'\n';return 1;}

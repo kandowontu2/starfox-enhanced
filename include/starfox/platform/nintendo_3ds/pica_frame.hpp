@@ -239,8 +239,14 @@ inline void validate_pica_group(const PicaFrame& frame,unsigned reserved_texture
         if(draw.clip) static_cast<void>(pica_screen_scissor(*draw.clip));
         for(const auto& row:draw.model) for(float value:row) if(!std::isfinite(value))
             throw std::invalid_argument("Non-finite 3DS model matrix");
-        for(unsigned eye=0;eye<frame.plan.eye_count;++eye)
-            static_cast<void>(pica_draw_matrix(frame.plan,eye,draw));
+        for(unsigned eye=0;eye<frame.plan.eye_count;++eye) {
+            // Identical matrix/overflow checks, but reuse the eye projection
+            // already validated above instead of rebuilding its six clip
+            // planes for every model draw in every composition/preflight.
+            if(draw.space==PicaSpace::world)
+                static_cast<void>(pica_multiply(projections[eye],draw.model));
+            else static_cast<void>(pica_draw_matrix(frame.plan,eye,draw));
+        }
         for(unsigned i=cursor;i<cursor+draw.count;++i) {
             const auto& vertex=frame.vertices[i];
             for(float value:vertex.position) if(!std::isfinite(value)) throw std::invalid_argument("Non-finite 3DS vertex");

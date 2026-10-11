@@ -498,6 +498,18 @@ void composition() {
         && layers.textures[0].pixels.data()==backdrop.textures[0].pixels.data(),"Dashboard-independent composition copied or flattened painter groups");
     rejected([&]{compositor.prepare_layers(plan,oversized);},"Artwork-only composition forgot the reserved lower LCD texture");
     rejected([&]{validate_pica_group(models,pica_texture_budget+1);},"Group validator accepted overflowing reserved residency");
+    // Every input still receives complete validation before publication, even
+    // when the final concatenation no longer walks the same vertices twice.
+    auto invalid_vertices=vertices;invalid_vertices.back().uv[1]=std::numeric_limits<float>::quiet_NaN();
+    auto bad=models;bad.vertices=invalid_vertices;
+    rejected([&]{compositor.prepare_layers(plan,std::array{backdrop,models,bad});},"Invalid vertex in a late painter group escaped validation");
+    require(std::equal(saved.begin(),saved.end(),layers.vertices.begin()),"Rejected late group discarded the last complete composition");
+    auto invalid_draws=draws;invalid_draws.front().first=1;bad=models;bad.draws=invalid_draws;
+    rejected([&]{compositor.prepare_layers(plan,std::array{models,bad});},"Rebasing concealed an invalid input draw range");
+    auto no_eyes=plan;no_eyes.eye_count=0;
+    rejected([&]{compositor.prepare_layers(no_eyes,{});},"Empty composition accepted a missing eye plan");
+    auto empty=compositor.prepare_layers(plan,{});validate_pica_frame(empty,dashboard.view());
+    require(empty.vertices.empty() && empty.draws.empty() && empty.textures.empty(),"Clear-only composition manufactured geometry");
 }
 void corridor_batch_contract() {
     auto ppu=source();ppu->background_mode=1;ppu->tunnel_scene=true;
