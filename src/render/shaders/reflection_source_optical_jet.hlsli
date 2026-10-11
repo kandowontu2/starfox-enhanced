@@ -104,10 +104,19 @@ OPTICAL_JET_FUNCTION_BOUNDARY OpticalJet3 jlava(OpticalJet x,OpticalJet z,Optica
     const OpticalJet fa=jband(footprint,jr(22,1000)),fb=jband(footprint,jr(54,1000)),fc=jband(footprint,jr(24,1000));
     OpticalJet h=ja(ja(jm(jm(jp(9),jsin(a)),fa),jm(jm(jp(2.5),jsin(b)),fb)),jm(jm(jp(5),jsin(c)),fc));
     const OpticalJet cb=jm(jcos(bend),filter);
-    OpticalJet dx=js(ja(jm(jm(jm(jp(9),ja(jr(18,1000),jm(jr(39,10000),cb))),jcos(a)),fa),jm(jm(jr(1175,10000),jcos(b)),fb)),jm(jm(jr(45,1000),jcos(c)),fc));
-    OpticalJet dz=ja(js(jm(jm(jm(jp(9),js(jr(11,1000),jm(jr(52,10000),cb))),jcos(a)),fa),jm(jm(jr(625,10000),jcos(b)),fb)),jm(jm(jr(110,1000),jcos(c)),fc));
+    // BEGIN LOCAL LAVA TRIG REUSE
+    // These immutable phases have already had both trigonometric
+    // polynomials checked by the height evaluation above. Reuse
+    // the identical complete cosine result within THIS wave only;
+    // no cross-cell/frame cache, estimate or missing wave evaluation.
+    const OpticalJet ca=jcos(a),ccB=jcos(b),ccC=jcos(c);
+    // END LOCAL LAVA TRIG REUSE
+    OpticalJet dx=js(ja(jm(jm(jm(jp(9),ja(jr(18,1000),jm(jr(39,10000),cb))),ca),fa),jm(jm(jr(1175,10000),ccB),fb)),jm(jm(jr(45,1000),ccC),fc));
+    OpticalJet dz=ja(js(jm(jm(jm(jp(9),js(jr(11,1000),jm(jr(52,10000),cb))),ca),fa),jm(jm(jr(625,10000),ccB),fb)),jm(jm(jr(110,1000),ccC),fc));
     const OpticalJet ripple=js(ja(jm(x,jr(173,1000)),jm(z,jr(129,1000))),jm(t,jr(73,100))),fr=jband(footprint,jr(216,1000));
-    h=ja(h,jm(jm(jr(38,100),jsin(ripple)),fr));dx=ja(dx,jm(jm(jr(6574,100000),jcos(ripple)),fr));dz=ja(dz,jm(jm(jr(4902,100000),jcos(ripple)),fr));
+    h=ja(h,jm(jm(jr(38,100),jsin(ripple)),fr));
+    const OpticalJet cr=jcos(ripple);
+    dx=ja(dx,jm(jm(jr(6574,100000),cr),fr));dz=ja(dz,jm(jm(jr(4902,100000),cr),fr));
     if(footprint.v.lo<24) {
         if(footprint.v.hi>=24){jetBranchKnown=false;return j3(h,dx,dz);}
         const OpticalJet xx=jd(x,jp(128)),zz=jd(z,jp(128));
