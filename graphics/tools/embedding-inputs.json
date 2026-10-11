@@ -1,0 +1,93 @@
+{
+  "Repository": "kandowontu2/starfox-enhanced",
+  "SourceRun": 38103454445,
+  "SourceCommit": "b9cf8e90b528347bcaede434b9248991afddf977",
+  "Recipes": {
+    "composite_vertex": [
+      "vert",
+      0,
+      0,
+      0
+    ],
+    "composite_fragment": [
+      "frag",
+      2,
+      2,
+      1
+    ],
+    "composite_witness": [
+      "frag",
+      3,
+      2,
+      1
+    ],
+    "water_guides": [
+      "frag",
+      2,
+      1,
+      1
+    ],
+    "water_panel_guides": [
+      "frag",
+      2,
+      0,
+      1
+    ]
+  },
+  "Libraries": {
+    "macosx": {
+      "composite_vertex": {
+        "LibrarySha256": "b76ed80462c9a6b9d7c59e55270815b33774ed09bf4e88c1fbf997a8bd62c8e6",
+        "ReceiptSha256": "5d855aecdf9e133df2ae81ffa45b7a3cd4afdc44efcda8276b40a1cc7ba343cb",
+        "Bytes": 3195
+      },
+      "composite_fragment": {
+        "LibrarySha256": "59026b63b950a75043f0840af890f94e7eca9eca271cc38bc15c61b0033cf84a",
+        "ReceiptSha256": "e0edf8a1427939ba11920386e316216477d7925a975a287802896f5500ca1c42",
+        "Bytes": 192269
+      },
+      "composite_witness": {
+        "LibrarySha256": "4f04c62546047cf6d376bfd758f3654052e04d1c1b853f131eb153c9a20983f1",
+        "ReceiptSha256": "6498da5fed04752c16084a89ad4eb60f5cbb9597f37599bcd988b5af43d586eb",
+        "Bytes": 193980
+      },
+      "water_guides": {
+        "LibrarySha256": "76082f95c9bf219a0428db18d13b272095d20c3d32fa0bcdf8a74b8cd8c9488b",
+        "ReceiptSha256": "140998b842eb90b35e0e079be014beca674dd9440350f716badeb564ed5d6e92",
+        "Bytes": 5952
+      },
+      "water_panel_guides": {
+        "LibrarySha256": "38c3243dd8d7c60f9715be4f453b27d5cf2033a04d5879c40b5355427ee954ac",
+        "ReceiptSha256": "6edb745e114fc32884aa4314ee77c9197d5c2bd26b375c208609179d78ee37b8",
+        "Bytes": 14128
+      }
+    },
+    "iphoneos": {
+      "composite_vertex": {
+        "LibrarySha256": "6134af13a206b1358330eda855f3a7ae0876a73f7a97be413637a2f2904ff469",
+        "ReceiptSha256": "06df65be146d2e459d52a48b97da92b98f6d0a0b4be2bd582779c4e530356fd2",
+        "Bytes": 3195
+      },
+      "composite_fragment": {
+        "LibrarySha256": "a69ba6c204ff0b46fc395868956a8f78f3ff4df6f0aec1b4517e32fba90b9f97",
+        "ReceiptSha256": "3468018cffbebc1ca55170f6ff34da5834ea5b03b12b7b94e34c5182cfb244ce",
+        "Bytes": 192253
+      },
+      "composite_witness": {
+        "LibrarySha256": "8d4d417b2787934a4c8d16cbf21356e7089d1153a6efaf831bddcc7c119c14e9",
+        "ReceiptSha256": "a0bf0598c49261c55607af33011b0383a13b44e76fbd1153acb509bc82550fdb",
+        "Bytes": 193964
+      },
+      "water_guides": {
+        "LibrarySha256": "8644452fa38fb0a950a60fdcac9f822a0ebba2c4552c55c169b41a59d2ee96f3",
+        "ReceiptSha256": "6cec136732fd5b0b2d6c7b3e565c501fc5aaed670ddcda4bdf52c849420745b9",
+        "Bytes": 5952
+      },
+      "water_panel_guides": {
+        "LibrarySha256": "a496af450d2518bfa7c9aa7fe2674129aeb6c67cea820a05da59e4bdd4d48fba",
+        "ReceiptSha256": "13b9b37c2bfa4affc2cb39a7ae59c582e9a87f31bc4cfc4a83834beff45a7247",
+        "Bytes": 14112
+      }
+    }
+  }
+}

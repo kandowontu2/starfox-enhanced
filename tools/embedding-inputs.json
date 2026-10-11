@@ -1,0 +1,501 @@
+{
+  "Repository": "kandowontu2/starfox-enhanced",
+  "SourceRun": 38101859976,
+  "SourceCommit": "a91cd4d2bdc02879c6929101f4b4d4ed3815756c",
+  "Recipes": {
+    "tiles": [
+      1,
+      1,
+      1,
+      0,
+      [
+        8,
+        8,
+        1
+      ]
+    ],
+    "reduce": [
+      1,
+      0,
+      1,
+      0,
+      [
+        8,
+        8,
+        1
+      ]
+    ],
+    "query": [
+      1,
+      2,
+      1,
+      0,
+      [
+        64,
+        1,
+        1
+      ]
+    ],
+    "mapping": [
+      1,
+      2,
+      1,
+      0,
+      [
+        64,
+        1,
+        1
+      ]
+    ],
+    "domains": [
+      2,
+      3,
+      1,
+      0,
+      [
+        8,
+        8,
+        1
+      ]
+    ],
+    "frames": [
+      1,
+      3,
+      1,
+      0,
+      [
+        64,
+        1,
+        1
+      ]
+    ],
+    "optical": [
+      3,
+      3,
+      1,
+      0,
+      [
+        64,
+        1,
+        1
+      ]
+    ],
+    "optical_stream": [
+      3,
+      4,
+      1,
+      0,
+      [
+        256,
+        1,
+        1
+      ]
+    ],
+    "optical_schedule": [
+      1,
+      1,
+      3,
+      0,
+      [
+        128,
+        1,
+        1
+      ]
+    ],
+    "jets": [
+      3,
+      4,
+      1,
+      0,
+      [
+        64,
+        1,
+        1
+      ]
+    ],
+    "jets_stream": [
+      3,
+      4,
+      1,
+      0,
+      [
+        8,
+        1,
+        1
+      ]
+    ],
+    "roots_clear": [
+      1,
+      0,
+      1,
+      0,
+      [
+        64,
+        1,
+        1
+      ]
+    ],
+    "witness": [
+      3,
+      3,
+      1,
+      0,
+      [
+        64,
+        1,
+        1
+      ]
+    ],
+    "folds": [
+      2,
+      3,
+      1,
+      0,
+      [
+        64,
+        1,
+        1
+      ]
+    ],
+    "guide": [
+      3,
+      2,
+      1,
+      0,
+      [
+        64,
+        1,
+        1
+      ]
+    ],
+    "colour": [
+      2,
+      3,
+      1,
+      0,
+      [
+        64,
+        1,
+        1
+      ]
+    ],
+    "compose": [
+      2,
+      2,
+      1,
+      0,
+      [
+        64,
+        1,
+        1
+      ]
+    ],
+    "publish": [
+      1,
+      1,
+      1,
+      0,
+      [
+        64,
+        1,
+        1
+      ]
+    ],
+    "publish_diagnostics": [
+      1,
+      1,
+      2,
+      0,
+      [
+        64,
+        1,
+        1
+      ]
+    ],
+    "admission_clear": [
+      1,
+      0,
+      1,
+      0,
+      [
+        64,
+        1,
+        1
+      ]
+    ],
+    "capture": [
+      1,
+      1,
+      1,
+      1,
+      [
+        8,
+        8,
+        1
+      ]
+    ],
+    "history": [
+      1,
+      2,
+      1,
+      1,
+      [
+        8,
+        8,
+        1
+      ]
+    ],
+    "lobes": [
+      1,
+      3,
+      1,
+      1,
+      [
+        8,
+        8,
+        1
+      ]
+    ],
+    "paths": [
+      1,
+      3,
+      1,
+      1,
+      [
+        8,
+        8,
+        1
+      ]
+    ],
+    "curved_paths": [
+      1,
+      3,
+      1,
+      1,
+      [
+        8,
+        8,
+        1
+      ]
+    ]
+  },
+  "Libraries": {
+    "macosx": {
+      "tiles": {
+        "LibrarySha256": "215c082834abbeb005e3632aa344b8038c89ab06f34c79ab7317ac2147cd9967",
+        "ReceiptSha256": "a7463158b15a2f8e85d4cee569ed723cdf9169af1e36a9d9655f57257632a9e7"
+      },
+      "reduce": {
+        "LibrarySha256": "9a3fc0e8c66a05f25ea99627f82fd14eb52a767ec68707ac9f458dadb3e73184",
+        "ReceiptSha256": "c20b164fa00d003acd0317fd56ad04b90413f012f7d83815efe9bb40cedce673"
+      },
+      "query": {
+        "LibrarySha256": "1403dc5cb42db6a2576f5dbb43a0eb7765c173b63100fdb489ef59040977ef58",
+        "ReceiptSha256": "5d75b43035d01764b6671fc151489e62ad6d0e0f4f3a6cb152cda9c6ee284ec5"
+      },
+      "mapping": {
+        "LibrarySha256": "f63c62da5149a6b7fc072d62b03e54723cd3bf59b5c508478575998ad17412b1",
+        "ReceiptSha256": "9cf3fc20a065e13bde3048d06344be7c33ecb253393db76298f98480a7ff8b32"
+      },
+      "domains": {
+        "LibrarySha256": "4662a6f230add7e0857d0abb7ccf0ddddbeb0717802546188bacc011dae99d7b",
+        "ReceiptSha256": "8e691120975ae5e2432ef252bf1b8eff90ae7459045aead3a312898ed16f7d76"
+      },
+      "frames": {
+        "LibrarySha256": "cdf4d83896a51cd5acc057c627ff3bb5c1ecaf4ca2a22dc515745d4660e3913c",
+        "ReceiptSha256": "6809c8af54193b69084948697ee200cb28d986d04ba4523e299b6575d11b7c3a"
+      },
+      "optical": {
+        "LibrarySha256": "c68d8040b57005b0e03bb623bcbe7b7bb87bcc215575dba266c5969dc3262093",
+        "ReceiptSha256": "838e46aa30c3937fe0b5041be75b3cdfac06e283849972913cca6d08686c75bb"
+      },
+      "optical_stream": {
+        "LibrarySha256": "ec6127894ae859cc51c7cdd4be76451660e4f0a8c21e21f0b47fc2757758e743",
+        "ReceiptSha256": "510dbadc1cb405f7d038b3ad1ec5b50e2ddb9caa3cf02575bd9b28551d1000a2"
+      },
+      "optical_schedule": {
+        "LibrarySha256": "7a6f7a150612b81bf7859dff90f9204731e564c98034168cebd55a477c1c83a2",
+        "ReceiptSha256": "19db0afc610d6599876578fc246d2ef90011004af3cb94116c5cd7bda6ad4006"
+      },
+      "jets": {
+        "LibrarySha256": "3719d50d4bd81ebdd9e7603367d104b638e80674886f70171ab840262930fc9d",
+        "ReceiptSha256": "f4e116ad1ff5d1d6f653f89894208098ac55f23e2d7c39f4c68ca2cdbfa5ff6e"
+      },
+      "jets_stream": {
+        "LibrarySha256": "e76d8eca3e155cab2afcb94eac45c3511f082304d506c1394a161c18ff2c120b",
+        "ReceiptSha256": "54acc673040f96ad2ce5e52d97e04e77214dee3c4fec8796980dfb6c25c71407"
+      },
+      "roots_clear": {
+        "LibrarySha256": "1199b9e818775beeab29639004ca3d44070a6f57eafe1c2296fcc1486dfae47d",
+        "ReceiptSha256": "8594ce1c04bc2dd1211e29dfbc7fe57889428d3f00eb9a2a13c5b8c61fc84a9a"
+      },
+      "witness": {
+        "LibrarySha256": "b1c8f7d07809c77051b439b9f178c0c4e70ba0ef491b4589b72b13064b698e52",
+        "ReceiptSha256": "1ef46a5c0c005dc1feffa1a327eedde8c6e0674d923f1739586aa58a26c9ff82"
+      },
+      "folds": {
+        "LibrarySha256": "79921767a28dcf4f5de07ac5050f0cbc36d58152f94acf54cb81c92b7555aea4",
+        "ReceiptSha256": "8c08ef94d89857fbe3f5d7bc5f1a52e1e4c7d36d937f5165aee7a0ab95972b93"
+      },
+      "guide": {
+        "LibrarySha256": "e15d2f2faec5c230edc64d7372f33471d4678e1bd85c20af28802d6333078999",
+        "ReceiptSha256": "da2707c8a1cb216bed6fba889aa3a2ad82a397c8b745be5526a6276347d9a531"
+      },
+      "colour": {
+        "LibrarySha256": "8740f5c07155d60f6da85d9120ac1895b7f208fc92aeed7856fbe475c06c21ce",
+        "ReceiptSha256": "513c33f942dbb50fb3a1b1cab651db327077c102eb7170d2e41353f2ac11f47a"
+      },
+      "compose": {
+        "LibrarySha256": "cc0e3a674c74f2cfc639a9b19c67acc746ebb32507dc01f08af6b2872ed5a0f9",
+        "ReceiptSha256": "e8d9adb558cdb95694b7f2b1b5252d7bb28dcd87356887bd36022e3debd5e587"
+      },
+      "publish": {
+        "LibrarySha256": "bc1f4c609edd6ae9889556203f168d47a4d65caefe02de0e516056606d5ca0a8",
+        "ReceiptSha256": "d95fac2aa6be8702c9deadb4d3b2531bfa27cd1b36d6d44a2249329337e03dcc"
+      },
+      "publish_diagnostics": {
+        "LibrarySha256": "9ed3ccd9c2b9e0b24d7239329440f0085d64481007baa81bc06cd07b1d305b6f",
+        "ReceiptSha256": "adfbc563329630163d70eca1c83f6091d79353b2758dbad3333fdee43cc91a1c"
+      },
+      "admission_clear": {
+        "LibrarySha256": "0ffed58f9cabd8c704ebab4e2aec0b40de1d7513ac3b7a5300a2d5269d4c1069",
+        "ReceiptSha256": "82844b73070e80687d33f06d893487e55af612677db3b79e326762ec38aec88c"
+      },
+      "capture": {
+        "LibrarySha256": "1f637c5176c0b5f46a75e3759ee50671f03406a74d5cbfb936603b4547c6c32a",
+        "ReceiptSha256": "5b30bb318c007b2d9fffcf28408686c95999692592bb84fa8d9e2e47965a8f7a"
+      },
+      "history": {
+        "LibrarySha256": "8d0b7f788d2bdba1870012a5d20799850f0dd818718768cdf83610e4a8bad05a",
+        "ReceiptSha256": "4a4bdcb8e7735e2e16220323f89a09d2f2c31ef28f0465972d932d5af5ac6b8b"
+      },
+      "lobes": {
+        "LibrarySha256": "c30c9fede0177d134190a6dc63f711ad88e65bfca82a3f7ab1d3b48b28fc86af",
+        "ReceiptSha256": "a5b95f4c3b41dd0235fc74d13c0aa1d3c6c6128f03cd31a50c0567c154568450"
+      },
+      "paths": {
+        "LibrarySha256": "588e85e6dce28975124f26b6e6d8044efa5873929bdb4d882fce0ded899ed022",
+        "ReceiptSha256": "0051f5e461f6e91733939ca36501bc7904e1fb20f5c0cf438d7f42d8e3cf54de"
+      },
+      "curved_paths": {
+        "LibrarySha256": "e17ecaf0c2d123e1738a2c793979474719c7682a1d84db00b26df3e38c936ac7",
+        "ReceiptSha256": "108e0b5e2f82a1988dbb8d4d61b476863c14ca0e8289163379471d167707e790"
+      }
+    },
+    "iphoneos": {
+      "tiles": {
+        "LibrarySha256": "3b50177d684a6d27e03d1e7b982dcbe98b9d3c45448b755851b8459890832a5d",
+        "ReceiptSha256": "60c0a32f62399ead7ae3074a2fa81705e7e9865fde8bff2fc7ff2580fbc9b207"
+      },
+      "reduce": {
+        "LibrarySha256": "d885bd861c14cb5e4ee9bdc37997e715b180b9a5b3c24b643be2f8b9b7ab390e",
+        "ReceiptSha256": "9665da298bf8e6f05a172537700b88f1287fc061ad6a2135ce47ca76f5e3e303"
+      },
+      "query": {
+        "LibrarySha256": "a188caeb34ebde154127f6a3f5381c30cfcaf06d63ad375572387ec1bcfa411c",
+        "ReceiptSha256": "f43b19019f29664af1ef814a1b599998c6f05cb41777a385fde59eb80cc1bd8e"
+      },
+      "mapping": {
+        "LibrarySha256": "45d7d374f4397255b31127beb44c98c62753606393988934acea195af79e3279",
+        "ReceiptSha256": "2ef843a1ec975998dc79df7be354fb99f8019715856c46c6c279a27f1a53e78d"
+      },
+      "domains": {
+        "LibrarySha256": "e9617213e3cc5ac1df7b8a100856bf3c13aca4709552c7847a5fecca9e9669a6",
+        "ReceiptSha256": "e758725df86a086ac5c667be9518b58b387f1217cef1a42a0d177a7f830207a6"
+      },
+      "frames": {
+        "LibrarySha256": "ca010570092b564d6222a932a6c03e74070d967751889059acceaf63c2f11d31",
+        "ReceiptSha256": "ac8e41ccb7aeb09e68bef3ee259bff598c6a34259b3ddc5419a6bbed87aea803"
+      },
+      "optical": {
+        "LibrarySha256": "6863e19958cb5345575094cdd7cc0c4b3c45725f07f2bded46d0cda365a46242",
+        "ReceiptSha256": "9a6cb1d7c3716724e59950034945b77e256f3e7836aecd32876548db11e51027"
+      },
+      "optical_stream": {
+        "LibrarySha256": "51782affe9c677e5169ab38ca5b979cad17476bf6a3be976da05d4f9f507f4ae",
+        "ReceiptSha256": "32575e5b6fc9063817402e80127a9ba769b70bc00f2d074e8c5f59a3db94c750"
+      },
+      "optical_schedule": {
+        "LibrarySha256": "658037c1c086b569625185848cc18005437c7c318e25abfe5203a76a829d6980",
+        "ReceiptSha256": "843cf443b3e93805fdb388ec0ce9a9c6597370fd0e4b64d376c1754fe75d47be"
+      },
+      "jets": {
+        "LibrarySha256": "41347047b8ae2565ccec5ff18974cf1928e2648f20e1a0af578d01ea19a6e0ec",
+        "ReceiptSha256": "7f09479de201ff7d3b001407710247f6e6bc74e0aed87ef5ca971d1c8e0554de"
+      },
+      "jets_stream": {
+        "LibrarySha256": "2d018949a322b7aae801ef4bb16aa74d38d05812eebf49d1029b5c2e552f049f",
+        "ReceiptSha256": "fd3744d3f119b8c27d42c5e9ba2ee21685ac9334058e04aa3f8205a68714ba90"
+      },
+      "roots_clear": {
+        "LibrarySha256": "6997fa9dba321eef231ddd30d73ed89f49ea627a654a2c7e73d04ebb184ff855",
+        "ReceiptSha256": "39b7991693c63c345cff84e67fba0eb204453dea782ed803a1d0acafc304c04c"
+      },
+      "witness": {
+        "LibrarySha256": "54ff5679737e8e48a2bb06f9727ca508bb45e7b355bccd47b71aca90281d4418",
+        "ReceiptSha256": "11b4cbbacf0f8b213a0f912aa5c40e02aa17cc7fe50d9a674b5783edf6a6ded4"
+      },
+      "folds": {
+        "LibrarySha256": "dcaa7d29d95a36f81a258622b3f94ae1ca863a762286e3d2431f532e5f778b17",
+        "ReceiptSha256": "da0a67ee75e062e5f34b329ea31fe018693050a5a14ea07ad7ac5a4a3bf4323b"
+      },
+      "guide": {
+        "LibrarySha256": "bfb46abd93cf9e8c4e77ba88e9e072a62798edae857916a76034503b5af2f51d",
+        "ReceiptSha256": "09feac7d59e27daee2c961e9ad8f58130b1bff97b0fb498ece1086a3ebd39515"
+      },
+      "colour": {
+        "LibrarySha256": "4df384d815d1130bf99e944223f110c50a5fd9833f5d0003046db2d4077c99d6",
+        "ReceiptSha256": "981c46ffbcd417d4a8befa59cbaf22fa5065e7910a7ad9c3e50e9be9e31426b5"
+      },
+      "compose": {
+        "LibrarySha256": "8638f3c098dfe7c086b3e2007af4ccbe7c3f97a8440d1f0f84acdfbdfe7a99ec",
+        "ReceiptSha256": "4b1d42575b2c35b5b784596f8c37814d39c111b5b57a26430b541ef48f01fb11"
+      },
+      "publish": {
+        "LibrarySha256": "5b37aca4daffa05ef8df2c98446b8b50c03a9ff445e4b5b46a4a5e02bbb1e767",
+        "ReceiptSha256": "198f8ccf0e24f2aaac7e9cc886281ca81ebdd6678bd1625db0a68ab5dd441ace"
+      },
+      "publish_diagnostics": {
+        "LibrarySha256": "851fa85ee4613054a4d270880058dce04a8702a9c5992fbc71a29056d3f06b8f",
+        "ReceiptSha256": "2b40cd98d7120c4fb943e049c608610fc79a787182efa51a039c736644f7c3e5"
+      },
+      "admission_clear": {
+        "LibrarySha256": "9786d28a1e08445a112c5dfed8a466b321f35e618abb58a4d2d427ca869e7b65",
+        "ReceiptSha256": "0698dd2931df4221955aafa75c5fc66d449dcfd442157437fdbf3b95814c0b86"
+      },
+      "capture": {
+        "LibrarySha256": "261b63bf1bcc16851ca1807bd94f1d6739b4d237a76f2f80839b8aac055f77d0",
+        "ReceiptSha256": "2a6873ed238b0df63533218ebde84997735f7f2f59e2c6662f5a1db5eca59f7c"
+      },
+      "history": {
+        "LibrarySha256": "ffc105aad5d29389cff76e0e8857e282b585c29ac2d4d2c582f614ae6e1f9449",
+        "ReceiptSha256": "8c62a0ec5bb759217f06f9c693776ef7e4a5e56935c17d41d5e92989d2f9f344"
+      },
+      "lobes": {
+        "LibrarySha256": "9b2882abeb3769564de7b6a2f330323f3bfb429cb47298a7b10eb2b47e89607f",
+        "ReceiptSha256": "2914583dc579927edf55f314e838dbdd2fec9cfce90f0eb451571f23210fafd9"
+      },
+      "paths": {
+        "LibrarySha256": "11ecb8b3d022d2c3d935455741c878216965409d8bdc85c0921ae33a1a6d8365",
+        "ReceiptSha256": "1ed00a997b082b66b1d68f79ce2e3cf2f97243ed266875357a469dd23d5f8ab9"
+      },
+      "curved_paths": {
+        "LibrarySha256": "ba58c3c252d5a91c46a55a1d67e97f078bd79ac401fcfd18d443846f6768d96e",
+        "ReceiptSha256": "4eb84f10cc08fcf2950a676e0b85988fe5c60f58ffaed9d2c0631da549490f0c"
+      }
+    }
+  },
+  "SchedulingCandidate": {
+    "Shader": "jets_stream",
+    "Threads": [
+      8,
+      1,
+      1
+    ],
+    "InputSpirvSha256": "10aaed0b26b7e808c2113e4af27a5f3dd6aaa31488fd640fba520c046106f66d",
+    "ReplacesHistoricalLibraryInputs": true,
+    "RuntimeAcceptanceRequired": true,
+    "SdkCompilerAccepted": true,
+    "RuntimeAccepted": false
+  }
+}

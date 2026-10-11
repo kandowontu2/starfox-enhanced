@@ -1,10 +1,19 @@
 #include "starfox/render/gpu_calibrated_reflection_history.hpp"
 #include "starfox/render/gpu_preparation.hpp"
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
 #include "shaders/generated/calibrated_scene_portable.hpp"
 #include "shaders/generated/calibrated_reflection_lobes.hpp"
 #include "shaders/generated/calibrated_reflection_paths.hpp"
 #include "shaders/generated/calibrated_reflection_curved_paths.hpp"
-#if defined(STARFOX_REFLECTION_SOURCE_INDEX_AVAILABLE)
+#endif
+#if defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+#include "starfox/render/sdl_metal_reflection_payload.hpp"
+#include "starfox/render/embedded_metal_reflection_programs.hpp"
+#if !defined(STARFOX_REFLECTION_SOURCE_INDEX_AVAILABLE)
+#error "Metal reflection bundle requires the entire original source-index factory graph"
+#endif
+#endif
+#if defined(STARFOX_REFLECTION_SOURCE_INDEX_AVAILABLE) && !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
 #include "native_reflection_index_tiles_dxil.hpp"
 #include "native_reflection_index_tiles_spirv.hpp"
 #include "native_reflection_index_reduce_dxil.hpp"
@@ -61,7 +70,22 @@
 #include <stdexcept>
 namespace starfox::render {
 namespace {
+// Preserve every query, but split the bounded stream into smaller workgroups.
+// Must match the compiled feature_jets_stream_main LocalSize (8,1,1).
+constexpr unsigned source_root_stream_lanes=8;
 void require(bool value,const char* message) {if(!value) throw std::runtime_error(message);}
+inline SDL_GPUComputePipeline* create_reflection_compute_pipeline(SDL_GPUDevice* device,
+    SDL_GPUComputePipelineCreateInfo* info, const char* variant) {
+#if defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+    const auto formats=SDL_GetGPUShaderFormats(device);
+    require((formats&SDL_GPU_SHADERFORMAT_METALLIB)!=0,"Embedded Metal reflection bundle requires a Metal device");
+    require(embedded_metal::select_payload(embedded_metal::programs_for_sdk(),variant,formats,*info)
+        ==embedded_metal::PayloadSelection::MetalSelected,"Incomplete/mismatched Metal reflection pipeline recipe");
+#else
+    (void)variant;
+#endif
+    return create_gpu_compute_pipeline(device,info);
+}
 struct Uniform {unsigned width,height,previous_width,previous_height,flags;float weight;unsigned prefix_stride,padding;};
 static_assert(sizeof(Uniform)==32);
 struct LobeUniform {
@@ -273,11 +297,27 @@ struct GpuCalibratedReflectionHistory::State {
             info.format=spirv?SDL_GPU_SHADERFORMAT_SPIRV:SDL_GPU_SHADERFORMAT_DXIL;
             info.num_readwrite_storage_buffers=info.num_uniform_buffers=1;info.num_readonly_storage_buffers=stage?0:1;
             info.threadcount_x=info.threadcount_y=8;info.threadcount_z=1;
-            if(stage) {info.code=spirv?native_reflection_index_reduce_spirv:native_reflection_index_reduce_dxil;
-                info.code_size=spirv?sizeof(native_reflection_index_reduce_spirv):sizeof(native_reflection_index_reduce_dxil);}
-            else {info.code=spirv?native_reflection_index_tiles_spirv:native_reflection_index_tiles_dxil;
-                info.code_size=spirv?sizeof(native_reflection_index_tiles_spirv):sizeof(native_reflection_index_tiles_dxil);}
-            selected=create_gpu_compute_pipeline(device,&info);require(selected,SDL_GetError());
+            if(stage) {
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code=spirv?native_reflection_index_reduce_spirv:native_reflection_index_reduce_dxil;
+#endif
+
+                
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code_size=spirv?sizeof(native_reflection_index_reduce_spirv):sizeof(native_reflection_index_reduce_dxil);
+#endif
+}
+            else {
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code=spirv?native_reflection_index_tiles_spirv:native_reflection_index_tiles_dxil;
+#endif
+
+                
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code_size=spirv?sizeof(native_reflection_index_tiles_spirv):sizeof(native_reflection_index_tiles_dxil);
+#endif
+}
+            selected=create_reflection_compute_pipeline(device,&info,stage?"reduce":"tiles");require(selected,SDL_GetError());
         }
 #else
         require(false,"Resident reflection source index not compiled; retaining current full-quality radiance");
@@ -292,28 +332,48 @@ struct GpuCalibratedReflectionHistory::State {
         info.format=spirv?SDL_GPU_SHADERFORMAT_SPIRV:SDL_GPU_SHADERFORMAT_DXIL;
         info.num_samplers=info.num_readonly_storage_buffers=info.num_readwrite_storage_buffers=info.num_uniform_buffers=1;
         info.threadcount_x=info.threadcount_y=8;info.threadcount_z=1;
-        info.code=spirv?native_reflection_capture_spirv:native_reflection_capture_dxil;
-        info.code_size=spirv?sizeof(native_reflection_capture_spirv):sizeof(native_reflection_capture_dxil);
-        capture_pipeline=create_gpu_compute_pipeline(device,&info);require(capture_pipeline,SDL_GetError());
+        
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code=spirv?native_reflection_capture_spirv:native_reflection_capture_dxil;
+#endif
+
+        
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code_size=spirv?sizeof(native_reflection_capture_spirv):sizeof(native_reflection_capture_dxil);
+#endif
+
+        capture_pipeline=create_reflection_compute_pipeline(device,&info,"capture");require(capture_pipeline,SDL_GetError());
 #endif
     }
     void prepare_source_queries() {
 #if defined(STARFOX_REFLECTION_SOURCE_INDEX_AVAILABLE)
         const bool spirv=(SDL_GetGPUShaderFormats(device)&SDL_GPU_SHADERFORMAT_SPIRV)!=0;
         require(!spirv || curved_vulkan_precision(device),"Resident source queries require Vulkan1.2 SignedZeroInfNanPreserve32");
-        const unsigned char* code[]{spirv?native_reflection_index_mapping_spirv:native_reflection_index_mapping_dxil,
+        #if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+const unsigned char* code[]{spirv?native_reflection_index_mapping_spirv:native_reflection_index_mapping_dxil,
             spirv?native_reflection_index_query_spirv:native_reflection_index_query_dxil,
             spirv?native_reflection_index_domains_spirv:native_reflection_index_domains_dxil};
-        const std::size_t sizes[]{spirv?sizeof(native_reflection_index_mapping_spirv):sizeof(native_reflection_index_mapping_dxil),
+#endif
+        #if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+const std::size_t sizes[]{spirv?sizeof(native_reflection_index_mapping_spirv):sizeof(native_reflection_index_mapping_dxil),
             spirv?sizeof(native_reflection_index_query_spirv):sizeof(native_reflection_index_query_dxil),
             spirv?sizeof(native_reflection_index_domains_spirv):sizeof(native_reflection_index_domains_dxil)};
+#endif
         const char* names[]{"feature_mapping_main","feature_query_main","feature_domains_main"};
         for(unsigned stage=0;stage<3;++stage)if(!query_pipelines[stage]) {
-            SDL_GPUComputePipelineCreateInfo info{};info.entrypoint=names[stage];info.code=code[stage];info.code_size=sizes[stage];
+            SDL_GPUComputePipelineCreateInfo info{};info.entrypoint=names[stage];
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code=code[stage];
+#endif
+
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code_size=sizes[stage];
+#endif
+
             info.format=spirv?SDL_GPU_SHADERFORMAT_SPIRV:SDL_GPU_SHADERFORMAT_DXIL;
             info.num_readwrite_storage_buffers=1;info.num_readonly_storage_buffers=stage==2?3:2;
             info.num_uniform_buffers=stage==2?2:1;info.threadcount_x=stage==2?8:64;info.threadcount_y=stage==2?8:1;info.threadcount_z=1;
-            query_pipelines[stage]=create_gpu_compute_pipeline(device,&info);require(query_pipelines[stage],SDL_GetError());
+            query_pipelines[stage]=create_reflection_compute_pipeline(device,&info,stage==2?"domains":stage==1?"query":"mapping");require(query_pipelines[stage],SDL_GetError());
         }
 #else
         require(false,"Resident reflection query stages not compiled");
@@ -335,35 +395,63 @@ struct GpuCalibratedReflectionHistory::State {
 #if defined(STARFOX_REFLECTION_SOURCE_INDEX_AVAILABLE)
         const bool spirv=(SDL_GetGPUShaderFormats(device)&SDL_GPU_SHADERFORMAT_SPIRV)!=0;
         require(!spirv || curved_vulkan_precision(device),"Resident source optics require Vulkan1.2 SignedZeroInfNanPreserve32");
-        const unsigned char* code[]{spirv?native_reflection_index_frames_spirv:native_reflection_index_frames_dxil,
+        #if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+const unsigned char* code[]{spirv?native_reflection_index_frames_spirv:native_reflection_index_frames_dxil,
             spirv?native_reflection_index_optical_spirv:native_reflection_index_optical_dxil};
-        const std::size_t sizes[]{spirv?sizeof(native_reflection_index_frames_spirv):sizeof(native_reflection_index_frames_dxil),
+#endif
+        #if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+const std::size_t sizes[]{spirv?sizeof(native_reflection_index_frames_spirv):sizeof(native_reflection_index_frames_dxil),
             spirv?sizeof(native_reflection_index_optical_spirv):sizeof(native_reflection_index_optical_dxil)};
+#endif
         const char* names[]{"feature_frames_main","feature_optical_main"};
         for(unsigned stage=0;stage<2;++stage)if(!optical_pipelines[stage] && !(stage && stream)) {
-            SDL_GPUComputePipelineCreateInfo info{};info.entrypoint=names[stage];info.code=code[stage];info.code_size=sizes[stage];
+            SDL_GPUComputePipelineCreateInfo info{};info.entrypoint=names[stage];
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code=code[stage];
+#endif
+
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code_size=sizes[stage];
+#endif
+
             info.format=spirv?SDL_GPU_SHADERFORMAT_SPIRV:SDL_GPU_SHADERFORMAT_DXIL;
             info.num_readwrite_storage_buffers=1;info.num_readonly_storage_buffers=3;info.num_uniform_buffers=stage?3:1;
             info.threadcount_x=64;info.threadcount_y=info.threadcount_z=1;
-            optical_pipelines[stage]=create_gpu_compute_pipeline(device,&info);require(optical_pipelines[stage],SDL_GetError());
+            optical_pipelines[stage]=create_reflection_compute_pipeline(device,&info,stage?"optical":"frames");require(optical_pipelines[stage],SDL_GetError());
         }
         if(stream && !optical_stream_pipeline) {
             SDL_GPUComputePipelineCreateInfo info{};info.entrypoint="feature_optical_stream_main";
             info.format=spirv?SDL_GPU_SHADERFORMAT_SPIRV:SDL_GPU_SHADERFORMAT_DXIL;
-            info.code=spirv?native_reflection_index_optical_stream_spirv:native_reflection_index_optical_stream_dxil;
-            info.code_size=spirv?sizeof(native_reflection_index_optical_stream_spirv):sizeof(native_reflection_index_optical_stream_dxil);
+            
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code=spirv?native_reflection_index_optical_stream_spirv:native_reflection_index_optical_stream_dxil;
+#endif
+
+            
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code_size=spirv?sizeof(native_reflection_index_optical_stream_spirv):sizeof(native_reflection_index_optical_stream_dxil);
+#endif
+
             info.num_readonly_storage_buffers=4;info.num_readwrite_storage_buffers=1;info.num_uniform_buffers=3;
             info.threadcount_x=GpuReflectionSourceOptical::stream_lanes;info.threadcount_y=info.threadcount_z=1;
-            optical_stream_pipeline=create_gpu_compute_pipeline(device,&info);require(optical_stream_pipeline,SDL_GetError());
+            optical_stream_pipeline=create_reflection_compute_pipeline(device,&info,"optical_stream");require(optical_stream_pipeline,SDL_GetError());
         }
         if(stream && !optical_schedule_pipeline) {
             SDL_GPUComputePipelineCreateInfo info{};info.entrypoint="feature_optical_schedule_main";
             info.format=spirv?SDL_GPU_SHADERFORMAT_SPIRV:SDL_GPU_SHADERFORMAT_DXIL;
-            info.code=spirv?native_reflection_index_optical_schedule_spirv:native_reflection_index_optical_schedule_dxil;
-            info.code_size=spirv?sizeof(native_reflection_index_optical_schedule_spirv):sizeof(native_reflection_index_optical_schedule_dxil);
+            
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code=spirv?native_reflection_index_optical_schedule_spirv:native_reflection_index_optical_schedule_dxil;
+#endif
+
+            
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code_size=spirv?sizeof(native_reflection_index_optical_schedule_spirv):sizeof(native_reflection_index_optical_schedule_dxil);
+#endif
+
             info.num_readonly_storage_buffers=1;info.num_readwrite_storage_buffers=3;info.num_uniform_buffers=1;
             info.threadcount_x=128;info.threadcount_y=info.threadcount_z=1;
-            optical_schedule_pipeline=create_gpu_compute_pipeline(device,&info);require(optical_schedule_pipeline,SDL_GetError());
+            optical_schedule_pipeline=create_reflection_compute_pipeline(device,&info,"optical_schedule");require(optical_schedule_pipeline,SDL_GetError());
         }
 #else
         (void)stream;
@@ -414,15 +502,31 @@ struct GpuCalibratedReflectionHistory::State {
         require(!spirv || curved_vulkan_precision(device),"Resident source roots require Vulkan1.2 SignedZeroInfNanPreserve32");
         SDL_GPUComputePipelineCreateInfo info{};info.entrypoint=stream?"feature_jets_stream_main":"feature_jets_main";
         info.format=spirv?SDL_GPU_SHADERFORMAT_SPIRV:SDL_GPU_SHADERFORMAT_DXIL;
-        info.code=spirv?native_reflection_index_jets_spirv:native_reflection_index_jets_dxil;
-        info.code_size=spirv?sizeof(native_reflection_index_jets_spirv):sizeof(native_reflection_index_jets_dxil);
+        
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code=spirv?native_reflection_index_jets_spirv:native_reflection_index_jets_dxil;
+#endif
+
+        
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code_size=spirv?sizeof(native_reflection_index_jets_spirv):sizeof(native_reflection_index_jets_dxil);
+#endif
+
         if(stream) {
-            info.code=spirv?native_reflection_index_jets_stream_spirv:native_reflection_index_jets_stream_dxil;
-            info.code_size=spirv?sizeof(native_reflection_index_jets_stream_spirv):sizeof(native_reflection_index_jets_stream_dxil);
+            
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code=spirv?native_reflection_index_jets_stream_spirv:native_reflection_index_jets_stream_dxil;
+#endif
+
+            
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code_size=spirv?sizeof(native_reflection_index_jets_stream_spirv):sizeof(native_reflection_index_jets_stream_dxil);
+#endif
+
         }
         info.num_readwrite_storage_buffers=1;info.num_readonly_storage_buffers=4;info.num_uniform_buffers=3;
-        info.threadcount_x=64;info.threadcount_y=info.threadcount_z=1;
-        selected=create_gpu_compute_pipeline(device,&info);require(selected,SDL_GetError());
+        info.threadcount_x=stream?source_root_stream_lanes:64;info.threadcount_y=info.threadcount_z=1;
+        selected=create_reflection_compute_pipeline(device,&info,stream?"jets_stream":"jets");require(selected,SDL_GetError());
 #else
         (void)stream;
         require(false,"Resident reflection local-root stage not compiled");
@@ -435,10 +539,18 @@ struct GpuCalibratedReflectionHistory::State {
             const bool spirv=(SDL_GetGPUShaderFormats(device)&SDL_GPU_SHADERFORMAT_SPIRV)!=0;
             SDL_GPUComputePipelineCreateInfo info{};info.entrypoint="feature_roots_clear_main";
             info.format=spirv?SDL_GPU_SHADERFORMAT_SPIRV:SDL_GPU_SHADERFORMAT_DXIL;
-            info.code=spirv?native_reflection_index_roots_clear_spirv:native_reflection_index_roots_clear_dxil;
-            info.code_size=spirv?sizeof(native_reflection_index_roots_clear_spirv):sizeof(native_reflection_index_roots_clear_dxil);
+            
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code=spirv?native_reflection_index_roots_clear_spirv:native_reflection_index_roots_clear_dxil;
+#endif
+
+            
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code_size=spirv?sizeof(native_reflection_index_roots_clear_spirv):sizeof(native_reflection_index_roots_clear_dxil);
+#endif
+
             info.num_readwrite_storage_buffers=info.num_uniform_buffers=1;info.threadcount_x=64;info.threadcount_y=info.threadcount_z=1;
-            root_clear_pipeline=create_gpu_compute_pipeline(device,&info);require(root_clear_pipeline,SDL_GetError());
+            root_clear_pipeline=create_reflection_compute_pipeline(device,&info,"roots_clear");require(root_clear_pipeline,SDL_GetError());
         }
         make_local_root_work();
         const SDL_GPUStorageBufferReadWriteBinding output{local_root_work->buffers[0],false,0,0,0};
@@ -466,19 +578,43 @@ struct GpuCalibratedReflectionHistory::State {
         require(!spirv || curved_vulkan_precision(device),"Resident source witnesses require Vulkan1.2 SignedZeroInfNanPreserve32");
         SDL_GPUComputePipelineCreateInfo info{};info.entrypoint=stage==2?"feature_guide_main":stage==1?"feature_folds_main":"feature_witness_main";
         info.format=spirv?SDL_GPU_SHADERFORMAT_SPIRV:SDL_GPU_SHADERFORMAT_DXIL;
-        info.code=spirv?native_reflection_index_witness_spirv:native_reflection_index_witness_dxil;
-        info.code_size=spirv?sizeof(native_reflection_index_witness_spirv):sizeof(native_reflection_index_witness_dxil);
+        
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code=spirv?native_reflection_index_witness_spirv:native_reflection_index_witness_dxil;
+#endif
+
+        
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code_size=spirv?sizeof(native_reflection_index_witness_spirv):sizeof(native_reflection_index_witness_dxil);
+#endif
+
         if(stage==1) {
-            info.code=spirv?native_reflection_index_folds_spirv:native_reflection_index_folds_dxil;
-            info.code_size=spirv?sizeof(native_reflection_index_folds_spirv):sizeof(native_reflection_index_folds_dxil);
+            
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code=spirv?native_reflection_index_folds_spirv:native_reflection_index_folds_dxil;
+#endif
+
+            
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code_size=spirv?sizeof(native_reflection_index_folds_spirv):sizeof(native_reflection_index_folds_dxil);
+#endif
+
         }
         if(stage==2) {
-            info.code=spirv?native_reflection_index_guide_spirv:native_reflection_index_guide_dxil;
-            info.code_size=spirv?sizeof(native_reflection_index_guide_spirv):sizeof(native_reflection_index_guide_dxil);
+            
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code=spirv?native_reflection_index_guide_spirv:native_reflection_index_guide_dxil;
+#endif
+
+            
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code_size=spirv?sizeof(native_reflection_index_guide_spirv):sizeof(native_reflection_index_guide_dxil);
+#endif
+
         }
         info.num_readwrite_storage_buffers=1;info.num_readonly_storage_buffers=stage==2?2U:3U;info.num_uniform_buffers=stage==1?2U:3U;
         info.threadcount_x=64;info.threadcount_y=info.threadcount_z=1;
-        selected=create_gpu_compute_pipeline(device,&info);require(selected,SDL_GetError());
+        selected=create_reflection_compute_pipeline(device,&info,stage==2?"guide":stage==1?"folds":"witness");require(selected,SDL_GetError());
 #else
         (void)stage;
         require(false,"Resident source witness stage not compiled");
@@ -491,11 +627,19 @@ struct GpuCalibratedReflectionHistory::State {
         require(!spirv || curved_vulkan_precision(device),"Resident source colour requires Vulkan1.2 SignedZeroInfNanPreserve32");
         SDL_GPUComputePipelineCreateInfo info{};info.entrypoint="feature_colour_main";
         info.format=spirv?SDL_GPU_SHADERFORMAT_SPIRV:SDL_GPU_SHADERFORMAT_DXIL;
-        info.code=spirv?native_reflection_index_colour_spirv:native_reflection_index_colour_dxil;
-        info.code_size=spirv?sizeof(native_reflection_index_colour_spirv):sizeof(native_reflection_index_colour_dxil);
+        
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code=spirv?native_reflection_index_colour_spirv:native_reflection_index_colour_dxil;
+#endif
+
+        
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code_size=spirv?sizeof(native_reflection_index_colour_spirv):sizeof(native_reflection_index_colour_dxil);
+#endif
+
         info.num_readonly_storage_buffers=3;info.num_readwrite_storage_buffers=1;info.num_uniform_buffers=2;
         info.threadcount_x=64;info.threadcount_y=info.threadcount_z=1;
-        colour_pipeline=create_gpu_compute_pipeline(device,&info);require(colour_pipeline,SDL_GetError());
+        colour_pipeline=create_reflection_compute_pipeline(device,&info,"colour");require(colour_pipeline,SDL_GetError());
 #else
         require(false,"Resident reflection source colour stage not compiled");
 #endif
@@ -507,11 +651,19 @@ struct GpuCalibratedReflectionHistory::State {
         require(!spirv || curved_vulkan_precision(device),"Resident pixel composition requires Vulkan1.2 SignedZeroInfNanPreserve32");
         SDL_GPUComputePipelineCreateInfo info{};info.entrypoint="feature_compose_main";
         info.format=spirv?SDL_GPU_SHADERFORMAT_SPIRV:SDL_GPU_SHADERFORMAT_DXIL;
-        info.code=spirv?native_reflection_index_compose_spirv:native_reflection_index_compose_dxil;
-        info.code_size=spirv?sizeof(native_reflection_index_compose_spirv):sizeof(native_reflection_index_compose_dxil);
+        
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code=spirv?native_reflection_index_compose_spirv:native_reflection_index_compose_dxil;
+#endif
+
+        
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code_size=spirv?sizeof(native_reflection_index_compose_spirv):sizeof(native_reflection_index_compose_dxil);
+#endif
+
         info.num_readonly_storage_buffers=2;info.num_readwrite_storage_buffers=1;info.num_uniform_buffers=2;
         info.threadcount_x=64;info.threadcount_y=info.threadcount_z=1;
-        compose_pipeline=create_gpu_compute_pipeline(device,&info);require(compose_pipeline,SDL_GetError());
+        compose_pipeline=create_reflection_compute_pipeline(device,&info,"compose");require(compose_pipeline,SDL_GetError());
 #else
         require(false,"Resident reflection pixel composition stage not compiled");
 #endif
@@ -523,16 +675,32 @@ struct GpuCalibratedReflectionHistory::State {
         const bool spirv=(SDL_GetGPUShaderFormats(device)&SDL_GPU_SHADERFORMAT_SPIRV)!=0;
         SDL_GPUComputePipelineCreateInfo info{};info.entrypoint=diagnostic?"feature_publish_diagnostics_main":"feature_publish_main";
         info.format=spirv?SDL_GPU_SHADERFORMAT_SPIRV:SDL_GPU_SHADERFORMAT_DXIL;
-        info.code=spirv?native_reflection_index_publish_spirv:native_reflection_index_publish_dxil;
-        info.code_size=spirv?sizeof(native_reflection_index_publish_spirv):sizeof(native_reflection_index_publish_dxil);
+        
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code=spirv?native_reflection_index_publish_spirv:native_reflection_index_publish_dxil;
+#endif
+
+        
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code_size=spirv?sizeof(native_reflection_index_publish_spirv):sizeof(native_reflection_index_publish_dxil);
+#endif
+
         if(diagnostic) {
-            info.code=spirv?native_reflection_index_publish_diagnostics_spirv:native_reflection_index_publish_diagnostics_dxil;
-            info.code_size=spirv?sizeof(native_reflection_index_publish_diagnostics_spirv):sizeof(native_reflection_index_publish_diagnostics_dxil);
+            
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code=spirv?native_reflection_index_publish_diagnostics_spirv:native_reflection_index_publish_diagnostics_dxil;
+#endif
+
+            
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code_size=spirv?sizeof(native_reflection_index_publish_diagnostics_spirv):sizeof(native_reflection_index_publish_diagnostics_dxil);
+#endif
+
         }
         info.num_readonly_storage_buffers=info.num_readwrite_storage_buffers=info.num_uniform_buffers=1;
         if(diagnostic)info.num_readwrite_storage_buffers=2;
         info.threadcount_x=64;info.threadcount_y=info.threadcount_z=1;
-        selected=create_gpu_compute_pipeline(device,&info);require(selected,SDL_GetError());
+        selected=create_reflection_compute_pipeline(device,&info,diagnostic?"publish_diagnostics":"publish");require(selected,SDL_GetError());
 #else
         require(false,"Resident complete reflection publication not compiled");
 #endif
@@ -544,11 +712,19 @@ struct GpuCalibratedReflectionHistory::State {
             const bool spirv=(SDL_GetGPUShaderFormats(device)&SDL_GPU_SHADERFORMAT_SPIRV)!=0;
             SDL_GPUComputePipelineCreateInfo info{};info.entrypoint="feature_admission_clear_main";
             info.format=spirv?SDL_GPU_SHADERFORMAT_SPIRV:SDL_GPU_SHADERFORMAT_DXIL;
-            info.code=spirv?native_reflection_index_admission_clear_spirv:native_reflection_index_admission_clear_dxil;
-            info.code_size=spirv?sizeof(native_reflection_index_admission_clear_spirv):sizeof(native_reflection_index_admission_clear_dxil);
+            
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code=spirv?native_reflection_index_admission_clear_spirv:native_reflection_index_admission_clear_dxil;
+#endif
+
+            
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code_size=spirv?sizeof(native_reflection_index_admission_clear_spirv):sizeof(native_reflection_index_admission_clear_dxil);
+#endif
+
             info.num_readwrite_storage_buffers=info.num_uniform_buffers=1;
             info.threadcount_x=64;info.threadcount_y=info.threadcount_z=1;
-            admission_clear_pipeline=create_gpu_compute_pipeline(device,&info);require(admission_clear_pipeline,SDL_GetError());
+            admission_clear_pipeline=create_reflection_compute_pipeline(device,&info,"admission_clear");require(admission_clear_pipeline,SDL_GetError());
         }
         const std::array<unsigned,4> uniform{pixels,0,0,0};
         SDL_GPUStorageBufferReadWriteBinding output{mask,false,0,0,0};
@@ -585,11 +761,27 @@ struct GpuCalibratedReflectionHistory::State {
         info.format=spirv?SDL_GPU_SHADERFORMAT_SPIRV:SDL_GPU_SHADERFORMAT_DXIL;
         info.num_samplers=info.num_readwrite_storage_buffers=info.num_uniform_buffers=1;
         info.num_readonly_storage_buffers=3;info.threadcount_x=info.threadcount_y=8;info.threadcount_z=1;
-        info.code=reflection_lobes_shader::lobes_spirv;info.code_size=sizeof(reflection_lobes_shader::lobes_spirv);
-#if defined(_WIN32)
-        if(!spirv) {info.code=reflection_lobes_shader::lobes_dxil;info.code_size=sizeof(reflection_lobes_shader::lobes_dxil);}
+        
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code=reflection_lobes_shader::lobes_spirv;
 #endif
-        lobe_pipeline=create_gpu_compute_pipeline(device,&info);require(lobe_pipeline,SDL_GetError());
+
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code_size=sizeof(reflection_lobes_shader::lobes_spirv);
+#endif
+
+#if defined(_WIN32)
+        if(!spirv) {
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code=reflection_lobes_shader::lobes_dxil;
+#endif
+
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code_size=sizeof(reflection_lobes_shader::lobes_dxil);
+#endif
+}
+#endif
+        lobe_pipeline=create_reflection_compute_pipeline(device,&info,"lobes");require(lobe_pipeline,SDL_GetError());
     }
     void prepare_paths(bool curved) {
         auto*& selected=curved?curved_pipeline:path_pipeline;
@@ -599,17 +791,49 @@ struct GpuCalibratedReflectionHistory::State {
         info.format=spirv?SDL_GPU_SHADERFORMAT_SPIRV:SDL_GPU_SHADERFORMAT_DXIL;
         info.num_samplers=info.num_readwrite_storage_buffers=info.num_uniform_buffers=1;
         info.num_readonly_storage_buffers=3;info.threadcount_x=info.threadcount_y=8;info.threadcount_z=1;
-        info.code=reflection_paths_shader::paths_spirv;info.code_size=sizeof(reflection_paths_shader::paths_spirv);
+        
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code=reflection_paths_shader::paths_spirv;
+#endif
+
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code_size=sizeof(reflection_paths_shader::paths_spirv);
+#endif
+
         if(curved) {
             if(spirv) require(curved_vulkan_precision(device),"Curved reflection history requires Vulkan1.2 SignedZeroInfNanPreserve32; retaining current full-quality radiance");
-            info.code=reflection_curved_paths_shader::curved_paths_spirv;
-            info.code_size=sizeof(reflection_curved_paths_shader::curved_paths_spirv);
+            
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code=reflection_curved_paths_shader::curved_paths_spirv;
+#endif
+
+            
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code_size=sizeof(reflection_curved_paths_shader::curved_paths_spirv);
+#endif
+
         }
 #if defined(_WIN32)
-        if(!spirv) {info.code=reflection_paths_shader::paths_dxil;info.code_size=sizeof(reflection_paths_shader::paths_dxil);}
-        if(curved && !spirv) {info.code=reflection_curved_paths_shader::curved_paths_dxil;info.code_size=sizeof(reflection_curved_paths_shader::curved_paths_dxil);}
+        if(!spirv) {
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code=reflection_paths_shader::paths_dxil;
 #endif
-        selected=create_gpu_compute_pipeline(device,&info);require(selected,SDL_GetError());
+
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code_size=sizeof(reflection_paths_shader::paths_dxil);
+#endif
+}
+        if(curved && !spirv) {
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code=reflection_curved_paths_shader::curved_paths_dxil;
+#endif
+
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code_size=sizeof(reflection_curved_paths_shader::curved_paths_dxil);
+#endif
+}
+#endif
+        selected=create_reflection_compute_pipeline(device,&info,curved?"curved_paths":"paths");require(selected,SDL_GetError());
     }
 };
 GpuCalibratedReflectionHistory::GpuCalibratedReflectionHistory():state_(std::make_unique<State>()) {}
@@ -862,7 +1086,7 @@ bool GpuCalibratedReflectionHistory::enqueue_source_root_stage(void* command,boo
         SDL_BindGPUComputeStorageBuffers(pass,0,reads,4);
         SDL_PushGPUComputeUniformData(cb,0,&index,sizeof(index));SDL_PushGPUComputeUniformData(cb,1,limits.data(),sizeof(limits));
         SDL_PushGPUComputeUniformData(cb,2,&target,sizeof(target));
-        SDL_DispatchGPUCompute(pass,stream?(q.count+63)/64:(GpuReflectionSourceLocalRoots::region_capacity+63)/64,stream?1:q.count,1);SDL_EndGPUComputePass(pass);
+        SDL_DispatchGPUCompute(pass,stream?(q.count+source_root_stream_lanes-1)/source_root_stream_lanes:(GpuReflectionSourceLocalRoots::region_capacity+63)/64,stream?1:q.count,1);SDL_EndGPUComputePass(pass);
         s.local_roots={s.optical,s.local_root_work->buffers[0]};
         s.root_hull_encoded=whole_cover;
         s.status=whole_cover?"Native GPU whole necessary-source hull classified; source membership/colour acceptance still required"
@@ -1185,11 +1409,27 @@ bool GpuCalibratedReflectionHistory::initialize(void* device) {
         info.format=spirv?SDL_GPU_SHADERFORMAT_SPIRV:SDL_GPU_SHADERFORMAT_DXIL;
         info.num_samplers=info.num_readwrite_storage_buffers=info.num_uniform_buffers=1;
         info.num_readonly_storage_buffers=2;info.threadcount_x=info.threadcount_y=8;info.threadcount_z=1;
-        info.code=calibrated_scene_shader::reflection_history_spirv;info.code_size=sizeof(calibrated_scene_shader::reflection_history_spirv);
-#if defined(_WIN32)
-        if(!spirv) {info.code=calibrated_scene_shader::reflection_history_dxil;info.code_size=sizeof(calibrated_scene_shader::reflection_history_dxil);}
+        
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code=calibrated_scene_shader::reflection_history_spirv;
 #endif
-        s->pipeline=create_gpu_compute_pipeline(s->device,&info);require(s->pipeline,SDL_GetError());
+
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code_size=sizeof(calibrated_scene_shader::reflection_history_spirv);
+#endif
+
+#if defined(_WIN32)
+        if(!spirv) {
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code=calibrated_scene_shader::reflection_history_dxil;
+#endif
+
+#if !defined(STARFOX_REFLECTION_EMBEDDED_METAL)
+info.code_size=sizeof(calibrated_scene_shader::reflection_history_dxil);
+#endif
+}
+#endif
+        s->pipeline=create_reflection_compute_pipeline(s->device,&info,"history");require(s->pipeline,SDL_GetError());
         SDL_GPUSamplerCreateInfo sampler{};sampler.min_filter=sampler.mag_filter=SDL_GPU_FILTER_NEAREST;
         sampler.mipmap_mode=SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
         sampler.address_mode_u=sampler.address_mode_v=sampler.address_mode_w=SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;

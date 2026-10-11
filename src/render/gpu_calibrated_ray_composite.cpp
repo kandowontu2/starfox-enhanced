@@ -1,8 +1,11 @@
 #include "starfox/render/gpu_calibrated_ray_composite.hpp"
 #include "starfox/render/effect_types.hpp"
+#if !defined(STARFOX_CALIBRATED_COMPOSITE_METAL)
 #include "shaders/generated/calibrated_scene_portable.hpp"
+#endif
 #include <SDL3/SDL.h>
 #include "starfox/render/gpu_preparation.hpp"
+#include "starfox/render/sdl_metal_composite_payload.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -56,17 +59,26 @@ struct GpuCalibratedRayComposite::State {
     }
     void prepare_witness() {
         if(witness_pipeline) return;
+#if !defined(STARFOX_CALIBRATED_COMPOSITE_METAL)
         const bool spirv=(SDL_GetGPUShaderFormats(device)&SDL_GPU_SHADERFORMAT_SPIRV)!=0;
+#endif
         if(!witness_fragment) {
             SDL_GPUShaderCreateInfo shader{};shader.stage=SDL_GPU_SHADERSTAGE_FRAGMENT;
             shader.entrypoint="composite_witness_main";shader.num_samplers=3;
             shader.num_storage_buffers=2;shader.num_uniform_buffers=1;
+#if defined(STARFOX_CALIBRATED_COMPOSITE_METAL)
+        shader.format=SDL_GPU_SHADERFORMAT_METALLIB;
+#else
             shader.format=spirv?SDL_GPU_SHADERFORMAT_SPIRV:SDL_GPU_SHADERFORMAT_DXIL;
+#endif
+#if !defined(STARFOX_CALIBRATED_COMPOSITE_METAL)
             shader.code=calibrated_scene_shader::composite_witness_spirv;
             shader.code_size=sizeof(calibrated_scene_shader::composite_witness_spirv);
 #if defined(_WIN32)
             if(!spirv) {shader.code=calibrated_scene_shader::composite_witness_dxil;shader.code_size=sizeof(calibrated_scene_shader::composite_witness_dxil);}
 #endif
+#endif
+            require(metal_composite::select(shader,SDL_GetGPUShaderFormats(device),"composite_witness"),SDL_GetError());
             witness_fragment=create_gpu_shader(device,&shader);require(witness_fragment,SDL_GetError());
         }
         SDL_GPUColorTargetDescription targets[2]{};targets[0].format=format;targets[1].format=SDL_GPU_TEXTUREFORMAT_R32_FLOAT;
@@ -107,21 +119,33 @@ bool GpuCalibratedRayComposite::initialize(void* device,int color_format) {
         require(next->format==SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM || next->format==SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM
             || next->format==SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB || next->format==SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM_SRGB,
             "Unsupported calibrated ray target format");
+#if !defined(STARFOX_CALIBRATED_COMPOSITE_METAL)
         const bool spirv=(SDL_GetGPUShaderFormats(next->device)&SDL_GPU_SHADERFORMAT_SPIRV)!=0;
+#endif
         SDL_GPUShaderCreateInfo shader{};
+#if defined(STARFOX_CALIBRATED_COMPOSITE_METAL)
+        shader.format=SDL_GPU_SHADERFORMAT_METALLIB;
+#else
         shader.format=spirv?SDL_GPU_SHADERFORMAT_SPIRV:SDL_GPU_SHADERFORMAT_DXIL;
+#endif
         shader.stage=SDL_GPU_SHADERSTAGE_VERTEX;shader.entrypoint="composite_vertex_main";
+#if !defined(STARFOX_CALIBRATED_COMPOSITE_METAL)
         shader.code=calibrated_scene_shader::composite_vertex_spirv;shader.code_size=sizeof(calibrated_scene_shader::composite_vertex_spirv);
 #if defined(_WIN32)
         if(!spirv) {shader.code=calibrated_scene_shader::composite_vertex_dxil;shader.code_size=sizeof(calibrated_scene_shader::composite_vertex_dxil);}
 #endif
+#endif
+        require(metal_composite::select(shader,SDL_GetGPUShaderFormats(next->device),"composite_vertex"),SDL_GetError());
         next->vertex=create_gpu_shader(next->device,&shader);require(next->vertex,SDL_GetError());
         shader.stage=SDL_GPU_SHADERSTAGE_FRAGMENT;shader.entrypoint="composite_fragment_main";
         shader.num_samplers=shader.num_storage_buffers=2;shader.num_uniform_buffers=1;
+#if !defined(STARFOX_CALIBRATED_COMPOSITE_METAL)
         shader.code=calibrated_scene_shader::composite_fragment_spirv;shader.code_size=sizeof(calibrated_scene_shader::composite_fragment_spirv);
 #if defined(_WIN32)
         if(!spirv) {shader.code=calibrated_scene_shader::composite_fragment_dxil;shader.code_size=sizeof(calibrated_scene_shader::composite_fragment_dxil);}
 #endif
+#endif
+        require(metal_composite::select(shader,SDL_GetGPUShaderFormats(next->device),"composite_fragment"),SDL_GetError());
         next->fragment=create_gpu_shader(next->device,&shader);require(next->fragment,SDL_GetError());
         SDL_GPUColorTargetDescription target{};target.format=next->format;
         SDL_GPUGraphicsPipelineCreateInfo pipeline{};pipeline.vertex_shader=next->vertex;pipeline.fragment_shader=next->fragment;
@@ -250,16 +274,25 @@ bool GpuCalibratedRayComposite::enqueue_water_guides(void* command,void* receive
         require(layout && water.device==s.device && water.buffer && water.width==width && water.height==height
             && water.row_bytes==width*4 && water.water_layers==*layout,"Invalid native water guide layout/device/extent");
         if(!s.water_fragment) {
+#if !defined(STARFOX_CALIBRATED_COMPOSITE_METAL)
             const bool spirv=(SDL_GetGPUShaderFormats(s.device)&SDL_GPU_SHADERFORMAT_SPIRV)!=0;
+#endif
             SDL_GPUShaderCreateInfo shader{};shader.stage=SDL_GPU_SHADERSTAGE_FRAGMENT;
             shader.entrypoint="water_guides_fragment_main";
+#if defined(STARFOX_CALIBRATED_COMPOSITE_METAL)
+        shader.format=SDL_GPU_SHADERFORMAT_METALLIB;
+#else
             shader.format=spirv?SDL_GPU_SHADERFORMAT_SPIRV:SDL_GPU_SHADERFORMAT_DXIL;
+#endif
             shader.num_samplers=2;shader.num_storage_buffers=shader.num_uniform_buffers=1;
+#if !defined(STARFOX_CALIBRATED_COMPOSITE_METAL)
             shader.code=calibrated_scene_shader::water_guides_spirv;
             shader.code_size=sizeof(calibrated_scene_shader::water_guides_spirv);
 #if defined(_WIN32)
             if(!spirv) {shader.code=calibrated_scene_shader::water_guides_dxil;shader.code_size=sizeof(calibrated_scene_shader::water_guides_dxil);}
 #endif
+#endif
+            require(metal_composite::select(shader,SDL_GetGPUShaderFormats(s.device),"water_guides"),SDL_GetError());
             s.water_fragment=create_gpu_shader(s.device,&shader);require(s.water_fragment,SDL_GetError());
         }
         if(!s.water_pipeline) {
@@ -324,23 +357,32 @@ bool GpuCalibratedRayComposite::enqueue_water_panel_guides(void* command,void* r
             std::array<std::array<float,4>,3> world;
             std::array<float,4> depth_time;
         } settings{width,height,{},
-            {width*camera.projection[0]/2,height*camera.projection[5]/2,
-                width*(1-camera.projection[8])/2,height*(1+camera.projection[9])/2},
+            {float(width)*camera.projection[0]/2,float(height)*camera.projection[5]/2,
+                float(width)*(1-camera.projection[8])/2,float(height)*(1+camera.projection[9])/2},
             {float(ground.plane.point.x),float(ground.plane.point.y),float(ground.plane.point.z),0},
             {float(ground.plane.normal.x),float(ground.plane.normal.y),float(ground.plane.normal.z),0},{},
             {camera.projection[10],camera.projection[14],water.time,0}};
         static_assert(sizeof(PanelSettings)==128);
         for(unsigned row=0;row<3;++row) settings.world[row]={r[row*3],r[row*3+1],r[row*3+2],water.camera_position[row]};
         if(!s.water_panel_fragment) {
+#if !defined(STARFOX_CALIBRATED_COMPOSITE_METAL)
             const bool spirv=(SDL_GetGPUShaderFormats(s.device)&SDL_GPU_SHADERFORMAT_SPIRV)!=0;
+#endif
             SDL_GPUShaderCreateInfo shader{};shader.stage=SDL_GPU_SHADERSTAGE_FRAGMENT;
             shader.entrypoint="water_guides_fragment_main";shader.num_samplers=2;shader.num_uniform_buffers=1;
+#if defined(STARFOX_CALIBRATED_COMPOSITE_METAL)
+        shader.format=SDL_GPU_SHADERFORMAT_METALLIB;
+#else
             shader.format=spirv?SDL_GPU_SHADERFORMAT_SPIRV:SDL_GPU_SHADERFORMAT_DXIL;
+#endif
+#if !defined(STARFOX_CALIBRATED_COMPOSITE_METAL)
             shader.code=calibrated_scene_shader::water_panel_guides_spirv;
             shader.code_size=sizeof(calibrated_scene_shader::water_panel_guides_spirv);
 #if defined(_WIN32)
             if(!spirv) {shader.code=calibrated_scene_shader::water_panel_guides_dxil;shader.code_size=sizeof(calibrated_scene_shader::water_panel_guides_dxil);}
 #endif
+#endif
+            require(metal_composite::select(shader,SDL_GetGPUShaderFormats(s.device),"water_panel_guides"),SDL_GetError());
             s.water_panel_fragment=create_gpu_shader(s.device,&shader);require(s.water_panel_fragment,SDL_GetError());
         }
         if(!s.water_panel_pipeline) {

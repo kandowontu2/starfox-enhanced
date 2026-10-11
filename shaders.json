@@ -1,0 +1,216 @@
+{
+  "Schema": 1,
+  "Scope": "Complete25 current native candidate translated to SDL-compatible strict Metal source; no SDK/runtime/optics/performance acceptance",
+  "TranslatorRepository": "https://github.com/KhronosGroup/SPIRV-Cross",
+  "TranslatorCommit": "be71ee8c12cd7dc5ca8fa9581f708c2e8561fe2a",
+  "TranslatorSha256": "53B77C49633147C1258464407D5D390020AA5B816A822B283A8B15A5D070378E",
+  "TranslationFlags": [
+    "--msl",
+    "--msl-version",
+    "30000"
+  ],
+  "NativeCandidateReceiptSha256": "4CE2E200AD2325F4CD71A1EA977B1FA1628EA7293583DB0267A7A1F5E41564A1",
+  "Shaders": [
+    {
+      "Name": "tiles",
+      "Entry": "feature_tiles_main",
+      "File": "shaders/tiles.metal",
+      "Sha256": "a743cff6b4c6f0679fbe7467880fd29ab92ffc43b0d7ef1425c608c0f99a1f5c",
+      "InputSpirvSha256": "bc85de1a86ef9e2d41c151ae3560d59e806291a7e081d7c15ae357cb0136b22b",
+      "Bytes": 9102
+    },
+    {
+      "Name": "reduce",
+      "Entry": "feature_reduce_main",
+      "File": "shaders/reduce.metal",
+      "Sha256": "2bf34fcd6845db46821c601bc14cba29a70c469663d5c27ccb949aad2d0c2d92",
+      "InputSpirvSha256": "55284d00e73d58cbcfc7b548c8fd04eecb22a73a58cfe366e2a3be54d3fb6732",
+      "Bytes": 3606
+    },
+    {
+      "Name": "query",
+      "Entry": "feature_query_main",
+      "File": "shaders/query.metal",
+      "Sha256": "1cd62d9bd9c9abc534df8947754abeb3d893da064b1628a4664b4b7e6e7ddbec",
+      "InputSpirvSha256": "c8b3e532d032038c8d70ccb861b3f03f5ca0a7c3248b89520a0a1400641ad68e",
+      "Bytes": 13229
+    },
+    {
+      "Name": "mapping",
+      "Entry": "feature_mapping_main",
+      "File": "shaders/mapping.metal",
+      "Sha256": "997c4675a6f19cf68448c38ab7bf3141108f6c2d619932257962795948826c81",
+      "InputSpirvSha256": "7059a002e648944aaf3715aafba57da31d60a11fa58412f7349c9828d1c1b645",
+      "Bytes": 74725
+    },
+    {
+      "Name": "domains",
+      "Entry": "feature_domains_main",
+      "File": "shaders/domains.metal",
+      "Sha256": "3eb7aaf093ecc589f517ddc703c5cdbb6d36dfb92c958db414a39d8b4886b4c1",
+      "InputSpirvSha256": "568582ae7226edfcf26bebc46ff23129bd5e4f15a0b73ae81f59c5a28ac0705f",
+      "Bytes": 167133
+    },
+    {
+      "Name": "frames",
+      "Entry": "feature_frames_main",
+      "File": "shaders/frames.metal",
+      "Sha256": "5605da6c5abbbdc40005751e27319b267f74c1b3dd8b0f767bf097165e50528b",
+      "InputSpirvSha256": "b964e254d16e45db13368dd3fe74767897faec50d0f25bed92cb929208fc8256",
+      "Bytes": 54306
+    },
+    {
+      "Name": "optical",
+      "Entry": "feature_optical_main",
+      "File": "shaders/optical.metal",
+      "Sha256": "eb6cb7e0f8ebc6f47ae4c5d23a81b93ea39f2057e4f965cf6f3113950dab125a",
+      "InputSpirvSha256": "534b5aa4cbf0189dece4fc3579946131caf59518e5ecbb2a8fc39a7c1c5c6f37",
+      "Bytes": 443054
+    },
+    {
+      "Name": "optical_stream",
+      "Entry": "feature_optical_stream_main",
+      "File": "shaders/optical_stream.metal",
+      "Sha256": "31cbcf9b40aa87a3ba47253f78897122d9bce0e191c08b0a8be0a9c4d0511fed",
+      "InputSpirvSha256": "a0437c0544aa8c65d6857b116741172146bd6d3bc5b10ea1c3827e232dc72716",
+      "Bytes": 444077
+    },
+    {
+      "Name": "optical_schedule",
+      "Entry": "feature_optical_schedule_main",
+      "File": "shaders/optical_schedule.metal",
+      "Sha256": "c56ac7e49e5d5076ff3a05d5dd9c8c1d856c441b981203ca2cef0c1f3edb2156",
+      "InputSpirvSha256": "ba5cdb3c29242e092f1af3cc9a58479cc74bd5aad89ae30f3c39f0146721e1bd",
+      "Bytes": 4384
+    },
+    {
+      "Name": "jets",
+      "Entry": "feature_jets_main",
+      "File": "shaders/jets.metal",
+      "Sha256": "3e78aae6765b44b85a172e19f52369c65d82276d853ae93e227a15cf621cd3d0",
+      "InputSpirvSha256": "4a8dc7af97c26fcfeb62fc142ee13801b6e3b90636ac6eadeb46de944aa2bd06",
+      "Bytes": 789272
+    },
+    {
+      "Name": "jets_stream",
+      "Entry": "feature_jets_stream_main",
+      "File": "shaders/jets_stream.metal",
+      "Sha256": "eee47a465482d168ef7e1eaeac8f2e4cf2f40d9f410f12db4a9ca6b94aa240c8",
+      "InputSpirvSha256": "10aaed0b26b7e808c2113e4af27a5f3dd6aaa31488fd640fba520c046106f66d",
+      "Bytes": 788644
+    },
+    {
+      "Name": "roots_clear",
+      "Entry": "feature_roots_clear_main",
+      "File": "shaders/roots_clear.metal",
+      "Sha256": "ec663d82add806a8c6de26e098e2cec503b3b5a2f8de669cd64cb9de01d63605",
+      "InputSpirvSha256": "9d80d5d0ae883fd1753469f4e83b06592a483b766da59ab9b3e5849bb61a3a46",
+      "Bytes": 1557
+    },
+    {
+      "Name": "witness",
+      "Entry": "feature_witness_main",
+      "File": "shaders/witness.metal",
+      "Sha256": "54f74d8da09e7f25b67cf889a2082a4339d6ad0f8dc21033ff5e8b886d7cc863",
+      "InputSpirvSha256": "c90f8d8d89bd545f06e719831592ae4d3283dcd1499f41acb1950a1d70c04215",
+      "Bytes": 121966
+    },
+    {
+      "Name": "folds",
+      "Entry": "feature_folds_main",
+      "File": "shaders/folds.metal",
+      "Sha256": "f5dc8e285b0c5e05a08e0a32cb0f030a3064dcb1c3d3a57bdaeacabb1d1d5633",
+      "InputSpirvSha256": "718626184ac5ed8310858edcaf14bee3713ce90aabe0e2aefd32058f7e6d05f1",
+      "Bytes": 3489293
+    },
+    {
+      "Name": "guide",
+      "Entry": "feature_guide_main",
+      "File": "shaders/guide.metal",
+      "Sha256": "162ec651cd19516018f87c72415d12851f9d92bd89da2ec57e36a90beca11ae8",
+      "InputSpirvSha256": "ad15e581a11ab159aff8b77000dbe19d97fefbc3d7e4d5e7dc515c2384302048",
+      "Bytes": 6834671
+    },
+    {
+      "Name": "colour",
+      "Entry": "feature_colour_main",
+      "File": "shaders/colour.metal",
+      "Sha256": "62a2f5c2cb9f062109c3a5ccd4a19fe41def5162b0f59b73a42e93c299329e06",
+      "InputSpirvSha256": "1d0b27497bf90f620fe4c662613c229175f669037bed9fcb6ea5ec40e0c96f83",
+      "Bytes": 75596
+    },
+    {
+      "Name": "compose",
+      "Entry": "feature_compose_main",
+      "File": "shaders/compose.metal",
+      "Sha256": "bcbb01bfb8d21ca03a8727a1478547d4260c4a435afe1e4ba52a64da645e40c4",
+      "InputSpirvSha256": "8a5109028882ff254a57617b20c443740cb0e1811cacb1c6bb6e4a79412ff6a4",
+      "Bytes": 41921
+    },
+    {
+      "Name": "publish",
+      "Entry": "feature_publish_main",
+      "File": "shaders/publish.metal",
+      "Sha256": "54c712a8f504512fdc8443fb6a3e13cf741b395815ad2ce10bb8772411ef3204",
+      "InputSpirvSha256": "353871df9e1cbd8f08d8367b612c5c447f9cbaf595f084a4c78d8c2b1c8aecf6",
+      "Bytes": 8596
+    },
+    {
+      "Name": "publish_diagnostics",
+      "Entry": "feature_publish_diagnostics_main",
+      "File": "shaders/publish_diagnostics.metal",
+      "Sha256": "dcf92826e9c37708ce23f76a79931e7f09f4e89e88e17715d0a857e50b990294",
+      "InputSpirvSha256": "f11b157fa2ea51c10f35bf01c74b0fbb7df6c9d1798058d1467f5e8bfa358ffa",
+      "Bytes": 8694
+    },
+    {
+      "Name": "admission_clear",
+      "Entry": "feature_admission_clear_main",
+      "File": "shaders/admission_clear.metal",
+      "Sha256": "e72b0392c823937492626ac118339d3bf17df677df6e5635cc97a5a396a707fa",
+      "InputSpirvSha256": "4944637a6cabc84a6327617609ec987c258fe8fa87b5ce79659adf1577c20acd",
+      "Bytes": 1718
+    },
+    {
+      "Name": "capture",
+      "Entry": "reflection_path_capture_main",
+      "File": "shaders/capture.metal",
+      "Sha256": "1b899e49e7932d28b7d7fd064c0633d951fcb73a3aa0cc77ceebe806976d3d23",
+      "InputSpirvSha256": "d11d3f3fcc0e4ca26733f420a731da7b58aa04c0fc7812f12b03115aef839060",
+      "Bytes": 13340
+    },
+    {
+      "Name": "history",
+      "Entry": "reflection_history_main",
+      "File": "shaders/history.metal",
+      "Sha256": "c82cc1179a0159df90792e696d3fa83afd4c243236960f28741d42d038079eb5",
+      "InputSpirvSha256": "8F006B5DFFDFEB21906D9D93B829E4D2641483D0D13A911A4DBF4A40FFFFC1CB",
+      "Bytes": 70328
+    },
+    {
+      "Name": "lobes",
+      "Entry": "reflection_lobes_main",
+      "File": "shaders/lobes.metal",
+      "Sha256": "01aba162cad7f4c4eac9128d4fa7422194332790de7f70bf74912dad45478fd8",
+      "InputSpirvSha256": "43B1AA53A834D318B09950F0119A42E45BAE17F23ED2387326C3DF788AA7CDCE",
+      "Bytes": 174523
+    },
+    {
+      "Name": "paths",
+      "Entry": "reflection_paths_main",
+      "File": "shaders/paths.metal",
+      "Sha256": "1dc78fb0de6002a7a3a8aa7c13b653d8d6aa93e133473f58e262c47e8dc37b89",
+      "InputSpirvSha256": "9BC07A92B7E42AF4911891A0DA21866C66C7C5362106D07200C591898E82E4AE",
+      "Bytes": 647863
+    },
+    {
+      "Name": "curved_paths",
+      "Entry": "reflection_paths_main",
+      "File": "shaders/curved_paths.metal",
+      "Sha256": "78343fb8d296ecd556b8fb93f1c44660dd6584616cb994cce28e950c0b5d134c",
+      "InputSpirvSha256": "6D961A7F467883BE5BF1FC86182E7EE672D19853F6E7C5283B93BB234B9433EA",
+      "Bytes": 12721191
+    }
+  ],
+  "GeneratedSourceFixes": "Original DontInline boundaries; preserve unused initializers, typed uint-only identity comparisons and post-barrier shared-reference reads. All exact inverses checked."
+}

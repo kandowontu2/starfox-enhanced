@@ -1,0 +1,63 @@
+{
+  "Scope": "Clang SDK sign-conversion fixes only: make the same original implicit target types explicit; no algorithm, branch, bound, workload or FP changes; original failed diagnostics preserved",
+  "Headers": [
+    {
+      "Path": "include/starfox/render/shadow_scene.hpp",
+      "OriginalSha256": "E58C3F828925339748EA87A4E78389EBC837C8C98BDDE5BCF8C9DF241E921771",
+      "Changes": [
+        {
+          "oldText": "nodes_[index].axis=axis;",
+          "newText": "nodes_[index].axis=static_cast<unsigned>(axis);"
+        },
+        {
+          "oldText": "std::nth_element(triangles_.begin()+begin,triangles_.begin()+middle,\n                triangles_.begin()+end,",
+          "newText": "std::nth_element(triangles_.begin()+static_cast<decltype(triangles_)::difference_type>(begin),\n                triangles_.begin()+static_cast<decltype(triangles_)::difference_type>(middle),\n                triangles_.begin()+static_cast<decltype(triangles_)::difference_type>(end),"
+        }
+      ]
+    },
+    {
+      "Path": "include/starfox/render/raster_commands.hpp",
+      "OriginalSha256": "E131B73D5BDEC4C5344F504F060EC92580E54A163BC2E52AD179B785C8DBA5CE",
+      "Changes": [
+        {
+          "oldText": "std::min<std::int32_t>(width_,c.right)",
+          "newText": "std::min<std::int32_t>(static_cast<std::int32_t>(width_),c.right)"
+        },
+        {
+          "oldText": "std::min<std::int32_t>(height_,c.bottom)",
+          "newText": "std::min<std::int32_t>(static_cast<std::int32_t>(height_),c.bottom)"
+        }
+      ]
+    },
+    {
+      "Path": "include/starfox/render/framebuffer.hpp",
+      "OriginalSha256": "F75E8705D24537D95A4D8B474180072715B7B679245EAC49A2CAB058E47DF8A1",
+      "Changes": [
+        {
+          "oldText": "coverage_.begin()+first",
+          "newText": "coverage_.begin()+static_cast<decltype(coverage_)::difference_type>(first)"
+        },
+        {
+          "oldText": "dither_pairs_.begin()+first",
+          "newText": "dither_pairs_.begin()+static_cast<decltype(dither_pairs_)::difference_type>(first)"
+        },
+        {
+          "oldText": "mark_written(static_cast<std::size_t>(y)*stored_width_+x);",
+          "newText": "mark_written(static_cast<std::size_t>(y)*stored_width_+static_cast<std::size_t>(x));"
+        },
+        {
+          "oldText": "std::min<std::int64_t>(colours.size(),",
+          "newText": "std::min<std::int64_t>(static_cast<std::int64_t>(colours.size()),"
+        },
+        {
+          "oldText": "std::fill_n(pixels_.begin() + offset,",
+          "newText": "std::fill_n(pixels_.begin() + static_cast<decltype(pixels_)::difference_type>(offset),"
+        },
+        {
+          "oldText": "std::fill_n(tags_.begin() + offset,",
+          "newText": "std::fill_n(tags_.begin() + static_cast<decltype(tags_)::difference_type>(offset),"
+        }
+      ]
+    }
+  ]
+}

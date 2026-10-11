@@ -35,7 +35,7 @@ inline constexpr bool special_fx(Effect value) {
 }
 inline constexpr bool valid_special_fx(unsigned value) {return value==0 || (value<effect_count && special_fx(static_cast<Effect>(value)));}
 inline constexpr std::uint8_t next_special_fx(std::uint8_t value,bool backwards) {
-    do {value=(value+(backwards?effect_count-1:1))%effect_count;} while(!valid_special_fx(value));return value;
+    do {value=static_cast<std::uint8_t>((value+(backwards?effect_count-1:1))%effect_count);} while(!valid_special_fx(value));return value;
 }
 inline constexpr bool manipulation(Effect value) {
     return spatial_manipulation(value) || value==Effect::trails || value==Effect::long_exposure;
@@ -44,7 +44,7 @@ inline constexpr bool valid_manipulation(unsigned value) {
     return value==0 || (value<effect_count && manipulation(static_cast<Effect>(value)));
 }
 inline constexpr std::uint8_t next_manipulation(std::uint8_t value,bool backwards) {
-    do {value=(value+(backwards?effect_count-1:1))%effect_count;}
+    do {value=static_cast<std::uint8_t>((value+(backwards?effect_count-1:1))%effect_count);}
     while(!valid_manipulation(value));
     return value;
 }
@@ -63,7 +63,7 @@ inline constexpr bool decorative_material(Effect value) {
 inline constexpr bool material(Effect value) { return reflective_material(value)||decorative_material(value); }
 inline constexpr bool valid_material(unsigned value) { return value==0 || (value<effect_count && material(static_cast<Effect>(value))); }
 inline constexpr std::uint8_t next_material(std::uint8_t value,bool backwards) {
-    do {value=(value+(backwards?effect_count-1:1))%effect_count;} while(!valid_material(value));
+    do {value=static_cast<std::uint8_t>((value+(backwards?effect_count-1:1))%effect_count);} while(!valid_material(value));
     return value;
 }
 // Shared conductor codes for software and GPU shading: 0 dielectric, 1 palette,
@@ -151,7 +151,7 @@ inline constexpr std::uint8_t next_effect(std::uint8_t value, bool world, bool b
     value=canonical_effect(value);
     unsigned index=0;
     for(unsigned i=0;i<effect_order.size();++i) if(static_cast<std::uint8_t>(effect_order[i])==value) index=i;
-    do { index=(index+(backwards?effect_order.size()-1:1))%effect_order.size();
+    do { index=static_cast<unsigned>((index+(backwards?effect_order.size()-1:1))%effect_order.size());
          value=static_cast<std::uint8_t>(effect_order[index]); }
     while(!selectable_effect(value,world) || (!world && (manipulation(static_cast<Effect>(value)) || material(static_cast<Effect>(value)))));
     return value;
