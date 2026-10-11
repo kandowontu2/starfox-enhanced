@@ -399,6 +399,28 @@ class MetalSourceAssemblyTests(unittest.TestCase):
         self.assertEqual((self.generated / "metal_material_colour.inc").read_text(encoding="utf-8"),
                          material_colour_source(ROOT))
 
+    def test_diagnostic_full_parameter_abi_tracks_the_actual_producer(self):
+        fixture=(ROOT / "tools/native_metal_fixture_parameters.hpp").read_text(encoding="utf-8")
+        for name,size,fields in (
+            ("ReflectionParameters",416,{"coverage":272,"primary_range":288,"optical":304,
+                "cube_info":320,"cube_row0":336,"cube_row2":368,"source_colour":384,"liquid_layers":400}),
+            ("ShadowParameters",352,{"lights":64,"coverage":320,"primary_range":336})):
+            runtime_name="Parameters" if name=="ShadowParameters" else name
+            self.assertIn(f"sizeof({name})=={size}",fixture)
+            self.assertIn(f"sizeof({runtime_name})=={size}",self.implementation)
+            for field,offset in fields.items():
+                self.assertIn(f"offsetof({name},{field})=={offset}",fixture)
+                self.assertIn(f"offsetof({runtime_name},{field})=={offset}",self.implementation)
+        self.assertEqual(fixture.count("m.primary_range=p.primary_range;"),2)
+        checker=(ROOT / "tools/check_native_metal.mm").read_text(encoding="utf-8")
+        self.assertIn('#include "native_metal_fixture_parameters.hpp"',checker)
+        self.assertIn("using native_metal_fixture::convert;",checker)
+        self.assertNotIn("struct alignas(16) MetalParameters",checker)
+        self.assertNotIn("options:nil",checker)
+        self.assertIn("options.languageVersion=MTLLanguageVersion3_0",checker)
+        self.assertIn("options.mathMode=MTLMathModeSafe",checker)
+        self.assertIn("options.fastMathEnabled=NO",checker)
+
     def test_empty_header_contract_no_synthetic_triangle_or_as(self):
         code=self.implementation
         contract=code.split("bool empty_native_geometry(",1)[1].split("constexpr char kEmptyScenePrefix",1)[0]

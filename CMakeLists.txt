@@ -1643,6 +1643,10 @@ if(STARFOX_BUILD_TESTS)
         list(APPEND STARFOX_SMOKE_BASELINE "STARFOX_TEST_${setting}=0")
     endforeach()
     enable_testing()
+    add_executable(starfox_native_metal_fixture_parameter_tests tests/native_metal_fixture_parameter_tests.cpp)
+    target_include_directories(starfox_native_metal_fixture_parameter_tests PRIVATE tools include)
+    target_compile_features(starfox_native_metal_fixture_parameter_tests PRIVATE cxx_std_20)
+    add_test(NAME starfox_native_metal_fixture_parameter_tests COMMAND starfox_native_metal_fixture_parameter_tests)
     add_test(NAME starfox_sdl_d3d12_copy_ordering_patch_tests
         COMMAND "${CMAKE_COMMAND}" "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
             "-DTEST_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/sdl-copy-ordering-fixtures"

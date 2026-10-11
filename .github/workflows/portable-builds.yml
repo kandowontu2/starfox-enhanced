@@ -1,116 +1,46 @@
-name: Temporary actual game with embedded native Metal RT libraries (no release)
+name: Temporary current Metal diagnostic ABI SDK check (no GPU, no release)
 on:
   workflow_dispatch:
-    inputs:
-      sdk:
-        description: Application SDK to build (no release)
-        type: choice
-        default: both
-        options: [both, macosx, iphoneos]
 permissions:
   contents: read
 jobs:
-  full-game:
-    name: Actual application / ${{ matrix.sdk }}
+  diagnostic-sdk:
     runs-on: macos-15-intel
-    timeout-minutes: 90
-    strategy:
-      fail-fast: false
-      matrix:
-        sdk: ${{ fromJSON(inputs.sdk == 'macosx' && '["macosx"]' || inputs.sdk == 'iphoneos' && '["iphoneos"]' || '["macosx","iphoneos"]') }}
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
           submodules: false
           lfs: false
-      - name: Check actual native provider selection and rejection (fake bytes, no GPU)
-        shell: bash
-        run: |
-          for mode in valid invalid; do
-            flags=()
-            if [[ "$mode" == invalid ]]; then flags+=(-DTEST_BAD_PAYLOAD=1); fi
-            clang++ -std=c++20 -O3 -fno-fast-math -ffp-contract=off \
-              -Wall -Wextra -Wconversion -Werror "${flags[@]}" -I include \
-              src/render/native_metal_rt_programs.cpp tests/native_metal_rt_provider_tests.cpp \
-              -o "${RUNNER_TEMP}/native-provider-${mode}"
-            "${RUNNER_TEMP}/native-provider-${mode}"
-          done
-      - name: Configure the complete game graph
-        shell: bash
-        run: |
-          sdk='${{ matrix.sdk }}'
-          args=(-S . -B "build/${sdk}" -G Xcode
-            -DCMAKE_OSX_SYSROOT="${sdk}"
-            -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO
-            -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED=NO
-            -DSTARFOX_BUILD_RUNTIME=ON -DSTARFOX_BUILD_TESTS=OFF
-            -DSTARFOX_BUILD_TOOLS=OFF -DSTARFOX_BUILD_VR=OFF
-            -DSTARFOX_METAL_INTEROP=ON -DSTARFOX_EMBED_RUNTIME_ASSETS=ON
-            -DSTARFOX_PACKAGE_MSU1_MUSIC=OFF)
-          if [[ "${sdk}" == iphoneos ]]; then
-            args+=(-DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_ARCHITECTURES=arm64
-              -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0)
-          else
-            args+=(-DCMAKE_OSX_ARCHITECTURES='arm64;x86_64'
-              -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0)
-          fi
-          cmake "${args[@]}" 2>&1 | tee configure.log
-      - name: Check all four complete native runtime shader programs
+      - name: Test real parameter conversion and all exact runtime sources
         shell: bash
         env:
           PYTHONDONTWRITEBYTECODE: '1'
         run: |
+          clang++ -std=c++20 -O3 -fno-fast-math -ffp-contract=off \
+            -Wall -Wextra -Wconversion -Werror -I include -I tools \
+            tests/native_metal_fixture_parameter_tests.cpp -o parameter-check
+          ./parameter-check
           python3 tests/test_metal_shader_sources.py
-          python3 tools/check_metal_rt_shaders.py --sdk '${{ matrix.sdk }}' \
-            --generated-dir 'build/${{ matrix.sdk }}/generated'
-      - name: Compile and link the actual application
+      - name: Compile and link the actual corrected Metal diagnostic
         shell: bash
         run: |
-          cmake --build 'build/${{ matrix.sdk }}' --config Release \
-            --parallel 1 --target starfox_pc 2>&1 | tee build.log
-      - name: Verify and package the test application
-        shell: bash
-        run: |
-          sdk='${{ matrix.sdk }}'
-          directory=Release
-          if [[ "${sdk}" == iphoneos ]]; then directory=Release-iphoneos; fi
-          app="build/${sdk}/${directory}/StarFoxEnhanced.app"
-          executable="${app}/Contents/MacOS/StarFoxEnhanced"
-          plist="${app}/Contents/Info.plist"
-          if [[ "${sdk}" == iphoneos ]]; then
-            executable="${app}/StarFoxEnhanced"
-            plist="${app}/Info.plist"
-          fi
-          test -s "${executable}"
-          plutil -lint "${plist}"
-          lipo -archs "${executable}"
-          if [[ "${sdk}" == iphoneos ]]; then
-            python3 tools/package_ios.py --app "${app}" \
-              --output StarFoxEnhanced-metal-integration-unsigned.ipa
-          else
-            ditto -c -k --sequesterRsrc --keepParent "${app}" \
-              StarFoxEnhanced-metal-integration-macos.zip
-          fi
-          package=StarFoxEnhanced-metal-integration-macos.zip
-          if [[ "${sdk}" == iphoneos ]]; then
-            package=StarFoxEnhanced-metal-integration-unsigned.ipa
-          fi
-          python3 tools/check_native_metal_library_embedding.py --sdk "${sdk}" \
-            --generated-dir "build/${sdk}/generated/native-metal-rt" --package "${package}"
+          sdk="$(xcrun --sdk macosx --show-sdk-path)"
+          xcrun --sdk macosx clang++ -std=c++20 -O3 -fobjc-arc \
+            -fno-fast-math -ffp-contract=off -target x86_64-apple-macos14.0 \
+            -isysroot "$sdk" -I include -I tools tools/check_native_metal.mm \
+            -framework Foundation -framework Metal -o native-metal-check
+          test -s native-metal-check
+          file native-metal-check
+          nm -gU native-metal-check | grep -E '(_main$)'
+          echo 'SDK compile/link only. No Metal device/runtime/performance acceptance.'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: full-metal-game-${{ matrix.sdk }}
+          name: native-metal-diagnostic-abi-r360
           path: |
-            configure.log
-            build.log
-            build/${{ matrix.sdk }}/CMakeCache.txt
-            build/${{ matrix.sdk }}/generated/*.hpp
-            build/${{ matrix.sdk }}/generated/native-metal-rt/*.metal
-            build/${{ matrix.sdk }}/generated/native-metal-rt/*.metallib
-            build/${{ matrix.sdk }}/generated/native-metal-rt/native-library-embedding.json
-            StarFoxEnhanced-metal-integration-unsigned.ipa
-            StarFoxEnhanced-metal-integration-macos.zip
+            parameter-check
+            native-metal-check
           if-no-files-found: warn
           retention-days: 7
