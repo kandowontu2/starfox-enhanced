@@ -222,6 +222,18 @@ OPTICAL_SCALAR_BOUNDARY float quotient_bound(float a,float b,bool upper) {
 // private to a shader invocation, like intervalFailed; the caller consumes it
 // immediately. No recursion, new approximation, or bracket/rounding change.
 static float interval_divide_upper=0;
+// BEGIN CERTIFIED SCALAR ENDPOINTS
+// In this range Dekker's binary32 product of two point operands is exact:
+// split intermediates cannot overflow; nonzero cross terms are >=2^-106,
+// hence normal even under FTZ/DAZ. Exact zero operands also stay exact.
+// Only the final, fully checked point-product comparisons establish a bound.
+// Do not narrow a fallback, failed check or unvalidated representation.
+bool optical_certified_point_operand(float value) {
+    const uint bits=asuint(value)&0x7fffffffU;
+    return bits==0 || (bits>=0x30800000U && bits<=0x4e800000U);
+}
+static bool interval_divide_certified=false;
+// END CERTIFIED SCALAR ENDPOINTS
 OPTICAL_SCALAR_BOUNDARY float interval_divide_pair(float alo,float ahi,float blo,float bhi) {
     // A repeated endpoint has exactly the same checked quotient and failure
     // state. Reuse only bit-identical corners of finite ordered intervals;
@@ -241,6 +253,15 @@ OPTICAL_SCALAR_BOUNDARY float interval_divide_pair(float alo,float ahi,float blo
     }
     // Retain the original initial sentinels and left-to-right corner folds.
     const float lo=min(min(min(min(1.e30,p),q),r),s);
+    // BEGIN CERTIFIED QUOTIENT BOUNDS
+    interval_divide_certified=!intervalFailed && finiteCorners
+        && optical_certified_point_operand(alo) && optical_certified_point_operand(ahi)
+        && optical_certified_point_operand(blo) && optical_certified_point_operand(bhi)
+        && optical_certified_point_operand(p) && optical_certified_point_operand(u)
+        && optical_certified_point_operand(q) && optical_certified_point_operand(v)
+        && optical_certified_point_operand(r) && optical_certified_point_operand(w)
+        && optical_certified_point_operand(s) && optical_certified_point_operand(x);
+    // END CERTIFIED QUOTIENT BOUNDS
     interval_divide_upper=max(max(max(max(-1.e30,u),v),w),x);return lo;
 }
 OPTICAL_BOUNDARY Interval idiv(Interval a,Interval b) {
@@ -256,6 +277,10 @@ OPTICAL_BOUNDARY Interval idiv(Interval a,Interval b) {
         if(interval_exact_point(b,1))return a;if(interval_exact_point(b,-1))return ineg(a);
     }
     const float lo=interval_divide_pair(a.lo,a.hi,b.lo,b.hi);
+    // The checked quotient already encloses every real corner. Its extra
+    // unconditional ULP is not needed when all actual products were exact.
+    // Preserve the original expanded fallback everywhere else.
+    if(interval_divide_certified)return iv(lo,interval_divide_upper);
     return iv(interval_down(lo),interval_up(interval_divide_upper));
 }
 OPTICAL_SCALAR_BOUNDARY float sqrt_bound(float a,bool upper) {
@@ -272,7 +297,14 @@ OPTICAL_SCALAR_BOUNDARY float sqrt_bound(float a,bool upper) {
 }
 OPTICAL_BOUNDARY Interval isqrt(Interval a) {
     if(a.hi<0 || a.hi>1.e30) {intervalFailed=true;return iv(0,1.e30);}
-    return iv(max(0,interval_down(sqrt_bound(max(0,a.lo),false))),interval_up(sqrt_bound(max(0,a.hi),true)));
+    // BEGIN CERTIFIED ROOT BOUNDS
+    const float lo=sqrt_bound(max(0,a.lo),false),hi=sqrt_bound(max(0,a.hi),true);
+    const bool certified=!intervalFailed && interval_finite_ordered(a)
+        && optical_certified_point_operand(max(0,a.lo)) && optical_certified_point_operand(max(0,a.hi))
+        && optical_certified_point_operand(lo) && optical_certified_point_operand(hi);
+    if(certified)return iv(lo,hi);
+    return iv(max(0,interval_down(lo)),interval_up(hi));
+    // END CERTIFIED ROOT BOUNDS
 }
 Interval iratio(float n,float d) {
     // Only these known constants use prechecked reciprocal enclosures. No
