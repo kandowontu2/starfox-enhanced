@@ -213,6 +213,59 @@ void reusable_texture_cache() {
     require(!cache.colour_matches(image) && cache.pixels().empty() && cache.layers().empty()
         && !cache.colour_capacity() && !cache.layer_capacity(),"Inactive texture cache retained allocations");
 }
+void full_size_texture_upload() {
+    // LCD/dashboard sizes, padded edge tiles, thin maximum-width/height images
+    // and the largest accepted allocation. The oracle deliberately retains
+    // the old row-major address calculation, independent of tile traversal.
+    constexpr std::array<std::array<unsigned,2>,7> sizes{{
+        {320,240},{400,240},{511,255},{1024,9},{9,1024},{1023,1023},{1024,1024}}};
+    constexpr unsigned spread[]{0,1,4,5,16,17,20,21};
+    for(const auto size:sizes) for(unsigned channels:{3U,4U}) {
+        const auto width=size[0],height=size[1],pitch=width*channels+11,layer_pitch=width+7;
+        // No trailing row padding: clamping must not read beyond the last
+        // logical texel, even when the padded allocation is much taller.
+        std::vector<std::uint8_t> pixels(std::size_t(pitch)*(height-1)+width*channels,0xA7);
+        std::vector<std::uint8_t> layers;
+        if(channels==4)layers.resize(std::size_t(layer_pitch)*(height-1)+width,0xB9);
+        for(unsigned y=0;y<height;++y) for(unsigned x=0;x<width;++x) {
+            const auto at=std::size_t(y)*pitch+x*channels;
+            for(unsigned c=0;c<3;++c)pixels[at+c]=std::uint8_t(x*17+y*29+c*53);
+            if(channels==4) {
+                const auto layer=(x+y)%7?1U<<((x+3*y)%6):0;
+                layers[std::size_t(y)*layer_pitch+x]=std::uint8_t(layer);
+                pixels[at+3]=layer?255:0;
+            }
+        }
+        PicaImage image{pixels,width,height,pitch,channels,false,layers,channels==4?layer_pitch:0};
+        const auto original_pixels=pixels,original_layers=layers;
+        const auto layout=pica_texture_layout(image);
+        for(bool repeat:{false,true}) {
+            if(repeat && (!std::has_single_bit(width) || !std::has_single_bit(height)))continue;
+            image.repeat=repeat;
+            std::vector<std::uint8_t> packed(layout.bytes+2,0xDD),ownership;
+            pack_pica_texture(image,std::span(packed).subspan(1,layout.bytes));
+            if(channels==4) {
+                ownership.assign(layout.width*layout.height+2,0xCC);
+                require(pack_pica_layers(image,std::span(ownership).subspan(1,ownership.size()-2))==63,
+                    "Full-size upload lost a populated source class");
+            }
+            for(unsigned y=0;y<layout.height;++y) for(unsigned x=0;x<layout.width;++x) {
+                const auto sx=repeat?x%width:std::min(x,width-1),sy=repeat?y%height:std::min(y,height-1);
+                const auto from=std::size_t(sy)*pitch+sx*channels;
+                const auto texel=((y/8)*(layout.width/8)+x/8)*64+spread[x%8]+2*spread[y%8];
+                const auto to=1+texel*4;
+                require(packed[to]==(channels==4?pixels[from+3]:255),"Full-size alpha/padded row changed");
+                for(unsigned c=0;c<3;++c)require(packed[to+3-c]==pixels[from+c],"Full-size Morton/ABGR changed");
+                if(channels==4)require(ownership[1+texel]==layers[std::size_t(sy)*layer_pitch+sx],
+                    "Full-size source ownership no longer matches colour artwork");
+            }
+            require(packed.front()==0xDD && packed.back()==0xDD,"Full-size colour crossed allocation guard");
+            if(channels==4)require(ownership.front()==0xCC && ownership.back()==0xCC,
+                "Full-size ownership crossed allocation guard");
+            require(pixels==original_pixels && layers==original_layers,"Packing mutated borrowed artwork");
+        }
+    }
+}
 void texture_residency() {
     struct Ledger {
         std::size_t live{},peak{};unsigned allocations{},releases{},prepares{},updates{},fail_at{};
@@ -504,7 +557,7 @@ STARFOX_TEXTURE_NOINLINE void operator delete(void* memory,std::size_t) noexcept
 STARFOX_TEXTURE_NOINLINE void operator delete[](void* memory,std::size_t) noexcept {std::free(memory);}
 #undef STARFOX_TEXTURE_NOINLINE
 int main() try {
-    texture_upload();texture_residency();reusable_texture_cache();vertex_residency();projection_and_draws();layer_upload();sampled_texture_orientation();
+    texture_upload();full_size_texture_upload();texture_residency();reusable_texture_cache();vertex_residency();projection_and_draws();layer_upload();sampled_texture_orientation();
     require(pica_uv_mode(false,false)==std::array<float,4>{1,0,0,0},"Ordinary texture projection changed");
     require(pica_uv_mode(true,false)==std::array<float,4>{0,1,0,0},"LCD parity texture lost its homogeneous Q");
     require(pica_uv_mode(false,true)==std::array<float,4>{0,0,1,0},"Source terrain mode zeroed ordinary UVs before projection");

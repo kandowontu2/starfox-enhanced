@@ -106,6 +106,39 @@ inline unsigned pica_texel_offset(unsigned x,unsigned y,unsigned width) noexcept
     }
     return (((y/8)*(width/8)+x/8)*64+morton)*4;
 }
+namespace detail {
+// Decode the local Morton index once at compile time. The allocation is
+// written sequentially; source row/edge decisions occur eight times per tile,
+// not once per texel. Callers preflight dimensions/storage before entering.
+inline constexpr auto pica_morton_coordinates=[] {
+    std::array<std::array<unsigned,2>,64> result{};
+    for(unsigned m=0;m<64;++m) for(unsigned bit=0;bit<3;++bit) {
+        result[m][0]|=((m>>(2*bit))&1U)<<bit;
+        result[m][1]|=((m>>(2*bit+1))&1U)<<bit;
+    }
+    return result;
+}();
+template<class Store>
+inline void pack_pica_plane(PicaTextureLayout layout,unsigned width,unsigned height,
+    unsigned pitch,unsigned channels,bool repeat,const std::uint8_t* source,Store store) {
+    unsigned texel=0;
+    for(unsigned ty=0;ty<layout.height;ty+=8) {
+        std::array<const std::uint8_t*,8> rows{};
+        for(unsigned y=0;y<8;++y) {
+            // Repeating logical dimensions were checked as powers of two.
+            const auto sy=repeat?(ty+y)&(height-1):std::min(ty+y,height-1);
+            rows[y]=source+std::size_t(sy)*pitch;
+        }
+        for(unsigned tx=0;tx<layout.width;tx+=8) {
+            std::array<unsigned,8> columns{};
+            for(unsigned x=0;x<8;++x)
+                columns[x]=(repeat?(tx+x)&(width-1):std::min(tx+x,width-1))*channels;
+            for(const auto& xy:pica_morton_coordinates)
+                store(texel++,rows[xy[1]]+columns[xy[0]]);
+        }
+    }
+}
+} // namespace detail
 inline void pack_pica_texture(PicaImage source,std::span<std::uint8_t> destination) {
     const auto layout=pica_texture_layout(source);
     if(destination.size()!=layout.bytes || !destination.data())
@@ -113,17 +146,15 @@ inline void pack_pica_texture(PicaImage source,std::span<std::uint8_t> destinati
     const auto src=reinterpret_cast<std::uintptr_t>(source.pixels.data()),dst=reinterpret_cast<std::uintptr_t>(destination.data());
     if((dst>=src && dst-src<source.pixels.size()) || (src>=dst && src-dst<destination.size()))
         throw std::invalid_argument("3DS texture upload requires independent storage");
-    for(unsigned y=0;y<layout.height;++y) for(unsigned x=0;x<layout.width;++x) {
-        const auto sx=source.repeat?x%source.width:std::min(x,source.width-1);
-        const auto sy=source.repeat?y%source.height:std::min(y,source.height-1);
-        const auto from=std::size_t(sy)*source.pitch+sx*source.channels;
+    detail::pack_pica_plane(layout,source.width,source.height,source.pitch,source.channels,source.repeat,
+        source.pixels.data(),[&](unsigned texel,const std::uint8_t* pixel) {
         // The shader converts top-left V to 1-V, and PICA's texture sampler
         // then addresses rows from bottom to top. Store source rows directly;
         // reversing them here as well flips uploaded artwork on both LCDs.
-        const auto to=pica_texel_offset(x,y,layout.width);
-        destination[to]=source.channels==4?source.pixels[from+3]:255; // ABGR bytes.
-        destination[to+1]=source.pixels[from+2];destination[to+2]=source.pixels[from+1];destination[to+3]=source.pixels[from];
-    }
+        const auto to=texel*4;
+        destination[to]=source.channels==4?pixel[3]:255; // ABGR bytes.
+        destination[to+1]=pixel[2];destination[to+2]=pixel[1];destination[to+3]=pixel[0];
+    });
 }
 // Validate provenance on changed uploads only. Frame/eye validation is O(draws),
 // not a second full image walk on every presentation. Bitset returns exactly
@@ -152,11 +183,8 @@ inline unsigned pack_pica_layers(PicaImage source,std::span<std::uint8_t> destin
     if(!independent(source.source_layers) || !independent(source.pixels))
         throw std::invalid_argument("3DS source layer upload requires independent storage");
     const auto classes=validate_pica_layers(source);
-    for(unsigned y=0;y<layout.height;++y) for(unsigned x=0;x<layout.width;++x) {
-        const unsigned sx=source.repeat?x%source.width:std::min(x,source.width-1);
-        const unsigned sy=source.repeat?y%source.height:std::min(y,source.height-1);
-        destination[pica_texel_offset(x,y,layout.width)/4]=source.source_layers[std::size_t(sy)*source.layer_pitch+sx];
-    }
+    detail::pack_pica_plane(layout,source.width,source.height,source.layer_pitch,1,source.repeat,
+        source.source_layers.data(),[&](unsigned texel,const std::uint8_t* layer) {destination[texel]=*layer;});
     return classes;
 }
 inline PicaMatrix pica_screen_matrix(unsigned width,unsigned height=screen_height) {
