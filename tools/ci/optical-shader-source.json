@@ -464,10 +464,10 @@
       "canonical_sha256": "310ecbd249a9579016d2213432dffbdcfb50cba9772778f4aaa357c28b942770"
     },
     {
-      "original_sha256": "d5ff845863c2334bbbe2b3ac7d222f9df3e122bac30c86994280f273edc3ce54",
+      "original_sha256": "27393c35f93b66faf1a4c81afc04e1a2d59030f93c602e87b32551008ab3f2ac",
       "path": "src/render/shaders/reflection_source_optical_stream.hlsl",
-      "canonical_bytes": 262,
-      "canonical_sha256": "d5ff845863c2334bbbe2b3ac7d222f9df3e122bac30c86994280f273edc3ce54"
+      "canonical_bytes": 261,
+      "canonical_sha256": "27393c35f93b66faf1a4c81afc04e1a2d59030f93c602e87b32551008ab3f2ac"
     },
     {
       "original_sha256": "3350426ff5e2860044130b0c629441aa07337635d95f2e4a51478a98e453eff6",
