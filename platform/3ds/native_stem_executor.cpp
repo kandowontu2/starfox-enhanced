@@ -75,14 +75,14 @@ struct NativeStemExecutor::Impl {
 
         std::exception_ptr foreground_failure, background_failure;
         if (worker) {
-            STARFOX_3DS_STARTUP_MARK(audio_worker_dispatch);
+    STARFOX_3DS_STARTUP_DETAIL_MARK(audio_worker_dispatch);
             LightEvent_Signal(&ready);
             try { foreground.run(foreground.context); }
             catch (...) { foreground_failure = std::current_exception(); }
             // Always join the in-flight block, including when foreground fails.
-            STARFOX_3DS_STARTUP_MARK(audio_worker_wait);
+    STARFOX_3DS_STARTUP_DETAIL_MARK(audio_worker_wait);
             LightEvent_Wait(&done);
-            STARFOX_3DS_STARTUP_MARK(audio_worker_complete);
+    STARFOX_3DS_STARTUP_DETAIL_MARK(audio_worker_complete);
             LightLock_Lock(&lock);
             background_failure = failure;
             failure = {};

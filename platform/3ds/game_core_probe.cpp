@@ -172,8 +172,11 @@ int main() {
             auto next=saved;next.experience=session->game().experience();
             next.preferences=session->preferences();
             next.bindings=bindings;
-            if(session->game().in_setup_menu() && !session->game().runtime_options_open())
-                next.preview=session->game().preview_requested();
+            // Preview is session-only on 3DS. Persisting ON before its first
+            // native frame completed trapped subsequent launches in loading.
+            // Retain the compatible field, but never automatically preroll at
+            // boot or discard any of the player's other settings / EX SRAM.
+            next.preview=false;
             if(session->cartridge_experience()==simulation::Experience::starfox_ex) {
                 const auto ram=session->cartridge_ram();
                 next.ex_sram.assign(ram.begin(),ram.end());next.ex_rom_crc=cartridge_crc;
@@ -195,8 +198,13 @@ int main() {
         menu.reset();suspension.reset();models.reset();session.reset();audio.reset();
     };
     const auto load=[&](const char* map,ctr::GameSessionOptions options={}) {
+#if defined(STARFOX_3DS_PROFILE_FRAMES)
+        startup_trace.restart_window();
+#endif
         STARFOX_3DS_STARTUP_MARK(load_begin);
+        STARFOX_3DS_STARTUP_MARK(owner_retirement);
         release_owners();
+        STARFOX_3DS_STARTUP_MARK(owner_retirement_complete);
         top.clear({8,15,28});lower.clear({8,15,28});
         top.text(24,100,"RENDERING",{240,181,86},2);
         lower.text(12,16,options.preview?"PREPARING REAL CARTRIDGE PREVIEW":"LOADING CARTRIDGE AND SETTINGS",{183,224,240});
@@ -277,8 +285,10 @@ int main() {
             if(first_load || (!running && (pressed&(input::a|input::y)))) {
                 first_load=false;
                 ctr::GameSessionOptions options;options.preferences=saved.preferences;
-                options.preview=saved.preview && !(pressed&input::y);
-                const auto initial_map=((pressed&input::y) || options.preview)?"LEVEL1_1":"BOOT";
+                // Legacy saves with Preview ON also recover through the menu.
+                // Y remains the explicit direct-stage diagnostic shortcut.
+                options.preview=false;
+                const auto initial_map=(pressed&input::y)?"LEVEL1_1":"BOOT";
                 load(initial_map,options);
             }
             if(running) {

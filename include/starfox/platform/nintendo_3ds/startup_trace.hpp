@@ -5,18 +5,30 @@
 
 namespace starfox::platform::nintendo_3ds {
 // A phase-entry receipt survives a stall, unlike completed-frame CSV totals.
-// Only the owner thread writes. The initial 16 frames / 512 rows are bounded;
+// Only the owner thread writes. Each source replacement rearms a bounded
+// window, so enabling Preview after a minute in the menu is still observable.
+// Repeated audio entries have their own budget: preroll cannot consume the
+// phase receipts needed to distinguish VBlank from GPU queue completion.
 // SD failures disable diagnostics rather than interrupting the game.
 class StartupTrace {
 public:
     using Clock = std::uint64_t (*)() noexcept;
     static constexpr unsigned maximum_frames = 16, maximum_rows = 512;
+    static constexpr unsigned maximum_windows = 8, maximum_detail_rows = 96;
     StartupTrace(std::ostream& stream, Clock clock) noexcept : stream_(stream), clock_(clock) {}
     void begin_frame() noexcept { if(frame_ < maximum_frames + 1) ++frame_; }
+    void restart_window() noexcept {
+        if(stopped_ || window_ + 1 >= maximum_windows) return;
+        ++window_; frame_ = rows_ = detail_rows_ = 0;
+    }
+    void write_detail(std::string_view phase) noexcept {
+        if(detail_rows_ >= maximum_detail_rows) return;
+        ++detail_rows_;write(phase);
+    }
     void write(std::string_view phase) noexcept {
         if(stopped_ || !clock_ || frame_ > maximum_frames || rows_ >= maximum_rows) return;
         try {
-            if(!rows_) stream_ << "frame,tick,phase\n";
+            if(!header_written_) {stream_ << "frame,tick,phase\n";header_written_ = true;}
             stream_ << frame_ << ',' << clock_() << ',' << phase << '\n';
             stream_.flush();
             ++rows_;
@@ -27,8 +39,8 @@ public:
 private:
     std::ostream& stream_;
     Clock clock_{};
-    unsigned frame_{}, rows_{};
-    bool stopped_{};
+    unsigned frame_{}, rows_{}, detail_rows_{}, window_{};
+    bool stopped_{}, header_written_{};
 };
 inline thread_local StartupTrace* active_startup_trace{};
 class ScopedStartupTraceActivation {
@@ -47,6 +59,11 @@ private:
     if(::starfox::platform::nintendo_3ds::active_startup_trace) \
         ::starfox::platform::nintendo_3ds::active_startup_trace->write(#name); \
 } while(false)
+#define STARFOX_3DS_STARTUP_DETAIL_MARK(name) do { \
+    if(::starfox::platform::nintendo_3ds::active_startup_trace) \
+        ::starfox::platform::nintendo_3ds::active_startup_trace->write_detail(#name); \
+} while(false)
 #else
 #define STARFOX_3DS_STARTUP_MARK(name) ((void)0)
+#define STARFOX_3DS_STARTUP_DETAIL_MARK(name) ((void)0)
 #endif

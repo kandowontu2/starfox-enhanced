@@ -4,6 +4,7 @@
 #include "starfox/platform/nintendo_3ds/game_menu.hpp"
 #include "starfox/platform/nintendo_3ds/game_layers.hpp"
 #include "starfox/platform/nintendo_3ds/frame_profile.hpp"
+#include "starfox/platform/nintendo_3ds/startup_trace.hpp"
 #include "starfox/compat/bit_cast.hpp"
 #include <cctype>
 
@@ -78,6 +79,7 @@ GameSession::GameSession(assets::RomImage rom,assets::SymbolMap symbols,PcmSink 
     }
     apply_native_capabilities();
     if(options.preview) {
+        STARFOX_3DS_STARTUP_MARK(preview_preroll);
         if(initial_map=="BOOT" || options.start_after_preview)
             throw std::invalid_argument("3DS preview requires a real stage owner, not BOOT/Start");
         // The same real Corneria/chatter reference as the desktop preview,
@@ -112,6 +114,7 @@ GameSession::GameSession(assets::RomImage rom,assets::SymbolMap symbols,PcmSink 
         game_.set_god_mode(god);
         if(!stable) throw std::runtime_error("Cartridge did not produce a stable 3DS preview frame");
         game_.enable_menu_preview();
+        STARFOX_3DS_STARTUP_MARK(preview_preroll_complete);
     }
     start_after_preview_=options.start_after_preview;
     history_.capture();history_.reset_interpolation();publish_raster();
