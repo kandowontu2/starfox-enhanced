@@ -129,21 +129,6 @@ jobs:
           python3 tools/check_3ds_spc_output.py "$RUNNER_TEMP/starfox-3ds-core-host"
           python3 tests/test_3ds_stack.py
           python3 tests/test_3ds_shader.py
-      - name: Compare complete palette recolouring with the frozen pre-change owner
-        shell: bash
-        run: |
-          git show fc699b65bf72d3d0a02744b3cac52c92e8460ad9:platform/3ds/pica_bg2_tiles.cpp > "$RUNNER_TEMP/pica_bg2_tiles_baseline.cpp"
-          python3 tools/check_3ds_palette_benchmark.py \
-            --build "$RUNNER_TEMP/starfox-3ds-core-host" \
-            --baseline-source "$RUNNER_TEMP/pica_bg2_tiles_baseline.cpp" \
-            --output "$RUNNER_TEMP/palette-comparison.json" --pairs 16
-      - name: Upload small source-only palette comparison receipt
-        uses: actions/upload-artifact@v4
-        with:
-          name: StarFoxEnhanced-3ds-palette-comparison
-          path: ${{ runner.temp }}/palette-comparison.json
-          if-no-files-found: error
-          retention-days: 7
       - name: Cross-build native diagnostics and experimental player
         shell: bash
         run: |

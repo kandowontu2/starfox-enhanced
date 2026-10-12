@@ -423,6 +423,67 @@ inline std::array<std::uint8_t,256> environment_palette_regions(const simulation
     }
     return regions;
 }
+struct SourceGroundRamp {
+    std::array<bool,256> inks{};
+    unsigned far_index{},near_index{},sampled_rows{};
+    bool valid() const noexcept {return far_index && near_index && sampled_rows>1;}
+};
+// Read the authored row order, not palette-index order or brightness extrema.
+// This is atlas metadata: callers cache it with the tiles, while CGRAM remains
+// live so weather transitions and black fades never latch an old colour.
+inline SourceGroundRamp source_ground_ramp(const simulation::SnesPpuState& p,unsigned horizon,
+    const std::array<std::uint8_t,256>* regions=nullptr) {
+    SourceGroundRamp ramp;
+    if((p.background_mode!=1 && p.background_mode!=2) || p.tunnel_scene) return ramp;
+    const unsigned edge=p.bg2_tile_size_16?16:8;
+    const unsigned width=((p.bg2_screen_size&1)?64:32)*edge;
+    const unsigned height=((p.bg2_screen_size&2)?64:32)*edge;
+    const unsigned pages_wide=(p.bg2_screen_size&1)?2:1;
+    std::array<bool,8> ground_banks{};
+    if(regions) for(unsigned index=1;index<128;++index)
+        if((*regions)[index]&1) ground_banks[index/16]=true;
+    const auto word=[&](unsigned a){return unsigned(p.vram[a&65535])|(unsigned(p.vram[(a+1)&65535])<<8);};
+    for(unsigned y=horizon;y<height;++y) {
+        std::array<unsigned,128> counts{};
+        for(unsigned x=0;x<width;x+=4) {
+            const unsigned tx=x/edge,ty=y/edge;
+            const unsigned entry=(tx/32+(ty/32)*pages_wide)*1024+(ty%32)*32+tx%32;
+            const unsigned tile=word(p.bg2_screen_base*2+entry*2);
+            const unsigned px=(tile&0x4000)?edge-1-x%edge:x%edge;
+            const unsigned py=(tile&0x8000)?edge-1-y%edge:y%edge;
+            const unsigned character=((tile&1023)+(px/8)+(py/8)*16)&1023;
+            const unsigned a=p.bg2_character_base*2+character*32+(py%8)*2;
+            const unsigned bits=word(a),high=word(a+16),mask=128>>(px%8);
+            const unsigned ink=((bits&mask)?1:0)+((bits&(mask<<8))?2:0)
+                +((high&mask)?4:0)+((high&(mask<<8))?8:0);
+            if(ink) ++counts[((tile>>10)&7)*16+ink];
+        }
+        const unsigned index=unsigned(std::max_element(counts.begin()+1,counts.end())-counts.begin());
+        if(counts[index]*400<width*95) continue; // Dots/objects are not a ground band.
+        // A native projection can begin a few rows above the actual ground.
+        // Do not latch its last full-width sky band and stop at the first real
+        // surface bank. Unclassified first ground shades remain eligible when
+        // their bank has actual terrain ownership in the atlas.
+        if(!ramp.far_index && regions
+            && ((*regions)[index]==2 || !ground_banks[index/16])) continue;
+        if(!ramp.far_index) ramp.far_index=index;
+        else if(index/16!=ramp.far_index/16) break; // Do not enter another atlas subject.
+        ramp.inks[index]=true;ramp.near_index=index;++ramp.sampled_rows;
+    }
+    return ramp;
+}
+inline void normalize_ground_ramp_classes(const SourceGroundRamp& ramp,
+    std::array<std::uint32_t,256>& classes) noexcept {
+    if(!ramp.valid()) return;
+    std::array<unsigned,6> population{};
+    for(unsigned ink=1;ink<classes.size();++ink)
+        if(ramp.inks[ink] && classes[ink]>=1 && classes[ink]<=5) ++population[classes[ink]];
+    const unsigned kind=unsigned(std::max_element(population.begin()+1,population.end())-population.begin());
+    if(kind>4 || !population[kind]) return; // Auto water stays a liquid.
+    for(unsigned ink=1;ink<classes.size();++ink)
+        if(ramp.inks[ink] && classes[ink]<=4) classes[ink]=kind;
+    // Sky, reflective water and explicitly protected detail are never promoted.
+}
 inline unsigned automatic_ground_material(std::uint16_t c) {
     const unsigned r=c&31,g=(c>>5)&31,b=(c>>10)&31;
     if(std::min({r,g,b})>17 && std::max({r,g,b})-std::min({r,g,b})<9) return 4;
@@ -460,6 +521,26 @@ inline std::array<std::array<float,4>,2> source_ground_gradient(
         const float luminance=rgb[0]*.2126f+rgb[1]*.7152f+rgb[2]*.0722f;
         if(luminance<low) {low=luminance;result[1]={rgb[0],rgb[1],rgb[2],1.f};}
         if(luminance>high) {high=luminance;result[0]={rgb[0],rgb[1],rgb[2],float(kind)};}
+    }
+    return result;
+}
+inline std::array<std::array<float,4>,2> authored_ground_gradient(
+    std::span<const std::uint16_t> palette,const std::array<std::uint32_t,256>& classes,
+    const SourceGroundRamp& ramp,bool include_water=false) {
+    if(!ramp.valid() || ramp.far_index>=palette.size() || ramp.near_index>=palette.size()
+        || ramp.far_index>=classes.size() || ramp.near_index>=classes.size())
+        return source_ground_gradient(palette,classes,include_water);
+    const auto kind=classes[ramp.far_index];
+    if(kind<1 || kind>4 || classes[ramp.near_index]!=kind)
+        return source_ground_gradient(palette,classes,include_water);
+    std::array<std::array<float,4>,2> result{};
+    for(unsigned end=0;end<2;++end) {
+        const auto value=palette[end?ramp.near_index:ramp.far_index];
+        for(unsigned channel=0;channel<3;++channel) {
+            const unsigned raw=(value>>(channel*5))&31;
+            result[end][channel]=float((raw<<3)|(raw>>2));
+        }
+        result[end][3]=end?1.F:float(kind);
     }
     return result;
 }

@@ -4,6 +4,7 @@
 #include "starfox/platform/nintendo_3ds/pica_texture_update.hpp"
 #include "starfox/platform/nintendo_3ds/pica_program_binding.hpp"
 #include "starfox/platform/nintendo_3ds/pica_display_sync.hpp"
+#include "starfox/platform/nintendo_3ds/pica_draw_transform.hpp"
 #include "starfox/platform/nintendo_3ds/startup_trace.hpp"
 #include "starfox/platform/nintendo_3ds/frame_profile.hpp"
 #include <atomic>
@@ -148,6 +149,7 @@ struct NativeGpu::Impl {
     PicaVertex* vbo{};
     PicaVertexResidency vertices;
     PicaDisplaySync display_sync;
+    PicaDrawTransform draw_transform;
     std::unique_ptr<NativeShaderProgram> shader_program;
     int transform_location{-1},uv_location{-1},uv_mode_location{-1};
     std::array<C3D_RenderTarget*,2> top{};
@@ -326,12 +328,17 @@ void NativeGpu::present_checked(const PicaFrame& frame,ImageView lower) {
         impl_->material(nullptr,false,false,false);Impl::source_layer(32);
         C3D_DepthTest(false,GPU_ALWAYS,static_cast<GPU_WRITEMASK>(0));
         C3D_DrawArrays(GPU_TRIANGLES,pica_vertex_limit+6,6);
+        // The backdrop explicitly replaced the transform. Start a new cache
+        // scope for this fixed eye/plan; target changes never reuse old keys.
+        impl_->draw_transform.reset();
         for(const auto& draw:frame.draws) {
             if(draw.clip) {
                 const auto bounds=pica_screen_scissor(*draw.clip);
                 C3D_SetScissor(GPU_SCISSOR_NORMAL,bounds[0],bounds[1],bounds[2],bounds[3]);
             } else C3D_SetScissor(GPU_SCISSOR_DISABLE,0,0,0,0);
-            upload_matrix(impl_->transform_location,pica_draw_matrix(frame.plan,eye,draw));
+            impl_->draw_transform.prepare(draw,
+                [&] {return pica_draw_matrix(frame.plan,eye,draw);},
+                [&](const PicaMatrix& matrix) {upload_matrix(impl_->transform_location,matrix);});
             auto* texture=draw.texture==pica_no_texture?nullptr:&impl_->textures[draw.texture];
             impl_->material(texture,
                 draw.alpha_blend,draw.depth_test,draw.depth_write,draw.screen_dither,draw.dither_odd,draw.projected_uv);

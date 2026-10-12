@@ -798,18 +798,23 @@ struct MenuDriver {
 void fps_navigation_parity(const assets::RomImage& rom,const assets::SymbolMap& symbols) {
     constexpr std::array<input::ButtonMask,4> navigation{0,input::up,input::down,input::ButtonMask(input::up|input::down)};
     unsigned fixtures{};
+    // Exercise both the New-family default and an existing custom depth.
+    // The independent source owner must start with the fixture's declared
+    // preferences, not the old desktop/default convergence of 1024.
+    for(const std::uint16_t convergence:{512,1024})
     for(bool runtime:{false,true})for(unsigned rate:{30U,60U})for(auto nav:navigation) {
         std::vector<std::int16_t> pcm;
         const auto map=runtime?"LEVEL1_1":"BOOT";
         GameSessionOptions options;options.preferences=GamePreferences{};
         options.preferences->render_fps=static_cast<std::uint8_t>(rate);
+        options.preferences->convergence=convergence;
         CheckedSession session(rom,symbols,[&](auto samples){pcm.insert(pcm.end(),samples.begin(),samples.end());},map,{},options);
         SourceOracle source(rom,symbols,map);
         // SD defaults invoke source-side setters, including EX's pending
         // laser/cartridge writes. Match those actual user choices in the
         // independent owner before comparing any input action.
         source.game.set_god_mode(false);source.game.set_default_laser(0);source.game.set_language(0);
-        source.game.set_selected_level(0);source.game.set_stereo_separation(16);source.game.set_stereo_convergence(1024);
+        source.game.set_selected_level(0);source.game.set_stereo_separation(16);source.game.set_stereo_convergence(convergence);
         source.game.set_presentation_fps(static_cast<std::uint16_t>(rate));
         require(session.game().save_state()==source.game.save_state(),"FPS fixture initialized different source/SD preferences");
         std::int64_t time{};session.advance(time,0);

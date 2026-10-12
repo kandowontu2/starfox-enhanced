@@ -753,8 +753,21 @@ void fixture(const assets::RomImage& rom,const assets::SymbolMap& symbols,const 
                     receiver_visible|=high>distance/source.plan.far_plane && low<distance/source.plan.near_plane;
                 } else {
                     ++receiver_count;
-                    require(draw.space==PicaSpace::world && draw.projected_uv && draw.depth_test,
-                        "Actual cartridge terrain lost its finite source-owned receiver");
+                    // BG2 remains a finite stereo receiver, but its authored
+                    // HDMA horizon is not the live BG1/model depth plane.
+                    // Writing reconstructed BG2 depth swallowed lights and
+                    // model bases; verify geometry AND painter ownership.
+                    require(draw.space==PicaSpace::world && draw.projected_uv
+                        && !draw.depth_test && !draw.depth_write,
+                        "Actual cartridge terrain lost its finite source-owned receiver or occludes BG1");
+                    for(unsigned at=draw.first;at<draw.first+draw.count;++at) {
+                        const auto p=ordered.before_models.vertices[at].position;
+                        const double residual=p[1]+plane.slope*source.plan.focal_x/source.plan.focal_y*p[0]
+                            +(plane.centre-120)/source.plan.focal_y*p[2]+plane.height;
+                        require(std::abs(residual)<std::max(.02,8*std::numeric_limits<float>::epsilon()*plane.height)
+                            && p[2]>=source.plan.near_plane-.02 && p[2]<=source.plan.far_plane+.02,
+                            "Actual cartridge terrain departed from its source plane or near/far clip");
+                    }
                 }
             }
             // A source horizon below the LCD correctly emits sky only; broad
