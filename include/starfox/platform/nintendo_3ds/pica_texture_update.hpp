@@ -79,12 +79,14 @@ public:
                 source_rows[i]=image.pixels.data()+std::size_t(y)*image.pitch;
                 source_columns[i]=x*image.channels;
             }
-            unsigned texel=0;
-            for(const auto& xy:detail::pica_morton_coordinates) {
-                const auto* pixel=source_rows[xy[1]]+source_columns[xy[0]];
-                const auto to=offset+4*texel++;
-                detail::pica_store_abgr(destination.data()+to,pixel,image.channels);
-            }
+            const auto pack=[&]<unsigned Channels>() {
+                detail::pack_pica_tile(source_rows,source_columns,offset/4,
+                    [&](unsigned texel,const std::uint8_t* pixel) {
+                        detail::pica_store_abgr<Channels>(destination.data()+4*texel,pixel);
+                    });
+            };
+            if(image.channels==4) pack.template operator()<4>();
+            else pack.template operator()<3>();
         }
         result.bytes=end-result.offset;
         return result;

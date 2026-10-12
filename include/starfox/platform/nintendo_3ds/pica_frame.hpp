@@ -147,8 +147,10 @@ inline constexpr auto pica_morton_coordinates=[] {
 // Preserve the four source bytes exactly, including alpha. memcpy keeps both
 // sides legal for unaligned rows and uint8_t storage. The unsigned expression
 // reverses bytes on either native endian order and can lower to ARM's REV.
-inline void pica_store_abgr(std::uint8_t* destination,const std::uint8_t* pixel,unsigned channels) noexcept {
-    if(channels==4) {
+template<unsigned Channels>
+inline void pica_store_abgr(std::uint8_t* destination,const std::uint8_t* pixel) noexcept {
+    static_assert(Channels==3 || Channels==4);
+    if constexpr(Channels==4) {
         std::uint32_t word;
         std::memcpy(&word,pixel,sizeof(word));
         const auto reversed=(word<<24)|((word<<8)&0x00ff0000U)
@@ -158,6 +160,24 @@ inline void pica_store_abgr(std::uint8_t* destination,const std::uint8_t* pixel,
         destination[0]=255;destination[1]=pixel[2];
         destination[2]=pixel[1];destination[3]=pixel[0];
     }
+}
+inline void pica_store_abgr(std::uint8_t* destination,const std::uint8_t* pixel,unsigned channels) noexcept {
+    if(channels==4) pica_store_abgr<4>(destination,pixel);
+    else pica_store_abgr<3>(destination,pixel);
+}
+template<class Store,std::size_t... Texels>
+inline void pack_pica_tile(const std::array<const std::uint8_t*,8>& rows,
+    const std::array<unsigned,8>& columns,unsigned first,Store store,std::index_sequence<Texels...>) {
+    // Every address within an 8x8 Morton tile is known at compile time. Keep
+    // edge/repeat handling in the caller, but avoid 64 coordinate-table loads
+    // and loop/format decisions for each tile on the ARM11 upload path.
+    (store(first+unsigned(Texels),rows[pica_morton_coordinates[Texels][1]]
+        +columns[pica_morton_coordinates[Texels][0]]),...);
+}
+template<class Store>
+inline void pack_pica_tile(const std::array<const std::uint8_t*,8>& rows,
+    const std::array<unsigned,8>& columns,unsigned first,Store store) {
+    pack_pica_tile(rows,columns,first,store,std::make_index_sequence<64>{});
 }
 template<class Store>
 inline void pack_pica_plane(PicaTextureLayout layout,unsigned width,unsigned height,
@@ -174,8 +194,7 @@ inline void pack_pica_plane(PicaTextureLayout layout,unsigned width,unsigned hei
             std::array<unsigned,8> columns{};
             for(unsigned x=0;x<8;++x)
                 columns[x]=(repeat?(tx+x)&(width-1):std::min(tx+x,width-1))*channels;
-            for(const auto& xy:pica_morton_coordinates)
-                store(texel++,rows[xy[1]]+columns[xy[0]]);
+            pack_pica_tile(rows,columns,texel,store);texel+=64;
         }
     }
 }
@@ -187,13 +206,17 @@ inline void pack_pica_texture(PicaImage source,std::span<std::uint8_t> destinati
     const auto src=reinterpret_cast<std::uintptr_t>(source.pixels.data()),dst=reinterpret_cast<std::uintptr_t>(destination.data());
     if((dst>=src && dst-src<source.pixels.size()) || (src>=dst && src-dst<destination.size()))
         throw std::invalid_argument("3DS texture upload requires independent storage");
-    detail::pack_pica_plane(layout,source.width,source.height,source.pitch,source.channels,source.repeat,
-        source.pixels.data(),[&](unsigned texel,const std::uint8_t* pixel) {
-        // The shader converts top-left V to 1-V, and PICA's texture sampler
-        // then addresses rows from bottom to top. Store source rows directly;
-        // reversing them here as well flips uploaded artwork on both LCDs.
-        detail::pica_store_abgr(destination.data()+texel*4,pixel,source.channels);
-    });
+    const auto pack=[&]<unsigned Channels>() {
+        detail::pack_pica_plane(layout,source.width,source.height,source.pitch,Channels,source.repeat,
+            source.pixels.data(),[&](unsigned texel,const std::uint8_t* pixel) {
+                // The shader converts top-left V to 1-V, and PICA's texture sampler
+                // then addresses rows from bottom to top. Store source rows directly;
+                // reversing them here as well flips uploaded artwork on both LCDs.
+                detail::pica_store_abgr<Channels>(destination.data()+texel*4,pixel);
+            });
+    };
+    if(source.channels==4) pack.template operator()<4>();
+    else pack.template operator()<3>();
 }
 // Validate provenance on changed uploads only. Frame/eye validation is O(draws),
 // not a second full image walk on every presentation. Bitset returns exactly
