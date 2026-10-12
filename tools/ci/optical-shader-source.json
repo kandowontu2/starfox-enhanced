@@ -420,9 +420,9 @@
     },
     {
       "path": "src/render/shaders/reflection_source_optical_interval.hlsli",
-      "original_sha256": "0191c06b8dab16abbe04b32429ae51f5682922e3591289b48e3255f10047a9c3",
-      "canonical_bytes": 20745,
-      "canonical_sha256": "0191c06b8dab16abbe04b32429ae51f5682922e3591289b48e3255f10047a9c3"
+      "original_sha256": "20cc7324bcc43f32a643a42e729f7d705e20cb60486619e1a7145982dcffffda",
+      "canonical_bytes": 21092,
+      "canonical_sha256": "20cc7324bcc43f32a643a42e729f7d705e20cb60486619e1a7145982dcffffda"
     },
     {
       "path": "src/render/shaders/reflection_source_optical_jet.hlsli",
@@ -503,7 +503,7 @@
       "canonical_sha256": "7580a1801dec3c0f65120a95ccb4f08fec87e8b64f337cbd1c6a86f1d5f3ce5e"
     }
   ],
-  "candidate": "Current working source, 64-query owner; recovered R383 binaries are not root-compatible",
+  "candidate": "Current working source, 64-query owner; honor the shared scalar call boundary without changing arithmetic",
   "production_adopted": false,
   "gpu_runtime_accepted": false
 }

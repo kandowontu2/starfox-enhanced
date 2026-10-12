@@ -14,7 +14,11 @@ static bool intervalFailed=false;
 #else
 #define OPTICAL_BOUNDARY
 #endif
-#if defined(STARFOX_OPTICAL_SCALAR_INLINE)
+// Heavy native/root stages request shared scalar helpers to keep DXC from
+// cloning the checked divide/sqrt/sine loops throughout every derivative.
+// Honor that request even when the general inline option is also enabled;
+// this changes only call boundaries, not arithmetic, loops or refusal guards.
+#if defined(STARFOX_OPTICAL_SCALAR_INLINE) && !defined(STARFOX_OPTICAL_SHARED_SCALAR)
 #define OPTICAL_SCALAR_BOUNDARY
 #else
 #define OPTICAL_SCALAR_BOUNDARY [noinline]
