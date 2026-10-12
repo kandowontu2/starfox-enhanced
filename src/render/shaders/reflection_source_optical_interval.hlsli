@@ -65,15 +65,21 @@ OPTICAL_SCALAR_BOUNDARY float endpoint_sum_bound(float a,float b,bool upper) {
     if(upper)return e>0?interval_up(s):s;
     return e<0?interval_down(s):s;
 }
-OPTICAL_SCALAR_BOUNDARY float endpoint_product_bound(float a,float b,bool upper) {
+// Compute the same exact residual once for both directed endpoints. The
+// interval product needs both bounds; duplicating this shared scalar call
+// doubled its split/residual work without adding enclosure information.
+OPTICAL_SCALAR_BOUNDARY Interval endpoint_product_bounds(float a,float b) {
     precise float p=a*b;
     if(!endpoint_safe(a) || !endpoint_safe(b) || !isfinite(p))
-        return upper?interval_up(p):interval_down(p);
+        return iv(interval_down(p),interval_up(p));
     precise float sa=a*4097.F,ah=sa-(sa-a),al=a-ah;
     precise float sb=b*4097.F,bh=sb-(sb-b),bl=b-bh;
     precise float e=((ah*bh-p)+ah*bl+al*bh)+al*bl;
-    if(upper)return e>0?interval_up(p):p;
-    return e<0?interval_down(p):p;
+    return iv(e<0?interval_down(p):p,e>0?interval_up(p):p);
+}
+float endpoint_product_bound(float a,float b,bool upper) {
+    const Interval bounds=endpoint_product_bounds(a,b);
+    return upper?bounds.hi:bounds.lo;
 }
 
 Interval iadd(Interval a,Interval b) {
@@ -102,11 +108,9 @@ Interval imul(Interval a,Interval b) {
         if(interval_exact_point(a,1))return b;if(interval_exact_point(b,1))return a;
         if(interval_exact_point(a,-1))return ineg(b);if(interval_exact_point(b,-1))return ineg(a);
     }
-    const float lo=min(min(endpoint_product_bound(a.lo,b.lo,false),endpoint_product_bound(a.lo,b.hi,false)),
-        min(endpoint_product_bound(a.hi,b.lo,false),endpoint_product_bound(a.hi,b.hi,false)));
-    const float hi=max(max(endpoint_product_bound(a.lo,b.lo,true),endpoint_product_bound(a.lo,b.hi,true)),
-        max(endpoint_product_bound(a.hi,b.lo,true),endpoint_product_bound(a.hi,b.hi,true)));
-    return iv(lo,hi);
+    const Interval p=endpoint_product_bounds(a.lo,b.lo),q=endpoint_product_bounds(a.lo,b.hi);
+    const Interval r=endpoint_product_bounds(a.hi,b.lo),s=endpoint_product_bounds(a.hi,b.hi);
+    return iv(min(min(p.lo,q.lo),min(r.lo,s.lo)),max(max(p.hi,q.hi),max(r.hi,s.hi)));
 }
 Interval isquare(Interval a) {
     const float minimum=a.lo<=0 && a.hi>=0?0:min(abs(a.lo),abs(a.hi)),maximum=max(abs(a.lo),abs(a.hi));

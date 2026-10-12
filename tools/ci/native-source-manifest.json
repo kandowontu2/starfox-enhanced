@@ -3911,8 +3911,8 @@
     },
     {
       "path": "src/render/shaders/reflection_source_optical_interval.hlsli",
-      "bytes": 23091,
-      "sha256": "999b8832e3608be9e82111e57b6f1b78a32fa52b548cc4ffebf89d072dc4a414"
+      "bytes": 23289,
+      "sha256": "c60c7abae79aaa950b4f728b6fdde7d97ec8e2df005cd8766eb718aecdd89b1a"
     },
     {
       "path": "src/render/shaders/reflection_source_optical_jet.hlsli",
@@ -7873,16 +7873,19 @@
     {
       "path": "src/render/shaders/reflection_source_optical_interval.hlsli",
       "original_sha256": "20cc7324bcc43f32a643a42e729f7d705e20cb60486619e1a7145982dcffffda",
-      "candidate_sha256": "999b8832e3608be9e82111e57b6f1b78a32fa52b548cc4ffebf89d072dc4a414",
+      "candidate_sha256": "c60c7abae79aaa950b4f728b6fdde7d97ec8e2df005cd8766eb718aecdd89b1a",
       "shader_arithmetic_changed": true,
-      "description": "Same checked directed-endpoint arithmetic; share helpers using existing scalar boundary to avoid compiler duplication",
-      "checked_helper_body_changed": false,
+      "description": "Compute one unchanged exact product residual for both directed endpoints; four paired calls instead of eight duplicate calls",
+      "checked_helper_body_changed": true,
       "checked_helpers_share_existing_scalar_boundary": true,
       "source_visibility_thresholds_changed": false,
       "optical_tolerances_changed": false,
       "root_work_bounds_changed": false,
       "shader_programs_removed": 0,
-      "production_adopted": false
+      "production_adopted": false,
+      "exact_product_residual_formula_unchanged": true,
+      "paired_product_calls": 4,
+      "prior_directed_product_calls": 8
     }
   ]
 }
