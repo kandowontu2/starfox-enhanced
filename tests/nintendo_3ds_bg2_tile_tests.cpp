@@ -1,9 +1,11 @@
 #include "starfox/platform/nintendo_3ds/pica_bg2_tiles.hpp"
 #include "starfox/platform/nintendo_3ds/game_layers.hpp"
 #include <atomic>
+#include <chrono>
 #include <cstdlib>
 #include <iostream>
 #include <new>
+#include <string_view>
 
 namespace {
 using namespace starfox;
@@ -301,6 +303,36 @@ void mode1_panorama_atlas() {
         require(owner.work().decodes==before.decodes+1,"Mode-1 atlas reused stale uniform-character geometry");
     }
 }
+void complete_palette_sweep() {
+    auto ppu=fixture(0);
+    PpuBatch batch;batch.passes.push_back({PpuLayer::bg2});
+    PicaBg2Tiles owner;const auto plan=plan_frame(0,true,ScreenUse::world);
+    // Exercise every source brightness/subtraction pair against the scalar
+    // indexed painter, including opaque RGB black and transparent tile ink 0.
+    for(unsigned brightness=0;brightness<16;++brightness) for(unsigned subtract=0;subtract<32;++subtract)
+        parity(ppu,batch,plan,brightness,subtract,owner);
+    require(owner.work().decodes==1 && owner.work().colour_updates==512,
+        "Complete palette sweep reran tile geometry or missed a source fade");
+}
+void palette_benchmark() {
+    const auto ppu=fixture(0);PpuBatch batch;batch.passes.push_back({PpuLayer::bg2});
+    PicaBg2Tiles owner;const auto plan=plan_frame(0,true,ScreenUse::world);
+    require(bool(owner.prepare(ppu,batch,plan,15,0,pica_vertex_limit)),"Palette benchmark fixture fell back");
+    std::uint64_t digest=14695981039346656037ULL;
+    // Real atlas recolouring, not a stand-in pixel loop. Geometry is already
+    // warm; source pixels, allocations and all normal validation remain.
+    const auto started=std::chrono::steady_clock::now();
+    for(unsigned iteration=0;iteration<4096;++iteration) {
+        const auto frame=owner.prepare(ppu,batch,plan,iteration%16,iteration%32,pica_vertex_limit);
+        require(frame && frame->textures.size()==1,"Palette benchmark lost its complete atlas");
+        const auto pixels=frame->textures[0].pixels;
+        digest^=pixels[(std::size_t(iteration)*997)%pixels.size()];digest*=1099511628211ULL;
+    }
+    const auto elapsed=std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now()-started).count();
+    require(owner.work().decodes==1 && owner.work().colour_updates==4097,"Palette benchmark changed source work cadence");
+    std::cout<<"Palette atlas benchmark iterations=4096 nanoseconds="<<elapsed<<" digest="<<std::hex<<digest
+        <<std::dec<<"; host component timing, not console FPS\n";
+}
 }
 // Only count native owner preparation, not fixture creation or pixel oracles.
 void* operator new(std::size_t count) {
@@ -313,7 +345,9 @@ void operator delete(void* memory) noexcept {std::free(memory);}
 void operator delete[](void* memory) noexcept {std::free(memory);}
 void operator delete(void* memory,std::size_t) noexcept {std::free(memory);}
 void operator delete[](void* memory,std::size_t) noexcept {std::free(memory);}
-int main() try {
+int main(int argc,char** argv) try {
+    if(argc==2 && std::string_view(argv[1])=="--palette-benchmark") {palette_benchmark();return 0;}
+    require(argc==1,"Use no arguments for parity checks, or --palette-benchmark");
     for(unsigned number=0;number<64;++number) {
         const auto ppu=fixture(number);const auto unchanged=*ppu;
         PpuBatch batch;batch.expand_horizontal=(number&1)!=0;batch.passes.push_back({PpuLayer::bg2,int(number%3)-1});
@@ -326,7 +360,7 @@ int main() try {
         }
         require(ppu->vram==unchanged.vram && ppu->cgram==unchanged.cgram && ppu->oam==unchanged.oam,"Native tile planning mutated cartridge memory");
     }
-    rejection_and_reuse();painter_integration();constant_vertical_offsets();rolled_offsets_and_carry();water_offsets_and_edges();mode1_panorama_atlas();
+    rejection_and_reuse();painter_integration();constant_vertical_offsets();rolled_offsets_and_carry();water_offsets_and_edges();mode1_panorama_atlas();complete_palette_sweep();
     std::cout<<"Native BG2 tile planner/atlas: "<<checks<<" exact pixel, palette, ownership, HDMA, flips, budget and fallback checks PASS\n";
     return 0;
 } catch(const std::exception& error) {count_allocations=false;std::cerr<<error.what()<<'\n';return 1;}

@@ -416,6 +416,7 @@ elseif(STARFOX_3DS_BUILD_HOST_TESTS)
         add_test(NAME starfox_3ds_fortuna_inputs_cli
             COMMAND "${CMAKE_COMMAND}" "-DCHECKER=$<TARGET_FILE:starfox_3ds_fortuna_inputs_check>"
                 -P "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/nintendo_3ds_fortuna_inputs_cli.cmake")
+        include("${CMAKE_CURRENT_SOURCE_DIR}/../../tests/nintendo_3ds_cartridge_tests.cmake")
     endif()
 endif()
 
