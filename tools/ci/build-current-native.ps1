@@ -87,13 +87,14 @@ try {
     $ciConfig=@('-S',$ciRoot,'-B',$ciBuild,'-G','Ninja','-DCMAKE_BUILD_TYPE=Release','-DCMAKE_EXPORT_COMPILE_COMMANDS=ON',
         '-DCMAKE_C_COMPILER=C:/Strawberry/c/bin/gcc.exe',('-DCMAKE_CXX_COMPILER='+$ciCompiler),
         '-DCMAKE_CXX_FLAGS=--param=ggc-min-expand=10 --param=ggc-min-heapsize=16384',
-        ('-DCMAKE_PROJECT_INCLUDE='+$ciRoot.Replace('\','/')+'/tools/ci/external-dxr-payloads.cmake'),
+        ('-DCMAKE_PROJECT_INCLUDE='+$ciRoot.Replace('\','/')+'/tools/ci/external-native-payloads.cmake'),
         '-DSTARFOX_BUILD_RUNTIME=ON','-DSTARFOX_BUILD_TOOLS=ON','-DSTARFOX_BUILD_TESTS=ON',
         '-DSTARFOX_BUILD_VR=OFF','-DSTARFOX_ENABLE_DISPLAYXR=ON','-DSTARFOX_ENABLE_LEIASR=OFF',
         '-DSTARFOX_EMBED_RUNTIME_ASSETS=OFF','-DSTARFOX_PACKAGE_MSU1_MUSIC=OFF','-DSTARFOX_DLSS_RUNTIME_DIRECTORY=',
         '-DSTARFOX_ROM_FILE=source-only-no-rom.sfc','-DSTARFOX_EX_ROM_FILE=source-only-no-ex-rom.sfc',
         '-DSTARFOX_RETAIL_V12_FILE=source-only-no-retail.sfc',('-DSTARFOX_DXC='+[IO.Path]::GetFullPath($Dxc)))
-    $ciReceipt.embedding_candidate='All 22 original DXR shader arrays: byte-exact COFF data objects, original fixed-size declarations and original DXC commands'
+    $ciReceipt.embedding_candidate='All 22 DXR and 50 reflection-history arrays: byte-exact COFF data, fixed extents and eight distinct legacy C++ entities; every original generator edge retained'
+    $ciReceipt.shader_command_alignment='All 42 native CMake commands match source-only shader run 38199185971; seven missing shared-scalar/SSA flag variants corrected, no shader arithmetic or work removed'
     Invoke-CiOwned 'configure' $ciCmake $ciConfig
     $ciCommands=Get-Content -LiteralPath (Join-Path $ciBuild 'compile_commands.json') -Raw|ConvertFrom-Json
     $ciFixture=@($ciCommands|Where-Object {$_.file.Replace('\','/').EndsWith('/tests/displayxr_runtime_tests.cpp') -and $_.command -match 'starfox_displayxr_gpu_presenter_check\.dir'})
@@ -116,10 +117,14 @@ try {
         Copy-Item -LiteralPath $ciFile -Destination $ciResult
         $ciReceipt.outputs+=,[ordered]@{name=[IO.Path]::GetFileName($ciFile);bytes=(Get-Item -LiteralPath $ciFile).Length;sha256=(Get-FileHash -LiteralPath $ciFile).Hash}
     }
-    $ciPayloads=@(Get-ChildItem -LiteralPath (Join-Path $ciBuild 'external-dxr-payloads') -Filter '*.json')
-    if($ciPayloads.Count -ne 22){throw 'Complete byte-exact payload receipts missing'}
+    $ciDxrPayloads=@(Get-ChildItem -LiteralPath (Join-Path $ciBuild 'external-dxr-payloads') -Filter '*.json')
+    $ciReflectionPayloads=@(Get-ChildItem -LiteralPath (Join-Path $ciBuild 'external-reflection-payloads') -Filter '*.json')
+    if($ciDxrPayloads.Count -ne 22 -or $ciReflectionPayloads.Count -ne 50){throw 'Require every one of the 22 DXR and 50 reflection-history payload receipts'}
+    $ciPayloads=$ciDxrPayloads+$ciReflectionPayloads
     $ciReceipt.payloads=@($ciPayloads|ForEach-Object {Get-Content -LiteralPath $_.FullName -Raw|ConvertFrom-Json})
-    if(@($ciReceipt.payloads|Where-Object {!$_.shader_bytes_unchanged -or !$_.original_array_extent_retained}).Count){throw 'Payload identity or ABI changed'}
+    if(@($ciReceipt.payloads|Where-Object {!$_.shader_bytes_unchanged -or !$_.original_array_extent_retained}).Count -or
+       @($ciReceipt.payloads.symbol|Select-Object -Unique).Count -ne 72){throw 'Payload identity, ABI or complete symbol inventory changed'}
+    $ciReceipt.payload_counts=@{dxr=22;reflection_history=50;total=72}
     $ciReceipt.status='fresh_full_native_link_passed_not_gpu_executed'
 } catch {
     $ciReceipt.status='failed_or_resource_deferred';$ciReceipt.error=$_.Exception.Message;Save-CiReceipt;throw

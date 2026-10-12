@@ -87,13 +87,21 @@ if(STARFOX_DXC)
             list(APPEND source_flags -DINDEX_REDUCE=1)
         endif()
         if(source_stage STREQUAL "optical" OR source_stage STREQUAL "optical_stream")
-            list(APPEND source_flags -DSTARFOX_OPTICAL_SCALAR_INLINE=1 -DSTARFOX_NATIVE_SOURCE_OPTICAL=1)
+            list(APPEND source_flags -DSTARFOX_OPTICAL_SCALAR_INLINE=1)
+            if(source_format STREQUAL "dxil")
+                # Match the complete, strict shared-scalar shader qualification.
+                # Keep every arithmetic operation and bound; share call sites.
+                list(APPEND source_flags -DSTARFOX_OPTICAL_SHARED_SCALAR=1)
+            endif()
+            list(APPEND source_flags -DSTARFOX_NATIVE_SOURCE_OPTICAL=1)
             list(APPEND source_extra_dependencies src/render/shaders/reflection_source_optical_target.hlsli)
             if(source_stage STREQUAL "optical_stream")
                 list(APPEND source_extra_dependencies src/render/shaders/reflection_source_optical.hlsl)
             endif()
         elseif(source_stage STREQUAL "jets" OR source_stage STREQUAL "jets_stream")
-            list(APPEND source_flags -DSTARFOX_OPTICAL_SCALAR_INLINE=1)
+            # Without the existing shared helpers DXC clones the checked
+            # divide/sqrt/sine loops and exceeds the original compiler cap.
+            list(APPEND source_flags -DSTARFOX_OPTICAL_SCALAR_INLINE=1 -DSTARFOX_OPTICAL_SHARED_SCALAR=1)
             list(APPEND source_extra_dependencies src/render/shaders/reflection_source_optical_target.hlsli
                 src/render/shaders/reflection_source_optical_local_root.hlsli src/render/shaders/reflection_source_optical_jet.hlsli
                 src/render/shaders/reflection_source_jets.hlsl)
@@ -111,7 +119,7 @@ if(STARFOX_DXC)
         endif()
         if(source_format STREQUAL "spirv")
             list(APPEND source_flags -spirv -fspv-target-env=vulkan1.2)
-            if(source_stage STREQUAL "jets" OR source_stage STREQUAL "jets_stream")
+            if(source_stage STREQUAL "jets" OR source_stage STREQUAL "jets_stream" OR source_stage STREQUAL "witness")
                 # Strict storage/SSA cleanup: the complete shared differential
                 # suite passes NVIDIA and Intel Vulkan. Native owner frames
                 # still require their separate execution checks; staging is

@@ -11,8 +11,8 @@
     },
     {
       "path": "cmake/DisplayXR.cmake",
-      "bytes": 50440,
-      "sha256": "b471730d639212eb863fbf6a084f12e7b7df2868e7b96e0cc1e8813568a1555f"
+      "bytes": 50998,
+      "sha256": "473023e33f0dab065b23804a4d6280b328f9567431799536754b9eaaa4b6aba3"
     },
     {
       "path": "cmake/EmbeddedDlss.cmake",
@@ -7859,6 +7859,16 @@
       "bytes": 6901,
       "sha256": "a693a7f32cbf2efcb2a5030bd3d6ce80fba8915e475c081a6c8dc48c5eaef9df"
     }
+  ],
+  "controlled_source_variants": [
+    {
+      "path": "cmake/DisplayXR.cmake",
+      "original_sha256": "b471730d639212eb863fbf6a084f12e7b7df2868e7b96e0cc1e8813568a1555f",
+      "candidate_sha256": "473023e33f0dab065b23804a4d6280b328f9567431799536754b9eaaa4b6aba3",
+      "scoped_hunks": 3,
+      "corrected_command_variants": 7,
+      "shader_arithmetic_changed": false,
+      "shader_programs_removed": 0
+    }
   ]
 }
-
