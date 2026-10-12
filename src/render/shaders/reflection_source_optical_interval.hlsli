@@ -55,7 +55,7 @@ bool endpoint_safe(float a) {
     const uint magnitude=asuint(a)&0x7fffffffU;
     return magnitude==0 || (magnitude>=0x2c800000U && magnitude<=0x52800000U);
 }
-float endpoint_sum_bound(float a,float b,bool upper) {
+OPTICAL_SCALAR_BOUNDARY float endpoint_sum_bound(float a,float b,bool upper) {
     precise float s=a+b;
     if(!endpoint_safe(a) || !endpoint_safe(b) || !isfinite(s))
         return upper?interval_up(s):interval_down(s);
@@ -65,7 +65,7 @@ float endpoint_sum_bound(float a,float b,bool upper) {
     if(upper)return e>0?interval_up(s):s;
     return e<0?interval_down(s):s;
 }
-float endpoint_product_bound(float a,float b,bool upper) {
+OPTICAL_SCALAR_BOUNDARY float endpoint_product_bound(float a,float b,bool upper) {
     precise float p=a*b;
     if(!endpoint_safe(a) || !endpoint_safe(b) || !isfinite(p))
         return upper?interval_up(p):interval_down(p);

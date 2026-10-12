@@ -3911,8 +3911,8 @@
     },
     {
       "path": "src/render/shaders/reflection_source_optical_interval.hlsli",
-      "bytes": 23043,
-      "sha256": "5cfdef8f4b781b9b667cedb3d76b4e45422d3dfd6fe032bb526d519a86fb0a71"
+      "bytes": 23091,
+      "sha256": "999b8832e3608be9e82111e57b6f1b78a32fa52b548cc4ffebf89d072dc4a414"
     },
     {
       "path": "src/render/shaders/reflection_source_optical_jet.hlsli",
@@ -7873,9 +7873,11 @@
     {
       "path": "src/render/shaders/reflection_source_optical_interval.hlsli",
       "original_sha256": "20cc7324bcc43f32a643a42e729f7d705e20cb60486619e1a7145982dcffffda",
-      "candidate_sha256": "5cfdef8f4b781b9b667cedb3d76b4e45422d3dfd6fe032bb526d519a86fb0a71",
+      "candidate_sha256": "999b8832e3608be9e82111e57b6f1b78a32fa52b548cc4ffebf89d072dc4a414",
       "shader_arithmetic_changed": true,
-      "description": "Checked exact TwoSum/TwoProduct directed endpoints only in bitwise-classified bounded normal range; existing outward fallback elsewhere",
+      "description": "Same checked directed-endpoint arithmetic; share helpers using existing scalar boundary to avoid compiler duplication",
+      "checked_helper_body_changed": false,
+      "checked_helpers_share_existing_scalar_boundary": true,
       "source_visibility_thresholds_changed": false,
       "optical_tolerances_changed": false,
       "root_work_bounds_changed": false,
