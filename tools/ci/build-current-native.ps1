@@ -32,6 +32,7 @@ function Assert-CiSources {
     if(@(Get-ChildItem -LiteralPath $ciRoot -Recurse -File | Where-Object {$_.Extension -match '^\.(sfc|smc|bin|rom|jks|keystore|pfx|p12|ipa|apk|exe|dll)$' -and !$_.FullName.Contains('\.git\')}).Count){throw 'Unexpected private/binary input in source-only checkout'}
 }
 function Invoke-CiOwned([string]$Name,[string]$Program,[string[]]$Arguments){
+    $Program=[IO.Path]::GetFullPath($Program)
     Assert-CiSources
     $ciMemory=Get-CimInstance Win32_OperatingSystem
     if($ciMemory.FreePhysicalMemory -lt 6291456 -or $ciMemory.FreeVirtualMemory -lt 2097152){throw 'Original compiler launch headroom unavailable; no process launched'}
