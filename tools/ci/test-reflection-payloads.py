@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import struct
 import tempfile
+import tracemalloc
 import unittest
 
 spec = importlib.util.spec_from_file_location("reflection_payloads", Path(__file__).with_name("externalize-reflection-payloads.py"))
@@ -69,6 +70,33 @@ class ReflectionPayloadTests(unittest.TestCase):
             self.assertIn("sample[300]", (root / "out/sample.hpp").read_text())
             self.assertTrue(record["shader_bytes_unchanged"])
             self.assertFalse(record["production_adopted"])
+
+    def test_large_initializer_has_bounded_parser_memory(self):
+        # Complete authored TEST container, not a runnable shader or GPU proof.
+        body = bytes(range(256)) * 16384
+        data = (b"DXBC" + bytes(16) + struct.pack("<III", 1, 44 + len(body), 1)
+                + struct.pack("<I", 36) + b"TEST" + struct.pack("<I", len(body)) + body)
+        text = header(data, namespace="large")
+        tracemalloc.start()
+        try:
+            parsed = payload.extract(text, "sample", "large")
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        type(self).large_parser_peak = peak
+        self.assertEqual(parsed, data)
+        self.assertLess(peak, 64 * 1024 * 1024)
+
+    def test_literal_boundaries_and_delimiters_are_strict(self):
+        valid = header(dxbc())
+        for replacement in ("0x7fff", "127 128", "127,,128",
+                            "127/*hidden*/", "-1", "0X7F", "1000"):
+            with self.subTest(replacement=replacement), self.assertRaises(ValueError):
+                payload.extract(valid.replace("0x7f", replacement), "sample")
+        for invalid in (valid.replace("};", "}"), valid.replace("0x7f,", "0x7f ")):
+            with self.assertRaises(ValueError):
+                payload.extract(invalid, "sample")
+        self.assertEqual(payload.extract(valid.replace(",\n};", "\n};"), "sample"), dxbc())
 
     def test_every_legacy_array_uses_distinct_cpp_entity(self):
         with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as folder:

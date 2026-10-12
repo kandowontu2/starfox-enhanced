@@ -36,49 +36,78 @@ def validate_container(data):
     elif data[:4] == b"\x03\x02\x23\x07":
         if len(data) < 20 or len(data) % 4:
             raise ValueError("Incomplete SPIR-V extent")
-        words = struct.unpack("<" + "I" * (len(data) // 4), data)
-        if not words[3] or words[4]:
+        if not struct.unpack_from("<I", data, 12)[0] or struct.unpack_from("<I", data, 16)[0]:
             raise ValueError("Invalid SPIR-V header")
-        at = 5
-        while at < len(words):
-            count = words[at] >> 16
-            if not count or at + count > len(words):
+        at = 20
+        while at < len(data):
+            count = struct.unpack_from("<I", data, at)[0] >> 16
+            if not count or at + count * 4 > len(data):
                 raise ValueError("Incomplete SPIR-V instruction")
-            at += count
+            at += count * 4
     else:
         raise ValueError("Expected complete DXBC or SPIR-V data")
+
+
+BYTE_LITERAL = re.compile(r"(?:0x[0-9a-fA-F]{2}|[0-9]{1,3})")
+ARRAY_END = re.compile(r"\}\s*;")
+NAMESPACE_END = re.compile(r"(?m)^\}\s*$")
 
 
 def extract(text, symbol, namespace=None):
     if not re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*", symbol):
         raise ValueError("Invalid shader symbol")
+    # Do not match the complete initializer with a repeated regex. Real arrays
+    # contain millions of literals; its backtracking stack dwarfs the payload.
     expression = (r"(?m)^(?:alignas\(4\)\s+)?(?:inline\s+constexpr\s+|const\s+)"
                   r"unsigned\s+char\s+" + re.escape(symbol)
-                  + r"\s*\[\s*\]\s*=\s*\{([^}]*)\}\s*;")
+                  + r"\s*\[\s*\]\s*=\s*\{")
     matches = list(re.finditer(expression, text))
     if len(matches) != 1:
         raise ValueError("Require exactly one original byte array")
+    declaration = matches[0]
+    end = text.find("}", declaration.end())
+    closing = ARRAY_END.match(text, end) if end >= 0 else None
+    if not closing:
+        raise ValueError("Nonliteral or incomplete byte initializer")
     if namespace:
         declarations = list(re.finditer(r"(?m)^namespace starfox::render::"
                                        + re.escape(namespace) + r"\s*\{\s*$", text))
         if len(declarations) != 1:
             raise ValueError("Original payload namespace missing or duplicated")
-        closing = re.search(r"(?m)^\}\s*$", text[declarations[0].end():])
-        if not closing or not (declarations[0].end() <= matches[0].start()
-                               and matches[0].end() <= declarations[0].end() + closing.start()):
+        namespace_end = NAMESPACE_END.search(text, declarations[0].end())
+        if not namespace_end or not (declarations[0].end() <= declaration.start()
+                                     and closing.end() <= namespace_end.start()):
             raise ValueError("Array escaped its original namespace")
-    token = r"(?:0x[0-9a-fA-F]{2}|[0-9]{1,3})"
-    body = matches[0].group(1)
-    if not re.fullmatch(r"\s*" + token + r"(?:\s*,\s*" + token + r")*\s*,?\s*", body):
+    # Match one bounded literal at a time, appending directly to the final byte
+    # buffer. No body copy, token list, integer list or whole-body regex stack.
+    values = bytearray()
+    at = declaration.end()
+    while True:
+        while at < end and text[at].isspace():
+            at += 1
+        if at == end:
+            break
+        literal = BYTE_LITERAL.match(text, at, end)
+        if not literal:
+            raise ValueError("Nonliteral or incomplete byte initializer")
+        token = literal.group()
+        value = int(token, 16 if token.startswith("0x") else 10)
+        if value > 255:
+            raise ValueError("Byte outside the original unsigned-char range")
+        values.append(value)
+        at = literal.end()
+        while at < end and text[at].isspace():
+            at += 1
+        if at == end:
+            break
+        if text[at] != ",":
+            raise ValueError("Nonliteral or incomplete byte initializer")
+        at += 1
+    if not values:
         raise ValueError("Nonliteral or incomplete byte initializer")
-    values = [int(value, 16 if value.startswith("0x") else 10)
-              for value in re.findall(token, body)]
-    if any(value > 255 for value in values):
-        raise ValueError("Byte outside the original unsigned-char range")
     data = bytes(values)
     validate_container(data)
     return data
-
 
 def fixed_declaration(symbol, extent):
     return f"alignas(4) extern const unsigned char {symbol}[{extent}];\n"
