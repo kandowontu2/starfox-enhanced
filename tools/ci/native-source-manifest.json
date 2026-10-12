@@ -3911,8 +3911,8 @@
     },
     {
       "path": "src/render/shaders/reflection_source_optical_interval.hlsli",
-      "bytes": 21092,
-      "sha256": "20cc7324bcc43f32a643a42e729f7d705e20cb60486619e1a7145982dcffffda"
+      "bytes": 22802,
+      "sha256": "cb283e754040ae0628a07417c08184ad221b2af635abc7ffea4f21e2c6418eda"
     },
     {
       "path": "src/render/shaders/reflection_source_optical_jet.hlsli",
@@ -7869,6 +7869,18 @@
       "corrected_command_variants": 7,
       "shader_arithmetic_changed": false,
       "shader_programs_removed": 0
+    },
+    {
+      "path": "src/render/shaders/reflection_source_optical_interval.hlsli",
+      "original_sha256": "20cc7324bcc43f32a643a42e729f7d705e20cb60486619e1a7145982dcffffda",
+      "candidate_sha256": "cb283e754040ae0628a07417c08184ad221b2af635abc7ffea4f21e2c6418eda",
+      "shader_arithmetic_changed": true,
+      "description": "Checked exact TwoSum/TwoProduct directed endpoints only in bounded normal range; existing outward fallback elsewhere",
+      "source_visibility_thresholds_changed": false,
+      "optical_tolerances_changed": false,
+      "root_work_bounds_changed": false,
+      "shader_programs_removed": 0,
+      "production_adopted": false
     }
   ]
 }
