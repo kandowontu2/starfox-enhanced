@@ -269,4 +269,3 @@ bool curved_liquid_sample(ReflectionLiquidFrame f,CurvedVector direction,float2 
 }
 #endif // !STARFOX_CURVED_SCALAR_ONLY
 #endif // STARFOX_REFLECTION_CURVED_PRECISION
-

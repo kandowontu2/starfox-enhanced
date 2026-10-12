@@ -33,4 +33,3 @@ LiquidOpticalSample liquid_optical_sample(float3 hit,float3 direction,float dist
     return result;
 }
 #endif
-

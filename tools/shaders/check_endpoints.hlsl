@@ -16,4 +16,3 @@ void checked_endpoints_main(uint3 id:SV_DispatchThreadID) {
     }
     output.Store4(id.x*32,uint4(raw,flags,0));output.Store4(id.x*32+16,bounds);
 }
-

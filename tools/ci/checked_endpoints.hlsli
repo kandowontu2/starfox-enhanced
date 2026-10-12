@@ -27,4 +27,3 @@ float endpoint_product_bound(float a,float b,bool upper) {
     if(upper)return e>0?interval_up(p):p;
     return e<0?interval_down(p):p;
 }
-

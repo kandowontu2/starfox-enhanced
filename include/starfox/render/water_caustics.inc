@@ -77,4 +77,3 @@ WC_FN float water_caustic_irradiance(float x,float z,float time,float depth,floa
     return water_caustic_sample(x,z,time,depth,footprint).irradiance;
 }
 #endif
-

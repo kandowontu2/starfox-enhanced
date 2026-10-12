@@ -46,4 +46,3 @@ Assert-Inputs
     native_gpu_accepted=$false;production_adopted=$false}|ConvertTo-Json -Depth 5|
     Out-File -LiteralPath (Join-Path $result 'receipt.json') -Encoding utf8
 $exitCode=$native.ExitCode;$native.Dispose();if($exitCode -ne 0 -or $stop){throw 'Actual compile did not pass'}
-

@@ -137,4 +137,3 @@ float4 reflection_specular_path_motion(ReflectionRoughFrame old,
     return 0;
 }
 #endif
-

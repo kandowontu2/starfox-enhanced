@@ -34,4 +34,3 @@ jobs:
           path: ${{ runner.temp }}/endpoint-${{ matrix.format }}/
           retention-days: 7
           if-no-files-found: warn
-

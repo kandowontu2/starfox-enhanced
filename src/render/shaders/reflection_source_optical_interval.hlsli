@@ -313,4 +313,3 @@ OPTICAL_BOUNDARY bool optical_excluded(float4 box,ReflectionRoughFrame receiver,
     ReflectionSpecularPlane planes[4],uint4 control,float4 terminal) {
     return optical_excluded_target(box,receiver,liquid,planes,control,p3(terminal.xyz),terminal.w!=0);
 }
-

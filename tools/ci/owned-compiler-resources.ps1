@@ -69,4 +69,3 @@ function Read-CiOwnedCompilerResources {
     $Native.Refresh()
     [pscustomobject]@{Completed=$Native.HasExited;Private=$ciPrivate;Workers=$ciWorkers;IgnoredRecycled=$ciIgnored}
 }
-

@@ -152,4 +152,3 @@ float4 reflection_liquid_hit_motion(ReflectionLiquidFrame old,float4 qa,float4 q
     return reflection_liquid_hit_motion(old,qa,qb,qc,bary,float2(-1,-1));
 }
 #endif
-
