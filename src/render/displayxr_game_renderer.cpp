@@ -1023,7 +1023,7 @@ DisplayXrSubmission DisplayXrGameRenderer::submit(std::shared_ptr<const Calibrat
                             Segment segment{*state_,command,scene_segments_submitted};
                             const auto boundary=[](void* context,void*& next) {
                                 auto& segment=*static_cast<Segment*>(context);
-                                check(next==segment.command,"Reflection segment lost its scene command owner");
+                                if(next!=segment.command) throw std::runtime_error("Reflection segment lost its scene command owner");
                                 auto* completed=segment.command;segment.command=nullptr;next=nullptr;
                                 // Submit consumes the command even on failure.
                                 // No per-segment wait or CPU feedback: the final

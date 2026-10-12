@@ -2556,8 +2556,8 @@
     },
     {
       "path": "src/render/displayxr_game_renderer.cpp",
-      "bytes": 92382,
-      "sha256": "b45fc7f003ca81765cc487ee4b9e236a5c28e55f7436bf3d95a4c1130623b483"
+      "bytes": 92405,
+      "sha256": "c11f3adac220515700c511ceb09c5b772d84603e1c33dd8f7d79cb06a97fda30"
     },
     {
       "path": "src/render/displayxr_motion_blur.inc",
