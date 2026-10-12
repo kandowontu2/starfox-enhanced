@@ -32,10 +32,39 @@ float interval_up(float x) {
 Interval iv(float lo,float hi) {Interval r;r.lo=lo;r.hi=hi;return r;}
 Interval ip(float x) {return iv(x,x);}
 Interval ic(float x) {return iv(interval_down(x),interval_up(x));}
-Interval iadd(Interval a,Interval b) {precise float lo=a.lo+b.lo,hi=a.hi+b.hi;return iv(interval_down(lo),interval_up(hi));}
-Interval ineg(Interval a) {return iv(-a.hi,-a.lo);}
+bool interval_finite_ordered(Interval a) {return isfinite(a.lo) && isfinite(a.hi) && a.lo<=a.hi;}
+bool interval_exact_point(Interval a,float x) {
+    // Test the representation, not a possibly denormal-flushing comparison.
+    // Both signed zero representations denote the same exact real constant.
+    if(x==0)return ((asuint(a.lo)|asuint(a.hi))&0x7fffffffU)==0;
+    return asuint(a.lo)==asuint(x) && asuint(a.hi)==asuint(x);
+}
+Interval iadd(Interval a,Interval b) {
+    // These are exact real identities, not approximate roundoff estimates.
+    // Keep an existing enclosure unchanged rather than adding fictitious ULPs
+    // at every zero entry of an exact axis/calibration matrix. Invalid inputs
+    // never enter the fast path; all nonidentity arithmetic stays outward.
+    if(interval_finite_ordered(a) && interval_finite_ordered(b)) {
+        if(interval_exact_point(a,0))return b;
+        if(interval_exact_point(b,0))return a;
+    }
+    precise float lo=a.lo+b.lo,hi=a.hi+b.hi;return iv(interval_down(lo),interval_up(hi));
+}
+Interval ineg(Interval a) {
+    // Negation only changes the IEEE sign bit. In a native Vulkan FTZ
+    // environment, floating FNegate flushed a min-subnormal endpoint to zero
+    // in the direct interval-identity regression. Keep this exact operation
+    // integer/bitwise, including signed zeros; no arithmetic precision mode,
+    // epsilon or enclosure is changed and nonfinite inputs remain nonfinite.
+    return iv(asfloat(asuint(a.hi)^0x80000000U),asfloat(asuint(a.lo)^0x80000000U));
+}
 Interval isub(Interval a,Interval b) {return iadd(a,ineg(b));}
 Interval imul(Interval a,Interval b) {
+    if(interval_finite_ordered(a) && interval_finite_ordered(b)) {
+        if(interval_exact_point(a,0) || interval_exact_point(b,0))return ip(0);
+        if(interval_exact_point(a,1))return b;if(interval_exact_point(b,1))return a;
+        if(interval_exact_point(a,-1))return ineg(b);if(interval_exact_point(b,-1))return ineg(a);
+    }
     precise float p=a.lo*b.lo,q=a.lo*b.hi,r=a.hi*b.lo,s=a.hi*b.hi;
     return iv(interval_down(min(min(p,q),min(r,s))),interval_up(max(max(p,q),max(r,s))));
 }
@@ -67,6 +96,14 @@ OPTICAL_SCALAR_BOUNDARY float quotient_bound(float a,float b,bool upper) {
 OPTICAL_BOUNDARY Interval idiv(Interval a,Interval b) {
     if(izero(b) || max(abs(b.lo),abs(b.hi))>1.e30 || max(abs(a.lo),abs(a.hi))>1.e30) {
         intervalFailed=true;return iv(-1.e30,1.e30);
+    }
+    // Only AFTER the original zero-denominator/range guard. A zero numerator
+    // over a finite nonzero interval is exactly zero; division by +/-1 merely
+    // preserves/reverses its existing endpoints. No quotient estimate, extra
+    // bracket step, tolerance change or unvalidated input is admitted.
+    if(interval_finite_ordered(a) && interval_finite_ordered(b)) {
+        if(interval_exact_point(a,0))return ip(0);
+        if(interval_exact_point(b,1))return a;if(interval_exact_point(b,-1))return ineg(a);
     }
     float lo=1.e30,hi=-1.e30;
     [unroll] for(uint i=0;i<2;++i)[unroll] for(uint j=0;j<2;++j) {

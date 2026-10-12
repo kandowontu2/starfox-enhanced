@@ -1,9 +1,0 @@
-#pragma once
-// Embedded from the same scalar kernels used by C++, HLSL and GLSL.
-inline constexpr char starfox_metal_water_shared[] = R"SF_WATER(
-#include <metal_stdlib>
-using namespace metal;
-@STARFOX_LAVA_SURFACE_SOURCE@
-@STARFOX_WATER_CAUSTICS_SOURCE@
-@STARFOX_WATER_TRANSMISSION_SOURCE@
-)SF_WATER";

@@ -10,18 +10,23 @@ void write_optical_local_root(uint outAt,float4 box,ReflectionRoughFrame receive
     Interval3 target,bool finiteTarget,uint refinements) {
     const float2 centre=(box.xy+box.zw)*.5;
     OpticalJet a=jp(0),b=jp(0);Interval f0=ip(0),f1=ip(0),j00=ip(0),j01=ip(0),j10=ip(0),j11=ip(0);
-    uint axis=0;OpticalLocalRoot root;root.status=0;root.enclosure=0;root.contraction=1.e30;
-    // One static forward/wave call site for box, midpoint and bounded proved
-    // enclosure refinement. No derivative approximation or cloned lava code.
-    // J(box) encloses the derivative on EVERY nested enclosure; only a complete
-    // unique certificate may start refinement. Original global domain/proof
-    // stays intact. Each accepted tighter K is strictly inside its predecessor.
+    Interval tight00=ip(0),tight01=ip(0),tight10=ip(0),tight11=ip(0);
+    uint axis=0;OpticalLocalRoot root;root.status=0;root.enclosure=0;root.contraction=1.e30;root.evaluated=false;
+    const uint extra=min(refinements,2U);const bool refreshDerivative=extra==2;
+    // One static full forward/wave call site, at most FOUR evaluations as
+    // before. After the original whole-domain unique proof, use the two
+    // reserved evaluations for J(certified enclosure), then its midpoint.
+    // Reusing only J(original box) twice leaves unnecessarily wide Krawczyk
+    // bounds at pixel boundaries. A point Jacobian is NEVER substituted for
+    // the full derivative enclosure. Original domain/proof/branch checks stay
+    // intact; intersect only a fully checked new K with the inherited proof.
     [loop] for(uint evaluation=0;evaluation<2+min(refinements,2U);++evaluation) {
         if(evaluation>=2 && root.status!=1)break;
         const float4 previousEnclosure=root.enclosure;
         const float2 localCentre=evaluation>=2?(previousEnclosure.xy+previousEnclosure.zw)*.5:centre;
         intervalFailed=false;jetBranchKnown=true;OpticalJetRay ray;
-        const float4 extent=evaluation?float4(localCentre,localCentre):box;
+        const float4 extent=!evaluation?box:(evaluation==2 && refreshDerivative)
+            ?previousEnclosure:float4(localCentre,localCentre);
         if(!optical_jet_forward(extent,receiver,liquid,planes,control,ray)) {
             if(evaluation>=2)break; // Keep the preceding valid, wider proof.
             results.Store(outAt+12,8U+uint(intervalFailed)+2U*uint(!jetBranchKnown));return;
@@ -45,13 +50,17 @@ void write_optical_local_root(uint outAt,float4 box,ReflectionRoughFrame receive
         }else if(evaluation==1) {
             f0=a.v;f1=b.v;
             root=optical_local_root(box,centre,f0,f1,j00,j01,j10,j11);
+        }else if(evaluation==2 && refreshDerivative) {
+            // Every derivative below encloses the entire ALREADY CERTIFIED
+            // previousEnclosure, including all clamps and finite-face checks.
+            // No CPU source/root, tap interpolation or extra evaluation enters.
+            tight00=a.dx;tight01=a.dy;tight10=b.dx;tight11=b.dy;
         }else {
-            // Outward Krawczyk inclusion using the SAME complete original
-            // derivative hull. No new seed/box from a CPU or source tap.
-            const OpticalLocalRoot next=optical_local_root(previousEnclosure,localCentre,a.v,b.v,j00,j01,j10,j11);
-            if(intervalFailed || next.status!=1 || any(next.enclosure.xy<previousEnclosure.xy)
-                || any(next.enclosure.zw>previousEnclosure.zw))break;
-            root.enclosure=next.enclosure;
+            Interval next00=j00,next01=j01,next10=j10,next11=j11;
+            if(refreshDerivative){next00=tight00;next01=tight01;next10=tight10;next11=tight11;}
+            const OpticalLocalRoot next=optical_local_root(previousEnclosure,localCentre,a.v,b.v,
+                next00,next01,next10,next11);
+            if(!optical_intersect_inherited_root(root,next))break;
         }
     }
     results.Store4(outAt,uint4(1,root.status,axis,0));results.Store4(outAt+16,asuint(box));
