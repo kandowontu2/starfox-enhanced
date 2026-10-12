@@ -179,7 +179,7 @@ inline void pack_pica_tile(const std::array<const std::uint8_t*,8>& rows,
     const std::array<unsigned,8>& columns,unsigned first,Store store) {
     pack_pica_tile(rows,columns,first,store,std::make_index_sequence<64>{});
 }
-template<class Store>
+template<bool ExpandTile=false,class Store>
 inline void pack_pica_plane(PicaTextureLayout layout,unsigned width,unsigned height,
     unsigned pitch,unsigned channels,bool repeat,const std::uint8_t* source,Store store) {
     unsigned texel=0;
@@ -194,7 +194,15 @@ inline void pack_pica_plane(PicaTextureLayout layout,unsigned width,unsigned hei
             std::array<unsigned,8> columns{};
             for(unsigned x=0;x<8;++x)
                 columns[x]=(repeat?(tx+x)&(width-1):std::min(tx+x,width-1))*channels;
-            pack_pica_tile(rows,columns,texel,store);texel+=64;
+            if constexpr(ExpandTile) {
+                pack_pica_tile(rows,columns,texel,store);texel+=64;
+            } else {
+                // Retain the compact predecessor traversal for RGB HUD and
+                // one-byte ownership planes; expanding those stores regressed
+                // the complete changing-frame RGB fixture.
+                for(const auto& xy:pica_morton_coordinates)
+                    store(texel++,rows[xy[1]]+columns[xy[0]]);
+            }
         }
     }
 }
@@ -207,7 +215,7 @@ inline void pack_pica_texture(PicaImage source,std::span<std::uint8_t> destinati
     if((dst>=src && dst-src<source.pixels.size()) || (src>=dst && src-dst<destination.size()))
         throw std::invalid_argument("3DS texture upload requires independent storage");
     const auto pack=[&]<unsigned Channels>() {
-        detail::pack_pica_plane(layout,source.width,source.height,source.pitch,Channels,source.repeat,
+        detail::pack_pica_plane<Channels==4>(layout,source.width,source.height,source.pitch,Channels,source.repeat,
             source.pixels.data(),[&](unsigned texel,const std::uint8_t* pixel) {
                 // The shader converts top-left V to 1-V, and PICA's texture sampler
                 // then addresses rows from bottom to top. Store source rows directly;

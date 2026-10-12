@@ -1,4 +1,25 @@
 namespace starfox::platform::nintendo_3ds {
+// Freeze the traversal too: calling the candidate's detail::pack_pica_plane
+// would silently change this baseline when its tile expansion is optimized.
+template<class Store>
+inline void baseline_pack_pica_plane(PicaTextureLayout layout,unsigned width,unsigned height,
+    unsigned pitch,unsigned channels,bool repeat,const std::uint8_t* source,Store store) {
+    unsigned texel=0;
+    for(unsigned ty=0;ty<layout.height;ty+=8) {
+        std::array<const std::uint8_t*,8> rows{};
+        for(unsigned y=0;y<8;++y) {
+            const auto sy=repeat?(ty+y)&(height-1):std::min(ty+y,height-1);
+            rows[y]=source+std::size_t(sy)*pitch;
+        }
+        for(unsigned tx=0;tx<layout.width;tx+=8) {
+            std::array<unsigned,8> columns{};
+            for(unsigned x=0;x<8;++x)
+                columns[x]=(repeat?(tx+x)&(width-1):std::min(tx+x,width-1))*channels;
+            for(const auto& xy:detail::pica_morton_coordinates)
+                store(texel++,rows[xy[1]]+columns[xy[0]]);
+        }
+    }
+}
 inline void baseline_pack_pica_texture(PicaImage source,std::span<std::uint8_t> destination) {
     const auto layout=pica_texture_layout(source);
     if(destination.size()!=layout.bytes || !destination.data())
@@ -6,7 +27,7 @@ inline void baseline_pack_pica_texture(PicaImage source,std::span<std::uint8_t> 
     const auto src=reinterpret_cast<std::uintptr_t>(source.pixels.data()),dst=reinterpret_cast<std::uintptr_t>(destination.data());
     if((dst>=src && dst-src<source.pixels.size()) || (src>=dst && src-dst<destination.size()))
         throw std::invalid_argument("3DS texture upload requires independent storage");
-    detail::pack_pica_plane(layout,source.width,source.height,source.pitch,source.channels,source.repeat,
+    baseline_pack_pica_plane(layout,source.width,source.height,source.pitch,source.channels,source.repeat,
         source.pixels.data(),[&](unsigned texel,const std::uint8_t* pixel) {
         // The shader converts top-left V to 1-V, and PICA's texture sampler
         // then addresses rows from bottom to top. Store source rows directly;
