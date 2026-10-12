@@ -44,7 +44,7 @@ function Invoke-CiOwned([string]$Name,[string]$Program,[string[]]$Arguments){
     $ciBirth=$ciNative.StartTime.ToUniversalTime()
     $ciOut=$ciNative.StandardOutput.ReadToEndAsync();$ciErr=$ciNative.StandardError.ReadToEndAsync()
     $ciRecord=[ordered]@{name=$Name;program=$Program;arguments=$Arguments;pid=$ciNative.Id;birth_utc=$ciBirth.ToString('o');
-        exit_code=$null;peak_private_bytes=0L;resource_stop=$null;completed=$false}
+        exit_code=$null;peak_private_bytes=0L;resource_stop=$null;completed=$false;cap_workers=@()}
     try {
         while(!$ciNative.WaitForExit(1000)){
             $ciMemory=Get-CimInstance Win32_OperatingSystem
@@ -68,7 +68,14 @@ function Invoke-CiOwned([string]$Name,[string]$Program,[string[]]$Arguments){
                 }
             }
             $ciRecord.peak_private_bytes=[Math]::Max($ciRecord.peak_private_bytes,$ciPrivate)
-            if($ciPrivate -gt 2147483648){$ciRecord.resource_stop='Original owned compiler private cap above 2 GiB'}
+            if($ciPrivate -gt 2147483648){
+                $ciRecord.resource_stop='Original owned compiler private cap above 2 GiB'
+                $ciRecord.cap_workers=@($ciChildren|Where-Object {$ciParents.Contains([int]$_.ProcessId)}|ForEach-Object {
+                    $ciObserved=Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue
+                    if($ciObserved){[ordered]@{pid=$ciObserved.Id;name=$ciObserved.ProcessName;private_bytes=$ciObserved.PrivateMemorySize64;
+                        source_names=@([regex]::Matches($_.CommandLine,'[A-Za-z0-9_]+\.(?:cpp|c|hlsl)\b')|ForEach-Object {$_.Value}|Sort-Object -Unique)}}
+                })
+            }
             elseif($ciMemory.FreePhysicalMemory -lt 6291456 -or $ciMemory.FreeVirtualMemory -lt 2097152){$ciRecord.resource_stop='Original live compiler RAM/commit floor'}
             if($ciRecord.resource_stop){$ciNative.Kill($true);$ciNative.WaitForExit();break}
         }
@@ -98,11 +105,13 @@ try {
     $ciConfig=@('-S',$ciRoot,'-B',$ciBuild,'-G','Ninja','-DCMAKE_BUILD_TYPE=Release','-DCMAKE_EXPORT_COMPILE_COMMANDS=ON',
         '-DCMAKE_C_COMPILER=C:/Strawberry/c/bin/gcc.exe',('-DCMAKE_CXX_COMPILER='+$ciCompiler),
         '-DCMAKE_CXX_FLAGS=--param=ggc-min-expand=10 --param=ggc-min-heapsize=16384',
+        ('-DCMAKE_PROJECT_INCLUDE='+$ciRoot.Replace('\','/')+'/tools/ci/external-dxr-payloads.cmake'),
         '-DSTARFOX_BUILD_RUNTIME=ON','-DSTARFOX_BUILD_TOOLS=ON','-DSTARFOX_BUILD_TESTS=ON',
         '-DSTARFOX_BUILD_VR=OFF','-DSTARFOX_ENABLE_DISPLAYXR=ON','-DSTARFOX_ENABLE_LEIASR=OFF',
         '-DSTARFOX_EMBED_RUNTIME_ASSETS=OFF','-DSTARFOX_PACKAGE_MSU1_MUSIC=OFF','-DSTARFOX_DLSS_RUNTIME_DIRECTORY=',
         '-DSTARFOX_ROM_FILE=source-only-no-rom.sfc','-DSTARFOX_EX_ROM_FILE=source-only-no-ex-rom.sfc',
         '-DSTARFOX_RETAIL_V12_FILE=source-only-no-retail.sfc',('-DSTARFOX_DXC='+[IO.Path]::GetFullPath($Dxc)))
+    $ciReceipt.embedding_candidate='All 22 original DXR shader arrays: byte-exact COFF data objects, original fixed-size declarations and original DXC commands'
     Invoke-CiOwned 'configure' $ciCmake $ciConfig
     $ciCommands=Get-Content -LiteralPath (Join-Path $ciBuild 'compile_commands.json') -Raw|ConvertFrom-Json
     $ciFixture=@($ciCommands|Where-Object {$_.file.Replace('\','/').EndsWith('/tests/displayxr_runtime_tests.cpp') -and $_.command -match 'starfox_displayxr_gpu_presenter_check\.dir'})
@@ -125,6 +134,10 @@ try {
         Copy-Item -LiteralPath $ciFile -Destination $ciResult
         $ciReceipt.outputs+=,[ordered]@{name=[IO.Path]::GetFileName($ciFile);bytes=(Get-Item -LiteralPath $ciFile).Length;sha256=(Get-FileHash -LiteralPath $ciFile).Hash}
     }
+    $ciPayloads=@(Get-ChildItem -LiteralPath (Join-Path $ciBuild 'external-dxr-payloads') -Filter '*.json')
+    if($ciPayloads.Count -ne 22){throw 'Complete byte-exact payload receipts missing'}
+    $ciReceipt.payloads=@($ciPayloads|ForEach-Object {Get-Content -LiteralPath $_.FullName -Raw|ConvertFrom-Json})
+    if(@($ciReceipt.payloads|Where-Object {!$_.shader_bytes_unchanged -or !$_.original_array_extent_retained}).Count){throw 'Payload identity or ABI changed'}
     $ciReceipt.status='fresh_full_native_link_passed_not_gpu_executed'
 } catch {
     $ciReceipt.status='failed_or_resource_deferred';$ciReceipt.error=$_.Exception.Message;Save-CiReceipt;throw
