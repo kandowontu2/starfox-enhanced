@@ -5,6 +5,7 @@
 #include "starfox/render/calibrated_ground.hpp"
 #include "starfox/render/calibrated_ground_receiver.hpp"
 #include "starfox/render/calibrated_game_motion.hpp"
+#include "starfox/render/environment_effects.hpp"
 #include "starfox/audio/spc700_audio.hpp"
 #include "starfox/assets/rom.hpp"
 #include "starfox/assets/runtime_bundle.hpp"
@@ -103,13 +104,14 @@ struct Gpu {
 };
 }
 int main(int argc,char** argv) try {
-    if(argc<5) throw std::runtime_error("usage: check_calibrated_game_scene BACKEND ROM SYMBOLS MAP [MAP ...] [--enhanced] [--ground] [--rays] [--scene-fx] [--capture DIRECTORY]; or BACKEND RUNTIME-BUNDLE EX-BUNDLE|ORIGINAL-BUNDLE MAP [MAP ...] [OPTIONS]");
-    bool enhanced=false,check_rays=false,ground=false,scene_fx=false;std::filesystem::path capture;
+    if(argc<5) throw std::runtime_error("usage: check_calibrated_game_scene BACKEND ROM SYMBOLS MAP [MAP ...] [--enhanced] [--ground] [--rays] [--scene-fx] [--plain-colour] [--capture DIRECTORY]; or BACKEND RUNTIME-BUNDLE EX-BUNDLE|ORIGINAL-BUNDLE MAP [MAP ...] [OPTIONS]");
+    bool enhanced=false,check_rays=false,ground=false,scene_fx=false,plain_colour=false;std::filesystem::path capture;
     for(int arg=4;arg<argc;++arg) {
         if(std::string_view(argv[arg])=="--enhanced") enhanced=true;
         if(std::string_view(argv[arg])=="--ground") ground=true;
         if(std::string_view(argv[arg])=="--rays") check_rays=true;
         if(std::string_view(argv[arg])=="--scene-fx") scene_fx=true;
+        if(std::string_view(argv[arg])=="--plain-colour") plain_colour=true;
         if(std::string_view(argv[arg])=="--capture") {
             require(arg+1<argc,"Missing capture directory");capture=argv[++arg];std::filesystem::create_directories(capture);
         }
@@ -155,7 +157,8 @@ int main(int argc,char** argv) try {
     unsigned finite_floors=0,matched_floors=0,radiance_rejections=0,static_clock_holds=0;
     for(int map=4;map<argc;++map) {
         if(std::string_view(argv[map])=="--enhanced" || std::string_view(argv[map])=="--rays"
-            || std::string_view(argv[map])=="--ground" || std::string_view(argv[map])=="--scene-fx") continue;
+            || std::string_view(argv[map])=="--ground" || std::string_view(argv[map])=="--scene-fx"
+            || std::string_view(argv[map])=="--plain-colour") continue;
         if(std::string_view(argv[map])=="--capture") {++map;continue;}
         simulation::GameSimulation game(rom,symbols,argv[map],{},true);
         if(kind=="EX-BUNDLE") game.set_experience(simulation::Experience::starfox_ex);
@@ -175,11 +178,48 @@ int main(int argc,char** argv) try {
             settings.enhanced_sky=enhanced;
             settings.enhanced_ground=ground;
             if(scene_fx) {settings.scene_enhancements=255;settings.particle_enhancements=15;}
-            settings.world_effects={2,100,0,0};settings.model_effects={1,100,0,0};
+            // Preserve the original styled test by default. A plain capture
+            // separately verifies authored terrain colours without a palette
+            // effect obscuring the source ramp; the same ownership gates run.
+            settings.world_effects={plain_colour?0U:2U,100,0,0};
+            settings.model_effects={plain_colour?0U:1U,100,0,0};
             for(double alpha:{0.,.5,1.}) {
                 settings.effect_seconds=float(checkpoint)+float(alpha)/60;
                 const auto frame=assembler.assemble(history.previous(),owned,game,alpha,settings,loader);
                 if(ground) {
+                    auto regions=render::environment_palette_regions(*owned->ppu,owned->landscape_atlas_origin);
+                    if(game.experience()==simulation::Experience::starfox_ex) {
+                        const auto lists=symbols.find("BGLISTS");
+                        if(!lists.empty()) for(const auto name:{"BG_6_4","BG_6_5","BG_6_6"}) {
+                            const auto addresses=symbols.find(name);
+                            if(!addresses.empty() && addresses.front()-lists.front()==owned->background_id)
+                                render::correct_ex_landscape_palette(name,regions);
+                        }
+                    }
+                    const auto ramp=render::source_ground_ramp(*owned->ppu,owned->landscape_atlas_origin+112U,&regions);
+                    if(ramp.valid()) for(const auto& draw:frame.draws) {
+                        const auto words=draw.packet.geometry.texel_view();
+                        if(words.size()!=render::calibrated_ground_offset+render::calibrated_ground_words
+                            || draw.packet.geometry.vertex_view().empty()
+                            || !(draw.packet.geometry.vertex_view().front().texture[3]&render::calibrated_ground_flag)
+                            || words[render::calibrated_ground_offset+8]!=0) continue;
+                        // Compare actual published GPU metadata to the live
+                        // first/last source rows, not to the producer's chosen
+                        // extrema or a rendered/possibly occluded eye pixel.
+                        for(unsigned end=0;end<2;++end) for(unsigned channel=0;channel<3;++channel) {
+                            const auto value=owned->ppu->cgram[end?ramp.near_index:ramp.far_index];
+                            const unsigned raw=(value>>(channel*5))&31;
+                            const float expected=float((raw<<3)|(raw>>2))/255.F*float(owned->display_brightness)/15.F;
+                            const float actual=std::bit_cast<float>(words[render::calibrated_ground_offset+end*3+channel]);
+                            if(std::abs(actual-expected)>=1.e-6F)
+                                std::cerr<<argv[map]<<": basic ramp mismatch bg="<<owned->background_id
+                                    <<" origin="<<owned->landscape_atlas_origin<<" far/near="<<ramp.far_index<<'/'<<ramp.near_index
+                                    <<" rows="<<ramp.sampled_rows<<" endpoint/channel="<<end<<'/'<<channel
+                                    <<" expected="<<expected<<" actual="<<actual<<'\n';
+                            require(std::abs(actual-expected)<1.e-6F,
+                                "Cartridge basic ground GPU endpoints do not match authored first/last rows");
+                        }
+                    }
                     const auto stage=symbols.find("NEWMAP"),lava=symbols.find("LEVEL6_6");
                     const bool exact_lava=game.experience()==simulation::Experience::starfox_ex
                         && !stage.empty() && !lava.empty()
@@ -363,22 +403,44 @@ int main(int argc,char** argv) try {
                             selected.ground_material=0;selected.ray_tracing=0;selected.reflections=0;
                             selected.effect_seconds=1.375F;
                             const auto auto_water=assembler.assemble(blue,blue,game,1,selected,loader);
+                            const auto bg_lists=symbols.find("BGLISTS"),titania=symbols.find("BG_2_3A");
+                            const bool blue_snow=!bg_lists.empty() && !titania.empty()
+                                && titania.front()-bg_lists.front()==owned->background_id;
+                            const auto macbeth=symbols.find("BG_3_5");
+                            const bool red_sand=!bg_lists.empty() && !macbeth.empty()
+                                && macbeth.front()-bg_lists.front()==owned->background_id;
                             unsigned liquids=0;
                             for(const auto& packet:auto_water.packets()) if(render::calibrated_ground_material(*packet.packet)==5) {
                                 require(!packet.ground_receiver && !packet.ray_caster,
                                     "RT-OFF Auto water secretly enabled optical ray tracing");
                                 ++liquids;
                             }
-                            require(liquids==1,"Live palette Auto water lost its native liquid receiver");
-                            const auto wave1=gpu.render(scene,auto_water);++rendered;
-                            selected.effect_seconds=2.25F;
-                            const auto later=assembler.assemble(blue,blue,game,1,selected,loader);
-                            require(endpoints(auto_water)==endpoints(later),
-                                "Native water baked a clock-dependent CPU shade into its palette ramp");
-                            const auto wave2=gpu.render(scene,later);++rendered;
-                            require(wave1!=wave2,"RT-OFF native water failed to animate its wave shading");
-                            require(gpu.render(scene,auto_water)==wave1,
-                                "Retained RT-OFF water changed its source clock during retry");++rendered;
+                            if(blue_snow || red_sand) {
+                                require(!liquids,"An authored snow/red-sand stage became automatic water");
+                                unsigned authored_floors=0;
+                                for(const auto& draw:auto_water.draws) {
+                                    const auto words=draw.packet.geometry.texel_view();
+                                    if(words.size()!=render::calibrated_ground_offset+render::calibrated_ground_words
+                                        || draw.packet.geometry.vertex_view().empty()
+                                        || !(draw.packet.geometry.vertex_view().front().texture[3]&render::calibrated_ground_flag)) continue;
+                                    require(words[render::calibrated_ground_offset+8]==(red_sand?8U:0U),
+                                        "A live palette change lost the authored snow/red-sand surface");
+                                    ++authored_floors;
+                                }
+                                require(authored_floors==1,"A live palette change lost the authored enhanced floor");
+                                (void)gpu.render(scene,auto_water);++rendered;
+                            } else {
+                                require(liquids==1,"Live palette Auto water lost its native liquid receiver");
+                                const auto wave1=gpu.render(scene,auto_water);++rendered;
+                                selected.effect_seconds=2.25F;
+                                const auto later=assembler.assemble(blue,blue,game,1,selected,loader);
+                                require(endpoints(auto_water)==endpoints(later),
+                                    "Native water baked a clock-dependent CPU shade into its palette ramp");
+                                const auto wave2=gpu.render(scene,later);++rendered;
+                                require(wave1!=wave2,"RT-OFF native water failed to animate its wave shading");
+                                require(gpu.render(scene,auto_water)==wave1,
+                                    "Retained RT-OFF water changed its source clock during retry");++rendered;
+                            }
                         }
                     }
                     auto off=settings;off.enhanced_ground=false;

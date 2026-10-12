@@ -771,6 +771,17 @@ void main(uint3 id : SV_DispatchThreadID,uint3 group : SV_GroupID,uint lane : SV
         uint4 base=uint4(splitBase.Load(int3(p,0))*255+.5);
         uint4 glow=uint4(splitGlow.Load(int3(p,0))*255+.5);
         bool unchanged=all(glow==c);
+#if defined(STARFOX_SDL_GPU)
+        // Colour equality does not imply world ownership: white host ink can
+        // equal clipped bloom underneath it. Keep declared menu ink wholly in
+        // the native base, never in the independently resampled glow layer.
+        uint2 at=p/scale;
+        if(pad0!=0 && at.x<surfaceWidth && at.y<surfaceHeight) {
+            uint i=at.y*surfaceWidth+at.x;
+            uint ink=(setupPixels.Load(i&~3u)>>((i&3u)*8))&255;
+            if(ink!=0) unchanged=false;
+        }
+#endif
         uint3 contribution=unchanged?uint3(max(int3(glow.rgb)-int3(base.rgb),0)):uint3(0,0,0);
         result=uint4(unchanged?base.rgb:c.rgb,c.a);
         splitOutput[p]=float4(contribution,255)/255.;

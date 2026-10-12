@@ -1,5 +1,12 @@
 #include "native_gpu.hpp"
+#include "starfox/platform/nintendo_3ds/pica_composite.hpp"
 #include "starfox/platform/nintendo_3ds/pica_residency.hpp"
+#include "starfox/platform/nintendo_3ds/pica_texture_update.hpp"
+#include "starfox/platform/nintendo_3ds/pica_program_binding.hpp"
+#include "starfox/platform/nintendo_3ds/pica_display_sync.hpp"
+#include "starfox/platform/nintendo_3ds/pica_draw_transform.hpp"
+#include "starfox/platform/nintendo_3ds/startup_trace.hpp"
+#include "starfox/platform/nintendo_3ds/frame_profile.hpp"
 #include <atomic>
 #include <cstring>
 extern "C" {
@@ -27,8 +34,38 @@ struct GpuLease {
 struct FrameEnd {
     // All changed buffers/textures are explicitly flushed. Do not flush the
     // entire linear heap (including unrelated PCM/unchanged art) every frame.
-    ~FrameEnd() {C3D_FrameEnd(GX_CMDLIST_FLUSH);}
+    ~FrameEnd() {
+        STARFOX_3DS_FRAME_PHASE(gpu_submit);
+        STARFOX_3DS_STARTUP_MARK(gpu_submit);
+        C3D_FrameEnd(GX_CMDLIST_FLUSH);
+        STARFOX_3DS_STARTUP_MARK(gpu_submit_complete);
+    }
 };
+struct NativeShaderProgram {
+    std::vector<u32> words;
+    DVLB_s* library{};
+    shaderProgram_s program{};
+    bool ready{};
+    explicit NativeShaderProgram(std::span<const std::uint8_t> shader) {
+        try {
+            words.resize(shader.size()/4);std::memcpy(words.data(),shader.data(),shader.size());
+            library=DVLB_ParseFile(words.data(),shader.size());
+            if(!library || library->numDVLE!=1) throw std::runtime_error("3DS GPU vertex shader parse failed");
+            if(R_FAILED(shaderProgramInit(&program))) throw std::runtime_error("3DS GPU program allocation failed");
+            ready=true;
+            if(R_FAILED(shaderProgramSetVsh(&program,&library->DVLE[0])))
+                throw std::runtime_error("3DS GPU vertex shader binding failed");
+        } catch(...) {release();throw;}
+    }
+    ~NativeShaderProgram() {release();}
+    void release() noexcept {
+        if(ready) {shaderProgramFree(&program);ready=false;}
+        if(library) {DVLB_Free(library);library=nullptr;}
+    }
+};
+// Process-lifetime bookkeeping for Citro3D's process-lifetime borrowed pointer.
+// GpuLease ensures that only the single native presenter can change this slot.
+PicaProgramBinding<NativeShaderProgram> program_binding;
 u32 clear_colour(Rgb colour) {return (u32(colour.r)<<24)|(u32(colour.g)<<16)|(u32(colour.b)<<8)|255;}
 void upload_matrix(int location,const PicaMatrix& rows) {
     C3D_Mtx matrix{};
@@ -42,6 +79,7 @@ struct ResidentTexture {
     C3D_Tex texture{};
     C3D_Tex layers{};
     PicaTextureResidency cache;
+    PicaTexturePacker packer;
     unsigned width{},height{},channels{};
     unsigned layer_width{},layer_height{},layer_classes{};
     bool ready{},repeat{};
@@ -52,7 +90,7 @@ struct ResidentTexture {
     }
     void release_colour() noexcept {
         if(ready) C3D_TexDelete(&texture);
-        texture={};ready=false;cache.release_colour();width=height=channels=0;repeat=false;
+        texture={};ready=false;cache.release_colour();packer.release();width=height=channels=0;repeat=false;
     }
     void release() noexcept {
         release_colour();
@@ -65,6 +103,7 @@ struct ResidentTexture {
         if(!keep.layers) release_layers();
     }
     void update(PicaImage image) {
+        const auto previous=cache.colour_base(image);
         cache.prepare(image,[&](PicaImage source,PicaTextureLayout layout) {
             if(!ready || texture.width!=layout.width || texture.height!=layout.height) {
                 if(ready) C3D_TexDelete(&texture);
@@ -73,10 +112,13 @@ struct ResidentTexture {
                     throw std::runtime_error("3DS GPU texture allocation failed");
                 ready=true;
             }
-            pack_pica_texture(source,{static_cast<std::uint8_t*>(texture.data),layout.bytes});
+            const auto changed=packer.pack(source,previous,
+                {static_cast<std::uint8_t*>(texture.data),layout.bytes});
             C3D_TexSetFilter(&texture,GPU_NEAREST,GPU_NEAREST);
             C3D_TexSetWrap(&texture,image.repeat?GPU_REPEAT:GPU_CLAMP_TO_EDGE,image.repeat?GPU_REPEAT:GPU_CLAMP_TO_EDGE);
-            C3D_TexFlush(&texture);
+            if(changed.bytes && R_FAILED(GSPGPU_FlushDataCache(
+                static_cast<std::uint8_t*>(texture.data)+changed.offset,changed.bytes)))
+                throw std::runtime_error("3DS GPU changed texture flush failed");
             width=image.width;height=image.height;channels=image.channels;repeat=image.repeat;
         },[&](PicaImage source,PicaTextureLayout layout,unsigned classes) {
             if(source.source_layers.empty()) {
@@ -103,12 +145,12 @@ struct ResidentTexture {
 } // namespace
 struct NativeGpu::Impl {
     GpuLease lease;
-    bool initialized{},program_ready{};
+    bool initialized{};
     PicaVertex* vbo{};
     PicaVertexResidency vertices;
-    std::vector<u32> shader_words;
-    DVLB_s* library{};
-    shaderProgram_s program{};
+    PicaDisplaySync display_sync;
+    PicaDrawTransform draw_transform;
+    std::unique_ptr<NativeShaderProgram> shader_program;
     int transform_location{-1},uv_location{-1},uv_mode_location{-1};
     std::array<C3D_RenderTarget*,2> top{};
     C3D_RenderTarget* bottom{};
@@ -120,12 +162,8 @@ struct NativeGpu::Impl {
         if(!C3D_Init(command_bytes)) throw std::runtime_error("Citro3D initialization failed");
         initialized=true;
         try {
-            shader_words.resize(shader.size()/4);std::memcpy(shader_words.data(),shader.data(),shader.size());
-            library=DVLB_ParseFile(shader_words.data(),shader.size());
-            if(!library || library->numDVLE!=1) throw std::runtime_error("3DS GPU vertex shader parse failed");
-            if(R_FAILED(shaderProgramInit(&program))) throw std::runtime_error("3DS GPU program allocation failed");
-            program_ready=true;
-            if(R_FAILED(shaderProgramSetVsh(&program,&library->DVLE[0]))) throw std::runtime_error("3DS GPU vertex shader binding failed");
+            shader_program=std::make_unique<NativeShaderProgram>(shader);
+            const auto& program=shader_program->program;
             transform_location=shaderInstanceGetUniformLocation(program.vertexShader,"transform");
             uv_location=shaderInstanceGetUniformLocation(program.vertexShader,"uv_scale");
             uv_mode_location=shaderInstanceGetUniformLocation(program.vertexShader,"uv_mode");
@@ -161,11 +199,10 @@ struct NativeGpu::Impl {
         for(auto& texture:textures) texture.release();
         dashboard.release();
         if(vbo) {linearFree(vbo);vbo=nullptr;}
-        if(program_ready) {shaderProgramFree(&program);program_ready=false;}
-        if(library) {DVLB_Free(library);library=nullptr;}
+        program_binding.retire(shader_program);
     }
     void configure() {
-        C3D_BindProgram(&program);
+        program_binding.bind(*shader_program,[](NativeShaderProgram& next) {C3D_BindProgram(&next.program);});
         auto* attrs=C3D_GetAttrInfo();AttrInfo_Init(attrs);
         AttrInfo_AddLoader(attrs,0,GPU_FLOAT,3);AttrInfo_AddLoader(attrs,1,GPU_FLOAT,4);AttrInfo_AddLoader(attrs,2,GPU_FLOAT,2);
         auto* buffers=C3D_GetBufInfo();BufInfo_Init(buffers);
@@ -232,18 +269,54 @@ struct NativeGpu::Impl {
 NativeGpu::NativeGpu(std::span<const std::uint8_t> shader):impl_(std::make_unique<Impl>(shader)) {}
 NativeGpu::~NativeGpu()=default;
 void NativeGpu::present(const PicaFrame& frame,ImageView lower) {
+    STARFOX_3DS_STARTUP_MARK(gpu_frame_validate);
     validate_pica_frame(frame,lower);
-    if(!C3D_FrameBegin(C3D_FRAME_SYNCDRAW)) throw std::runtime_error("3DS GPU frame unavailable");
+    STARFOX_3DS_STARTUP_MARK(gpu_frame_validate_complete);
+    present_checked(frame,lower);
+}
+void NativeGpu::present(const PicaValidatedFrame& prepared,ImageView lower) {
+    STARFOX_3DS_STARTUP_MARK(gpu_frame_validate);
+    const auto& frame=prepared.checked_frame(lower);
+    STARFOX_3DS_STARTUP_MARK(gpu_frame_validate_complete);
+    present_checked(frame,lower);
+}
+void NativeGpu::present_checked(const PicaFrame& frame,ImageView lower) {
+    // Keep display pacing separate from queue retirement. If preparation has
+    // already crossed BOTH LCD refresh intervals, no extra refresh sleep is
+    // needed. FrameBegin(0) still retires the prior GPU use before any upload.
+    STARFOX_3DS_STARTUP_MARK(gpu_vblank_wait);
+    {
+        STARFOX_3DS_FRAME_PHASE(gpu_sync);
+        impl_->display_sync.synchronize([] {
+            return std::array<std::uint32_t,2>{C3D_FrameCounter(0),C3D_FrameCounter(1)};
+        },[] {C3D_FrameSync();});
+    }
+    STARFOX_3DS_STARTUP_MARK(gpu_vblank_wait_complete);
+    STARFOX_3DS_STARTUP_MARK(gpu_wait);
+    {
+        STARFOX_3DS_FRAME_PHASE(gpu_wait);
+        if(!C3D_FrameBegin(0)) throw std::runtime_error("3DS GPU frame unavailable");
+    }
+    STARFOX_3DS_STARTUP_MARK(gpu_wait_complete);
     FrameEnd end; // Includes failure exits; uploads complete before targets are marked used.
-    update_pica_texture_residency(frame.textures,{lower.pixels,lower.width,lower.height,lower.pitch,3},
-        std::span(impl_->textures),impl_->dashboard);
-    impl_->vertices.prepare(frame.vertices,[&](std::span<const PicaVertex> source) {
-        std::memcpy(impl_->vbo,source.data(),source.size_bytes());
-        if(R_FAILED(GSPGPU_FlushDataCache(impl_->vbo,source.size_bytes())))
-            throw std::runtime_error("3DS GPU geometry flush failed");
-    });
+    STARFOX_3DS_STARTUP_MARK(gpu_upload);
+    {
+        STARFOX_3DS_FRAME_PHASE(gpu_upload);
+        update_pica_texture_residency(frame.textures,{lower.pixels,lower.width,lower.height,lower.pitch,3},
+            std::span(impl_->textures),impl_->dashboard);
+        impl_->vertices.prepare(frame.vertices,[&](std::span<const PicaVertex> source) {
+            std::memcpy(impl_->vbo,source.data(),source.size_bytes());
+            if(R_FAILED(GSPGPU_FlushDataCache(impl_->vbo,source.size_bytes())))
+                throw std::runtime_error("3DS GPU geometry flush failed");
+        });
+    }
+    STARFOX_3DS_STARTUP_MARK(gpu_upload_complete);
+    STARFOX_3DS_STARTUP_MARK(gpu_shader_bind);
+    STARFOX_3DS_FRAME_PHASE(gpu_record); // CPU command encoding, not GPU execution time.
     if(frame.plan.stereo && !impl_->top[1]) impl_->top[1]=Impl::make_target(top_width,GFX_TOP,GFX_RIGHT,true);
     impl_->configure();gfxSet3D(frame.plan.stereo);
+    STARFOX_3DS_STARTUP_MARK(gpu_shader_bind_complete);
+    STARFOX_3DS_STARTUP_MARK(gpu_draw);
     for(unsigned eye=0;eye<frame.plan.eye_count;++eye) {
         auto* target=impl_->top[eye];C3D_RenderTargetClear(target,C3D_CLEAR_ALL,clear_colour(frame.clear),0);
         if(!C3D_FrameDrawOn(target)) throw std::runtime_error("3DS GPU eye target unavailable");
@@ -255,12 +328,17 @@ void NativeGpu::present(const PicaFrame& frame,ImageView lower) {
         impl_->material(nullptr,false,false,false);Impl::source_layer(32);
         C3D_DepthTest(false,GPU_ALWAYS,static_cast<GPU_WRITEMASK>(0));
         C3D_DrawArrays(GPU_TRIANGLES,pica_vertex_limit+6,6);
+        // The backdrop explicitly replaced the transform. Start a new cache
+        // scope for this fixed eye/plan; target changes never reuse old keys.
+        impl_->draw_transform.reset();
         for(const auto& draw:frame.draws) {
             if(draw.clip) {
                 const auto bounds=pica_screen_scissor(*draw.clip);
                 C3D_SetScissor(GPU_SCISSOR_NORMAL,bounds[0],bounds[1],bounds[2],bounds[3]);
             } else C3D_SetScissor(GPU_SCISSOR_DISABLE,0,0,0,0);
-            upload_matrix(impl_->transform_location,pica_draw_matrix(frame.plan,eye,draw));
+            impl_->draw_transform.prepare(draw,
+                [&] {return pica_draw_matrix(frame.plan,eye,draw);},
+                [&](const PicaMatrix& matrix) {upload_matrix(impl_->transform_location,matrix);});
             auto* texture=draw.texture==pica_no_texture?nullptr:&impl_->textures[draw.texture];
             impl_->material(texture,
                 draw.alpha_blend,draw.depth_test,draw.depth_write,draw.screen_dither,draw.dither_odd,draw.projected_uv);
@@ -293,5 +371,6 @@ void NativeGpu::present(const PicaFrame& frame,ImageView lower) {
     C3D_StencilOp(GPU_STENCIL_KEEP,GPU_STENCIL_KEEP,GPU_STENCIL_KEEP);
     impl_->material(&impl_->dashboard,false,false,false);
     C3D_DrawArrays(GPU_TRIANGLES,pica_vertex_limit,6);
+    STARFOX_3DS_STARTUP_MARK(gpu_draw_complete);
 }
 } // namespace starfox::platform::nintendo_3ds

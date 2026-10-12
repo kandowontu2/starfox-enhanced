@@ -1,4 +1,7 @@
 #include "starfox/audio/spc700_audio.hpp"
+#if defined(STARFOX_SPC_PARALLEL_ORACLE)
+#include "native_stem_executor.hpp"
+#endif
 
 #include <algorithm>
 #include <array>
@@ -62,7 +65,13 @@ void advance(Audio& audio, std::span<const Write> writes) {
     // preserve its executable separately to compare complete state/PCM traces.
     static_cast<void>(audio.render_logic_tick(writes));
 #else
+#if defined(STARFOX_SPC_PARALLEL_ORACLE)
+    static starfox::platform::nintendo_3ds::NativeStemExecutor executor;
+    require(executor.parallel_available(), "Parallel oracle accidentally used serial fallback");
+    audio.render_stems_logic_tick(writes, &executor);
+#else
     audio.render_stems_logic_tick(writes);
+#endif
 #endif
 }
 std::uint64_t digest = 14695981039346656037ULL;

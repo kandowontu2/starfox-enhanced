@@ -31,6 +31,15 @@ bool supported(PregamePage page,unsigned id,bool runtime) {
     }
     return false;
 }
+unsigned destination(PregamePage page,unsigned selection,input::TickInput input) {
+    if(!(input.pressed&(input::up|input::down))) return selection;
+    // The shared source tick navigates before activating the selected row.
+    const auto order=simulation::pregame_menu_order(page);
+    const auto current=std::size_t(std::find(order.begin(),order.end(),selection)-order.begin());
+    if(order.empty() || current==order.size()) throw std::invalid_argument("Invalid source menu selection");
+    const auto delta=(input.pressed&input::up)?order.size()-1U:1U;
+    return order[(current+delta)%order.size()];
+}
 GameMenuRow row(const simulation::GameSimulation& game,unsigned id) {
     const auto page=game.pregame_page();
     GameMenuRow result{std::uint8_t(id),{}, {},supported(page,id,game.runtime_options_open())};
@@ -131,11 +140,30 @@ GameMenuState GameMenu::capture(const simulation::GameSimulation& game) {
     return result;
 }
 input::TickInput GameMenu::filter(const simulation::GameSimulation& game,input::TickInput input) {
-    if(!game.in_setup_menu() || supported(game.pregame_page(),game.pregame_selection(),game.runtime_options_open())) return input;
+    if(!game.in_setup_menu()) return input;
+    return filter(game.pregame_page(),game.pregame_selection(),game.runtime_options_open(),input);
+}
+input::TickInput GameMenu::filter(PregamePage page,unsigned selection,bool runtime,input::TickInput input) {
+    selection=destination(page,selection,input);
+    if(supported(page,selection,runtime)) return input;
     auto changes=input::ButtonMask(input::a|input::select|input::left|input::right);
-    if(game.pregame_page()==PregamePage::main) changes|=input::b;
+    if(page==PregamePage::main) changes|=input::b;
     input.pressed=static_cast<input::ButtonMask>(input.pressed&~changes);
     return input;
+}
+GameMenuEditor GameMenu::editor(PregamePage page,unsigned selection,input::TickInput input) {
+    if(page!=PregamePage::options || !(input.pressed&input::a)
+        || (input.pressed&(input::b|input::start))) return GameMenuEditor::none;
+    switch(destination(page,selection,input)) {
+    case 3:return GameMenuEditor::hud;
+    case 8:return GameMenuEditor::controller;
+    default:return GameMenuEditor::none;
+    }
+}
+bool GameMenu::launch_gesture(PregamePage page,unsigned selection,bool runtime,input::TickInput input) {
+    if(runtime || page!=PregamePage::main) return false;
+    return (input.pressed&input::start)
+        || (destination(page,selection,input)==15 && (input.pressed&(input::a|input::b)));
 }
 bool GameMenu::update(const GameMenuState& state) {
     if(initialized_ && state_==state) return false;

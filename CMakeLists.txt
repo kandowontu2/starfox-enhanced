@@ -338,7 +338,10 @@ if(STARFOX_ENABLE_XBRZ)
 endif()
 
 # Ordinary effects use SM5 compute, not RT cores. Compile DXBC at build time.
-if(WIN32)
+# CPU-only host/3DS test graphs do not use desktop shaders. In particular,
+# they have no runtime DXC discovery, so finding an installed SDK FXC must
+# not add a DXR custom command with an empty compiler executable.
+if(WIN32 AND (STARFOX_BUILD_RUNTIME OR STARFOX_BUILD_VR OR STARFOX_BUILD_TOOLS))
     file(GLOB STARFOX_SDK_FXC "C:/Program Files (x86)/Windows Kits/10/bin/*/x64/fxc.exe")
     list(SORT STARFOX_SDK_FXC COMPARE NATURAL ORDER DESCENDING)
     find_program(STARFOX_FXC NAMES fxc)
@@ -889,6 +892,9 @@ if(STARFOX_BUILD_RUNTIME)
             -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/sdl3-d3d12-descriptor-reservation.cmake"
             COMMAND_ERROR_IS_FATAL ANY)
         execute_process(COMMAND "${CMAKE_COMMAND}" "-DSOURCE_DIR=${sdl3_SOURCE_DIR}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/sdl3-d3d12-copy-ordering.cmake"
+            COMMAND_ERROR_IS_FATAL ANY)
+        execute_process(COMMAND "${CMAKE_COMMAND}" "-DSOURCE_DIR=${sdl3_SOURCE_DIR}"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/sdl3-responsive-renderer.cmake"
             COMMAND_ERROR_IS_FATAL ANY)
         execute_process(COMMAND "${CMAKE_COMMAND}" "-DSOURCE_DIR=${sdl3_SOURCE_DIR}"
@@ -896,6 +902,7 @@ if(STARFOX_BUILD_RUNTIME)
             COMMAND_ERROR_IS_FATAL ANY)
         set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
             "cmake/sdl3-d3d12-descriptor-reservation.cmake" "include/starfox/render/d3d12_descriptor_capacity.h"
+            "cmake/sdl3-d3d12-copy-ordering.cmake"
             "cmake/sdl3-responsive-renderer.cmake" "include/starfox/render/sdl_gpu_preparation.h"
             "cmake/sdl3-responsive-pipelines.cmake" "include/starfox/render/sdl_gpu_pipeline_preparation.h")
         get_target_property(STARFOX_SDL_NATIVE_TARGET SDL3::SDL3 ALIASED_TARGET)
@@ -1205,30 +1212,34 @@ if(STARFOX_BUILD_RUNTIME)
     endif()
     if(APPLE)
         enable_language(OBJCXX)
-        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-            "${CMAKE_CURRENT_SOURCE_DIR}/include/starfox/render/lava_surface.inc"
-            "${CMAKE_CURRENT_SOURCE_DIR}/include/starfox/render/water_caustics.inc"
-            "${CMAKE_CURRENT_SOURCE_DIR}/include/starfox/render/water_transmission.inc")
-        file(READ "${CMAKE_CURRENT_SOURCE_DIR}/include/starfox/render/lava_surface.inc" STARFOX_LAVA_SURFACE_SOURCE)
-        file(READ "${CMAKE_CURRENT_SOURCE_DIR}/include/starfox/render/water_caustics.inc" STARFOX_WATER_CAUSTICS_SOURCE)
-        file(READ "${CMAKE_CURRENT_SOURCE_DIR}/include/starfox/render/water_transmission.inc" STARFOX_WATER_TRANSMISSION_SOURCE)
-        configure_file(src/render/shaders/metal_water_shared.hpp.in
-            "${CMAKE_CURRENT_BINARY_DIR}/generated/metal_water_shared.hpp" @ONLY)
+        include(cmake/NativeMetalMaterialSource.cmake)
         if(STARFOX_BUILD_TOOLS AND NOT IOS)
             find_package(Python3 COMPONENTS Interpreter REQUIRED)
             set(STARFOX_NATIVE_METAL_SOURCE_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/native-metal-check")
             add_custom_command(OUTPUT "${STARFOX_NATIVE_METAL_SOURCE_DIR}/reflection.metal"
                     "${STARFOX_NATIVE_METAL_SOURCE_DIR}/shadow.metal"
+                    "${STARFOX_NATIVE_METAL_SOURCE_DIR}/empty_reflection.metal"
+                    "${STARFOX_NATIVE_METAL_SOURCE_DIR}/empty_shadow.metal"
                 COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_metal_rt_shaders.py"
                     --emit-only "${STARFOX_NATIVE_METAL_SOURCE_DIR}"
+                    --generated-dir "${CMAKE_CURRENT_BINARY_DIR}/generated"
                 DEPENDS tools/check_metal_rt_shaders.py src/render/metal_hardware_rt.mm
                     src/render/shaders/metal_water_shared.hpp.in
+                    src/render/shaders/metal_native_material_shared.hpp.in
+                    "${CMAKE_CURRENT_BINARY_DIR}/generated/metal_water_shared.hpp"
+                    "${CMAKE_CURRENT_BINARY_DIR}/generated/metal_native_material_shared.hpp"
+                    "${CMAKE_CURRENT_BINARY_DIR}/generated/metal_liquid_optics.inc"
+                    "${CMAKE_CURRENT_BINARY_DIR}/generated/metal_material_colour.inc"
+                    include/starfox/render/metal_native_material_coverage.inc
+                    include/starfox/render/metal_native_material_colour.inc
                     include/starfox/render/lava_surface.inc include/starfox/render/water_caustics.inc
                     include/starfox/render/water_transmission.inc
                 VERBATIM)
             add_custom_target(starfox_native_metal_source DEPENDS
                 "${STARFOX_NATIVE_METAL_SOURCE_DIR}/reflection.metal"
-                "${STARFOX_NATIVE_METAL_SOURCE_DIR}/shadow.metal")
+                "${STARFOX_NATIVE_METAL_SOURCE_DIR}/shadow.metal"
+                "${STARFOX_NATIVE_METAL_SOURCE_DIR}/empty_reflection.metal"
+                "${STARFOX_NATIVE_METAL_SOURCE_DIR}/empty_shadow.metal")
             add_executable(starfox_native_metal_check tools/check_native_metal.mm)
             add_dependencies(starfox_native_metal_check starfox_native_metal_source)
             target_compile_features(starfox_native_metal_check PRIVATE cxx_std_20)
@@ -1238,6 +1249,10 @@ if(STARFOX_BUILD_RUNTIME)
         endif()
         target_include_directories(starfox_pc PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
         target_sources(starfox_pc PRIVATE src/render/metal_hardware_rt.mm)
+        # APPLE already installs our pinned SDL Metal interop above. Do not
+        # hide embedding behind a test-branch-only, undefined cache variable.
+        include(cmake/NativeMetalRtLibraries.cmake)
+        starfox_embed_native_metal_rt(starfox_pc)
         set_source_files_properties(src/render/metal_hardware_rt.mm
             PROPERTIES COMPILE_FLAGS "-fobjc-arc")
         target_link_libraries(starfox_pc PRIVATE "-framework Metal")
@@ -1598,6 +1613,20 @@ if(STARFOX_BUILD_RUNTIME)
 endif()
 
 if(STARFOX_BUILD_TESTS)
+    # These portable tests exercise the real read-only library provider with
+    # fake payloads; they do not claim SDK compilation or GPU execution.
+    foreach(variant IN ITEMS valid invalid)
+        add_executable(starfox_native_metal_provider_${variant}_tests
+            tests/native_metal_rt_provider_tests.cpp
+            src/render/native_metal_rt_programs.cpp)
+        target_include_directories(starfox_native_metal_provider_${variant}_tests PRIVATE include)
+        target_compile_features(starfox_native_metal_provider_${variant}_tests PRIVATE cxx_std_20)
+        if(variant STREQUAL "invalid")
+            target_compile_definitions(starfox_native_metal_provider_${variant}_tests PRIVATE TEST_BAD_PAYLOAD=1)
+        endif()
+        add_test(NAME starfox_native_metal_provider_${variant}_tests
+            COMMAND starfox_native_metal_provider_${variant}_tests)
+    endforeach()
     add_executable(starfox_sr_platform_policy_tests tests/sr_platform_policy_tests.cpp)
     target_include_directories(starfox_sr_platform_policy_tests PRIVATE include)
     target_compile_features(starfox_sr_platform_policy_tests PRIVATE cxx_std_20)
@@ -1614,6 +1643,17 @@ if(STARFOX_BUILD_TESTS)
         list(APPEND STARFOX_SMOKE_BASELINE "STARFOX_TEST_${setting}=0")
     endforeach()
     enable_testing()
+    add_executable(starfox_native_metal_fixture_parameter_tests tests/native_metal_fixture_parameter_tests.cpp)
+    target_include_directories(starfox_native_metal_fixture_parameter_tests PRIVATE tools include)
+    target_compile_features(starfox_native_metal_fixture_parameter_tests PRIVATE cxx_std_20)
+    add_test(NAME starfox_native_metal_fixture_parameter_tests COMMAND starfox_native_metal_fixture_parameter_tests)
+    add_test(NAME starfox_sdl_d3d12_copy_ordering_patch_tests
+        COMMAND "${CMAKE_COMMAND}" "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+            "-DTEST_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/sdl-copy-ordering-fixtures"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_sdl_d3d12_copy_ordering.cmake")
+    add_test(NAME starfox_reflection_shader_dependency_tests
+        COMMAND "${CMAKE_COMMAND}" "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_reflection_shader_dependencies.cmake")
     # This host ABI must compile without optional OpenXR/VR include paths.
     add_executable(starfox_calibrated_dlss_api_tests tests/calibrated_dlss_api_tests.cpp)
     target_include_directories(starfox_calibrated_dlss_api_tests PRIVATE include)
@@ -1637,6 +1677,39 @@ if(STARFOX_BUILD_TESTS)
     add_executable(starfox_3ds_audio_tests tests/nintendo_3ds_audio_tests.cpp)
     target_link_libraries(starfox_3ds_audio_tests PRIVATE starfox_3ds_frontend)
     add_test(NAME starfox_3ds_audio_tests COMMAND starfox_3ds_audio_tests)
+    # Link the real NDSP adapter to explicit test doubles. Native SDK/firmware
+    # and physical audio acceptance remain separate from these host contracts.
+    add_executable(starfox_3ds_native_audio_tests tests/nintendo_3ds_native_audio_tests.cpp
+        platform/3ds/native_audio.cpp)
+    target_include_directories(starfox_3ds_native_audio_tests PRIVATE tests/3ds_audio_stubs include)
+    target_compile_features(starfox_3ds_native_audio_tests PRIVATE cxx_std_20)
+    add_test(NAME starfox_3ds_native_audio_tests COMMAND starfox_3ds_native_audio_tests)
+    add_executable(starfox_3ds_native_stem_executor_tests
+        tests/nintendo_3ds_native_stem_executor_tests.cpp platform/3ds/native_stem_executor.cpp)
+    target_include_directories(starfox_3ds_native_stem_executor_tests PRIVATE
+        tests/3ds_stem_stubs include platform/3ds)
+    target_compile_features(starfox_3ds_native_stem_executor_tests PRIVATE cxx_std_20)
+    target_link_libraries(starfox_3ds_native_stem_executor_tests PRIVATE Threads::Threads)
+    add_test(NAME starfox_3ds_native_stem_executor_tests COMMAND starfox_3ds_native_stem_executor_tests)
+    # Host libctru doubles are confined to these regression targets. Never
+    # substitute them for the real SDK in the separately packaged ARM player.
+    add_library(starfox_3ds_stem_test_runtime STATIC
+        tests/nintendo_3ds_native_stem_executor_tests.cpp platform/3ds/native_stem_executor.cpp)
+    target_include_directories(starfox_3ds_stem_test_runtime PRIVATE
+        tests/3ds_stem_stubs include platform/3ds)
+    target_compile_features(starfox_3ds_stem_test_runtime PRIVATE cxx_std_20)
+    target_compile_definitions(starfox_3ds_stem_test_runtime PRIVATE
+        main=worker_api_fixture_main STARFOX_STEM_TEST_NEW_MODEL=1)
+    target_link_libraries(starfox_3ds_stem_test_runtime PRIVATE Threads::Threads)
+    add_executable(starfox_spc_stems_tests tests/spc_stems_tests.cpp)
+    target_link_libraries(starfox_spc_stems_tests PRIVATE starfox_core)
+    add_test(NAME starfox_spc_stems_tests COMMAND starfox_spc_stems_tests)
+    add_executable(starfox_spc_parallel_stems_tests tests/spc_stems_tests.cpp)
+    target_compile_definitions(starfox_spc_parallel_stems_tests PRIVATE STARFOX_SPC_PARALLEL_ORACLE=1)
+    target_include_directories(starfox_spc_parallel_stems_tests PRIVATE platform/3ds)
+    target_link_libraries(starfox_spc_parallel_stems_tests PRIVATE
+        starfox_core starfox_3ds_stem_test_runtime Threads::Threads)
+    add_test(NAME starfox_spc_parallel_stems_tests COMMAND starfox_spc_parallel_stems_tests)
     add_executable(starfox_3ds_pica_tests tests/nintendo_3ds_pica_tests.cpp)
     target_link_libraries(starfox_3ds_pica_tests PRIVATE starfox_3ds_frontend)
     add_test(NAME starfox_3ds_pica_tests COMMAND starfox_3ds_pica_tests)
@@ -1671,7 +1744,9 @@ if(STARFOX_BUILD_TESTS)
     target_link_libraries(starfox_3ds_game_hud PUBLIC starfox_3ds_frontend starfox_core)
     add_library(starfox_3ds_game_session STATIC platform/3ds/game_session.cpp platform/3ds/game_session_state.cpp
         platform/3ds/game_state.cpp platform/3ds/game_state_storage.cpp platform/3ds/game_menu.cpp platform/3ds/game_storage.cpp src/vr/game_scene.cpp)
-    target_link_libraries(starfox_3ds_game_session PUBLIC starfox_3ds_game_hud)
+    # presentation() uses the shared native panorama classifier in game_layers.
+    # Export that archive dependency so session-only consumers link too.
+    target_link_libraries(starfox_3ds_game_session PUBLIC starfox_3ds_game_hud starfox_3ds_raster)
     target_compile_definitions(starfox_3ds_game_session PRIVATE STARFOX_SCENE_SOURCE_ONLY=1)
     add_library(starfox_3ds_game_models STATIC platform/3ds/game_models.cpp platform/3ds/game_dots.cpp
         src/vr/source_pose_interpolation.cpp)
@@ -1686,6 +1761,13 @@ if(STARFOX_BUILD_TESTS)
     target_link_libraries(starfox_3ds_game_models_check PRIVATE starfox_3ds_game_models starfox_3ds_raster)
     add_executable(starfox_3ds_game_session_check tools/check_3ds_game_session.cpp)
     target_link_libraries(starfox_3ds_game_session_check PRIVATE starfox_3ds_game_models starfox_3ds_raster)
+    add_executable(starfox_3ds_parallel_game_session_check tools/check_3ds_game_session.cpp)
+    target_compile_definitions(starfox_3ds_parallel_game_session_check PRIVATE STARFOX_3DS_CHECK_PARALLEL_AUDIO=1)
+    target_include_directories(starfox_3ds_parallel_game_session_check PRIVATE platform/3ds)
+    target_link_libraries(starfox_3ds_parallel_game_session_check PRIVATE
+        starfox_3ds_game_models starfox_3ds_raster starfox_3ds_stem_test_runtime Threads::Threads)
+    add_executable(starfox_3ds_native_model_check tools/check_3ds_native_model.cpp)
+    target_link_libraries(starfox_3ds_native_model_check PRIVATE starfox_3ds_game_models)
     add_executable(starfox_3ds_game_menu_tests tests/nintendo_3ds_game_menu_tests.cpp)
     target_link_libraries(starfox_3ds_game_menu_tests PRIVATE starfox_3ds_game_session)
     add_test(NAME starfox_3ds_game_menu_tests COMMAND starfox_3ds_game_menu_tests)
@@ -1704,6 +1786,7 @@ if(STARFOX_BUILD_TESTS)
     if(EXISTS "${STARFOX_ROM_FILE}" AND EXISTS "${STARFOX_SYMBOLS_FILE}")
         add_test(NAME starfox_3ds_game_hud_original COMMAND starfox_3ds_game_hud_check "${STARFOX_ROM_FILE}" "${STARFOX_SYMBOLS_FILE}")
         add_test(NAME starfox_3ds_game_session_original COMMAND starfox_3ds_game_session_check "${STARFOX_ROM_FILE}" "${STARFOX_SYMBOLS_FILE}")
+        add_test(NAME starfox_3ds_parallel_game_session_original COMMAND starfox_3ds_parallel_game_session_check "${STARFOX_ROM_FILE}" "${STARFOX_SYMBOLS_FILE}")
         add_test(NAME starfox_3ds_game_capabilities_original COMMAND starfox_3ds_game_session_check "${STARFOX_ROM_FILE}" "${STARFOX_SYMBOLS_FILE}" --capabilities-only)
         add_test(NAME starfox_3ds_game_stage_sweep_original COMMAND starfox_3ds_game_session_check "${STARFOX_ROM_FILE}" "${STARFOX_SYMBOLS_FILE}" --stage-sweep)
         set_tests_properties(starfox_3ds_game_stage_sweep_original PROPERTIES TIMEOUT 1800)
@@ -1713,7 +1796,14 @@ if(STARFOX_BUILD_TESTS)
         set_tests_properties(starfox_3ds_game_corneria_source_route_original PROPERTIES TIMEOUT 1800)
         add_test(NAME starfox_3ds_game_attack_carrier_source_route_original COMMAND starfox_3ds_game_session_check "${STARFOX_ROM_FILE}" "${STARFOX_SYMBOLS_FILE}" --attack-carrier-source-route)
         set_tests_properties(starfox_3ds_game_attack_carrier_source_route_original PROPERTIES TIMEOUT 1800)
+        add_test(NAME starfox_3ds_game_death_source_route_original COMMAND starfox_3ds_game_session_check "${STARFOX_ROM_FILE}" "${STARFOX_SYMBOLS_FILE}" --death-source-route)
+        set_tests_properties(starfox_3ds_game_death_source_route_original PROPERTIES TIMEOUT 1800)
+        foreach(continue_choice IN ITEMS yes no)
+            add_test(NAME starfox_3ds_game_continue_${continue_choice}_source_route_original COMMAND starfox_3ds_game_session_check "${STARFOX_ROM_FILE}" "${STARFOX_SYMBOLS_FILE}" --continue-${continue_choice}-source-route)
+            set_tests_properties(starfox_3ds_game_continue_${continue_choice}_source_route_original PROPERTIES TIMEOUT 1800)
+        endforeach()
         add_test(NAME starfox_3ds_game_models_original COMMAND starfox_3ds_game_models_check "${STARFOX_ROM_FILE}" "${STARFOX_SYMBOLS_FILE}")
+        add_test(NAME starfox_3ds_native_model_original COMMAND starfox_3ds_native_model_check "${STARFOX_ROM_FILE}" "${STARFOX_SYMBOLS_FILE}")
         add_test(NAME starfox_3ds_game_attack_carrier_composition_original COMMAND starfox_3ds_game_models_check "${STARFOX_ROM_FILE}" "${STARFOX_SYMBOLS_FILE}" LEVEL1_1 36000 --attack-carrier-complete)
         add_test(NAME starfox_3ds_game_fortuna_composition_original COMMAND starfox_3ds_game_models_check "${STARFOX_ROM_FILE}" "${STARFOX_SYMBOLS_FILE}" LEVEL3_3 36000 --fortuna-complete)
         # This offline oracle re-prepares every source phase at maximum optics
@@ -1729,10 +1819,18 @@ if(STARFOX_BUILD_TESTS)
     if(EXISTS "${STARFOX_EX_ROM_FILE}" AND EXISTS "${STARFOX_EX_SYMBOLS_FILE}")
         add_test(NAME starfox_3ds_game_hud_ex COMMAND starfox_3ds_game_hud_check "${STARFOX_EX_ROM_FILE}" "${STARFOX_EX_SYMBOLS_FILE}")
         add_test(NAME starfox_3ds_game_session_ex COMMAND starfox_3ds_game_session_check "${STARFOX_EX_ROM_FILE}" "${STARFOX_EX_SYMBOLS_FILE}")
+        add_test(NAME starfox_3ds_parallel_game_session_ex COMMAND starfox_3ds_parallel_game_session_check "${STARFOX_EX_ROM_FILE}" "${STARFOX_EX_SYMBOLS_FILE}")
         add_test(NAME starfox_3ds_game_capabilities_ex COMMAND starfox_3ds_game_session_check "${STARFOX_EX_ROM_FILE}" "${STARFOX_EX_SYMBOLS_FILE}" --capabilities-only)
         add_test(NAME starfox_3ds_game_stage_sweep_ex COMMAND starfox_3ds_game_session_check "${STARFOX_EX_ROM_FILE}" "${STARFOX_EX_SYMBOLS_FILE}" --stage-sweep)
         set_tests_properties(starfox_3ds_game_stage_sweep_ex PROPERTIES TIMEOUT 1800)
+        add_test(NAME starfox_3ds_game_death_source_route_ex COMMAND starfox_3ds_game_session_check "${STARFOX_EX_ROM_FILE}" "${STARFOX_EX_SYMBOLS_FILE}" --death-source-route)
+        set_tests_properties(starfox_3ds_game_death_source_route_ex PROPERTIES TIMEOUT 1800)
+        foreach(continue_choice IN ITEMS yes no)
+            add_test(NAME starfox_3ds_game_continue_${continue_choice}_source_route_ex COMMAND starfox_3ds_game_session_check "${STARFOX_EX_ROM_FILE}" "${STARFOX_EX_SYMBOLS_FILE}" --continue-${continue_choice}-source-route)
+            set_tests_properties(starfox_3ds_game_continue_${continue_choice}_source_route_ex PROPERTIES TIMEOUT 1800)
+        endforeach()
         add_test(NAME starfox_3ds_game_models_ex COMMAND starfox_3ds_game_models_check "${STARFOX_EX_ROM_FILE}" "${STARFOX_EX_SYMBOLS_FILE}")
+        add_test(NAME starfox_3ds_native_model_ex COMMAND starfox_3ds_native_model_check "${STARFOX_EX_ROM_FILE}" "${STARFOX_EX_SYMBOLS_FILE}")
         add_test(NAME starfox_3ds_game_effects_ex COMMAND starfox_3ds_game_models_check "${STARFOX_EX_ROM_FILE}" "${STARFOX_EX_SYMBOLS_FILE}" --native-effects-flow)
         add_test(NAME starfox_3ds_game_menu_composition_ex COMMAND starfox_3ds_game_models_check "${STARFOX_EX_ROM_FILE}" "${STARFOX_EX_SYMBOLS_FILE}" --native-menu-composition)
         add_test(NAME starfox_3ds_game_landscape_ex COMMAND starfox_3ds_game_models_check "${STARFOX_EX_ROM_FILE}" "${STARFOX_EX_SYMBOLS_FILE}" --native-landscape-flow)
@@ -2066,6 +2164,11 @@ if(STARFOX_BUILD_TESTS)
         target_compile_features(starfox_reflection_source_stage_timing_tests PRIVATE cxx_std_20)
         target_link_libraries(starfox_reflection_source_stage_timing_tests PRIVATE SDL3::SDL3)
         add_test(NAME starfox_reflection_source_stage_timing_tests COMMAND starfox_reflection_source_stage_timing_tests)
+        add_executable(starfox_reflection_source_proof_receipt_tests tests/reflection_source_proof_receipt_tests.cpp)
+        target_include_directories(starfox_reflection_source_proof_receipt_tests PRIVATE include)
+        target_compile_features(starfox_reflection_source_proof_receipt_tests PRIVATE cxx_std_20)
+        target_link_libraries(starfox_reflection_source_proof_receipt_tests PRIVATE SDL3::SDL3)
+        add_test(NAME starfox_reflection_source_proof_receipt_tests COMMAND starfox_reflection_source_proof_receipt_tests)
         if(WIN32 AND NOT WINDOWS_STORE)
             # Requires a visible Windows desktop; run explicitly, not in headless CTest.
             add_executable(starfox_renderer_switch_tests tests/renderer_switch_tests.cpp)
@@ -2332,6 +2435,15 @@ if(STARFOX_BUILD_TESTS)
 
     find_package(Python3 COMPONENTS Interpreter)
     if(Python3_Interpreter_FOUND)
+        add_test(NAME starfox_shader_payload_partition_tests
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_shader_payload_partition.py")
+        if(WIN32 AND NOT WINDOWS_STORE AND NOT CMAKE_CROSSCOMPILING)
+            add_executable(starfox_pcvr_launcher_fixture tests/pcvr_launcher_exit_fixture.cpp)
+            target_compile_features(starfox_pcvr_launcher_fixture PRIVATE cxx_std_17)
+            add_test(NAME starfox_pcvr_launcher_exit_codes
+                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_pcvr_launcher.py"
+                    "$<TARGET_FILE:starfox_pcvr_launcher_fixture>")
+        endif()
         add_test(NAME starfox_metal_source_assembly
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_metal_shader_sources.py")
         add_test(NAME starfox_vulkan_material_colour_adapter

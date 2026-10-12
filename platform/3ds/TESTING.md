@@ -1,9 +1,25 @@
-# Star Fox Enhanced — New 3DS stereo / original-model mono test candidate
+# Star Fox Enhanced — New Nintendo 3DS-family test candidate
 
 ## Quick start for testers
 
-1. Download the current `StarFoxEnhanced-3ds-test.zip` experimental player
-   (or its numbered tester ZIP) and extract it to the SD card's root.
+Supported targets are **New 3DS, New 3DS XL and New 2DS XL**. Original
+3DS/3DS XL/2DS are unsupported: the owner reports only 2--3 FPS. Please do not
+request further old-model performance tests. Legacy mono code and historical
+results below are retained, but no longer describe the supported target.
+For now, development/regression testing remains emulator-led rather than
+requesting a hardware test for each incremental candidate.
+Fresh settings use stereo separation 16 and convergence 512; existing saved
+values are preserved. The Stereoscopic 3D menu still controls both. The new
+default increases distant-background depth without moving HUD/menu text or
+changing the one-eye slider-off/New 2DS XL path.
+
+1. The latest source-only candidate is the experimental
+   `StarFoxEnhanced-3ds-test.zip` artifact from
+   [ARM run 38206689640](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38206689640).
+   R376 remains the hardware-tested baseline, not the latest source candidate.
+   Extract the ZIP to the SD card's root, keeping its folder structure. When
+   updating an earlier build, replace only the `.3dsx` and `.smdh`; preserve the existing
+   BIN, settings, saves and diagnostics.
 2. Put your own `Starfox-Assets.BIN` in `/3ds/starfox-enhanced/`.
    The final path must be `/3ds/starfox-enhanced/Starfox-Assets.BIN`.
    Do not put a ROM in that folder instead of the generated BIN.
@@ -11,20 +27,462 @@
    console's `/3ds/dspfirm.cdc`; it is not included in the download.
 4. In Homebrew Launcher, launch **Star Fox Enhanced - TEST**. Keep the
    pre-game menu and choose **START GAME** normally.
-5. Try Training and Corneria. On New 3DS/XL, start with the slider low, then
-   compare slider off and halfway. Original 3DS/XL and 2DS intentionally stay
-   mono. Check sound, pause/resume, and Select + Start to exit.
+5. R376 is confirmed running on New 3DS XL with sound, slider and HOME/exit.
+   Its remaining reported problems are ground hiding lights/model bottoms and
+   low presentation FPS. Start with Preview OFF and the slider down, then
+   compare slider off/halfway and enable the FPS counter. Preserve the newest
+   `native-frame-profile-*.csv` for performance investigation. If a hard freeze
+   recurs, stop repeating it and send the newest startup/frame CSVs.
+6. Once ordinary Start is stable, try Training and Corneria. On New 3DS/XL, start with the slider low, then
+   compare slider off and halfway. New 2DS XL uses mono with the same faster
+   CPU/cache profile. Check sound, pause/resume, and Select + Start to exit.
 
 Back up existing `/3ds/starfox-enhanced/` saves/settings first. If boot fails,
 photograph the on-screen error; it should remain visible. Report console model,
 Original or EX, stage/scene, and the source commit in `BUILD-INFO.json`.
 This is a test candidate, not a promise of stable console FPS.
 
+The host audio tests now also compile the actual `native_audio.cpp` NDSP
+adapter against explicit libctru test doubles. Its 753 checks cover queued and
+playing PCM immutability, buffer exhaustion and wraparound, pause/resume,
+worker-before-storage retirement, failed initialization/reset/cache flush,
+recovery and the shared NDSP/CSND output lease. This is not firmware, IPC,
+audible output or console timing acceptance. No player change or new ARM
+package is implied by these host-only tests.
+
+The earlier frontend-only host graph passes its 20 registered tests. The
+complete cartridge-core host graph now also passes all 41 registered tests,
+including the actual pre-game menu, remapping, HUD editor/routing, raster
+coverage and audio adapters. This includes a simultaneous direction+confirm
+regression: unsupported desktop graphics settings remain unavailable after
+navigation, while supported controls, Back and Start keep their source behavior.
+These fixes are now in the R134 native ZIP below. Native console testing is
+still required.
+
 ## Current build and validation
 
-### R74 runtime-remapping audio follow-up (October 8)
+The current source candidate (R412) is commit
+`e98788bef9dbfbca46cfbe0506b02a356b6a3388`, from
+[ARM run 38206689640](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38206689640).
+The asset-free ZIP is 1,133,475 bytes, SHA256
+`406e3ca195c1edeadde6a476e80347ec21aaea479a4da0e0b40e53fbbd4e607c`.
+It retains the R376 shader correction and later ground-depth fixes. Its latest
+changes retain the exact-byte RGBA tile expansion and reduce redundant transform
+calculations/uploads for adjacent equal model draws within each fixed eye/frame
+scope. Every source face, draw, material and clip remains; both eyes, blocking
+GPU retirement and cartridge/audio cadence are preserved. The CI run passes
+48 asset-free host tests plus the full ARM/shader/stack checks. The new transform
+regression checks 1,176 baseline-equality, scope and failure-repair assertions;
+these and the earlier upload timings are not console FPS measurements.
+Original Preview ON/OFF/ON, ordinary Preview-OFF Start, source intro/Controls,
+Training and live steering/roll render in the reused accuracy-enabled New-model
+emulator. Select+Start retires the guest, then the same monitored process closes
+normally with exit code 0, without a forced stop or restart. Training's sampled
+views retain ground lights, visible model bases, both eyes and the lower HUD.
+Live logs confirm Vulkan, accurate GPU timing/math, memory exceptions and slider
+100. The emulator does not implement the New CPU configuration request, and
+HLE DSP is not physical-console audio acceptance. This is not measured New-console
+performance or full-port acceptance; development remains emulator-led, without
+a request for another minor hardware test. Full current cartridge regression
+and sustained New-console performance remain open. R376 remains the only
+hardware-tested baseline; R412 is not advertised as hardware-verified.
 
-The latest checked candidate is `build/StarFoxEnhanced-3ds-test-r74.zip`, or the
+## Hardware-tested baseline R376
+
+The last hardware-tested candidate is `build/StarFoxEnhanced-3ds-test-r376.zip`
+(1,127,314 bytes), source `454e8fb8839d021c7482e41cfe8b224ccba84947`.
+ZIP SHA256: `385b9c99de7ed9694c0ffa77828f548a1dfef776bd42c0fc5a6c43fb3fb815d2`.
+Its [source-only ARM run 38154475650](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38154475650)
+passes all 47 host tests, native compilation, compiled shader output, stack and
+package gates. Independent local checks verify all ZIP members, CRCs, native
+ELF/3DSX/SMDH and the identical local/CI compiled shader.
+
+The exact native binary passes default Original A-confirmed Start, a minute
+of rendering and normal exit in strict Azahar 2126.2. Physical R375 froze at
+the second-frame GPU queue wait; the owner now confirms R376 works on New
+3DS XL, including sound, the slider and HOME/exit. Ground occlusion and low
+presentation FPS still need correction; sleep/resume and long-run stability
+are not established by that report.
+The same R376 binary also passes EX Preview ON/OFF/ON, ordinary Start,
+a minute of rendering and normal guest/host shutdown with exit code 0.
+The original-model emulator configuration also passes fresh default
+A-confirmed Start, a minute of rendering and normal guest/host exit code 0.
+Original-console performance and HOME/sleep remain unverified.
+
+## Earlier R373 validation
+
+The earlier follow-up is `build/StarFoxEnhanced-3ds-test-r373.zip`
+(1,125,193 bytes), from source `f5876fc1bfd153a044ea0232c6c9350f2c3b0a33`.
+ZIP SHA256: `0adbdd501fe58379972f5e607454741bb57c7eb4b6eebe0545885f680d8d9116`.
+Its [source-only ARM run 38148953720](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38148953720)
+passes all 46 host tests, native ARM, stack and package gates. Independent
+download checks verify the five asset-free members and native 3DSX/SMDH hashes.
+
+Azahar 2126.2 with accurate GPU timings, accurate shader multiplication,
+synchronous shader/presentation work and memory exceptions found a null read
+inside Citro3D's shader rebinding after Preview. R373 keeps the previous CPU
+shader alive until rebinding completes, while still freeing its GPU targets,
+textures and vertex buffer. The strict native-binary retest passed Preview
+ON/OFF/ON, Start, a minute of post-menu PICA/audio work and normal exit.
+This does not establish real-console stability or FPS, or prove that the
+tester's initial Preview stall has the same cause.
+
+For equivalent emulator testing, use Azahar 2126.2 or newer; 2125.1.2 ignores
+`simulate_3ds_gpu_timings`. Enable `simulate_3ds_gpu_timings` and
+`shaders_accurate_mul` under Renderer, and `enable_exception_handler` under
+Debugging. Set each corresponding `\default=false` when editing INI directly.
+Disable asynchronous shaders/presentation and use New 3DS at 100% CPU clock.
+Verify the enabled values in the actual boot log. Unmapped-memory exceptions
+do not detect every buffer overrun within otherwise valid guest RAM.
+
+R180 freezes on a tester's real New 3DS XL while displaying the loading image.
+The supplied CSV shows loading finished and one GPU presentation returned;
+it does not prove GPU completion or identify the precise subsequent stall.
+R371/R373 use direct LCD presentation for Preview-OFF menus and initialize PICA
+only for a real preview, game or editor. It adds `native-startup-*.csv` phase
+receipts. R373 rearms a bounded trace window for each source replacement,
+reserves high-level receipts during audio preroll, and separates display-sync
+from GPU-queue waits. Preview is session-only and always starts OFF, including
+with older saved Preview-ON settings. If startup still freezes, send the
+newest startup CSV and `native-frame-profile-*.csv`, along with where it stopped.
+Retain existing data and old diagnostics. The ZIP's README contains earlier
+history; use `BUILD-INFO.json` and the R373 companion instructions for this build.
+
+## Earlier R180 validation and physical failure
+
+The earlier tester package is `build/StarFoxEnhanced-3ds-test-r180.zip`
+(1,120,357 bytes), from source `bbc5d96956291e5ffa8647cd462f2d99fb0bced5`.
+ZIP SHA256: `2d633592020ee7667d1f659e983ed8f0453c2bdf4c7662cee9c66eccce83d31d`.
+Its [source-only ARM run 38000160275](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38000160275)
+passes all 43 host tests and seven native targets, including stack and package
+checks. The five ZIP members, payload checksums and 81 actual ARM compiler
+commands were independently checked. The strict Release-O3 build keeps source
+game timing and does not enable fast-math, Ofast or LTO.
+
+This exact package completes all 42 ordinary emulator input events, gameplay,
+guest audio/GPU/kernel shutdown and normal host exit, with settings restored.
+That is functional evidence, not console FPS, audible output, slider or
+Home/sleep acceptance. New 3DS/XL stereo and Original/2DS mono remain the policy.
+Use your own BIN and DSP firmware. This is an experimental homebrew 3DSX,
+not a CIA or release; full console and campaign testing remains required.
+Check `BUILD-INFO.json` for the package's source rather than assuming the current
+working tree includes every staged change used by this candidate.
+
+## Earlier build validation
+
+The earlier functional baseline is `build/StarFoxEnhanced-3ds-test-r149.zip`.
+It reuses clipped terrain/water corner calculations while keeping the exact
+emitted geometry. The complete fresh host build and all 43 tests pass. An
+independent comparison against R148 matches every serialized vertex float and
+draw/texture field across 2,129,355 vertices, including exact-budget behavior
+and previous-frame preservation after rejection. A deliberately shifted
+geometry copy fails the same comparison. This is not a measured console speedup.
+
+Source-only ARM
+[run 37920848892](https://github.com/kandowontu2/starfox-enhanced/actions/runs/37920848892)
+passes for source `48535357fd87828e4d849f5e257d4799b42cd885`, including actual
+compile/link, stack/memory and package gates. Independent download checks verify
+all five asset-free ZIP members, native 3DSX/SMDH and 81 real SDK compiler commands.
+ZIP SHA256: `c1436b4c31492bb66d7975d1fbd571d89035922f305582580bfacdb0aea53ca3`.
+Its complete ordinary emulator route also passes all 42 real-menu input edges,
+guest DSP/GSP/audio/kernel shutdown and normal host close, with the original
+settings/save restored. This is functional evidence, not console FPS or audio.
+The unchanged complete default session suites also pass in both Original and
+EX: 20,651 checks each for serial audio, and 20,789 each with the actual joined
+parallel SPC worker (5,229 Original / 5,301 EX joined blocks). These are host
+source/audio/session parity checks, not physical PICA/NDSP or console FPS.
+Use the quick-start steps above and your own BIN/DSP firmware. New 3DS/XL stereo
+and old-model mono policy remain unchanged. Native full-game, audio, sleep and
+sustained performance testing is still required. No release is published.
+
+The earlier strict native Release-O3 experiment is available separately as
+`build/StarFoxEnhanced-3ds-test-r153.zip`, from
+[run 37936446669](https://github.com/kandowontu2/starfox-enhanced/actions/runs/37936446669)
+at source `28a28d010551944eade72d8e432964c69abb07f0`.
+ZIP SHA256: `9259bf8bdc02be253a9bba95d0ea31cdcedf7d1b86257d77d62a8e62ee9c1caa`.
+The full host tests, ARM/stack/package gates, five-member package audit and all
+81 real SDK commands pass. Native Release commands use effective O3, with
+strict arithmetic and no fast-math/IPO/LTO. Its ordinary emulator route stops
+after 26/42 input edges at the unchanged host-memory floor; it has no full
+runtime, console or measured performance verdict. Use R149 as the functional
+baseline when comparing that historical experiment, and retain your save backup.
+
+The isolated R148 background follow-up passes all43 current host tests and
+24,584,446 BG2 pixel, palette, ownership, HDMA, budget and cache checks. It avoids
+replanning an identical rejected tile topology; the accurate raster fallback,
+source coverage and public validation stay unchanged. An independent removal of
+the cache guard fails the regression as intended. This is not a measured console
+speedup. Source-only ARM
+[run 37917956715](https://github.com/kandowontu2/starfox-enhanced/actions/runs/37917956715)
+passes for source `bf2e4901fbb4432a991d1fa039aba94012fe954e`, including actual
+ARM compile/link and stack/memory/package gates. Independent download checks
+verify the exact five asset-free ZIP members, native 3DSX/SMDH and all 81 real SDK
+compiler commands. Use the separate experimental
+`build/StarFoxEnhanced-3ds-test-r148.zip`; previous candidates are preserved.
+ZIP SHA256: `d992126e44ecf4966f451abdd499f528506a56d10b39d2b3b6c23266a0edb8fd`.
+The attempted new full cartridge suite later stops at the unchanged virtual-
+memory floor; the remaining suites never start. They have no complete parity
+verdict. No release is published.
+
+The R147 joined-audio follow-up is available as the separate experimental
+`build/StarFoxEnhanced-3ds-test-r147.zip`; R134 is preserved. A fresh complete host build passes all 174 steps
+and 43 registered tests. The complete independent Original serial suite passes
+20,651 checks in both Original and EX. Original's complete parallel suite also
+passes 20,789 checks and 5,229 actual joined SPC blocks against the unchanged
+independent serial source oracle. EX parallel was stopped by the unchanged
+memory-safety floor when free system RAM fell below1GiB; it has no complete
+verdict. The fresh R147 whole-CMake cartridge wrapper then refused launch rather
+than retrying the failed prerequisite automatically.
+A supplemental check confirms actual joined-block dispatch after all six
+BOOT/stage partial-audio restores in each cartridge. A deliberate dropped-worker
+negative control fails as intended. Real ARM compilation passes in
+[run 37913961912](https://github.com/kandowontu2/starfox-enhanced/actions/runs/37913961912)
+at source `4276d125bda7fe096bc718b81e5e7c5b55ccc6ca`, including stack/memory/package
+gates. Independent download checks verify all five asset-free ZIP members,
+checksums, native 3DSX/SMDH and 81 real SDK compiler commands. ZIP SHA256:
+`cf3240c9dbcc186429e4bfaf1f7261a305780ec07ef392bd264eb9471994d888`.
+New-model core-2 access may be denied; old models and allocation failures retain
+accurate serial audio. Host tests do not prove core access, audible output or
+console FPS. Read `BUILD-INFO.json` for the exact R147 source: its embedded README
+also retains the older build-history notes and the same quick-start steps.
+
+The fresh October 9 R141 complete host build passes all 164 build tasks and
+41/41 registered tests. Its exact CMake-built checker also passes 20,651
+checks in each complete Original and EX default session suite, including the
+newer native settings-import tests. Production inputs match the R134 ARM
+package below; only the regression-test file differs. This does not create
+a newer console package or establish physical performance, stereo or audio
+acceptance. This is historical R134 evidence; use the current candidate section
+above when selecting a tester ZIP.
+
+The same fresh executable subsequently passes the complete stage-entry/flow
+sweeps: all 19 Original and 40 EX stage entries, plus nine flows in each
+variant. Each retains 30 source seconds and suspend/resume, comparing complete
+VM state, raster, stereo/mono source state and every PCM block. Original passes
+306,401 checks and EX 536,204; all consumed production source hashes and build
+inputs are revalidated. This is not completion of every level/boss route,
+physical PICA pixels, NDSP/audio playback or stable console FPS.
+
+Full fresh-core route checks also pass Fortuna and both Corneria boss/result/
+map routes, followed by natural death/restart and Original GAME OVER -> Continue
+YES -> route/gameplay. The latter retains three reserve-consuming deaths,
+ordinary choice/Start and a fresh map confirmation; no source writes or survival
+cheats. Original Continue NO now also passes through a fully bright title,
+and EX natural death/restart passes. EX Continue YES also passes through four
+deaths, a fresh map confirmation and 120 fully bright gameplay phases. Eight
+completed commands total 536,408 checks. EX Continue NO was stopped by the
+unchanged memory-safety floor when free system RAM fell below 1 GiB; its full
+route and the nine-command collection are not accepted. These remain host-source/composition checks,
+not native PICA pixels, audible output or hardware performance.
+
+### Earlier R134 native FPS/menu candidate (October 9)
+
+Use `build/StarFoxEnhanced-3ds-test-r134.zip`, or **StarFoxEnhanced-3ds-test**
+from [run 37889505276](https://github.com/kandowontu2/starfox-enhanced/actions/runs/37889505276).
+Source: `6d5e00a3b4a43bafefd5749628bc92b72ad5bead`; ZIP SHA256:
+`6ac79746f8ccd80158d023176459c1fee487175ccbeb6de5797dd1666328d96d`.
+
+This keeps the earlier menu/editor/viewer fixes and corrects the native FPS row.
+In both pre-game setup and runtime Options, try selecting RENDER FPS while
+moving Up/Down and pressing A together. It should toggle between 30 and 60.
+Hold a horizontal direction, then change direction without releasing: it must
+not toggle again until you release. Leaving the row must not change its value.
+Start must retain its ordinary game/menu behavior, including a combined action.
+
+The complete Original and EX host suites each pass 20,277 source/audio/session
+checks, including 16 FPS fixtures and the existing 48 editor fixtures. Native
+CI, stack/package gates, exact downloaded ZIP and complete ARM compiler/SDK
+graph pass. New-model stereo and original-model mono policy is unchanged.
+This is still an experimental package, not hardware-verified port completion.
+Check `BUILD-INFO.json` for the current source; the ZIP README contains older
+build-history notes as well as the unchanged quick-start instructions.
+
+### Earlier R131 native menu/editor candidate (October 9)
+
+Use `build/StarFoxEnhanced-3ds-test-r131.zip`, or **StarFoxEnhanced-3ds-test**
+from [run 37885687517](https://github.com/kandowontu2/starfox-enhanced/actions/runs/37885687517).
+Source: `8dd11720217c8bbbf697b79303c53daeacff37e6`; ZIP SHA256:
+`114dd6d31ee0f11a48327b6f0d3e5739b15907561984ed4b241bdeb2221096f8`.
+
+This includes the capability fix below and fixes combined direction+A
+opening the wrong native editor. Try moving onto Controller/Customize Screen
+and confirming together; closing the editor should leave the cursor on that
+row. Back/Start combinations must not unexpectedly open an editor.
+All41 host tests, native ARM and package gates pass. Original and EX each pass
+18565 independent source/audio checks, including48 setup/runtime editor cases.
+The downloaded package and actual ARM compiler/SDK settings are independently
+checked. Physical console performance, pixels, audio, slider and Home/sleep/exit
+remain unverified; this is an experimental tester build, not a release.
+
+### Earlier R129 native menu candidate (October 9)
+
+Use `build/StarFoxEnhanced-3ds-test-r129.zip`, or the **StarFoxEnhanced-3ds-test**
+artifact from [run 37881321281](https://github.com/kandowontu2/starfox-enhanced/actions/runs/37881321281).
+Source: `9d0c46f52c84cee839af2e9a3b74014a459a486a`; ZIP SHA256:
+`6a74b23770dff4c5f1dd01f4afc8a928d113ca3e95d87c2c01c86d336a06de8a`.
+All 41 asset-free CI tests, native ARM compilation, memory/stack/package gates,
+and independent downloaded ZIP/CRC/member/checksum/native-structure checks pass.
+The actual downloaded ARM graph contains 80 compile commands and seven real
+libctru display targets, using ARMv6K/mpcore/hard-float/O2 without fake SDK
+headers, fast-math or LTO. These are build checks, not physical console FPS.
+
+This fixes simultaneous direction+confirm bypassing unavailable menu rows.
+Testers should check normal pre-game navigation, Back/Start, and supported
+options while pressing direction and confirm together. Desktop-only graphics
+settings should remain unavailable. R117's model-viewer and Continue fixes
+are retained. The installation steps and stereo/mono hardware policy above
+are unchanged. Use the source commit in `BUILD-INFO.json` to identify the app;
+the ZIP's README also contains historical R117 information. No release or
+private assets are included, and hardware acceptance remains pending.
+
+### Earlier R117 native model-viewer candidate (October 8)
+
+Use `build/StarFoxEnhanced-3ds-test-r117.zip`, or the **StarFoxEnhanced-3ds-test**
+artifact from [run 37858079646](https://github.com/kandowontu2/starfox-enhanced/actions/runs/37858079646).
+Source: `4189673e8f9d1600365d71602204bbc4e9a0d566`; ZIP SHA256:
+`5d8fda65784de4f2e0b996afae7fbe06ae1ed1e2fe79592f66012c10319f9170`.
+Native compilation, asset-free checks, memory/stack/package gates pass, with
+independent downloaded-package and actual ARM compiler-graph checks.
+
+The Continue screen should now show its rotating Arwing instead of an empty
+grid. Its shoulder zoom and EX's native model-viewer page use the source pose,
+not a fabricated gameplay object. Original/EX focused host regressions pass;
+two actual native Continue captures show the restored Arwing rotating inside
+the panel. The ordinary-input run also reaches gameplay, performs guest
+audio/graphics/kernel shutdown before planned graceful emulator closure, and
+restores the isolated save/settings byte-for-byte. All 19 Original and 40 EX
+stage entries plus nine flows each pass host source/audio/raster parity.
+This is not a full-stage/boss, physical audio/slider, pixel-equivalence or
+console-FPS acceptance. Continue/front-end policy stays mono.
+The rebuilt adapter also passes all eight registered Original/EX viewer,
+natural death and Continue YES/NO tests without extending their deadlines.
+Additional focused host checks verify save/load and suspension at every partial
+audio phase, preserving exact PCM and the model/palette. These checks do not
+replace a console test of SD state storage, Home/sleep or audio playback.
+The host viewer checks also reject damaged/truncated saves and malformed
+VM/SPC components without changing the active viewer or emitting PCM. They
+continue the replacement for24 ordinary-input frames after destroying the old
+decoder/session, checking exact source state, audio and geometry. This does
+not change the native tester ZIP or establish console failure-path acceptance.
+Installation steps, New-model gameplay slider support and old-model mono
+fallback above are unchanged. This is not physical-device acceptance or a release.
+
+### Earlier R90 native texture-cache candidate (October 8)
+
+Use `build/StarFoxEnhanced-3ds-test-r90.zip`, or the **StarFoxEnhanced-3ds-test**
+artifact from
+[run 37793341673](https://github.com/kandowontu2/starfox-enhanced/actions/runs/37793341673).
+Its `BUILD-INFO.json` source is `d0b89a73031f6aca415a1bed07f2f9d582c150c6`.
+ZIP SHA256: `abeef63a8dedc473ad4a3964113528e0ab03fda1d43309019fa0e12a398bc636`.
+All 40 asset-free checks, native ARM compilation, stack/memory/package gates,
+and independent downloaded ZIP/CRC/member/digest/native-structure checks pass.
+
+This removes per-change full-image staging allocations from native texture
+updates while preserving colour, ownership and failure-retry behavior. The
+shared host test verifies exact packed pixels and zero warmed allocations;
+that is not console FPS evidence. Follow the unchanged Quick start above.
+Check palette fades, scenery/menus, gameplay, audio and slider behavior on
+hardware. No private assets or release are included; hardware acceptance
+remains pending.
+
+The unchanged R90 ARM player has also been exercised with ordinary keyboard
+input in isolated New-model and original-model emulator profiles. Both reached
+gameplay and performed guest DSP/GSP shutdown after Select + Start, before the
+test's later host-window cleanup. One New-model test-helper cleanup race is
+preserved as a failed helper run; the corrected original-model run closes
+without forced termination. This is functional guest exit evidence only, not
+physical screen/audio, slider, Home/sleep or console performance acceptance.
+
+The New-model R110 repeat also reaches the actual guest DSP/GSP/audio/kernel
+shutdown before the planned host deadline, with the package unchanged and
+save/config restored byte-for-byte. The emulator later requires forced host
+closure (exit-1), so it is not a clean whole-run pass. Hardware testing below
+is still required; an emulator shutdown log does not qualify console speed,
+screen output, audible sound or slider behavior.
+
+The R115 native-image follow-up captures the same unchanged ARM player through
+its real pre-game menu, Original title, Controls, planet map and launch tunnel
+using ordinary inputs in an isolated New-model emulator. The viewed Controls
+pose has a uniform dark-blue surround and a demo model confined to its panel;
+the launch tunnel has differing eye views and a populated lower HUD. The
+emulator's side-by-side display repeats the bottom panel, but the console
+presenter draws one physical lower LCD. These five stills are functional
+evidence only, not complete pixel/projection equivalence, full gameplay,
+physical output/audio/slider or performance acceptance. Guest shutdown is
+observed before the host deadline, but emulator closure still requires forced
+termination; retain that host failure. Config/save restoration is byte-exact.
+The current R90 tester ZIP remains unchanged.
+
+R116 then extends that unchanged New-model ARM run into live Corneria,
+multiple natural deaths/restarts and the actual Continue screen. Six reviewed
+captures show scenery/models, updating radio/shield/reserves and the lower
+HUD switching away from gameplay meters at Continue. The sampled stills do
+not capture the death-circle transitions or verify Continue YES/NO. Guest
+shutdown precedes planned host closure, which completes gracefully this time;
+the earlier forced-closure failures remain recorded. Save/config restoration
+is byte-exact. This adds emulator functional coverage, not physical-console
+pixels, audio, slider, sustained FPS or complete gameplay-route acceptance.
+The R90 player and package have not changed.
+
+The October 8 R98 host-only death/restart follow-up also passes Original and
+EX with ordinary stationary flight and no survival cheats or source-state
+writes. It follows real health loss, death circles, the black fade, restart
+and 120 consecutive bright recovered gameplay phases. Original passed
+19,480 checks/84 consecutive VM/SPC/PCM/raster windows; EX passed
+30,930 checks/156 windows. The complete native scene-owner graph was checked
+at supported maximum stereo and original-model mono for 1,536/1,767
+compositions, including the lower-LCD texture budget and source-state purity.
+This is host source/audio/resource evidence, not ARM/PICA pixels, audible
+console output, game-over/continue, total process RAM or physical FPS. It
+does not change the R90 ARM player or tester ZIP.
+
+The same unchanged single-death gates also pass on the R104 host diagnostic
+after adding separate natural GAME OVER/Continue route coverage. Original
+and EX retain the same source phases, checks, parity windows, compositions
+and texture peaks listed above. Both complete R104 Continue-NO routes pass
+through the actual title with120 bright recovered phases. The YES test driver
+omitted the source-required fresh button press on the returned map; those
+owned runs were stopped and remain invalid-driver failures, not passes.
+The corrected R106 host driver uses ordinary fresh START there, leaving the
+player unchanged. Both unchanged default death regressions also pass on
+R106, with identical parity/resource statistics and output hashes to R104.
+Original Continue-NO also passes on R106 through the actual title with120
+bright recovered phases, preserving200 parity windows/8,934 complete
+compositions and3,805,440 padded texture bytes. Original Continue-YES now
+also passes through the real route and live/full-shield gameplay plus120
+bright rasters (230 parity windows/14,271 complete compositions). EX NO/YES
+both pass:703/732 parity windows and11,625/16,980 complete compositions;
+peak padded scene/lower textures3,830,016 bytes. The same bounds, source
+purity, stereo/mono and complete resource requirements were retained.
+All six corrected-driver runs are terminal host passes. These direct runs
+do not qualify pending registered CTest deadlines, physical hardware or
+change the R90 ARM package.
+
+For a hardware regression, let a ship die normally in Corneria, then check
+that the death circle/fade covers the upper screen in both eyes, the lower
+HUD remains correct, and controls/audio/scenery recover after the restart.
+Report Original/EX, console model, slider position and the package's source
+commit. Do not infer sustained console speed from these host tests.
+
+### Earlier R89 merged-source ARM candidate (October 8)
+
+Use `build/StarFoxEnhanced-3ds-test-r89.zip`, or the **StarFoxEnhanced-3ds-test**
+artifact from
+[run 37788629827](https://github.com/kandowontu2/starfox-enhanced/actions/runs/37788629827).
+Its `BUILD-INFO.json` source is `b7ca8f36dee86265e27e8bc74c327a67f717daad`.
+All 40 asset-free checks, native ARM compilation, stack/memory/package gates,
+and independent ZIP/member/checksum/3DSX/SMDH inspection passed.
+ZIP SHA256: `bcfb22a7bbc6968c23298e5d2ba305e53d4ccf314b9fbfb1b4d35b3eb3cff164`.
+
+Follow the Quick start above. Identify the package by `BUILD-INFO.json`, not
+the older build-history entries in its bundled README. The pre-game menu,
+New-model slider stereo and original-model mono fallback remain. No private
+assets or release are included. This is a native-build-qualified candidate,
+not a claim of hardware-accepted FPS, audio, PICA output or full gameplay.
+
+### Earlier R74 runtime-remapping audio follow-up (October 8)
+
+The earlier checked candidate is `build/StarFoxEnhanced-3ds-test-r74.zip`, or the
 **StarFoxEnhanced-3ds-test** artifact from
 [run 37754152691](https://github.com/kandowontu2/starfox-enhanced/actions/runs/37754152691).
 Its `BUILD-INFO.json` source is `bbc9d0e4d362e5c4dd3e6584772c7cef7200b2cb`.
@@ -353,8 +811,9 @@ small report if the result fails. Select + Start exits. Do not mistake this
 result for sustained FPS, streaming audio, full process-RAM or hardware
 acceptance of the player.
 
-1. Prefer a New 3DS/New 3DS XL with an existing homebrew setup and Homebrew Launcher.
-   Original 3DS/XL and 2DS use the same package in mono.
+1. Use a New 3DS, New 3DS XL or New 2DS XL with an existing homebrew setup
+   and Homebrew Launcher. Original 3DS/XL/2DS are unsupported; their retained
+   legacy mono fallback is not a supported performance target.
    This package does not modify firmware or install a CIA.
 2. Extract the ZIP to the SD card root. The program is
    `/3ds/starfox-enhanced/starfox-enhanced.3dsx`.
@@ -379,23 +838,24 @@ Back up existing `starfox-enhanced` settings/save files before testing.
 - Face buttons and L/R follow the SNES/Nintendo physical arrangement.
 - Circle Pad and D-pad steer. Start pauses the game.
 - On New 3DS/XL the 3D slider changes stereo strength without advancing the
-  game twice. Slider zero skips the right eye. On Original 3DS/XL the slider
-  is ignored, including during preview and gameplay; the top screen stays mono.
-  Slider-off and 2DS use one mono eye. Begin testing at modest separation.
+  game twice. Slider zero skips the right eye. New 2DS XL always uses one
+  mono eye. Begin testing at modest separation.
 - Select + Y opens the native quick menu (resume/options/save/load).
 - Select + Start exits. Home/sleep should suspend and resume safely.
 - Pre-game Options includes controller remapping and **CUSTOMIZE SCREEN** for
   the lower HUD. Hold the mapped in-game L+R in setup for five seconds to reset
   settings; cartridge saves are retained.
 
-## Check on New 3DS/XL; separately check old-model mono
+## New-family acceptance checks
+
+Development remains emulator-led for now; this checklist is for a consolidated
+hardware candidate, not a request to test every incremental build.
 
 Please report model, build commit from `BUILD-INFO.json`, Original/EX,
 stage/scene, model, render FPS setting and stereo separation/convergence.
-On New 3DS/XL compare slider 0, halfway and full. On Original 3DS/XL verify
-both slider extremes stay mono. On New 2DS XL verify mono gameplay. Check
-Home-menu return, lid-close/wake and clean exit on each model. Do not compare
-New and old emulator timings as though they were the same hardware baseline.
+On New 3DS/XL compare slider 0, halfway and full. On New 2DS XL verify mono
+gameplay. Check Home-menu return, lid-close/wake and clean exit on supported
+models. Old-model performance and slider qualification are no longer required.
 
 - Preview OFF should keep the plain menu responsive; preview ON should show
   RENDERING during preparation. Start Game, experience switching and restart

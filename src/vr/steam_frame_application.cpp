@@ -3,6 +3,7 @@
 #include "starfox/vr/enhanced_landscape.hpp"
 #include "starfox/render/background_renderer.hpp"
 #include "starfox/vr/frame_wait.hpp"
+#include "starfox/vr/vulkan_frame_resources.hpp"
 #include "starfox/vr/scene_interpolation.hpp"
 #include "starfox/vr/cockpit.hpp"
 #include "starfox/vr/cartridge_save.hpp"
@@ -599,11 +600,13 @@ int starfox::vr::run_steam_frame_application(int argc,char** argv,const Applicat
     starfox::vr::VulkanDrawPackets scene;
     starfox::vr::VulkanSourceScene compute_scene;
     bool compute_scene_active=false;
-    std::array<std::unique_ptr<VulkanDxrFrame>,2> ray_frames;
+    // Reverse destruction retires producer commands before either the borrowed
+    // scene buffers/descriptors or their shared compute pipeline can die.
+    VulkanSpanPipeline ray_pipeline;
     std::array<std::unique_ptr<VulkanMixedRayScene>,2> ray_scenes;
+    std::array<std::unique_ptr<VulkanDxrFrame>,2> ray_frames;
     std::array<std::optional<XrTime>,2> ray_times;
     std::array<uint64_t,2> ray_sizes{};
-    VulkanSpanPipeline ray_pipeline;
     SourceModelPackets ray_inputs;
     StereoRayPlan ray_plan_cache;
     std::array<render::shadows::DxrShadows::Coverage,2> ray_coverage_views;
@@ -667,7 +670,12 @@ int starfox::vr::run_steam_frame_application(int argc,char** argv,const Applicat
                 std::span<const starfox::vr::DrawPacket>(&model_packet,1))) {std::cerr<<scene.status()<<'\n';return 8;}
         }
     }
-    starfox::vr::VulkanEyeCommands commands;
+    starfox::vr::VulkanFrameResources frame_resources;
+    auto& commands=frame_resources.commands;
+    auto& circle_pipeline=frame_resources.circle_pipeline;
+    auto& circle_vertices=frame_resources.circle_vertices;
+    auto& shutter_pipeline=frame_resources.shutter_pipeline;
+    auto& shutter_vertices=frame_resources.shutter_vertices;
     if(live && !live->output.open()) {std::cerr<<live->output.status()<<'\n';return 8;}
     const bool timing_gpu=starfox::vr::env_override_bool("timing_gpu").value_or(false);
     const std::optional<starfox::vr::VulkanEyeCommands::TimestampConfig> timestamp_config=profile_csv.enabled() || timing_gpu
@@ -752,13 +760,9 @@ int starfox::vr::run_steam_frame_application(int argc,char** argv,const Applicat
     startup.refresh_override=starfox::vr::env_override_float("refresh_rate");
     if(startup.haptics_override) std::cout<<"[vr] haptics strength overridden by SFX_VR_HAPTICS: "<<*startup.haptics_override<<'\n';
     startup.ray_tracing_available=ray_supported;startup.ray_tracing=ray_tracing;
-    starfox::vr::VulkanScenePipeline circle_pipeline;
-    starfox::vr::VulkanSceneBuffer circle_vertices;
     std::optional<starfox::vr::SceneBlend> circle_blend;
     starfox::vr::Matrix4 circle_model{};
     bool circle_active=false,circle_over_hud=false;
-    starfox::vr::VulkanScenePipeline shutter_pipeline;
-    starfox::vr::VulkanSceneBuffer shutter_vertices;
     bool shutter_ready=false,shutter_active=false;
     startup.open=live && live->game.flow_state()==starfox::simulation::GameFlowState::intro;
     const bool initial_extended=live && live->game.peek_meter_state().extended;
@@ -1535,7 +1539,8 @@ int starfox::vr::run_steam_frame_application(int argc,char** argv,const Applicat
                                 if(ray_frames[eye]->resize_geometry(uint32_t(plan.bytes/16))) ray_sizes[eye]=plan.bytes;
                             }
                             if(!ray_frames[eye] || ray_sizes[eye]!=plan.bytes || ray_frames[eye]->state()==VulkanDxrFrame::State::error) {
-                                ray_scenes[eye].reset();ray_frames[eye]=std::make_unique<VulkanDxrFrame>();
+                                ray_frames[eye].reset();ray_scenes[eye].reset();
+                                ray_frames[eye]=std::make_unique<VulkanDxrFrame>();
                                 if(!ray_frames[eye]->initialize(device.binding().device,get_device,device.binding().physicalDevice,
                                     ray_properties,*device.adapter_luid(),device.queue(),device.binding().queueFamilyIndex,uint32_t(plan.bytes/16))) ray_frames[eye].reset();
                                 ray_sizes[eye]=plan.bytes;

@@ -17,6 +17,9 @@ std::shared_ptr<const CalibratedGameFrame> native_curved_reflection_owner_checks
     check(!disocclusion || camera_motion,"Disocclusion qualification requires real moving eyes and independent optics");
     check(!source_validation || (!quality && !reconstruct),
         "Source-frame owner qualification currently requires AA OFF; MSAA remains a separate gate");
+    check(!native_source_lava_raw_input_only || (motion && !source_validation && !quality && !reconstruct
+        && !shifted && !camera_motion && !disocclusion && srgb),
+        "Raw-input capture requires the exact fixed-eye sRGB moving lava producer fixture");
     const auto enable=[&](bool enabled) {return source_validation
         ?renderer.enable_source_reflection_validation(enabled):renderer.enable_curved_reflection_validation(enabled);};
     const bool detailed=shifted || motion;
@@ -27,9 +30,24 @@ std::shared_ptr<const CalibratedGameFrame> native_curved_reflection_owner_checks
     check(!enable(true),"Curved/source owner did not require explicit diagnostic opt-in");
     check(renderer.enable_reflection_diagnostics(true) && enable(true),
         "Could not stage the actual ordered-liquid owner");
-    if(source_timings && source_timings->enabled())check(source_validation
-        && renderer.set_source_stage_observer(ReflectionSourceStageTimings::observe,source_timings),
-        "Could not bind explicit source-stage timestamps");
+    ReflectionSourceProofReceipts proof_receipts;
+    const bool proof_diagnostics=source_validation && motion
+        && (native_source_lava_motion_proof_only || SDL_getenv("STARFOX_TRACE_SOURCE_PROOF_RECEIPTS"));
+    struct SourceObserver {
+        ReflectionSourceStageTimings* timings;ReflectionSourceProofReceipts* proofs;
+        static void observe(void* context,const ReflectionSourceStageEvent& event) {
+            auto& state=*static_cast<SourceObserver*>(context);
+            if(state.timings && state.timings->enabled())ReflectionSourceStageTimings::observe(state.timings,event);
+            state.proofs->observe(event);
+        }
+    } source_observer{source_timings,&proof_receipts};
+    struct RemoveSourceObserver {
+        DisplayXrGameRenderer& renderer;
+        ~RemoveSourceObserver(){renderer.set_source_stage_observer(nullptr);}
+    } remove_observer{renderer};
+    if(proof_diagnostics || (source_timings && source_timings->enabled()))check(source_validation
+        && renderer.set_source_stage_observer(SourceObserver::observe,&source_observer),
+        "Could not bind explicit source-stage diagnostics");
     struct Bank {shadows::GpuReflectionOutput output;std::vector<unsigned> words;};
     const auto download=[&](shadows::GpuReflectionOutput output) {
         check(output.device && output.buffer && output.reflection_history.storage_bytes,"Missing real owner ray bank");
@@ -142,6 +160,8 @@ std::shared_ptr<const CalibratedGameFrame> native_curved_reflection_owner_checks
     std::uint64_t independently_bounded_seeds=0;
     std::shared_ptr<CalibratedGameFrame> last;
     for(unsigned ground_material:{5U,9U})for(auto material:{Effect::mirror,Effect::marble}) {
+        if((native_source_lava_motion_proof_only || native_source_lava_raw_input_only)
+            && (ground_material!=9 || material!=Effect::mirror))continue;
         check(enable(false) && enable(true),
             "Curved owner could not cut/reseed between native cohorts");
         auto base=std::make_shared<CalibratedGameFrame>();base->settings.srgb=srgb;base->clear={.03F,.06F,.09F,1};
@@ -342,10 +362,38 @@ std::shared_ptr<const CalibratedGameFrame> native_curved_reflection_owner_checks
         std::array<std::optional<starfox::vr::EyeCamera>,2> previous_cameras{};
         for(unsigned phase=0;phase<phases;++phase) {
             auto frame=source(phase);
+            std::vector<unsigned> diagnostic_proofs;
+            proof_receipts.selected=proof_diagnostics && ground_material==9 && material==Effect::mirror && phase==1;
             if(source_validation)std::cerr<<"Source owner phase begin ground="<<ground_material
                 <<" model="<<unsigned(material)<<" samples="<<samples<<" phase="<<phase
                 <<" srgb="<<srgb<<" extent="<<mock.image_width<<'x'<<mock.image_height<<std::endl;
             const auto images=render(frame);
+            if(proof_receipts.selected) {
+                auto receipts=proof_receipts.retired(!renderer.frame_pending());
+                const unsigned records=mock.image_width*mock.image_height,proof_begin=records*12;
+                std::array<std::unordered_map<unsigned,unsigned>,5> reasons;
+                unsigned curved=0;
+                for(unsigned r=0;r<records;++r) {
+                    const unsigned query=r*12,control=receipts[query+5];
+                    if(receipts[query]>=model_triangles || !((control>>4)&15U))continue;
+                    ++curved;const unsigned proof=proof_begin+r*144;
+                    ++reasons[0][(receipts[proof]<<24)|(receipts[proof+1]<<16)|receipts[proof+3]];
+                    ++reasons[1][(receipts[proof+48]<<24)|receipts[proof+50]];
+                    ++reasons[2][(receipts[proof+64]<<24)|receipts[proof+65]];
+                    ++reasons[3][(receipts[proof+80]<<24)|receipts[proof+81]];
+                    ++reasons[4][(receipts[proof+96]<<24)|receipts[proof+97]];
+                }
+                std::cout<<"Source curved proof receipts srgb="<<srgb<<" phase="<<phase
+                    <<" eye=0 complete-records="<<records<<" curved-queries="<<curved<<'\n';
+                for(unsigned stage=0;stage<reasons.size();++stage) {
+                    std::vector<std::pair<unsigned,unsigned>> sorted(reasons[stage].begin(),reasons[stage].end());
+                    std::sort(sorted.begin(),sorted.end());
+                    std::cout<<"Source proof stage="<<stage<<" valid/class/reason:count=";
+                    for(const auto& [key,count]:sorted)std::cout<<(key>>24)<<'/'<<((key>>16)&255)<<'/'<<(key&65535)<<':'<<count<<',';
+                    std::cout<<std::endl;
+                }
+                diagnostic_proofs=std::move(receipts);
+            }
             if(source_validation)std::cerr<<"Source owner phase GPU/readback complete ground="<<ground_material
                 <<" model="<<unsigned(material)<<" samples="<<samples<<" phase="<<phase<<std::endl;
             const auto old_cameras=previous_cameras;
@@ -400,6 +448,46 @@ std::shared_ptr<const CalibratedGameFrame> native_curved_reflection_owner_checks
                 const auto& out=candidate[sample][eye];const auto& h=out.output.reflection_history;
                 auto& witness=coverage[sample][eye];
                 const unsigned count=out.output.width*out.output.height,lobes=h.model_lobes;
+                if(!diagnostic_proofs.empty() && !sample && !eye) {
+                    // Correlate the complete GPU receipts with the ACTUAL old
+                    // bank, for diagnosis only. These roots/targets/taps never
+                    // seed the independent forward-optics acceptance oracle
+                    // or become renderer input. Bound verbose printing only.
+                    check(phase && lobes==1 && diagnostic_proofs.size()==count*156,
+                        "Proof correlation lost its complete previous-bank layout");
+                    const auto& old=accepted[sample][eye];unsigned unique{},printed{};
+                    for(unsigned p=0;p<count;++p) {
+                        const unsigned q=p*12,proof=count*12+p*144;
+                        if(diagnostic_proofs[q]>=model_triangles || !((diagnostic_proofs[q+5]>>4)&15U)
+                            || diagnostic_proofs[proof]!=1 || diagnostic_proofs[proof+1]!=1)continue;
+                        ++unique;if(printed++>=32)continue;
+                        std::array<float,4> root{};
+                        for(unsigned n=0;n<4;++n)root[n]=std::bit_cast<float>(diagnostic_proofs[proof+36+n]);
+                        std::cout<<"Source unique proof diagnostic pixel="<<p%out.output.width<<','<<p/out.output.width
+                            <<" primary="<<diagnostic_proofs[q]<<" control="<<diagnostic_proofs[q+5]
+                            <<" terminal="<<diagnostic_proofs[q+6]<<" target=";
+                        for(unsigned n=0;n<3;++n)std::cout<<std::bit_cast<float>(diagnostic_proofs[q+7+n])<<',';
+                        std::cout<<" enclosure=";for(const auto value:root)std::cout<<value<<',';
+                        std::cout<<" witness="<<diagnostic_proofs[proof+48]<<'/'<<diagnostic_proofs[proof+50]<<'\n';
+                        if(!std::all_of(root.begin(),root.end(),[](float v){return std::isfinite(v);})
+                            || root[0]<.5F || root[1]<.5F || root[2]>out.output.width-.5F
+                            || root[3]>out.output.height-.5F || root[0]>root[2] || root[1]>root[3])continue;
+                        const int x0=int(std::floor(root[0]-.5F))-1,y0=int(std::floor(root[1]-.5F))-1,
+                            x1=int(std::floor(root[2]-.5F))+2,y1=int(std::floor(root[3]-.5F))+2;
+                        if(x1-x0>5 || y1-y0>5)continue;
+                        for(int y=y0;y<=y1;++y)for(int x=x0;x<=x1;++x) {
+                            if(x<0 || y<0 || x>=int(out.output.width) || y>=int(out.output.height))continue;
+                            const unsigned np=unsigned(y)*out.output.width+unsigned(x),at=h.incoming_offset/4+np*16;
+                            std::cout<<"Source old tap diagnostic xy="<<x<<','<<y
+                                <<" primary="<<old.words[h.identity_offset/4+np]<<" path=";
+                            for(unsigned n=0;n<6;++n)std::cout<<old.words[at+n]<<',';
+                            std::cout<<" feature=";for(unsigned n=0;n<3;++n)std::cout<<std::bit_cast<float>(old.words[at+6+n])<<',';
+                            std::cout<<" depth="<<std::bit_cast<float>(old.words[h.witness_offset/4+np])<<'\n';
+                        }
+                    }
+                    std::cout<<"Source unique proof diagnostic total="<<unique<<" printed="<<std::min(unique,32U)
+                        <<"; observation only, never an optical/colour acceptance oracle"<<std::endl;
+                }
                 auto& admission=candidate_admissions[sample][eye];
                 admission.output=renderer.accepted_reflection_source_admission(eye,sample);
                 if(source_validation) {
@@ -438,7 +526,8 @@ std::shared_ptr<const CalibratedGameFrame> native_curved_reflection_owner_checks
                     "Current presentation overwrote the prior accepted ordered-liquid bank");
 #if defined(STARFOX_CURVED_OWNER_TRACE_AVAILABLE)
                 std::vector<unsigned> refusal_trace;unsigned traced_samples=0;
-                if(detailed && material==Effect::mirror && ((phase==1 && eye==0) || (motion && phase))) {
+                if(!native_source_lava_raw_input_only && detailed && material==Effect::mirror
+                    && ((phase==1 && eye==0) || (motion && phase))) {
                     const auto inputs=renderer.reflection_liquid_inputs(eye,sample);
                     refusal_trace=trace_direct(raw.output,accepted[sample][eye].output,inputs,*renderer.source_raster_diagnostic_camera(eye));
                 }
@@ -580,6 +669,22 @@ std::shared_ptr<const CalibratedGameFrame> native_curved_reflection_owner_checks
                             }
                             std::cout<<"END_CURVED_OWNER_SOURCE_V4\n"<<std::flush;
                         };
+                        if(native_source_lava_raw_input_only && phase==1 && sample==0 && eye==0
+                            && p==29*out.output.width+107 && l==0) {
+                            // Predetermined CURRENT raster coordinate from the
+                            // recorded refusal, not a downloaded source root.
+                            // Export only the already bounded raw geometry,
+                            // calibration/path/depth and full old visibility.
+                            check(out.output.width==128 && out.output.height==72 && lobes==1
+                                && id==40 && control==546 && motion_inputs
+                                && motion_inputs->current_liquid_transform,
+                                "Raw lava capture no longer matches the observed producer-input case");
+                            emit_optical_replay();
+                            std::cout<<"Raw lava input capture: eye0/sample0/phase1 CURRENT pixel107,29; "
+                                <<"all "<<count<<" old visibility inputs retained. No GPU root, guide, source choice "
+                                <<"or old incident RGB exported. Diagnostic only, no qualification claim.\n";
+                            return frame;
+                        }
                         // A same-byte incident can still be an admitted old
                         // source lookup before quantization. Qualify EVERY
                         // admitted footprint independently, not only changes

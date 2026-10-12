@@ -45,17 +45,7 @@ FetchContent_Declare(starfox_vulkan_headers
 FetchContent_MakeAvailable(starfox_vulkan_headers)
 # Vendored shared sfvr C99 library (third_party/sfvr/VERSION): built for every
 # VR target (PCVR, Quest, Steam Frame) through starfox_vr_core.
-enable_language(C)
-add_library(starfox_sfvr STATIC
-    third_party/sfvr/src/sfvr_haptics.c third_party/sfvr/src/sfvr_perf.c
-    third_party/sfvr/src/sfvr_room.c third_party/sfvr/src/sfvr_settings.c
-    third_party/sfvr/src/sfvr_turn.c third_party/sfvr/src/sfvr_view.c)
-target_include_directories(starfox_sfvr PUBLIC third_party/sfvr/include)
-set_target_properties(starfox_sfvr PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED ON
-    C_EXTENSIONS OFF POSITION_INDEPENDENT_CODE ON)
-if(NOT MSVC)
-    target_link_libraries(starfox_sfvr PUBLIC m)
-endif()
+include("${CMAKE_CURRENT_LIST_DIR}/Sfvr.cmake")
 add_library(starfox_vr_core STATIC src/vr/openxr_runtime.cpp src/vr/openxr_session.cpp src/vr/openxr_swapchains.cpp src/vr/eye_camera.cpp src/vr/vulkan_device.cpp src/vr/vulkan_loader.cpp src/vr/stereo_renderer.cpp src/vr/vulkan_eye_targets.cpp)
 target_include_directories(starfox_vr_core PUBLIC include)
 target_sources(starfox_vr_core PRIVATE src/vr/vulkan_eye_commands.cpp)
@@ -241,6 +231,9 @@ if(NOT ANDROID)
         add_test(NAME starfox_pcvr_help COMMAND starfox_pcvr --help)
         set_tests_properties(starfox_pcvr_help PROPERTIES LABELS vr TIMEOUT 10
             PASS_REGULAR_EXPRESSION "Requires a Vulkan-capable GPU")
+        add_test(NAME starfox_vr_resource_ownership
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_vr_resource_ownership.py")
+        set_tests_properties(starfox_vr_resource_ownership PROPERTIES LABELS vr TIMEOUT 10)
         add_test(NAME starfox_vr_profile_cli
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/vr_profile_cli_tests.py"
                 "$<TARGET_FILE:starfox_pcvr>")

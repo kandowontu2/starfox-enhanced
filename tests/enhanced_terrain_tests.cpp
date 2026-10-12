@@ -599,6 +599,101 @@ int main() {
         require(environment_palette_regions(p,0)==std::array<std::uint8_t,256>{},
             "Landscape enhancements contaminated a tunnel atlas");
     }
+    for(unsigned mode:{1U,2U}) for(bool large:{false,true}) for(unsigned size=0;size<4;++size) {
+        starfox::simulation::SnesPpuState p{};
+        p.background_mode=mode;p.bg2_tile_size_16=large;p.bg2_screen_size=size;
+        p.bg2_screen_base=0x7000;p.bg2_character_base=0x5000;
+        const unsigned edge=large?16:8,width=(size&1)?64:32,height=(size&2)?64:32;
+        const unsigned horizon=height*edge/2;
+        const auto store=[&](unsigned at,unsigned word) {
+            p.vram[at&65535]=std::uint8_t(word);p.vram[(at+1)&65535]=std::uint8_t(word>>8);
+        };
+        const auto entry=[&](unsigned x,unsigned y) {
+            return ((x/32)+(y/32)*(width/32))*1024+(y%32)*32+x%32;
+        };
+        for(unsigned group=0;group<5;++group) for(unsigned sub:{0U,1U,16U,17U}) {
+            const unsigned ink=std::array{1U,14U,3U,2U,15U}[group];
+            for(unsigned y=0;y<8;++y) {
+                const unsigned at=0xa000+(group*32+sub)*32+y*2;
+                store(at,((ink&1)?255:0)|((ink&2)?0xff00:0));
+                store(at+16,((ink&4)?255:0)|((ink&8)?0xff00:0));
+            }
+        }
+        for(unsigned y=0;y<height;++y) for(unsigned x=0;x<width;++x) {
+            const unsigned group=y*edge<horizon?3:y*edge<horizon+2*edge?0:
+                y<height-2?1:2;
+            store(0xe000+entry(x,y)*2,group*32|((group==3?2:4)<<10)|0xc000);
+        }
+        // A tiny white detail occupies less than 5% of the first ground row.
+        store(0xe000+entry(0,horizon/edge)*2,128|(4<<10)|0xc000);
+        const auto ramp=source_ground_ramp(p,horizon);
+        require(ramp.valid() && ramp.far_index==65 && ramp.near_index==67
+            && ramp.inks[65] && ramp.inks[78] && ramp.inks[67] && !ramp.inks[79],
+            "Authored ground row order lost flips/pages, first bands or sparse detail");
+        for(unsigned x=0;x<width;++x) store(0xe000+entry(x,horizon/edge)*2,96|(2<<10)|0xc000);
+        const auto ownership=environment_palette_regions(p,horizon-112);
+        const auto after_sky=source_ground_ramp(p,horizon,&ownership);
+        require(ownership[34]==2 && after_sky.valid() && after_sky.far_index==65
+            && after_sky.near_index==67 && !after_sky.inks[34],
+            "A leading sky-only band displaced the first actual ground colour");
+        for(unsigned x=0;x<width;++x) store(0xe000+entry(x,horizon/edge)*2,(4<<10)|0xc000);
+        store(0xe000+entry(0,horizon/edge)*2,128|(4<<10)|0xc000);
+        std::array<std::uint32_t,256> classes{};
+        classes[78]=2;classes[67]=3;classes[79]=7;classes[34]=6;classes[20]=1;
+        normalize_ground_ramp_classes(ramp,classes);
+        require(classes[65]==2 && classes[67]==2 && classes[78]==2
+            && classes[79]==7 && classes[34]==6 && classes[20]==1,
+            "One authored basic ramp split into materials or recoloured protected/sky inks");
+        const std::array<unsigned,3> far{9,6,0},near{21,18,12};
+        for(unsigned fade=0;fade<=31;++fade) {
+            p.cgram[65]=p.cgram[67]=0;
+            for(unsigned c=0;c<3;++c) {
+                p.cgram[65]|=std::uint16_t((far[c]*fade/31)<<(c*5));
+                p.cgram[67]|=std::uint16_t((near[c]*fade/31)<<(c*5));
+            }
+            p.cgram[78]=0x7fff; // Brightest interior band is neither endpoint.
+            const auto gradient=authored_ground_gradient(p.cgram,classes,ramp);
+            require(gradient[0][3]==2 && gradient[1][3]==1,
+                "Authored ground lost material or endpoint validity during a fade");
+            for(unsigned c=0;c<3;++c) for(unsigned end=0;end<2;++end) {
+                const auto raw=(end?near:far)[c]*fade/31;
+                require(gradient[end][c]==float((raw<<3)|(raw>>2)),
+                    "Enhanced ground sorted by brightness, ignored black or latched old CGRAM");
+            }
+        }
+        require(authored_ground_gradient(p.cgram,classes,ramp)!=source_ground_gradient(p.cgram,classes),
+            "Authored-order regression failed to distinguish the former brightness-extrema path");
+        auto returning=ramp;returning.near_index=returning.far_index;
+        const auto constant=authored_ground_gradient(p.cgram,classes,returning);
+        for(unsigned c=0;c<3;++c) require(constant[0][c]==constant[1][c],
+            "A ramp returning to its first colour incorrectly borrowed a bright interior band");
+        returning.sampled_rows=1;
+        require(!returning.valid(),"One atlas row was mistaken for a complete ground ramp");
+        auto water=classes;water[65]=water[67]=water[78]=5;
+        const auto before=water;normalize_ground_ramp_classes(ramp,water);
+        require(water==before && authored_ground_gradient(p.cgram,water,ramp,true)
+            ==source_ground_gradient(p.cgram,water,true),
+            "Basic ramp correction changed the reflective-water gradient path");
+        auto protected_ramp=ramp;protected_ramp.inks[34]=protected_ramp.inks[79]=true;
+        normalize_ground_ramp_classes(protected_ramp,classes);
+        require(classes[34]==6 && classes[79]==7,"Ramp normalization changed protected sky/detail");
+        auto invalid=ramp;invalid.far_index=999;
+        require(authored_ground_gradient(p.cgram,classes,invalid)==source_ground_gradient(p.cgram,classes),
+            "Invalid authored endpoint failed to use the existing safe fallback");
+        require(authored_ground_gradient(std::span<const std::uint16_t>(p.cgram).first(64),classes,ramp)
+            ==source_ground_gradient(std::span<const std::uint16_t>(p.cgram).first(64),classes),
+            "Authored endpoint read past a partial live palette");
+        for(unsigned x=0;x<width;++x) store(0xe000+entry(x,height-1)*2,96|(2<<10)|0xc000);
+        const auto bounded=source_ground_ramp(p,horizon);
+        require(bounded.far_index==65 && bounded.near_index==67 && !bounded.inks[34],
+            "Ground ramp entered a second atlas palette subject");
+        p.tunnel_scene=true;require(!source_ground_ramp(p,horizon).valid(),"Ground ramp entered a tunnel");
+        p.tunnel_scene=false;p.background_mode=3;
+        require(!source_ground_ramp(p,horizon).valid(),"Ground ramp decoded unsupported tile planes");
+        p.background_mode=mode;
+        require(!source_ground_ramp(p,height*edge).valid(),"Ground ramp escaped atlas height");
+    }
+    std::cout<<"Authored basic-ground gradients: 16 atlas layouts, 32 live fade levels, row order, flips/pages, sparse detail and liquid/protected-class exclusions passed\n";
     for(const std::int16_t horizontal:{std::int16_t(-8192),std::int16_t(8192)}) {
         const std::array<std::int16_t,9> banked{31727,0,0,horizontal,31727,0,0,0,32767};
         const float slope=environment_horizon_slope(banked);

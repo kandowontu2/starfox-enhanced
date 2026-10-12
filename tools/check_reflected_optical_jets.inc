@@ -69,6 +69,21 @@ JetFixture jet_fixture(unsigned family,unsigned variant) {
     f.hops=p.hops;f.lobe=p.lobe;return f;
 }
 [[maybe_unused]] void jet_checks(Gpu& gpu) {
+    const auto contracts=gpu.jet_boxes(std::vector<JetInput>(8),0,true);
+    require(contracts.size()==8,"Incomplete native inherited-root contract batch");
+    for(unsigned n=0;n<contracts.size();++n) {
+        const auto& result=contracts[n];
+        require(result.status[0]==(n==6?0U:1U) && result.status[1]==(n==1?1U:n==3?2U:0U)
+            && result.status[2]==(n==2?0U:1U) && result.status[3]==unsigned(n<2),
+            "Native inherited intersection confused a checked unresolved image with an invalid/absent proof");
+        if(n<2) {
+            require(result.enclosure!=result.box && result.enclosure[0]>=result.box[0]
+                && result.enclosure[1]>=result.box[1] && result.enclosure[2]<=result.box[2]
+                && result.enclosure[3]<=result.box[3] && result.enclosure[0]<=.5F && result.enclosure[2]>=.5F
+                && result.enclosure[1]<=.5F && result.enclosure[3]>=.5F,
+                "Checked native intersection failed to retain the exact affine root in a narrower parent");
+        }else require(result.enclosure==result.box,"Invalid/unresolved/no-root/failed inherited proof was modified");
+    }
     std::vector<JetFixture> fixtures;
     for(unsigned family=0;family<3;++family)for(unsigned variant=0;variant<(family?13U:9U);++variant)fixtures.push_back(jet_fixture(family,variant));
     const unsigned axis_start=unsigned(fixtures.size());
@@ -120,7 +135,22 @@ JetFixture jet_fixture(unsigned family,unsigned variant) {
             const double y=input.box[1]+double(input.box[3]-input.box[1])*(steps==1?.5:(double(yy)+.5)/steps);
             const auto ray=o::forward(f.input,f.path,x,y);require(ray.valid,"Bounded physical branch contradicted independent forward map");
             const std::array<double,8> values{ray.origin[0],ray.origin[1],ray.origin[2],ray.outgoing[0],ray.outgoing[1],ray.outgoing[2],ray.depth,ray.bias};
-            for(unsigned c=0;c<8;++c)require(jet_contains(result.ray[c],values[c]),"GPU optical value bounds omitted independent forward geometry");
+            for(unsigned c=0;c<8;++c) {
+                if(!jet_contains(result.ray[c],values[c])) {
+                    const auto precision=std::cerr.precision(17);
+                    std::cerr<<"Optical value miss fixture="<<n/radii.size()<<" box="<<n
+                        <<" family="<<f.family<<" hops="<<f.hops<<" lobe="<<f.lobe
+                        <<" component="<<c<<" sample="<<x<<','<<y
+                        <<" box-bounds="<<input.box[0]<<','<<input.box[1]<<','<<input.box[2]<<','<<input.box[3]
+                        <<" reference="<<values[c]<<" bounds="<<result.ray[c][0]<<','<<result.ray[c][1]
+                        <<" status="<<result.status[0]<<','<<result.status[1]<<','<<result.status[2]<<','<<result.status[3]<<'\n';
+                    for(unsigned coordinate=0;coordinate<8;++coordinate)
+                        std::cerr<<"  optical component="<<coordinate<<" reference="<<values[coordinate]
+                            <<" bounds="<<result.ray[coordinate][0]<<','<<result.ray[coordinate][1]<<'\n';
+                    std::cerr.precision(precision);
+                }
+                require(jet_contains(result.ray[c],values[c]),"GPU optical value bounds omitted independent forward geometry");
+            }
             const auto r=jet_reference_residual(f,x,y,result.status[2]);
             for(unsigned c=0;c<2;++c)require(jet_contains(result.residual[c],r[coordinates[c]]),"GPU residual enclosure omitted independent forward residual");
             ++samples;
@@ -169,6 +199,39 @@ JetFixture jet_fixture(unsigned family,unsigned variant) {
     }
     for(bool covered:axis_valid)require(covered,"Exact-axis, reversed or one-ULP-tilted face lacks complete physical differential coverage");
     const auto stable=gpu.jet_boxes(boxes);require(std::memcmp(outputs.data(),stable.data(),outputs.size()*sizeof(JetResult))==0,"Held optical differential inputs changed outputs");
+    std::array<unsigned,2> refined_unique{},refined_tighter{};
+    // Exercise the actual shared GPU writer with its production refinement
+    // bounds. Independent roots are computed ONLY after the GPU readback;
+    // neither roots nor downloaded enclosures become renderer inputs.
+    for(unsigned refinements=1;refinements<=2;++refinements) {
+        const auto refined=gpu.jet_boxes(boxes,refinements);
+        require(refined.size()==outputs.size(),"Incomplete refined differential output batch");
+        for(unsigned n=0;n<refined.size();++n) {
+            const auto& base=outputs[n];const auto& result=refined[n];
+            auto metadata=result;metadata.enclosure=base.enclosure;
+            require(std::memcmp(&metadata,&base,sizeof(base))==0,
+                "Refinement changed original domain, classification, value/Jacobian or strict existence certificate");
+            if(base.status[1]!=1) {
+                require(result.enclosure==base.enclosure,"Refinement promoted/changed an unresolved or no-root enclosure");
+                continue;
+            }
+            ++refined_unique[refinements-1];
+            require(result.enclosure[0]>=base.enclosure[0] && result.enclosure[1]>=base.enclosure[1]
+                && result.enclosure[2]<=base.enclosure[2] && result.enclosure[3]<=base.enclosure[3]
+                && result.enclosure[0]<=result.enclosure[2] && result.enclosure[1]<=result.enclosure[3],
+                "Inherited root enclosure enlarged or became empty");
+            const auto root=jet_reference_root(fixtures[n/radii.size()],7.75,10.75,result.status[2]);
+            require(root.has_value() && (*root)[0]>=result.enclosure[0] && (*root)[0]<=result.enclosure[2]
+                && (*root)[1]>=result.enclosure[1] && (*root)[1]<=result.enclosure[3],
+                "Inherited intersection omitted the independent physical root");
+            refined_tighter[refinements-1]+=unsigned(result.enclosure!=base.enclosure);
+        }
+        const auto held=gpu.jet_boxes(boxes,refinements);
+        require(std::memcmp(refined.data(),held.data(),refined.size()*sizeof(JetResult))==0,
+            "Held refined differential inputs changed outputs");
+        require(refined_unique[refinements-1]==unique && refined_tighter[refinements-1]>0,
+            "Refinement lacks actual inherited-root/narrowing coverage");
+    }
     auto bad=boxes.front();std::vector<JetInput> faults;
     bad.frame.receiver[0][3]=0;faults.push_back(bad);bad=boxes.front();bad.frame.receiver[5][1]=8;faults.push_back(bad);
     bad=boxes.front();bad.frame.terminal[0]=NAN;faults.push_back(bad);bad=boxes.front();bad.box[0]=NAN;faults.push_back(bad);
@@ -176,6 +239,11 @@ JetFixture jet_fixture(unsigned family,unsigned variant) {
     bad=boxes[9*radii.size()];bad.frame.liquid[5][0]+=1;faults.push_back(bad);
     bad=boxes[9*radii.size()];bad.box={1,1,16,12};faults.push_back(bad); // Crosses a primary denominator/physical branch.
     const auto refusals=gpu.jet_boxes(faults);for(const auto& result:refusals)require(!result.status[0] && !result.status[1],"Invalid/branch-crossing differential input published a root certificate");
+    for(unsigned refinements=1;refinements<=2;++refinements) {
+        const auto refined=gpu.jet_boxes(faults,refinements);
+        require(refined.size()==refusals.size() && std::memcmp(refined.data(),refusals.data(),refined.size()*sizeof(JetResult))==0,
+            "Refinement changed a malformed/arithmetic/branch refusal");
+    }
     // These boxes are authored independently of the downloaded certificates.
     // A local existence result must not be substituted for global uniqueness.
     std::vector<JetInput> displaced;
@@ -195,6 +263,11 @@ JetFixture jet_fixture(unsigned family,unsigned variant) {
         }
     }
     require(absent_certificates,"No negative local-root case was actually exercised");
+    for(unsigned refinements=1;refinements<=2;++refinements) {
+        const auto refined=gpu.jet_boxes(displaced,refinements);
+        require(refined.size()==absent.size() && std::memcmp(refined.data(),absent.data(),refined.size()*sizeof(JetResult))==0,
+            "Refinement changed a displaced no-root certificate");
+    }
     auto boundary=fixtures.front();boundary.path.terminal={0,0,-1};boundary.frame=optical_frame(boundary.input,boundary.path);
     const std::vector<JetInput> shared_edge{{boundary.frame,{8.5F-1.F/64,6.5F-1.F/64,8.5F,6.5F+1.F/64}},
         {boundary.frame,{8.5F,6.5F-1.F/64,8.5F+1.F/64,6.5F+1.F/64}},
@@ -202,11 +275,164 @@ JetFixture jet_fixture(unsigned family,unsigned variant) {
     const auto edge_results=gpu.jet_boxes(shared_edge);
     for(const auto& result:edge_results)require(result.status[0]==1 && result.status[1]==0,
         "Shared-boundary/zero-area root was falsely certified or excluded");
+    for(unsigned refinements=1;refinements<=2;++refinements) {
+        const auto refined=gpu.jet_boxes(shared_edge,refinements);
+        require(refined.size()==edge_results.size() && std::memcmp(refined.data(),edge_results.data(),refined.size()*sizeof(JetResult))==0,
+            "Refinement changed a shared-boundary/zero-area refusal");
+    }
     std::cout<<"GPU optical differential/local-root checks: "<<fixtures.size()<<" canonical planar/water/lava paths, 0-4 ordered finite/liquid hops, all eight rough lobes; "
         <<valid<<'/'<<boxes.size()<<" physical boxes, "<<samples<<" independent forward samples, "<<derivatives<<" five-point derivative checks; "
         <<unique<<" local unique-root enclosures, "<<no_root<<" local no-root boxes, "<<unknown<<" unresolved physical branches; "
         <<absent_certificates<<" displaced no-root certificates, three shared-boundary/zero-area refusals, held/malformed checks passed.\n"
+        <<"Inherited GPU refinement1/2: "<<refined_unique[0]<<'/'<<refined_unique[1]<<" independent root enclosures retained; "
+        <<refined_tighter[0]<<'/'<<refined_tighter[1]<<" narrowed, original certificates and all refusals unchanged.\n"
         <<"Local certificates ONLY: no complete global source cover, native-owner integration, old RGB reuse or frame-rate qualification.\n";
+}
+// Replay extends, rather than replaces, the canonical suite above. Only the
+// marked raw INPUT block is read: no downloaded inverse/root or colour enters
+// these boxes. The 448-byte diagnostic frame encodes its terminal as float3;
+// it is not the native 512-byte raw-feature/eye-transform certificate ABI.
+JetFixture jet_replay_fixture(const FullCurvedOwnerReplay& replay) {
+    require(replay.x<replay.width && replay.y<replay.height,"Replay receiver is outside its raw input extent");
+    const unsigned kind=replay.record[4]>>8,hops=replay.record[4]&7U,mask=(replay.record[4]>>4)&15U;
+    require(kind>=1 && kind<=3 && hops<=4 && !(mask>>hops) && (kind==3)==(hops==4)
+        && std::isfinite(replay.roughness) && replay.roughness>=0 && replay.roughness<=1,
+        "Malformed raw replay optical path");
+    JetFixture f;f.input=replay.inputs;f.path=old_optical_path(replay);
+    auto& l=f.input.liquid;
+    const auto encode=[](auto& values){for(auto& value:values)value=float(value);};
+    encode(l.point);encode(l.normal);encode(l.rotation);encode(l.offset);encode(l.projection);
+    l.near=float(l.near);l.far=float(l.far);l.time=float(l.time);
+    f.path.receiver=jet_binary32_plane(f.path.receiver);
+    for(auto& plane:f.path.mirrors)plane=jet_binary32_plane(plane);
+    encode(f.path.terminal);f.path.roughness=float(f.path.roughness);
+    f.frame=optical_frame(f.input,f.path);f.frame.control[3]=kind;
+    f.hops=hops;f.lobe=replay.lobe;f.family=l.material==3?2U:1U;
+    return f;
+}
+[[maybe_unused]] void jet_replay_checks(Gpu& gpu,const FullCurvedOwnerReplay& replay) {
+    const auto f=jet_replay_fixture(replay);
+    const float sx=float(replay.x)+.5F,sy=float(replay.y)+.5F;
+    // Authored receiver coordinates, never an independently or GPU-solved root.
+    constexpr std::array<float,7> radii{0.F,1.F/1024,1.F/256,1.F/128,1.F/64,1.F/16,1.F/4};
+    std::vector<JetInput> boxes;
+    for(float radius:radii)boxes.push_back({f.frame,{sx-radius,sy-radius,sx+radius,sy+radius}});
+    const auto outputs=gpu.jet_boxes(boxes);
+    require(outputs.size()==boxes.size(),"Incomplete raw replay differential batch");
+    // Independent forward solves happen AFTER GPU readback, for comparison
+    // only. Neither result is ever uploaded as a root/guide/refinement seed.
+    const auto native_path=old_optical_path(replay);
+    const auto native_root=o::solve_forward(replay.inputs,native_path,sx,sy);
+    const auto read=[&](unsigned x,unsigned y)->std::optional<o::SourceTap>{
+        if(x>=replay.width || y>=replay.height)return {};
+        return replay.taps[std::size_t(y)*replay.width+x];
+    };
+    if(native_root.valid) {
+        const o::Solution source{native_root.x-.5,native_root.y-.5,native_root.depth,native_root.error,true,false};
+        std::cout<<"Raw native-input forward root="<<native_root.x<<','<<native_root.y<<" error="<<native_root.error
+            <<" independent-source-guard="<<unsigned(o::source_guard(replay.inputs,replay.primary,replay.record,
+                replay.roughness,replay.lobe,source,read))<<'\n';
+    }
+    unsigned valid=0,unique=0,no_root=0,unresolved=0,samples=0,derivatives=0;
+    std::array<std::optional<std::array<double,2>>,7> roots;
+    for(unsigned n=0;n<outputs.size();++n) {
+        const auto& input=boxes[n];const auto& result=outputs[n];
+        std::cout<<"Raw replay box radius="<<radii[n]<<" valid="<<result.status[0]<<" root-status="<<result.status[1]
+            <<" refusal="<<result.status[3]<<" enclosure="<<result.enclosure[0]<<','<<result.enclosure[1]<<','
+            <<result.enclosure[2]<<','<<result.enclosure[3]<<'\n';
+        if(!result.status[0]) {
+            require(!result.status[1],"Unresolved raw replay published a local root certificate");++unresolved;continue;
+        }
+        require(result.status[0]==1 && result.status[1]<=2 && result.status[2]<3 && !result.status[3]
+            && result.box==input.box,"Malformed raw replay differential result");
+        ++valid;const auto coordinates=jet_coordinates(result.status[2]);
+        const double span=std::max(double(input.box[2]-input.box[0]),double(input.box[3]-input.box[1]));
+        const unsigned steps=span?5:1;
+        for(unsigned yy=0;yy<steps;++yy)for(unsigned xx=0;xx<steps;++xx) {
+            const double x=input.box[0]+double(input.box[2]-input.box[0])*(steps==1?.5:(double(xx)+.5)/steps);
+            const double y=input.box[1]+double(input.box[3]-input.box[1])*(steps==1?.5:(double(yy)+.5)/steps);
+            const auto ray=o::forward(f.input,f.path,x,y);
+            require(ray.valid,"Raw replay physical enclosure contradicts independent full forward path");
+            const std::array<double,8> values{ray.origin[0],ray.origin[1],ray.origin[2],ray.outgoing[0],
+                ray.outgoing[1],ray.outgoing[2],ray.depth,ray.bias};
+            for(unsigned c=0;c<8;++c)require(jet_contains(result.ray[c],values[c]),
+                "Raw replay optical value bounds omitted independent geometry");
+            const auto r=jet_reference_residual(f,x,y,result.status[2]);
+            for(unsigned c=0;c<2;++c)require(jet_contains(result.residual[c],r[coordinates[c]]),
+                "Raw replay residual bounds omitted independent residual");
+            ++samples;const double h=span?std::min(1.e-4,span*.002):1.e-4;
+            for(unsigned axis=0;axis<2;++axis) {
+                const auto eval=[&](double offset){return jet_reference_residual(f,
+                    x+(axis==0?offset:0),y+(axis==1?offset:0),result.status[2]);};
+                const auto a=eval(-2*h),b=eval(-h),c=eval(h),d=eval(2*h);
+                for(unsigned component=0;component<2;++component) {
+                    const unsigned coordinate=coordinates[component];
+                    const double derivative=(a[coordinate]-8*b[coordinate]+8*c[coordinate]-d[coordinate])/(12*h);
+                    require(jet_contains(result.jacobian[component*2+axis],derivative),
+                        "Raw replay Jacobian omitted independent five-point derivative");++derivatives;
+                }
+            }
+        }
+        const auto centre=jet_reference_residual(f,result.settings[1],result.settings[2],result.status[2]);
+        for(unsigned c=0;c<2;++c)require(jet_contains(result.centre_residual[c],centre[coordinates[c]]),
+            "Raw replay midpoint residual omitted independent reference");
+        roots[n]=jet_reference_root(f,sx,sy,result.status[2]);
+        require(roots[n].has_value(),"Independent encoded replay root could not be refined");
+        const auto root=*roots[n];const bool inside=root[0]>=input.box[0] && root[0]<=input.box[2]
+            && root[1]>=input.box[1] && root[1]<=input.box[3];
+        if(result.status[1]==1) {
+            ++unique;
+            require(std::isfinite(result.settings[0]) && result.settings[0]<1
+                && result.enclosure[0]>input.box[0] && result.enclosure[1]>input.box[1]
+                && result.enclosure[2]<input.box[2] && result.enclosure[3]<input.box[3],
+                "Raw replay local certificate lacks strict contraction/inclusion");
+            require(inside && root[0]>=result.enclosure[0] && root[0]<=result.enclosure[2]
+                && root[1]>=result.enclosure[1] && root[1]<=result.enclosure[3],
+                "Raw replay local certificate omitted independently refined encoded root");
+        }else if(result.status[1]==2) {
+            ++no_root;require(!inside,"Raw replay no-root certificate discarded independent encoded root");
+        }
+        std::cout<<"Encoded diagnostic replay root="<<root[0]<<','<<root[1]
+            <<" native-target-delta="<<(native_root.valid?root[0]-native_root.x:NAN)<<','
+            <<(native_root.valid?root[1]-native_root.y:NAN)<<'\n';
+    }
+    require(valid && samples && derivatives,"Raw replay has no independently checked physical differential coverage");
+    const auto held=gpu.jet_boxes(boxes);
+    require(held.size()==outputs.size() && std::memcmp(held.data(),outputs.data(),outputs.size()*sizeof(JetResult))==0,
+        "Held raw optical inputs changed differential output");
+    for(unsigned refinements=1;refinements<=2;++refinements) {
+        const auto refined=gpu.jet_boxes(boxes,refinements);
+        require(refined.size()==outputs.size(),"Incomplete refined raw replay batch");
+        unsigned narrower=0;
+        for(unsigned n=0;n<refined.size();++n) {
+            const auto& base=outputs[n];const auto& result=refined[n];
+            auto metadata=result;metadata.enclosure=base.enclosure;
+            require(std::memcmp(&metadata,&base,sizeof(base))==0,
+                "Raw replay refinement changed original domain/value/Jacobian/certificate");
+            if(base.status[1]!=1) {
+                require(result.enclosure==base.enclosure,"Raw replay refinement promoted or modified a refusal");continue;
+            }
+            require(result.enclosure[0]>=base.enclosure[0] && result.enclosure[1]>=base.enclosure[1]
+                && result.enclosure[2]<=base.enclosure[2] && result.enclosure[3]<=base.enclosure[3]
+                && result.enclosure[0]<=result.enclosure[2] && result.enclosure[1]<=result.enclosure[3],
+                "Raw replay inherited root enclosure enlarged or became empty");
+            const auto root=*roots[n];
+            require(root[0]>=result.enclosure[0] && root[0]<=result.enclosure[2]
+                && root[1]>=result.enclosure[1] && root[1]<=result.enclosure[3],
+                "Raw replay inherited enclosure omitted independent encoded root");
+            narrower+=unsigned(result.enclosure!=base.enclosure);
+            std::cout<<"Raw replay refinement="<<refinements<<" radius="<<radii[n]<<" enclosure="
+                <<result.enclosure[0]<<','<<result.enclosure[1]<<','<<result.enclosure[2]<<','<<result.enclosure[3]<<'\n';
+        }
+        const auto stable=gpu.jet_boxes(boxes,refinements);
+        require(stable.size()==refined.size() && std::memcmp(stable.data(),refined.data(),refined.size()*sizeof(JetResult))==0,
+            "Held refined raw inputs changed differential output");
+        std::cout<<"Raw replay inherited refinement="<<refinements<<" narrowed="<<narrower<<'/'<<unique<<'\n';
+    }
+    std::cout<<"Additional raw replay differential checks: "<<valid<<'/'<<boxes.size()<<" physical boxes, "
+        <<samples<<" forward samples, "<<derivatives<<" derivatives, "<<unique<<" local unique, "<<no_root
+        <<" local no-root, "<<unresolved<<" unresolved; held/refinement checks passed. "
+        <<"No native raw-target/global-source/RGB/moving-owner/camera/MSAA/performance acceptance.\n";
 }
 #if defined(STARFOX_OPTICAL_ARITHMETIC_TRACE_ONLY)
 unsigned jet_arithmetic_checks(Gpu& gpu) {

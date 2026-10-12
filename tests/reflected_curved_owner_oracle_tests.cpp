@@ -1,4 +1,5 @@
 #include "reflected_curved_visibility_domain.hpp"
+#include "../tools/full_curved_owner_replay.hpp"
 #include <iostream>
 #include <iomanip>
 #include <string_view>
@@ -87,7 +88,8 @@ void visibility_domain_tests() {
     optical.terminal=o::point(optical.terminal_plane,{std::bit_cast<float>(hr[6]),std::bit_cast<float>(hr[7])});
     const auto physical=o::solve_forward(hole,optical,5.625,1.625);require(physical.valid,"Source-hole independent root failed");
     const auto hole_read=[&](unsigned x,unsigned y)->std::optional<o::SourceTap> {
-        if(x<4 || x>6 || y>2)return {};o::SourceTap tap;tap.identity=0;tap.depth=400;
+        if(x<4 || x>6 || y>2)return {};
+        o::SourceTap tap;tap.identity=0;tap.depth=400;
         std::copy_n(hr.begin(),9,tap.path.begin());tap.path[6]=std::bit_cast<unsigned>(std::bit_cast<float>(hr[6])
             +(x==5 && y==1?.03F:0.F));return tap;
     };
@@ -100,7 +102,8 @@ void visibility_domain_tests() {
         "A root in a necessary bounding-box hole bypassed the independent actual source predicate");
     for(unsigned fault:{1U,2U}) {
         const auto fold_read=[&](unsigned x,unsigned y)->std::optional<o::SourceTap> {
-            if(x<4 || x>6 || y>2)return {};o::SourceTap tap;tap.identity=0;tap.depth=400;
+            if(x<4 || x>6 || y>2)return {};
+            o::SourceTap tap;tap.identity=0;tap.depth=400;
             std::copy_n(hr.begin(),9,tap.path.begin());const int dx=int(x)-5,dy=int(y)-1;
             const float feature_x=std::bit_cast<float>(hr[6])+.001F*float(fault==1?dx*(dy==1?-1:1):std::abs(dx));
             const float feature_y=std::bit_cast<float>(hr[7])+.001F*float(dy);
@@ -228,7 +231,8 @@ int main(int argc,char** argv) {
     try {
         const bool receiver_replay=argc==2 && std::string_view(argv[1])=="--receiver-replay-fixture";
         const bool replay_fixture=receiver_replay || (argc==2 && std::string_view(argv[1])=="--camera-replay-fixture");
-        require(argc==1 || replay_fixture,"Unknown independent oracle test option");
+        const bool raw_replay=argc==3 && std::string_view(argv[1])=="--raw-owner-input-replay";
+        require(argc==1 || replay_fixture || raw_replay,"Unknown independent oracle test option");
         visibility_domain_tests();
         ordered_source_guard_tests();
         o::Inputs inputs;auto& f=inputs.liquid;
@@ -536,6 +540,43 @@ int main(int argc,char** argv) {
         try {(void)o::decode(words,48,3,frame,inputs.current_projection);}catch(const std::runtime_error&){rejected=true;}
         require(rejected,"Owner oracle accepted malformed finite W instead of rejecting its geometry");
         std::cout<<"Independent owner oracle: necessary full-bank feature domains with literal half-plane/boundary/island/remapping/rotated-eye guards and nonlinear-source enclosure, float-boundary initializer/ABI neighbour, stalled-basin and distant visible-bank recovery, optical-ambiguity refusal, bounded old-bank/mapped receiver/hop/terminal and nonfinite-depth guards, depth/feature/missing-tap guards, rotated eye/order/translation and malformed-basis guards, literal affine liquid receiver transport/invalid-input refusal, radius/visibility refusal, finite geometry packing and accepted-old clock passed.\n";
+        FullCurvedOwnerReplay bounded_replay;bounded_replay.primary=0xfffffffdU;
+        bounded_replay.record[4]=512;bounded_replay.record[8]=std::bit_cast<unsigned>(1.F);
+        require(full_replay_optical_path(bounded_replay).liquid_primary,
+            "Bounded replay path lost literal liquid primary");
+        for(unsigned fault=0;fault<8;++fault) {
+            auto bad=bounded_replay;
+            if(fault==0)bad.record[4]=519; // Seven hops must not index four planes.
+            if(fault==1)bad.record[4]=528; // A liquid mask bit without its hop.
+            if(fault==2)bad.record[4]=1024; // Unknown terminal kind.
+            if(fault==3)bad.record[4]=768; // Exhausted terminal requires four hops.
+            if(fault==4)bad.lobe=8;
+            if(fault==5)bad.roughness=NAN;
+            if(fault==6)bad.record[8]=std::bit_cast<unsigned>(0.F);
+            if(fault==7)bad.primary=0; // Missing receiver map/geometry.
+            bool refused=false;try{(void)full_replay_optical_path(bad);}catch(const std::exception&){refused=true;}
+            require(refused,"Bounded raw replay path accepted malformed control/feature/geometry");
+        }
+        if(raw_replay) {
+            const auto raw=load_full_curved_owner_replay(argv[2]);const auto raw_path=full_replay_optical_path(raw);
+            require(raw.x<raw.width && raw.y<raw.height,"Raw replay current receiver outside extent");
+            const auto root=o::solve_forward(raw.inputs,raw_path,raw.x+.5,raw.y+.5);
+            require(root.valid,"Raw replay centre-start independent forward solve did not converge");
+            const auto read=[&](unsigned x,unsigned y)->std::optional<o::SourceTap>{
+                if(x>=raw.width || y>=raw.height)return {};
+                return raw.taps[std::size_t(y)*raw.width+x];
+            };
+            const o::Solution source{root.x-.5,root.y-.5,root.depth,root.error,true,false};
+            require(o::source_guard(raw.inputs,raw.primary,raw.record,raw.roughness,raw.lobe,source,read)==o::SourceGuard::accepted,
+                "Raw replay independent source guard rejected its converged physical source");
+            const auto domains=o::old_visibility_domains(raw.inputs,raw.primary,raw.record,read);
+            require(std::any_of(domains.begin(),domains.end(),[&](const auto& domain){return domain.contains(source.x,source.y);}),
+                "Raw replay necessary input domains removed independent qualified source");
+            std::cout<<std::setprecision(17)<<"Additional raw-input replay: "<<raw.taps.size()<<" old taps, "
+                <<raw.inputs.previous.size()<<" triangles, root="<<root.x<<','<<root.y<<" error="<<root.error
+                <<"; independent forward/source guard and necessary input domains passed. "
+                <<"Local diagnosis only: no global uniqueness, GPU/native-owner/RGB or performance acceptance.\n";
+        }
         return 0;
     } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }

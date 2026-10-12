@@ -2,12 +2,10 @@
 #include "starfox/vr/openxr_input.hpp"
 #include "starfox/input/buttons.hpp"
 #include "starfox/vr/menu_stick.hpp"
+#include "starfox/vr/steering_matrix.hpp"
 #include <cmath>
 #include <limits>
 namespace starfox::vr {
-// Column-major projection of native pad directions into cockpit pad axes.
-// It contains no physical head pose.
-using SteeringMatrix=std::array<float,4>;
 // Produces the same SNES-button TickInput consumed by GameSimulation. Native
 // control type/inversion remains the game's responsibility. Default type A:
 // Y fire, A bomb, X boost, B brake, L/R roll. Retains quick taps between ticks.

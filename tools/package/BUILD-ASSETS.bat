@@ -13,10 +13,13 @@ if "%~1"=="" (
   exit /b 2
 )
 "%~dp0starfox_asset_builder.exe" "%~1" "%~dp0Starfox-Assets.BIN"
-if errorlevel 1 (
-  echo Asset creation failed. Check the message above and verify your ROM dump.
+set "SFE_ASSET_BUILD_EXIT_CODE=%ERRORLEVEL%"
+if not "%SFE_ASSET_BUILD_EXIT_CODE%"=="0" (
+  echo Asset creation failed with exit code %SFE_ASSET_BUILD_EXIT_CODE%.
+  echo Check the message above and verify your ROM dump.
   pause
-  exit /b 1
+  exit /b %SFE_ASSET_BUILD_EXIT_CODE%
 )
 echo Assets are ready. Launch LAUNCH-PCVR.bat.
 pause
+exit /b 0

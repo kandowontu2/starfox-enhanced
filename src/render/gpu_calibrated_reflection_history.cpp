@@ -1,9 +1,17 @@
 #include "starfox/render/gpu_calibrated_reflection_history.hpp"
 #include "starfox/render/gpu_preparation.hpp"
+#if defined(STARFOX_REFLECTION_HISTORY_EXTERNAL_PAYLOADS)
+#include "external_reflection_history_payloads_v2.hpp"
+#else
+// This unit uses only the history PSO from the scene package. Do not parse
+// unrelated multi-megabyte scene arrays here; their normal callers retain all.
+#define STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY
 #include "shaders/generated/calibrated_scene_portable.hpp"
+#undef STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY
 #include "shaders/generated/calibrated_reflection_lobes.hpp"
 #include "shaders/generated/calibrated_reflection_paths.hpp"
 #include "shaders/generated/calibrated_reflection_curved_paths.hpp"
+#endif
 #if defined(STARFOX_REFLECTION_SOURCE_INDEX_AVAILABLE)
 #include "native_reflection_index_tiles_dxil.hpp"
 #include "native_reflection_index_tiles_spirv.hpp"
@@ -60,6 +68,19 @@
 #include <cmath>
 #include <stdexcept>
 namespace starfox::render {
+// Distinct byte-data entities keep language linkage/ODR consistent with other
+// scene units, which still declare their inline constexpr scene package.
+#if defined(STARFOX_REFLECTION_HISTORY_EXTERNAL_PAYLOADS)
+namespace history_scene_shader = reflection_history_external_scene_shader;
+namespace history_lobes_shader = reflection_history_external_lobes_shader;
+namespace history_paths_shader = reflection_history_external_paths_shader;
+namespace history_curved_shader = reflection_history_external_curved_shader;
+#else
+namespace history_scene_shader = calibrated_scene_shader;
+namespace history_lobes_shader = reflection_lobes_shader;
+namespace history_paths_shader = reflection_paths_shader;
+namespace history_curved_shader = reflection_curved_paths_shader;
+#endif
 namespace {
 void require(bool value,const char* message) {if(!value) throw std::runtime_error(message);}
 struct Uniform {unsigned width,height,previous_width,previous_height,flags;float weight;unsigned prefix_stride,padding;};
@@ -585,9 +606,9 @@ struct GpuCalibratedReflectionHistory::State {
         info.format=spirv?SDL_GPU_SHADERFORMAT_SPIRV:SDL_GPU_SHADERFORMAT_DXIL;
         info.num_samplers=info.num_readwrite_storage_buffers=info.num_uniform_buffers=1;
         info.num_readonly_storage_buffers=3;info.threadcount_x=info.threadcount_y=8;info.threadcount_z=1;
-        info.code=reflection_lobes_shader::lobes_spirv;info.code_size=sizeof(reflection_lobes_shader::lobes_spirv);
+        info.code=history_lobes_shader::lobes_spirv;info.code_size=sizeof(history_lobes_shader::lobes_spirv);
 #if defined(_WIN32)
-        if(!spirv) {info.code=reflection_lobes_shader::lobes_dxil;info.code_size=sizeof(reflection_lobes_shader::lobes_dxil);}
+        if(!spirv) {info.code=history_lobes_shader::lobes_dxil;info.code_size=sizeof(history_lobes_shader::lobes_dxil);}
 #endif
         lobe_pipeline=create_gpu_compute_pipeline(device,&info);require(lobe_pipeline,SDL_GetError());
     }
@@ -599,15 +620,15 @@ struct GpuCalibratedReflectionHistory::State {
         info.format=spirv?SDL_GPU_SHADERFORMAT_SPIRV:SDL_GPU_SHADERFORMAT_DXIL;
         info.num_samplers=info.num_readwrite_storage_buffers=info.num_uniform_buffers=1;
         info.num_readonly_storage_buffers=3;info.threadcount_x=info.threadcount_y=8;info.threadcount_z=1;
-        info.code=reflection_paths_shader::paths_spirv;info.code_size=sizeof(reflection_paths_shader::paths_spirv);
+        info.code=history_paths_shader::paths_spirv;info.code_size=sizeof(history_paths_shader::paths_spirv);
         if(curved) {
             if(spirv) require(curved_vulkan_precision(device),"Curved reflection history requires Vulkan1.2 SignedZeroInfNanPreserve32; retaining current full-quality radiance");
-            info.code=reflection_curved_paths_shader::curved_paths_spirv;
-            info.code_size=sizeof(reflection_curved_paths_shader::curved_paths_spirv);
+            info.code=history_curved_shader::curved_paths_spirv;
+            info.code_size=sizeof(history_curved_shader::curved_paths_spirv);
         }
 #if defined(_WIN32)
-        if(!spirv) {info.code=reflection_paths_shader::paths_dxil;info.code_size=sizeof(reflection_paths_shader::paths_dxil);}
-        if(curved && !spirv) {info.code=reflection_curved_paths_shader::curved_paths_dxil;info.code_size=sizeof(reflection_curved_paths_shader::curved_paths_dxil);}
+        if(!spirv) {info.code=history_paths_shader::paths_dxil;info.code_size=sizeof(history_paths_shader::paths_dxil);}
+        if(curved && !spirv) {info.code=history_curved_shader::curved_paths_dxil;info.code_size=sizeof(history_curved_shader::curved_paths_dxil);}
 #endif
         selected=create_gpu_compute_pipeline(device,&info);require(selected,SDL_GetError());
     }
@@ -835,8 +856,17 @@ bool GpuCalibratedReflectionHistory::enqueue_source_root_stage(void* command,boo
             && s.optical.queries.first==s.queries.first,
             "No compatible pending SAME-command native optical batch; retaining CURRENT radiance");
         require(source_local_root_allocation_bytes().has_value(),"Native local roots exceed the combined one-GiB bound");
-        const bool stream=whole_cover && s.source_stream_encoding;
+        // A whole-union query uses exactly the same one-query-per-lane writer
+        // as the complete production stream. Do not mix the per-region
+        // writer's 128 independently clearing lanes into a whole-hull query.
+        // Standalone callers may just have encoded local-region results in
+        // this shared allocation: clear ALL slots before the stream writer,
+        // not only its hull/guard prefix. The complete stream already performs
+        // this bounded clearing once before its ordered batches. No source
+        // domain, optical evaluation, proof guard or allocation is changed.
+        const bool stream=whole_cover;
         s.prepare_source_local_roots(stream);s.make_local_root_work();
+        if(stream && !s.source_stream_encoding)s.clear_stream_roots(static_cast<SDL_GPUCommandBuffer*>(command));
         auto* cb=static_cast<SDL_GPUCommandBuffer*>(command);const auto& q=s.queries;const auto& r=q.source.layout;
         const SourceIndexUniform index{r.width,r.height,r.lobes,r.primary_prefix,r.record_prefix,r.path_stride,r.total_nodes,r.level_count,
             0,q.count,q.limits.leaves,q.limits.nodes,r.levels};
@@ -1093,7 +1123,18 @@ bool GpuCalibratedReflectionHistory::enqueue_source_frame(void* command,SourceBa
         const auto count=std::uint32_t(std::min<std::uint64_t>(GpuReflectionSourceQueries::capacity,total-first));
         const auto mark=[&](ReflectionSourceStage stage) {
             if(!stages)return true;
-            try {stages(stage_context,{s.device,command,first,total,count,0,0,stage});return true;}
+            try {
+                ReflectionSourceStageEvent event{s.device,command,first,total,count,0,0,stage};
+                if(stage==ReflectionSourceStage::composition) {
+                    const auto& composed=s.source_composition;
+                    const auto& queries=composed.colour.guide.folds.witness.hull.optical.queries;
+                    event.queries=queries.queries;event.proofs=composed.results;
+                    event.query_stride=GpuReflectionSourceQueries::query_stride;
+                    event.proof_stride=GpuReflectionSourceComposition::result_stride;
+                    event.proof_bytes=GpuReflectionSourceComposition::record_offset+GpuReflectionSourceComposition::record_bytes;
+                }
+                stages(stage_context,event);return true;
+            }
             catch(const std::exception& e){s.status=e.what();return false;}
         };
         if(!mark(ReflectionSourceStage::begin)
@@ -1165,9 +1206,9 @@ bool GpuCalibratedReflectionHistory::initialize(void* device) {
         info.format=spirv?SDL_GPU_SHADERFORMAT_SPIRV:SDL_GPU_SHADERFORMAT_DXIL;
         info.num_samplers=info.num_readwrite_storage_buffers=info.num_uniform_buffers=1;
         info.num_readonly_storage_buffers=2;info.threadcount_x=info.threadcount_y=8;info.threadcount_z=1;
-        info.code=calibrated_scene_shader::reflection_history_spirv;info.code_size=sizeof(calibrated_scene_shader::reflection_history_spirv);
+        info.code=history_scene_shader::reflection_history_spirv;info.code_size=sizeof(history_scene_shader::reflection_history_spirv);
 #if defined(_WIN32)
-        if(!spirv) {info.code=calibrated_scene_shader::reflection_history_dxil;info.code_size=sizeof(calibrated_scene_shader::reflection_history_dxil);}
+        if(!spirv) {info.code=history_scene_shader::reflection_history_dxil;info.code_size=sizeof(history_scene_shader::reflection_history_dxil);}
 #endif
         s->pipeline=create_gpu_compute_pipeline(s->device,&info);require(s->pipeline,SDL_GetError());
         SDL_GPUSamplerCreateInfo sampler{};sampler.min_filter=sampler.mag_filter=SDL_GPU_FILTER_NEAREST;

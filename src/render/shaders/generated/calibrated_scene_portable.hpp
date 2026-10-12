@@ -16,6 +16,7 @@
 // Reflection-history SHA-256: 4a95fbf91530b83f09f49e4b12fa0139aa4b98bca5ee7728bb937c87644a36d8
 #pragma once
 namespace starfox::render::calibrated_scene_shader {
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char vertex_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,127,22,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
 1,0,0,0,10,0,7,0,83,80,86,95,75,72,82,95,102,108,111,97,116,95,99,111,110,116,114,111,108,115,0,0,
@@ -4568,7 +4569,9 @@ inline constexpr unsigned char vertex_spirv[]={
 128,15,0,0,62,0,3,0,33,0,0,0,129,15,0,0,62,0,3,0,34,0,0,0,130,15,0,0,253,0,1,0,
 56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char vertex_dxil[]={
 68,88,66,67,75,253,218,183,157,164,16,163,99,39,107,240,200,84,177,176,1,0,0,0,184,41,1,0,7,0,0,0,
 60,0,0,0,76,0,0,0,72,2,0,0,148,4,0,0,92,10,0,0,160,23,0,0,188,23,0,0,83,70,73,48,
@@ -6954,6 +6957,8 @@ inline constexpr unsigned char vertex_dxil[]={
 12,182,12,189,157,60,99,176,101,24,239,228,25,3,0,0,0,0,0,0,0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char vertex_motion_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,238,31,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
 1,0,0,0,10,0,7,0,83,80,86,95,75,72,82,95,102,108,111,97,116,95,99,111,110,116,114,111,108,115,0,0,
@@ -13336,7 +13341,9 @@ inline constexpr unsigned char vertex_motion_spirv[]={
 35,0,0,0,14,19,0,0,62,0,3,0,36,0,0,0,235,31,0,0,62,0,3,0,37,0,0,0,236,31,0,0,
 62,0,3,0,38,0,0,0,141,28,0,0,253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char vertex_motion_dxil[]={
 68,88,66,67,217,35,110,52,249,148,175,188,37,152,240,189,49,175,196,138,1,0,0,0,164,89,1,0,7,0,0,0,
 60,0,0,0,76,0,0,0,116,2,0,0,32,5,0,0,156,12,0,0,244,27,0,0,16,28,0,0,83,70,73,48,
@@ -16106,6 +16113,8 @@ inline constexpr unsigned char vertex_motion_dxil[]={
 0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char vertex_motion_msaa_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,253,31,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
 1,0,0,0,17,0,2,0,35,0,0,0,10,0,7,0,83,80,86,95,75,72,82,95,102,108,111,97,116,95,99,111,
@@ -22505,7 +22514,9 @@ inline constexpr unsigned char vertex_motion_msaa_spirv[]={
 250,31,0,0,62,0,3,0,38,0,0,0,251,31,0,0,62,0,3,0,39,0,0,0,156,28,0,0,253,0,1,0,
 56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char vertex_motion_msaa_dxil[]={
 68,88,66,67,240,124,91,99,229,209,88,23,158,59,10,52,242,189,84,76,1,0,0,0,180,90,1,0,7,0,0,0,
 60,0,0,0,76,0,0,0,116,2,0,0,64,5,0,0,216,12,0,0,140,28,0,0,168,28,0,0,83,70,73,48,
@@ -25283,6 +25294,8 @@ inline constexpr unsigned char vertex_motion_msaa_dxil[]={
 147,92,160,52,216,50,160,228,2,165,1,0,0,0,0,0,0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char vertex_msaa_guides_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,140,22,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
 1,0,0,0,17,0,2,0,35,0,0,0,10,0,7,0,83,80,86,95,75,72,82,95,102,108,111,97,116,95,99,111,
@@ -29849,7 +29862,9 @@ inline constexpr unsigned char vertex_msaa_guides_spirv[]={
 142,15,0,0,62,0,3,0,34,0,0,0,143,15,0,0,62,0,3,0,35,0,0,0,87,1,0,0,253,0,1,0,
 56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char vertex_msaa_guides_dxil[]={
 68,88,66,67,87,223,9,227,184,239,216,145,183,156,137,35,62,243,96,200,1,0,0,0,192,42,1,0,7,0,0,0,
 60,0,0,0,76,0,0,0,72,2,0,0,180,4,0,0,148,10,0,0,52,24,0,0,80,24,0,0,83,70,73,48,
@@ -32243,6 +32258,8 @@ inline constexpr unsigned char vertex_msaa_guides_dxil[]={
 242,140,193,150,161,183,147,103,12,182,12,190,157,60,99,176,101,32,239,228,25,3,0,0,0,0,0,0,0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char fragment_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,96,46,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
 1,0,0,0,10,0,7,0,83,80,86,95,75,72,82,95,102,108,111,97,116,95,99,111,110,116,114,111,108,115,0,0,
@@ -41438,7 +41455,9 @@ inline constexpr unsigned char fragment_spirv[]={
 47,10,0,0,95,46,0,0,62,0,3,0,127,15,0,0,95,46,0,0,62,0,3,0,20,0,0,0,95,46,0,0,
 253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char fragment_dxil[]={
 68,88,66,67,124,71,67,157,103,198,242,247,105,0,237,210,175,37,36,17,1,0,0,0,244,204,0,0,7,0,0,0,
 60,0,0,0,76,0,0,0,152,2,0,0,212,2,0,0,68,6,0,0,24,20,0,0,52,20,0,0,83,70,73,48,
@@ -43082,6 +43101,8 @@ inline constexpr unsigned char fragment_dxil[]={
 0,197,3,74,131,45,67,40,30,80,26,0,0,0,0,0,0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char fragment_msaa_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,106,46,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
 1,0,0,0,10,0,7,0,83,80,86,95,75,72,82,95,102,108,111,97,116,95,99,111,110,116,114,111,108,115,0,0,
@@ -52286,7 +52307,9 @@ inline constexpr unsigned char fragment_msaa_spirv[]={
 62,0,3,0,46,10,0,0,105,46,0,0,62,0,3,0,49,10,0,0,105,46,0,0,62,0,3,0,129,15,0,0,
 105,46,0,0,62,0,3,0,20,0,0,0,105,46,0,0,253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char fragment_msaa_dxil[]={
 68,88,66,67,174,31,250,239,223,113,41,27,109,126,224,14,189,5,250,56,1,0,0,0,80,205,0,0,7,0,0,0,
 60,0,0,0,76,0,0,0,152,2,0,0,212,2,0,0,68,6,0,0,24,20,0,0,52,20,0,0,83,70,73,48,
@@ -53933,6 +53956,8 @@ inline constexpr unsigned char fragment_msaa_dxil[]={
 131,45,195,43,30,80,26,0,0,0,0,0,0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char receiver_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,253,46,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
 1,0,0,0,10,0,7,0,83,80,86,95,75,72,82,95,102,108,111,97,116,95,99,111,110,116,114,111,108,115,0,0,
@@ -63255,7 +63280,9 @@ inline constexpr unsigned char receiver_spirv[]={
 94,9,0,0,251,46,0,0,62,0,3,0,93,9,0,0,250,46,0,0,62,0,3,0,20,0,0,0,251,46,0,0,
 62,0,3,0,21,0,0,0,250,46,0,0,253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char receiver_dxil[]={
 68,88,66,67,151,68,81,105,245,147,134,169,76,49,202,46,174,8,234,24,1,0,0,0,172,209,0,0,7,0,0,0,
 60,0,0,0,76,0,0,0,152,2,0,0,244,2,0,0,116,6,0,0,136,20,0,0,164,20,0,0,83,70,73,48,
@@ -64937,6 +64964,8 @@ inline constexpr unsigned char receiver_dxil[]={
 0,0,0,0,0,0,0,0,0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char receiver_msaa_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,42,47,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
 1,0,0,0,17,0,2,0,35,0,0,0,10,0,7,0,83,80,86,95,75,72,82,95,102,108,111,97,116,95,99,111,
@@ -74303,7 +74332,9 @@ inline constexpr unsigned char receiver_msaa_spirv[]={
 40,47,0,0,62,0,3,0,100,9,0,0,39,47,0,0,62,0,3,0,22,0,0,0,40,47,0,0,62,0,3,0,
 23,0,0,0,39,47,0,0,253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char receiver_msaa_dxil[]={
 68,88,66,67,41,43,184,77,126,33,154,86,101,35,248,25,63,194,151,66,1,0,0,0,168,212,0,0,7,0,0,0,
 60,0,0,0,76,0,0,0,232,2,0,0,68,3,0,0,244,6,0,0,164,21,0,0,192,21,0,0,83,70,73,48,
@@ -76009,6 +76040,8 @@ inline constexpr unsigned char receiver_msaa_dxil[]={
 0,0,0,0,0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char surface_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,228,47,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
 1,0,0,0,10,0,7,0,83,80,86,95,75,72,82,95,102,108,111,97,116,95,99,111,110,116,114,111,108,115,0,0,
@@ -85521,7 +85554,9 @@ inline constexpr unsigned char surface_spirv[]={
 225,47,0,0,62,0,3,0,20,0,0,0,226,47,0,0,62,0,3,0,21,0,0,0,83,47,0,0,62,0,3,0,
 22,0,0,0,225,47,0,0,253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char surface_dxil[]={
 68,88,66,67,26,2,126,176,14,175,241,207,131,195,98,130,15,173,174,89,1,0,0,0,52,218,0,0,7,0,0,0,
 60,0,0,0,76,0,0,0,152,2,0,0,20,3,0,0,188,6,0,0,244,21,0,0,16,22,0,0,83,70,73,48,
@@ -87271,6 +87306,8 @@ inline constexpr unsigned char surface_dxil[]={
 234,17,181,193,150,161,85,143,168,13,0,0,0,0,0,0,0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char surface_msaa_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,60,48,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
 1,0,0,0,17,0,2,0,35,0,0,0,10,0,7,0,83,80,86,95,75,72,82,95,102,108,111,97,116,95,99,111,
@@ -96861,7 +96898,9 @@ inline constexpr unsigned char surface_msaa_spirv[]={
 167,9,0,0,57,48,0,0,62,0,3,0,22,0,0,0,58,48,0,0,62,0,3,0,23,0,0,0,171,47,0,0,
 62,0,3,0,24,0,0,0,57,48,0,0,253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char surface_msaa_dxil[]={
 68,88,66,67,195,104,79,189,181,69,155,242,139,1,125,166,241,213,102,67,1,0,0,0,140,223,0,0,7,0,0,0,
 60,0,0,0,76,0,0,0,232,2,0,0,100,3,0,0,60,7,0,0,180,23,0,0,208,23,0,0,83,70,73,48,
@@ -98654,6 +98693,8 @@ inline constexpr unsigned char surface_msaa_dxil[]={
 54,0,0,0,0,0,0,0,0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char motion_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,2,49,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
 1,0,0,0,10,0,7,0,83,80,86,95,75,72,82,95,102,108,111,97,116,95,99,111,110,116,114,111,108,115,0,0,
@@ -108406,7 +108447,9 @@ inline constexpr unsigned char motion_spirv[]={
 191,9,0,0,255,48,0,0,62,0,3,0,23,0,0,0,0,49,0,0,62,0,3,0,24,0,0,0,215,47,0,0,
 62,0,3,0,25,0,0,0,145,48,0,0,62,0,3,0,26,0,0,0,255,48,0,0,253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char motion_dxil[]={
 68,88,66,67,213,161,78,238,138,113,165,197,102,228,147,45,233,96,22,79,1,0,0,0,176,227,0,0,7,0,0,0,
 60,0,0,0,76,0,0,0,248,2,0,0,148,3,0,0,216,7,0,0,164,24,0,0,192,24,0,0,83,70,73,48,
@@ -110232,6 +110275,8 @@ inline constexpr unsigned char motion_dxil[]={
 203,144,183,71,4,7,0,0,0,0,0,0,0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char motion_msaa_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,97,49,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
 1,0,0,0,17,0,2,0,35,0,0,0,10,0,7,0,83,80,86,95,75,72,82,95,102,108,111,97,116,95,99,111,
@@ -120070,7 +120115,9 @@ inline constexpr unsigned char motion_msaa_spirv[]={
 54,48,0,0,62,0,3,0,27,0,0,0,240,48,0,0,62,0,3,0,28,0,0,0,94,49,0,0,253,0,1,0,
 56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char motion_msaa_dxil[]={
 68,88,66,67,66,86,193,80,0,59,23,171,126,84,3,89,253,88,56,193,1,0,0,0,48,233,0,0,7,0,0,0,
 60,0,0,0,76,0,0,0,72,3,0,0,228,3,0,0,92,8,0,0,104,26,0,0,132,26,0,0,83,70,73,48,
@@ -121940,6 +121987,8 @@ inline constexpr unsigned char motion_msaa_dxil[]={
 67,249,30,209,27,0,0,0,0,0,0,0,0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char depth_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,62,5,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
 1,0,0,0,10,0,7,0,83,80,86,95,75,72,82,95,102,108,111,97,116,95,99,111,110,116,114,111,108,115,0,0,
@@ -122997,7 +123046,9 @@ inline constexpr unsigned char depth_spirv[]={
 238,1,0,0,17,2,0,0,60,5,0,0,23,5,0,0,62,0,3,0,207,1,0,0,61,5,0,0,62,0,3,0,
 4,0,0,0,61,5,0,0,253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char depth_dxil[]={
 68,88,66,67,24,98,253,210,255,200,52,13,138,154,36,250,19,34,171,117,1,0,0,0,220,49,0,0,7,0,0,0,
 60,0,0,0,76,0,0,0,136,0,0,0,196,0,0,0,196,1,0,0,232,10,0,0,4,11,0,0,83,70,73,48,
@@ -123400,6 +123451,8 @@ inline constexpr unsigned char depth_dxil[]={
 203,192,142,129,212,6,91,134,122,12,164,54,216,50,220,99,32,181,1,0,0,0,0,0,0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char ground_fragment_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,230,51,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
 1,0,0,0,17,0,2,0,51,0,0,0,10,0,7,0,83,80,86,95,75,72,82,95,102,108,111,97,116,95,99,111,
@@ -133820,7 +133873,9 @@ inline constexpr unsigned char ground_fragment_spirv[]={
 127,51,0,0,62,0,3,0,230,12,0,0,229,51,0,0,62,0,3,0,233,12,0,0,229,51,0,0,62,0,3,0,
 92,19,0,0,229,51,0,0,62,0,3,0,20,0,0,0,229,51,0,0,253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char ground_fragment_dxil[]={
 68,88,66,67,215,237,105,156,183,88,205,28,68,145,44,36,87,251,220,165,1,0,0,0,80,226,0,0,7,0,0,0,
 60,0,0,0,76,0,0,0,152,2,0,0,212,2,0,0,68,6,0,0,56,20,0,0,84,20,0,0,83,70,73,48,
@@ -135635,6 +135690,8 @@ inline constexpr unsigned char ground_fragment_dxil[]={
 108,25,72,255,136,210,0,0,0,0,0,0,0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char ground_fragment_msaa_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,240,51,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
 1,0,0,0,17,0,2,0,51,0,0,0,10,0,7,0,83,80,86,95,75,72,82,95,102,108,111,97,116,95,99,111,
@@ -146065,7 +146122,9 @@ inline constexpr unsigned char ground_fragment_msaa_spirv[]={
 62,0,3,0,235,12,0,0,239,51,0,0,62,0,3,0,94,19,0,0,239,51,0,0,62,0,3,0,20,0,0,0,
 239,51,0,0,253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char ground_fragment_msaa_dxil[]={
 68,88,66,67,6,36,118,121,94,82,41,146,153,252,22,200,185,253,129,239,1,0,0,0,172,226,0,0,7,0,0,0,
 60,0,0,0,76,0,0,0,152,2,0,0,212,2,0,0,68,6,0,0,56,20,0,0,84,20,0,0,83,70,73,48,
@@ -147883,6 +147942,8 @@ inline constexpr unsigned char ground_fragment_msaa_dxil[]={
 136,210,0,0,0,0,0,0,0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char ground_receiver_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,130,52,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
 1,0,0,0,17,0,2,0,51,0,0,0,10,0,7,0,83,80,86,95,75,72,82,95,102,108,111,97,116,95,99,111,
@@ -158430,7 +158491,9 @@ inline constexpr unsigned char ground_receiver_spirv[]={
 62,0,3,0,248,11,0,0,128,52,0,0,62,0,3,0,247,11,0,0,127,52,0,0,62,0,3,0,20,0,0,0,
 128,52,0,0,62,0,3,0,21,0,0,0,127,52,0,0,253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char ground_receiver_dxil[]={
 68,88,66,67,88,145,44,118,7,3,56,208,208,223,155,138,160,105,49,199,1,0,0,0,248,230,0,0,7,0,0,0,
 60,0,0,0,76,0,0,0,152,2,0,0,244,2,0,0,116,6,0,0,168,20,0,0,196,20,0,0,83,70,73,48,
@@ -160282,6 +160345,8 @@ inline constexpr unsigned char ground_receiver_dxil[]={
 36,74,131,45,3,25,34,81,26,108,25,206,16,137,210,0,0,0,0,0,0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char ground_receiver_msaa_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,174,52,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
 1,0,0,0,17,0,2,0,35,0,0,0,17,0,2,0,51,0,0,0,10,0,7,0,83,80,86,95,75,72,82,95,
@@ -170873,7 +170938,9 @@ inline constexpr unsigned char ground_receiver_msaa_spirv[]={
 253,11,0,0,171,52,0,0,62,0,3,0,22,0,0,0,172,52,0,0,62,0,3,0,23,0,0,0,171,52,0,0,
 253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char ground_receiver_msaa_dxil[]={
 68,88,66,67,41,165,201,1,221,204,48,91,42,71,117,69,183,56,188,242,1,0,0,0,4,234,0,0,7,0,0,0,
 60,0,0,0,76,0,0,0,232,2,0,0,68,3,0,0,244,6,0,0,200,21,0,0,228,21,0,0,83,70,73,48,
@@ -172750,6 +172817,8 @@ inline constexpr unsigned char ground_receiver_msaa_dxil[]={
 0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char ground_surface_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,103,53,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
 1,0,0,0,17,0,2,0,51,0,0,0,10,0,7,0,83,80,86,95,75,72,82,95,102,108,111,97,116,95,99,111,
@@ -183486,7 +183555,9 @@ inline constexpr unsigned char ground_surface_spirv[]={
 62,0,3,0,20,0,0,0,101,53,0,0,62,0,3,0,21,0,0,0,214,52,0,0,62,0,3,0,22,0,0,0,
 100,53,0,0,253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char ground_surface_dxil[]={
 68,88,66,67,237,168,177,100,197,65,157,121,164,244,112,242,79,201,186,118,1,0,0,0,48,239,0,0,7,0,0,0,
 60,0,0,0,76,0,0,0,152,2,0,0,20,3,0,0,188,6,0,0,248,21,0,0,20,22,0,0,83,70,73,48,
@@ -185404,6 +185475,8 @@ inline constexpr unsigned char ground_surface_dxil[]={
 45,3,108,34,81,27,0,0,0,0,0,0,0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char ground_surface_msaa_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,190,53,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
 1,0,0,0,17,0,2,0,35,0,0,0,17,0,2,0,51,0,0,0,10,0,7,0,83,80,86,95,75,72,82,95,
@@ -196218,7 +196291,9 @@ inline constexpr unsigned char ground_surface_msaa_spirv[]={
 188,53,0,0,62,0,3,0,23,0,0,0,45,53,0,0,62,0,3,0,24,0,0,0,187,53,0,0,253,0,1,0,
 56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char ground_surface_msaa_dxil[]={
 68,88,66,67,17,9,48,29,61,64,38,215,210,38,38,221,1,225,131,69,1,0,0,0,144,244,0,0,7,0,0,0,
 60,0,0,0,76,0,0,0,232,2,0,0,100,3,0,0,60,7,0,0,180,23,0,0,208,23,0,0,83,70,73,48,
@@ -198179,6 +198254,8 @@ inline constexpr unsigned char ground_surface_msaa_dxil[]={
 252,137,68,108,0,0,0,0,0,0,0,0,0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char ground_motion_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,133,54,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
 1,0,0,0,17,0,2,0,51,0,0,0,10,0,7,0,83,80,86,95,75,72,82,95,102,108,111,97,116,95,99,111,
@@ -209155,7 +209232,9 @@ inline constexpr unsigned char ground_motion_spirv[]={
 130,54,0,0,62,0,3,0,23,0,0,0,131,54,0,0,62,0,3,0,24,0,0,0,90,53,0,0,62,0,3,0,
 25,0,0,0,20,54,0,0,62,0,3,0,26,0,0,0,130,54,0,0,253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char ground_motion_dxil[]={
 68,88,66,67,17,145,32,200,50,131,163,69,67,100,62,93,22,172,20,180,1,0,0,0,176,248,0,0,7,0,0,0,
 60,0,0,0,76,0,0,0,248,2,0,0,148,3,0,0,216,7,0,0,164,24,0,0,192,24,0,0,83,70,73,48,
@@ -211149,6 +211228,8 @@ inline constexpr unsigned char ground_motion_dxil[]={
 62,69,34,56,0,0,0,0,0,0,0,0,0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char ground_motion_msaa_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,227,54,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
 1,0,0,0,17,0,2,0,35,0,0,0,17,0,2,0,51,0,0,0,10,0,7,0,83,80,86,95,75,72,82,95,
@@ -222210,7 +222291,9 @@ inline constexpr unsigned char ground_motion_msaa_spirv[]={
 25,0,0,0,225,54,0,0,62,0,3,0,26,0,0,0,184,53,0,0,62,0,3,0,27,0,0,0,114,54,0,0,
 62,0,3,0,28,0,0,0,224,54,0,0,253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char ground_motion_msaa_dxil[]={
 68,88,66,67,116,63,52,237,205,201,74,102,9,210,32,129,164,72,193,203,1,0,0,0,44,254,0,0,7,0,0,0,
 60,0,0,0,76,0,0,0,72,3,0,0,228,3,0,0,92,8,0,0,104,26,0,0,132,26,0,0,83,70,73,48,
@@ -224248,6 +224331,8 @@ inline constexpr unsigned char ground_motion_msaa_dxil[]={
 0,0,0,0,0,0,0,0,0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char msaa_extract_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,56,0,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
 1,0,0,0,10,0,7,0,83,80,86,95,75,72,82,95,102,108,111,97,116,95,99,111,110,116,114,111,108,115,0,0,
@@ -224310,7 +224395,9 @@ inline constexpr unsigned char msaa_extract_spirv[]={
 54,0,0,0,62,0,3,0,39,0,0,0,52,0,0,0,62,0,3,0,38,0,0,0,54,0,0,0,62,0,3,0,
 3,0,0,0,52,0,0,0,62,0,3,0,4,0,0,0,54,0,0,0,253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char msaa_extract_dxil[]={
 68,88,66,67,166,253,18,213,197,177,63,199,175,194,118,11,58,122,218,4,1,0,0,0,24,17,0,0,7,0,0,0,
 60,0,0,0,76,0,0,0,136,0,0,0,228,0,0,0,228,1,0,0,80,9,0,0,108,9,0,0,83,70,73,48,
@@ -224451,6 +224538,8 @@ inline constexpr unsigned char msaa_extract_dxil[]={
 3,0,0,0,91,134,225,73,131,45,3,241,164,1,0,0,0,0,0,0,0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char msaa_extract_surface_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,62,0,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
 1,0,0,0,10,0,7,0,83,80,86,95,75,72,82,95,102,108,111,97,116,95,99,111,110,116,114,111,108,115,0,0,
@@ -224521,7 +224610,9 @@ inline constexpr unsigned char msaa_extract_surface_spirv[]={
 60,0,0,0,62,0,3,0,3,0,0,0,56,0,0,0,62,0,3,0,4,0,0,0,58,0,0,0,62,0,3,0,
 5,0,0,0,60,0,0,0,253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char msaa_extract_surface_dxil[]={
 68,88,66,67,31,68,85,128,219,64,44,253,209,97,118,143,2,140,22,202,1,0,0,0,60,18,0,0,7,0,0,0,
 60,0,0,0,76,0,0,0,136,0,0,0,4,1,0,0,56,2,0,0,216,9,0,0,244,9,0,0,83,70,73,48,
@@ -224671,6 +224762,8 @@ inline constexpr unsigned char msaa_extract_surface_dxil[]={
 3,0,0,0,3,0,0,0,91,6,226,81,131,45,67,241,168,1,0,0,0,0,0,0,0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char msaa_extract_motion_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,67,0,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
 1,0,0,0,10,0,7,0,83,80,86,95,75,72,82,95,102,108,111,97,116,95,99,111,110,116,114,111,108,115,0,0,
@@ -224747,7 +224840,9 @@ inline constexpr unsigned char msaa_extract_motion_spirv[]={
 65,0,0,0,62,0,3,0,3,0,0,0,59,0,0,0,62,0,3,0,4,0,0,0,61,0,0,0,62,0,3,0,
 5,0,0,0,63,0,0,0,62,0,3,0,6,0,0,0,65,0,0,0,253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char msaa_extract_motion_dxil[]={
 68,88,66,67,77,246,168,12,192,167,74,83,122,58,172,233,191,185,234,53,1,0,0,0,64,19,0,0,7,0,0,0,
 60,0,0,0,76,0,0,0,136,0,0,0,36,1,0,0,132,2,0,0,80,10,0,0,108,10,0,0,83,70,73,48,
@@ -224905,6 +225000,8 @@ inline constexpr unsigned char msaa_extract_motion_dxil[]={
 204,193,29,188,65,128,1,49,3,0,0,0,91,134,226,89,131,45,131,241,172,1,0,0,0,0,0,0,0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char msaa_resolve_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,89,0,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
 1,0,0,0,10,0,7,0,83,80,86,95,75,72,82,95,102,108,111,97,116,95,99,111,110,116,114,111,108,115,0,0,
@@ -224995,7 +225092,9 @@ inline constexpr unsigned char msaa_resolve_spirv[]={
 87,0,0,0,136,0,5,0,33,0,0,0,23,0,0,0,86,0,0,0,88,0,0,0,62,0,3,0,51,0,0,0,
 23,0,0,0,62,0,3,0,3,0,0,0,23,0,0,0,253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char msaa_resolve_dxil[]={
 68,88,66,67,74,131,81,117,246,213,209,251,246,187,100,146,178,33,196,74,1,0,0,0,232,19,0,0,7,0,0,0,
 60,0,0,0,76,0,0,0,136,0,0,0,196,0,0,0,64,2,0,0,44,10,0,0,72,10,0,0,83,70,73,48,
@@ -225159,6 +225258,8 @@ inline constexpr unsigned char msaa_resolve_dxil[]={
 0,0,0,0,0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char msaa_resolve_ink_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,109,0,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
 1,0,0,0,10,0,7,0,83,80,86,95,75,72,82,95,102,108,111,97,116,95,99,111,110,116,114,111,108,115,0,0,
@@ -225267,7 +225368,9 @@ inline constexpr unsigned char msaa_resolve_ink_spirv[]={
 77,0,0,0,25,0,0,0,95,0,0,0,62,0,3,0,60,0,0,0,108,0,0,0,62,0,3,0,3,0,0,0,
 108,0,0,0,253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char msaa_resolve_ink_dxil[]={
 68,88,66,67,195,246,25,194,249,30,38,17,139,230,188,17,230,60,206,114,1,0,0,0,204,20,0,0,7,0,0,0,
 60,0,0,0,76,0,0,0,136,0,0,0,196,0,0,0,112,2,0,0,144,10,0,0,172,10,0,0,83,70,73,48,
@@ -225437,6 +225540,7 @@ inline constexpr unsigned char msaa_resolve_ink_dxil[]={
 7,97,196,32,1,64,16,12,16,152,40,137,149,88,137,127,8,48,32,6,3,0,0,0,91,134,5,194,131,45,3,3,
 225,1,0,0,0,0,0,0,0,0,0,0
 };
+#endif
 #endif
 inline constexpr unsigned char reflection_history_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,118,7,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
@@ -228203,6 +228307,7 @@ inline constexpr unsigned char reflection_history_dxil[]={
 96,203,224,239,68,84,6,91,134,127,39,162,50,216,50,128,60,17,149,1,0,0,0,0,0,0,0,0,0,0,0,0
 };
 #endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char composite_vertex_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,66,0,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
 1,0,0,0,10,0,7,0,83,80,86,95,75,72,82,95,102,108,111,97,116,95,99,111,110,116,114,111,108,115,0,0,
@@ -228286,7 +228391,9 @@ inline constexpr unsigned char composite_vertex_spirv[]={
 80,0,4,0,15,0,0,0,65,0,0,0,64,0,0,0,62,0,3,0,46,0,0,0,64,0,0,0,62,0,3,0,
 3,0,0,0,64,0,0,0,253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char composite_vertex_dxil[]={
 68,88,66,67,69,51,0,242,146,106,112,54,32,93,156,25,11,47,230,213,1,0,0,0,144,11,0,0,7,0,0,0,
 60,0,0,0,76,0,0,0,136,0,0,0,196,0,0,0,96,1,0,0,88,6,0,0,116,6,0,0,83,70,73,48,
@@ -228383,6 +228490,8 @@ inline constexpr unsigned char composite_vertex_dxil[]={
 0,32,8,6,8,231,104,90,100,32,0,0,0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char composite_fragment_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,1,105,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
 1,0,0,0,10,0,7,0,83,80,86,95,75,72,82,95,102,108,111,97,116,95,99,111,110,116,114,111,108,115,0,0,
@@ -250004,7 +250113,9 @@ inline constexpr unsigned char composite_fragment_spirv[]={
 54,33,0,0,0,105,0,0,62,0,3,0,57,33,0,0,0,105,0,0,62,0,3,0,61,33,0,0,0,105,0,0,
 62,0,3,0,4,0,0,0,0,105,0,0,253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char composite_fragment_dxil[]={
 68,88,66,67,189,110,95,165,63,96,134,228,98,16,128,137,200,174,230,30,1,0,0,0,208,98,2,0,7,0,0,0,
 60,0,0,0,76,0,0,0,136,0,0,0,196,0,0,0,224,1,0,0,212,14,0,0,240,14,0,0,83,70,73,48,
@@ -254895,6 +255006,8 @@ inline constexpr unsigned char composite_fragment_dxil[]={
 232,213,9,146,3,0,0,0,0,0,0,0,0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char composite_witness_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,45,105,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
 1,0,0,0,10,0,7,0,83,80,86,95,75,72,82,95,102,108,111,97,116,95,99,111,110,116,114,111,108,115,0,0,
@@ -276558,7 +276671,9 @@ inline constexpr unsigned char composite_witness_spirv[]={
 62,0,3,0,255,21,0,0,15,105,0,0,62,0,3,0,254,21,0,0,43,105,0,0,62,0,3,0,4,0,0,0,
 15,105,0,0,62,0,3,0,5,0,0,0,43,105,0,0,253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char composite_witness_dxil[]={
 68,88,66,67,105,207,132,86,212,45,180,247,155,77,171,113,127,9,236,98,1,0,0,0,160,102,2,0,7,0,0,0,
 60,0,0,0,76,0,0,0,136,0,0,0,228,0,0,0,40,2,0,0,180,15,0,0,208,15,0,0,83,70,73,48,
@@ -281479,6 +281594,8 @@ inline constexpr unsigned char composite_witness_dxil[]={
 193,193,150,225,95,39,8,14,182,12,40,59,65,112,176,101,80,217,9,130,3,0,0,0,0,0,0,0,0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char water_guides_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,220,0,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
 1,0,0,0,10,0,7,0,83,80,86,95,75,72,82,95,102,108,111,97,116,95,99,111,110,116,114,111,108,115,0,0,
@@ -281661,7 +281778,9 @@ inline constexpr unsigned char water_guides_spirv[]={
 62,0,3,0,83,0,0,0,218,0,0,0,62,0,3,0,82,0,0,0,217,0,0,0,62,0,3,0,4,0,0,0,
 218,0,0,0,62,0,3,0,5,0,0,0,217,0,0,0,253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char water_guides_dxil[]={
 68,88,66,67,179,75,29,117,79,254,118,185,153,81,160,209,161,134,211,59,1,0,0,0,172,21,0,0,7,0,0,0,
 60,0,0,0,76,0,0,0,136,0,0,0,228,0,0,0,252,1,0,0,196,10,0,0,224,10,0,0,83,70,73,48,
@@ -281839,6 +281958,8 @@ inline constexpr unsigned char water_guides_dxil[]={
 6,0,0,0,0,0,0,0,0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char water_panel_guides_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,157,5,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
 1,0,0,0,10,0,7,0,83,80,86,95,75,72,82,95,102,108,111,97,116,95,99,111,110,116,114,111,108,115,0,0,
@@ -283031,7 +283152,9 @@ inline constexpr unsigned char water_panel_guides_spirv[]={
 49,2,0,0,154,5,0,0,62,0,3,0,48,2,0,0,155,5,0,0,62,0,3,0,4,0,0,0,154,5,0,0,
 62,0,3,0,5,0,0,0,155,5,0,0,253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char water_panel_guides_dxil[]={
 68,88,66,67,133,7,131,83,34,245,75,57,143,51,43,25,76,45,245,212,1,0,0,0,188,30,0,0,7,0,0,0,
 60,0,0,0,76,0,0,0,136,0,0,0,228,0,0,0,228,1,0,0,128,11,0,0,156,11,0,0,83,70,73,48,
@@ -283281,6 +283404,8 @@ inline constexpr unsigned char water_panel_guides_dxil[]={
 78,26,108,25,70,201,73,131,45,3,41,57,105,176,101,64,37,39,13,0,0,0,0,0,0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char persistence_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,83,1,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
 1,0,0,0,10,0,7,0,83,80,86,95,75,72,82,95,102,108,111,97,116,95,99,111,110,116,114,111,108,115,0,0,
@@ -283563,7 +283688,9 @@ inline constexpr unsigned char persistence_spirv[]={
 110,0,0,0,81,1,0,0,62,0,3,0,4,0,0,0,80,1,0,0,62,0,3,0,5,0,0,0,81,1,0,0,
 253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char persistence_dxil[]={
 68,88,66,67,86,194,220,130,220,238,218,42,193,224,74,229,250,75,102,92,1,0,0,0,204,24,0,0,7,0,0,0,
 60,0,0,0,76,0,0,0,136,0,0,0,228,0,0,0,252,1,0,0,176,10,0,0,204,10,0,0,83,70,73,48,
@@ -283766,6 +283893,8 @@ inline constexpr unsigned char persistence_dxil[]={
 0,0,0,0,0,0,0,0,0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char global_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,228,10,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
 1,0,0,0,10,0,7,0,83,80,86,95,75,72,82,95,102,108,111,97,116,95,99,111,110,116,114,111,108,115,0,0,
@@ -285988,7 +286117,9 @@ inline constexpr unsigned char global_spirv[]={
 140,5,0,0,226,10,0,0,189,10,0,0,62,0,3,0,15,4,0,0,227,10,0,0,62,0,3,0,4,0,0,0,
 227,10,0,0,253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char global_dxil[]={
 68,88,66,67,184,139,154,155,225,58,146,21,201,245,137,9,31,101,89,6,1,0,0,0,8,75,0,0,7,0,0,0,
 60,0,0,0,76,0,0,0,136,0,0,0,196,0,0,0,172,1,0,0,176,10,0,0,204,10,0,0,83,70,73,48,
@@ -286593,6 +286724,8 @@ inline constexpr unsigned char global_dxil[]={
 0,0,0,0,0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char bloom_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,122,2,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
 1,0,0,0,10,0,7,0,83,80,86,95,75,72,82,95,102,108,111,97,116,95,99,111,110,116,114,111,108,115,0,0,
@@ -287098,7 +287231,9 @@ inline constexpr unsigned char bloom_spirv[]={
 120,2,0,0,85,2,0,0,62,0,3,0,244,0,0,0,121,2,0,0,62,0,3,0,4,0,0,0,121,2,0,0,
 253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char bloom_dxil[]={
 68,88,66,67,216,213,240,89,125,154,167,146,59,233,92,151,52,169,81,237,1,0,0,0,20,32,0,0,7,0,0,0,
 60,0,0,0,76,0,0,0,136,0,0,0,196,0,0,0,220,1,0,0,24,11,0,0,52,11,0,0,83,70,73,48,
@@ -287359,6 +287494,8 @@ inline constexpr unsigned char bloom_dxil[]={
 144,27,108,25,200,7,114,3,0,0,0,0,0,0,0,0,0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char temporal_aa_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,128,7,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
 1,0,0,0,10,0,7,0,83,80,86,95,75,72,82,95,102,108,111,97,116,95,99,111,110,116,114,111,108,115,0,0,
@@ -288933,7 +289070,9 @@ inline constexpr unsigned char temporal_aa_spirv[]={
 62,0,3,0,4,0,0,0,124,7,0,0,62,0,3,0,5,0,0,0,125,7,0,0,62,0,3,0,6,0,0,0,
 126,7,0,0,253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char temporal_aa_dxil[]={
 68,88,66,67,146,144,181,245,18,37,45,173,160,80,69,200,141,194,11,65,1,0,0,0,236,134,0,0,7,0,0,0,
 60,0,0,0,76,0,0,0,136,0,0,0,4,1,0,0,168,2,0,0,8,14,0,0,36,14,0,0,83,70,73,48,
@@ -290017,6 +290156,8 @@ inline constexpr unsigned char temporal_aa_dxil[]={
 59,0,0,0,0,0,0,0,0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char temporal_present_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,18,4,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
 1,0,0,0,10,0,7,0,83,80,86,95,75,72,82,95,102,108,111,97,116,95,99,111,110,116,114,111,108,115,0,0,
@@ -290885,7 +291026,9 @@ inline constexpr unsigned char temporal_present_spirv[]={
 127,2,0,0,126,2,0,0,1,4,0,0,153,2,0,0,16,4,0,0,6,4,0,0,62,0,3,0,58,1,0,0,
 17,4,0,0,62,0,3,0,4,0,0,0,17,4,0,0,253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char temporal_present_dxil[]={
 68,88,66,67,217,79,131,173,197,53,166,87,128,76,39,2,16,200,253,243,1,0,0,0,152,47,0,0,7,0,0,0,
 60,0,0,0,76,0,0,0,136,0,0,0,196,0,0,0,44,2,0,0,208,12,0,0,236,12,0,0,83,70,73,48,
@@ -291270,6 +291413,8 @@ inline constexpr unsigned char temporal_present_dxil[]={
 7,91,6,23,12,130,62,216,50,188,97,16,244,1,0,0,0,0,0,0,0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char exposure_meter_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,50,1,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
 1,0,0,0,10,0,7,0,83,80,86,95,75,72,82,95,102,108,111,97,116,95,99,111,110,116,114,111,108,115,0,0,
@@ -291516,7 +291661,9 @@ inline constexpr unsigned char exposure_meter_spirv[]={
 80,0,5,0,59,0,0,0,48,1,0,0,35,0,0,0,36,0,0,0,61,0,4,0,14,0,0,0,49,1,0,0,
 15,0,0,0,99,0,5,0,49,1,0,0,48,1,0,0,47,1,0,0,0,0,0,0,253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char exposure_meter_dxil[]={
 68,88,66,67,174,229,50,43,128,51,112,23,144,192,121,248,237,26,79,150,1,0,0,0,72,22,0,0,7,0,0,0,
 60,0,0,0,76,0,0,0,92,0,0,0,108,0,0,0,52,1,0,0,232,9,0,0,4,10,0,0,83,70,73,48,
@@ -291699,6 +291846,8 @@ inline constexpr unsigned char exposure_meter_dxil[]={
 0,0,0,0,0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char exposure_reduce_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,207,0,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
 1,0,0,0,10,0,7,0,83,80,86,95,75,72,82,95,102,108,111,97,116,95,99,111,110,116,114,111,108,115,0,0,
@@ -291881,7 +292030,9 @@ inline constexpr unsigned char exposure_reduce_spirv[]={
 206,0,0,0,76,0,0,0,205,0,0,0,0,0,0,0,62,0,3,0,104,0,0,0,101,0,0,0,249,0,2,0,
 126,0,0,0,248,0,2,0,126,0,0,0,253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char exposure_reduce_dxil[]={
 68,88,66,67,247,128,112,215,174,141,187,145,94,58,37,61,143,250,157,250,1,0,0,0,228,21,0,0,7,0,0,0,
 60,0,0,0,76,0,0,0,92,0,0,0,108,0,0,0,52,1,0,0,148,10,0,0,176,10,0,0,83,70,73,48,
@@ -292061,6 +292212,8 @@ inline constexpr unsigned char exposure_reduce_dxil[]={
 0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char exposure_apply_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,49,1,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
 1,0,0,0,10,0,7,0,83,80,86,95,75,72,82,95,102,108,111,97,116,95,99,111,110,116,114,111,108,115,0,0,
@@ -292314,7 +292467,9 @@ inline constexpr unsigned char exposure_apply_spirv[]={
 193,0,0,0,192,0,0,0,47,1,0,0,8,1,0,0,62,0,3,0,133,0,0,0,48,1,0,0,62,0,3,0,
 4,0,0,0,48,1,0,0,253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char exposure_apply_dxil[]={
 68,88,66,67,91,177,155,129,193,178,44,238,88,111,144,128,195,236,182,99,1,0,0,0,184,24,0,0,7,0,0,0,
 60,0,0,0,76,0,0,0,136,0,0,0,196,0,0,0,204,1,0,0,128,10,0,0,156,10,0,0,83,70,73,48,
@@ -292516,6 +292671,8 @@ inline constexpr unsigned char exposure_apply_dxil[]={
 106,64,110,176,101,120,13,200,13,182,12,178,1,185,1,0,0,0,0,0,0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char aa_spatial_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,51,2,0,0,0,0,0,0,17,0,2,0,1,0,0,0,11,0,6,0,
 1,0,0,0,71,76,83,76,46,115,116,100,46,52,53,48,0,0,0,0,14,0,3,0,0,0,0,0,1,0,0,0,
@@ -292920,7 +293077,9 @@ inline constexpr unsigned char aa_spatial_spirv[]={
 78,0,0,0,116,0,0,0,78,0,0,0,221,1,0,0,49,2,0,0,14,2,0,0,62,0,3,0,4,0,0,0,
 50,2,0,0,253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char aa_spatial_dxil[]={
 68,88,66,67,24,220,252,97,66,176,46,208,179,82,155,157,34,97,213,181,1,0,0,0,8,29,0,0,7,0,0,0,
 60,0,0,0,76,0,0,0,136,0,0,0,196,0,0,0,176,1,0,0,212,9,0,0,240,9,0,0,83,70,73,48,
@@ -293157,6 +293316,8 @@ inline constexpr unsigned char aa_spatial_dxil[]={
 65,25,4,0,0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char aa_edges_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,111,2,0,0,0,0,0,0,17,0,2,0,1,0,0,0,11,0,6,0,
 1,0,0,0,71,76,83,76,46,115,116,100,46,52,53,48,0,0,0,0,14,0,3,0,0,0,0,0,1,0,0,0,
@@ -293624,7 +293785,9 @@ inline constexpr unsigned char aa_edges_spirv[]={
 245,0,7,0,17,0,0,0,110,2,0,0,18,0,0,0,85,0,0,0,109,2,0,0,103,2,0,0,62,0,3,0,
 4,0,0,0,110,2,0,0,253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char aa_edges_dxil[]={
 68,88,66,67,10,50,27,75,110,115,113,132,165,69,213,101,7,252,52,165,1,0,0,0,132,33,0,0,7,0,0,0,
 60,0,0,0,76,0,0,0,136,0,0,0,196,0,0,0,172,1,0,0,48,10,0,0,76,10,0,0,83,70,73,48,
@@ -293897,6 +294060,8 @@ inline constexpr unsigned char aa_edges_dxil[]={
 0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char aa_weights_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,88,7,0,0,0,0,0,0,17,0,2,0,1,0,0,0,11,0,6,0,
 1,0,0,0,71,76,83,76,46,115,116,100,46,52,53,48,0,0,0,0,14,0,3,0,0,0,0,0,1,0,0,0,
@@ -295304,7 +295469,9 @@ inline constexpr unsigned char aa_weights_spirv[]={
 249,0,2,0,129,5,0,0,248,0,2,0,129,5,0,0,245,0,7,0,58,0,0,0,87,7,0,0,125,5,0,0,
 255,0,0,0,86,7,0,0,53,7,0,0,62,0,3,0,4,0,0,0,87,7,0,0,253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char aa_weights_dxil[]={
 68,88,66,67,120,227,102,129,244,247,252,177,59,157,218,35,125,127,92,104,1,0,0,0,116,64,0,0,7,0,0,0,
 60,0,0,0,76,0,0,0,136,0,0,0,196,0,0,0,224,1,0,0,156,10,0,0,184,10,0,0,83,70,73,48,
@@ -295824,6 +295991,8 @@ inline constexpr unsigned char aa_weights_dxil[]={
 61,118,176,101,88,203,224,185,3,0,0,0,0,0,0,0,0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char aa_blend_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,168,1,0,0,0,0,0,0,17,0,2,0,1,0,0,0,11,0,6,0,
 1,0,0,0,71,76,83,76,46,115,116,100,46,52,53,48,0,0,0,0,14,0,3,0,0,0,0,0,1,0,0,0,
@@ -296137,7 +296306,9 @@ inline constexpr unsigned char aa_blend_spirv[]={
 68,0,0,0,245,0,9,0,24,0,0,0,167,1,0,0,79,0,0,0,85,0,0,0,79,0,0,0,119,0,0,0,
 166,1,0,0,131,1,0,0,62,0,3,0,4,0,0,0,167,1,0,0,253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char aa_blend_dxil[]={
 68,88,66,67,1,114,56,5,93,237,139,87,10,164,6,217,168,110,100,170,1,0,0,0,192,27,0,0,7,0,0,0,
 60,0,0,0,76,0,0,0,136,0,0,0,196,0,0,0,220,1,0,0,192,10,0,0,220,10,0,0,83,70,73,48,
@@ -296363,6 +296534,8 @@ inline constexpr unsigned char aa_blend_dxil[]={
 193,0,33,153,113,209,23,125,65,151,96,196,32,1,64,16,12,16,146,25,23,125,209,23,121,177,19,4,0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char aa_supersample_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,117,0,0,0,0,0,0,0,17,0,2,0,1,0,0,0,11,0,6,0,
 1,0,0,0,71,76,83,76,46,115,116,100,46,52,53,48,0,0,0,0,14,0,3,0,0,0,0,0,1,0,0,0,
@@ -296466,7 +296639,9 @@ inline constexpr unsigned char aa_supersample_spirv[]={
 38,0,0,0,245,0,7,0,26,0,0,0,116,0,0,0,49,0,0,0,57,0,0,0,115,0,0,0,104,0,0,0,
 62,0,3,0,4,0,0,0,116,0,0,0,253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char aa_supersample_dxil[]={
 68,88,66,67,54,77,229,22,122,201,232,183,207,46,117,254,168,82,157,19,1,0,0,0,108,19,0,0,7,0,0,0,
 60,0,0,0,76,0,0,0,136,0,0,0,196,0,0,0,228,1,0,0,236,9,0,0,8,10,0,0,83,70,73,48,
@@ -296626,6 +296801,8 @@ inline constexpr unsigned char aa_supersample_dxil[]={
 48,14,163,128,0,0,0,0,0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char aa_upscale_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,79,0,0,0,0,0,0,0,17,0,2,0,1,0,0,0,11,0,6,0,
 1,0,0,0,71,76,83,76,46,115,116,100,46,52,53,48,0,0,0,0,14,0,3,0,0,0,0,0,1,0,0,0,
@@ -296700,7 +296877,9 @@ inline constexpr unsigned char aa_upscale_spirv[]={
 248,0,2,0,68,0,0,0,245,0,7,0,24,0,0,0,78,0,0,0,77,0,0,0,69,0,0,0,56,0,0,0,
 70,0,0,0,62,0,3,0,4,0,0,0,78,0,0,0,253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char aa_upscale_dxil[]={
 68,88,66,67,120,116,95,159,208,98,94,211,14,18,216,144,68,148,33,236,1,0,0,0,44,18,0,0,7,0,0,0,
 60,0,0,0,76,0,0,0,136,0,0,0,196,0,0,0,200,1,0,0,224,9,0,0,252,9,0,0,83,70,73,48,
@@ -296850,6 +297029,8 @@ inline constexpr unsigned char aa_upscale_dxil[]={
 13,252,192,15,236,224,65,0,0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char connected_project_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,228,0,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
 1,0,0,0,10,0,7,0,83,80,86,95,75,72,82,95,102,108,111,97,116,95,99,111,110,116,114,111,108,115,0,0,
@@ -297023,7 +297204,9 @@ inline constexpr unsigned char connected_project_spirv[]={
 36,0,0,0,62,0,3,0,227,0,0,0,226,0,0,0,62,0,3,0,99,0,0,0,88,0,0,0,249,0,2,0,
 121,0,0,0,248,0,2,0,121,0,0,0,253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char connected_project_dxil[]={
 68,88,66,67,57,232,29,20,65,140,168,119,3,168,78,223,35,164,9,35,1,0,0,0,48,16,0,0,7,0,0,0,
 60,0,0,0,76,0,0,0,92,0,0,0,108,0,0,0,4,1,0,0,160,7,0,0,188,7,0,0,83,70,73,48,
@@ -297157,6 +297340,8 @@ inline constexpr unsigned char connected_project_dxil[]={
 91,134,56,8,200,0,0,0,0,0,0,0,0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char connected_rows_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,110,1,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
 1,0,0,0,10,0,7,0,83,80,86,95,75,72,82,95,102,108,111,97,116,95,99,111,110,116,114,111,108,115,0,0,
@@ -297451,7 +297636,9 @@ inline constexpr unsigned char connected_rows_spirv[]={
 72,0,0,0,53,0,0,0,62,0,3,0,109,1,0,0,196,0,0,0,62,0,3,0,152,0,0,0,116,0,0,0,
 249,0,2,0,181,0,0,0,248,0,2,0,181,0,0,0,253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char connected_rows_dxil[]={
 68,88,66,67,42,246,5,70,192,248,145,15,25,5,226,159,123,20,155,3,1,0,0,0,76,18,0,0,7,0,0,0,
 60,0,0,0,76,0,0,0,92,0,0,0,108,0,0,0,4,1,0,0,128,7,0,0,156,7,0,0,83,70,73,48,
@@ -297602,6 +297789,8 @@ inline constexpr unsigned char connected_rows_dxil[]={
 61,204,18,76,8,0,0,0,0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char ray_geometry_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,58,37,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
 1,0,0,0,10,0,7,0,83,80,86,95,75,72,82,95,102,108,111,97,116,95,99,111,110,116,114,111,108,115,0,0,
@@ -305317,7 +305506,9 @@ inline constexpr unsigned char ray_geometry_spirv[]={
 175,8,0,0,249,0,2,0,119,32,0,0,248,0,2,0,119,32,0,0,62,0,3,0,124,14,0,0,175,8,0,0,
 249,0,2,0,152,14,0,0,248,0,2,0,152,14,0,0,253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char ray_geometry_dxil[]={
 68,88,66,67,172,116,135,41,116,57,209,86,176,190,223,149,67,245,244,121,1,0,0,0,84,229,0,0,7,0,0,0,
 60,0,0,0,76,0,0,0,92,0,0,0,108,0,0,0,24,1,0,0,96,13,0,0,124,13,0,0,83,70,73,48,
@@ -307156,6 +307347,8 @@ inline constexpr unsigned char ray_geometry_dxil[]={
 168,232,241,132,193,150,97,69,143,39,12,0,0,0,0,0,0,0,0,0
 };
 #endif
+#endif
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char environment_pack_spirv[]={
 3,2,35,7,0,0,1,0,0,0,14,0,183,0,0,0,0,0,0,0,17,0,2,0,114,17,0,0,17,0,2,0,
 1,0,0,0,10,0,7,0,83,80,86,95,75,72,82,95,102,108,111,97,116,95,99,111,110,116,114,111,108,115,0,0,
@@ -307303,7 +307496,9 @@ inline constexpr unsigned char environment_pack_spirv[]={
 182,0,0,0,9,0,0,0,37,0,0,0,167,0,0,0,62,0,3,0,182,0,0,0,181,0,0,0,62,0,3,0,
 87,0,0,0,33,0,0,0,249,0,2,0,94,0,0,0,248,0,2,0,94,0,0,0,253,0,1,0,56,0,1,0
 };
+#endif
 #if defined(_WIN32)
+#if !defined(STARFOX_CALIBRATED_REFLECTION_HISTORY_ONLY)
 inline constexpr unsigned char environment_pack_dxil[]={
 68,88,66,67,165,22,178,173,177,190,255,51,70,206,168,77,105,91,124,250,1,0,0,0,124,17,0,0,7,0,0,0,
 60,0,0,0,76,0,0,0,92,0,0,0,108,0,0,0,28,1,0,0,116,8,0,0,144,8,0,0,83,70,73,48,
@@ -307446,5 +307641,6 @@ inline constexpr unsigned char environment_pack_dxil[]={
 240,6,144,24,108,25,236,0,18,131,45,195,29,64,98,176,101,192,3,72,12,182,12,121,0,137,193,150,193,15,32,49,
 216,50,252,1,36,6,91,6,80,128,196,96,203,16,10,144,24,0,0,0,0,0,0,0,0,0,0,0
 };
+#endif
 #endif
 }

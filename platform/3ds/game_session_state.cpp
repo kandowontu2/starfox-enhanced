@@ -18,7 +18,7 @@ std::vector<std::uint8_t> GameSession::save_state() const {
 std::unique_ptr<GameSession> GameSession::restored_state(std::span<const std::uint8_t> bytes) const {
     if(!state_available()) throw std::runtime_error("Close runtime options or finish cartridge handoff before loading a state");
     auto data=decode_game_state(bytes,assets::crc32(rom_.bytes()));
-    GameSessionOptions options;options.preferences=preferences();
+    GameSessionOptions options;options.preferences=preferences();options.stem_executor=stem_executor_;
     auto next=std::make_unique<GameSession>(rom_,symbols_,sink_,"BOOT",std::span<const std::uint8_t>{},options);
     // Restore from the candidate, NOT this->game_: GameSimulation retains ROM
     // and symbol pointers from the caller. Those must survive retiring *this.

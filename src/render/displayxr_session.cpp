@@ -90,7 +90,8 @@ bool DisplayXrSession::initialize(const DisplayXrRuntime& runtime,const void* gr
             function<PFN_xrWaitFrame>(runtime,"xrWaitFrame"),
             function<PFN_xrBeginFrame>(runtime,"xrBeginFrame"),
             function<PFN_xrEndFrame>(runtime,"xrEndFrame"),
-            function<PFN_xrLocateViews>(runtime,"xrLocateViews")};
+            function<PFN_xrLocateViews>(runtime,"xrLocateViews"),
+            function<PFN_xrRequestExitSession>(runtime,"xrRequestExitSession")};
         enumerate_modes_=function<displayxr::EnumerateRenderingModes>(runtime,"xrEnumerateDisplayRenderingModesDXR");
         const auto request=function<displayxr::RequestRenderingMode>(runtime,"xrRequestDisplayRenderingModeDXR");
         displayxr::WindowBinding window_binding;window_binding.window=window;window_binding.next=graphics;

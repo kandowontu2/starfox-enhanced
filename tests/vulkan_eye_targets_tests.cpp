@@ -3,6 +3,7 @@
 #include "starfox/vr/vulkan_stereo_draw.hpp"
 #include "starfox/vr/vulkan_scene_pipeline.hpp"
 #include "starfox/vr/vulkan_scene_buffer.hpp"
+#include "starfox/vr/vulkan_frame_resources.hpp"
 #include "starfox/vr/scene_material.hpp"
 #include <cstring>
 #include <iostream>
@@ -26,12 +27,18 @@ bool expected_depth_test=false,expected_depth_write=false;
 std::array<unsigned char,1024> uploaded{};
 unsigned flushes{},unmaps{},buffers_destroyed{},memory_freed{};
 bool fail_flush{};
+bool track_retirement{},outstanding_submission{};
+unsigned premature_resource_destroys{},pipelines_destroyed{};
+VkResult submit_result=VK_SUCCESS;
 VKAPI_ATTR VkResult VKAPI_CALL create_buffer(VkDevice,const VkBufferCreateInfo* info,const VkAllocationCallbacks*,VkBuffer* out) {
     require(info->size==3*sizeof(SceneVertex)
         && info->usage==(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT|VK_BUFFER_USAGE_STORAGE_BUFFER_BIT));
     *out=handle<VkBuffer>(1);return VK_SUCCESS;
 }
-VKAPI_ATTR void VKAPI_CALL destroy_buffer(VkDevice,VkBuffer,const VkAllocationCallbacks*) {++buffers_destroyed;}
+VKAPI_ATTR void VKAPI_CALL destroy_buffer(VkDevice,VkBuffer,const VkAllocationCallbacks*) {
+    if(track_retirement && outstanding_submission) ++premature_resource_destroys;
+    ++buffers_destroyed;
+}
 VKAPI_ATTR void VKAPI_CALL requirements(VkDevice,VkBuffer,VkMemoryRequirements* out) {*out={1024,16,1};}
 VKAPI_ATTR VkResult VKAPI_CALL allocate_memory(VkDevice,const VkMemoryAllocateInfo* info,const VkAllocationCallbacks*,VkDeviceMemory* out) {
     require(info->memoryTypeIndex==0 && info->allocationSize==1024);*out=handle<VkDeviceMemory>(1);return VK_SUCCESS;
@@ -62,7 +69,10 @@ VKAPI_ATTR VkResult VKAPI_CALL create_pipeline(VkDevice,VkPipelineCache,uint32_t
         && bool(info->pDepthStencilState->depthWriteEnable)==expected_depth_write);
     *out=handle<VkPipeline>(1);return VK_SUCCESS;
 }
-VKAPI_ATTR void VKAPI_CALL destroy_pipeline(VkDevice,VkPipeline,const VkAllocationCallbacks*) {}
+VKAPI_ATTR void VKAPI_CALL destroy_pipeline(VkDevice,VkPipeline,const VkAllocationCallbacks*) {
+    if(track_retirement && outstanding_submission) ++premature_resource_destroys;
+    ++pipelines_destroyed;
+}
 VKAPI_ATTR void VKAPI_CALL bind_pipeline(VkCommandBuffer,VkPipelineBindPoint,VkPipeline) {}
 VKAPI_ATTR void VKAPI_CALL bind_vertices(VkCommandBuffer,uint32_t,uint32_t,const VkBuffer*,const VkDeviceSize*) {}
 VKAPI_ATTR void VKAPI_CALL push(VkCommandBuffer,VkPipelineLayout,VkShaderStageFlags,uint32_t,uint32_t size,const void*) {require(size==128);}
@@ -80,7 +90,11 @@ VKAPI_ATTR VkResult VKAPI_CALL create_fence(VkDevice,const VkFenceCreateInfo*,co
     *out=handle<VkFence>(1);return VK_SUCCESS;
 }
 VKAPI_ATTR void VKAPI_CALL destroy_fence(VkDevice,VkFence,const VkAllocationCallbacks*) {++fence_destroys;}
-VKAPI_ATTR VkResult VKAPI_CALL idle(VkQueue) {++idles;return VK_SUCCESS;}
+VKAPI_ATTR VkResult VKAPI_CALL idle(VkQueue) {
+    ++idles;
+    if(track_retirement) outstanding_submission=false;
+    return VK_SUCCESS;
+}
 VKAPI_ATTR VkResult VKAPI_CALL reset_pool(VkDevice,VkCommandPool,VkCommandPoolResetFlags) {inside_pass=false;return VK_SUCCESS;}
 VKAPI_ATTR VkResult VKAPI_CALL reset_fences(VkDevice,uint32_t,const VkFence*) {return VK_SUCCESS;}
 VKAPI_ATTR VkResult VKAPI_CALL begin(VkCommandBuffer,const VkCommandBufferBeginInfo*) {return VK_SUCCESS;}
@@ -98,11 +112,18 @@ VKAPI_ATTR VkResult VKAPI_CALL submit(VkQueue,uint32_t count,const VkSubmitInfo*
         require(timeline->sType==VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO
             && timeline->waitSemaphoreValueCount==1 && *timeline->pWaitSemaphoreValues==42);
     } else require(!info->pNext);
-    require(count==1 && info->commandBufferCount==1 && fence);++submissions;return VK_SUCCESS;
+    require(count==1 && info->commandBufferCount==1 && fence);++submissions;
+    if(track_retirement) outstanding_submission=true;
+    return submit_result;
 }
-VKAPI_ATTR VkResult VKAPI_CALL fence_status(VkDevice,VkFence) {return pending_fence?VK_NOT_READY:VK_SUCCESS;}
+VKAPI_ATTR VkResult VKAPI_CALL fence_status(VkDevice,VkFence) {
+    if(track_retirement && !pending_fence) outstanding_submission=false;
+    return pending_fence?VK_NOT_READY:VK_SUCCESS;
+}
 VKAPI_ATTR VkResult VKAPI_CALL wait_fences(VkDevice,uint32_t,const VkFence*,VkBool32,uint64_t timeout) {
-    require(timeout<=1000000);return pending_fence?VK_TIMEOUT:VK_SUCCESS;
+    require(timeout<=1000000);
+    if(track_retirement && !pending_fence) outstanding_submission=false;
+    return pending_fence?VK_TIMEOUT:VK_SUCCESS;
 }
 VKAPI_ATTR VkResult VKAPI_CALL pass(VkDevice,const VkRenderPassCreateInfo* info,const VkAllocationCallbacks*,VkRenderPass* out) {
     require(info->attachmentCount==1 && info->subpassCount==1);
@@ -275,6 +296,50 @@ int main(int argc,char** argv) try {
         require(!unsupported.gpu_timestamps_available()
             && unsupported.timestamp_status().find("timestampValidBits is zero")!=std::string::npos);
     }
+    // Actual production owner, not a copied declaration sequence. Cancellation,
+    // unwinding and an uncertain failed submit must retire the eye queue before
+    // destroying either transition layer. A completed eye needs no extra idle.
+    track_retirement=true;
+    expected_depth_test=expected_depth_write=false;
+    fail_flush=false;
+    for(unsigned mode=0;mode<4;++mode) {
+        const auto prior_idles=idles,prior_buffers=buffers_destroyed;
+        const auto prior_pipelines=pipelines_destroyed;
+        bool caught=false;
+        try {
+            VulkanFrameResources resources;
+            VkPhysicalDeviceMemoryProperties properties{};properties.memoryTypeCount=1;
+            properties.memoryTypes[0].propertyFlags=VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+            const std::array<SceneVertex,3> vertices{};
+            for(auto* buffer:{&resources.circle_vertices,&resources.shutter_vertices})
+                require(buffer->initialize(handle<VkDevice>(1),get,properties,vertices));
+            for(auto* pipeline:{&resources.circle_pipeline,&resources.shutter_pipeline})
+                require(pipeline->initialize(handle<VkDevice>(1),get,targets.render_pass()));
+            require(resources.commands.initialize(handle<VkDevice>(1),handle<VkQueue>(1),2,get));
+            pending_fence=true;
+            submit_result=mode==2?VK_ERROR_DEVICE_LOST:VK_SUCCESS;
+            VkClearColorValue clear{};
+            const EyeCamera camera{};
+            const bool submitted=resources.commands.submit(targets,0,0,clear,[&](auto command,auto extent) {
+                require(resources.circle_pipeline.record(command,extent,resources.circle_vertices.buffer(),3,camera));
+                require(resources.shutter_pipeline.record(command,extent,resources.shutter_vertices.buffer(),3,camera));
+            });
+            require(submitted==(mode!=2) && outstanding_submission);
+            if(mode==3) {
+                pending_fence=false;
+                require(resources.commands.poll()==VulkanEyeCommands::Completion::complete);
+            } else if(mode==1) throw std::runtime_error("controlled frame unwind");
+        } catch(const std::runtime_error& error) {
+            if(std::string_view(error.what())!="controlled frame unwind") throw;
+            caught=true;
+        }
+        require(caught==(mode==1));
+        require(!outstanding_submission && premature_resource_destroys==0);
+        require(buffers_destroyed==prior_buffers+2 && pipelines_destroyed==prior_pipelines+2);
+        require(idles==prior_idles+(mode==3?0:1));
+    }
+    submit_result=VK_SUCCESS;track_retirement=false;
+    std::cout<<"Transition buffers/pipelines retire after queued eyes on cancel, unwind and failed submit (injected driver)\n";
     targets.close();targets.close();
     require(destroyed_passes==1 && destroyed_views==4 && destroyed_frames==4);
     fail_frame=true;

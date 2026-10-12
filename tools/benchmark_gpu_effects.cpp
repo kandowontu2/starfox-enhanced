@@ -33,6 +33,7 @@
 #if defined(STARFOX_TEST_PORTABLE_GPU)
 #include "check_dedither.inc"
 #include "check_environment_reflection.inc"
+#include "check_host_bloom_ink.inc"
 #endif
 int main() {
     using namespace starfox::render;
@@ -45,6 +46,7 @@ int main() {
     } device{SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV|SDL_GPU_SHADERFORMAT_MSL
         |SDL_GPU_SHADERFORMAT_DXIL,true,nullptr)};
     if(!device.Get()) {std::cerr<<SDL_GetError()<<'\n';return 1;}
+    std::cout<<"Portable GPU driver: "<<SDL_GetGPUDeviceDriver(device.Get())<<'\n';
     SdlGpuEffects gpu;
 #if defined(_WIN32)
     if(std::getenv("STARFOX_TEST_D3D11_SCREEN_REFLECTION_ONLY")) {
@@ -112,6 +114,8 @@ int main() {
         }
         if(!world_changed) {std::cerr<<"Host UI fixture did not exercise world effects\n";return 112;}
         std::cout<<"Native host UI: exact grey/yellow/white inks through exposure, afterglow, trails, reset and camera motion passed\n";
+        try {check_host_bloom_ink(gpu,device.Get());}
+        catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 117;}
         if(std::getenv("STARFOX_TEST_HOST_OVERLAY_ONLY")) return 0;
     }
 #else

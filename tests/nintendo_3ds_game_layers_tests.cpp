@@ -1,5 +1,6 @@
 #include "starfox/platform/nintendo_3ds/game_layers.hpp"
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <new>
 
@@ -238,9 +239,9 @@ void landscape_depth() {
         Canvas lower;validate_pica_frame(prepared.before_models,lower.view());
         const auto& group=prepared.before_models;
         require(group.draws.size()==2 && group.draws[0].space==PicaSpace::scenery
-            && group.draws[1].space==PicaSpace::world && group.draws[1].depth_test && group.draws[1].depth_write
+            && group.draws[1].space==PicaSpace::world && !group.draws[1].depth_test && !group.draws[1].depth_write
             && group.draws[1].projected_uv && group.draws[0].source_layer==2 && group.draws[1].source_layer==2,
-            "Native landscape stayed a screen-depth HUD image or lost source ownership/depth");
+            "Native landscape lost stereo geometry/source ownership or occludes the BG1 model layer");
         require(group.textures.size()==1 && group.textures[0].source_layers.empty(),"Landscape duplicated the entire texture or retained an unnecessary mixed-layer mask");
         const std::vector<PicaVertex> saved(group.vertices.begin(),group.vertices.end());
         for(unsigned i=6;i<saved.size();++i) {
@@ -315,8 +316,8 @@ void atlas_landscape_depth() {
         const auto& group=gpu.before_models;
         require(group.draws.size()==2 && group.draws[0].space==PicaSpace::scenery
             && group.draws[1].space==PicaSpace::world && group.draws[1].projected_uv
-            && group.draws[1].depth_test && group.draws[1].depth_write,
-            "Atlas terrain lost source depth, infinity ordering or projected UV");
+            && !group.draws[1].depth_test && !group.draws[1].depth_write,
+            "Atlas terrain lost stereo geometry/order/UV or writes conflicting BG1 occlusion depth");
         require(group.textures[0].source_layers.empty() && group.vertices.size()<pica_vertex_limit,
             "Atlas terrain duplicated provenance or exceeded native geometry capacity");
         const auto plane=source_landscape_plane(frame);const auto& finite=group.draws[1];
@@ -360,6 +361,187 @@ void atlas_landscape_depth() {
             "Finite geometry overflow was not rejected atomically");
         require(old.size()==accepted->vertices.size() && std::equal(old.begin(),old.end(),accepted->vertices.begin()),
             "Failed receiver preparation invalidated a previous borrowed complete frame");
+        const auto exact=[&](const PicaFrame& actual,const PicaFrame& expected) {
+            require(actual.vertices.size()==expected.vertices.size()
+                && std::memcmp(actual.vertices.data(),expected.vertices.data(),actual.vertices.size_bytes())==0,
+                "Reused terrain differs from a fresh complete mesh");
+            require(actual.draws.size()==expected.draws.size() && actual.textures.size()==expected.textures.size()
+                && actual.clear==expected.clear && same_pica_plan(actual.plan,expected.plan),
+                "Reused terrain lost its current plan, painter groups or clear");
+            for(unsigned i=0;i<actual.draws.size();++i) {
+                const auto& a=actual.draws[i];const auto& b=expected.draws[i];
+                require(a.first==b.first && a.count==b.count && a.texture==b.texture && a.model==b.model
+                    && a.space==b.space && a.depth_test==b.depth_test && a.depth_write==b.depth_write
+                    && a.alpha_blend==b.alpha_blend && a.screen_dither==b.screen_dither && a.dither_odd==b.dither_odd
+                    && a.clip==b.clip && a.source_layer==b.source_layer && a.colour_op==b.colour_op
+                    && a.projected_uv==b.projected_uv,"Reused terrain changed draw ownership or depth");
+            }
+            for(unsigned i=0;i<actual.textures.size();++i) {
+                const auto& a=actual.textures[i];const auto& b=expected.textures[i];
+                require(a.width==b.width && a.height==b.height && a.pitch==b.pitch && a.channels==b.channels
+                    && a.repeat==b.repeat && a.layer_pitch==b.layer_pitch
+                    && std::equal(a.pixels.begin(),a.pixels.end(),b.pixels.begin(),b.pixels.end())
+                    && std::equal(a.source_layers.begin(),a.source_layers.end(),b.source_layers.begin(),b.source_layers.end()),
+                    "Reused terrain retained obsolete texture metadata/artwork");
+            }
+        };
+        auto input=*tiles;
+        std::array<PicaImage,1> images{input.textures.front()};input.textures=images;
+        std::vector<std::uint8_t> pixels(images[0].pixels.begin(),images[0].pixels.end());
+        pixels[0]^=0x7f;images[0].pixels=pixels;input.clear={41,73,101};
+        const auto compare_fresh=[&] {
+            input.plan=frame.plan;
+            GameScenery fresh;
+            const auto reference=fresh.prepare_tiles(frame,input,owner.coverage_guard(),pica_vertex_limit);
+            const auto reused=receiver.prepare_tiles(frame,input,owner.coverage_guard(),pica_vertex_limit);
+            require(reference && reused,"Terrain reuse fixture lost complete atlas acceptance");
+            exact(*reused,*reference);
+        };
+        const auto before_reuse=receiver.atlas_geometry_work();
+        for(float slider:{0.F,.5F,1.F}) {
+            frame.plan=plan_frame(slider,true,ScreenUse::world);compare_fresh();
+        }
+        require(receiver.atlas_geometry_work().builds==before_reuse.builds
+            && receiver.atlas_geometry_work().reuses==before_reuse.reuses+3,
+            "Slider/borrowed-art changes rebuilt the identical terrain mesh");
+        // Even unused accepted draw metadata must come from this frame,
+        // rather than leaking a previous source group's TEV constant.
+        std::array<PicaDraw,1> current_draw{input.draws.front()};
+        current_draw[0].dither_odd={17,29,43,255};input.draws=current_draw;
+        compare_fresh();
+        require(receiver.atlas_geometry_work().builds==before_reuse.builds
+            && receiver.atlas_geometry_work().reuses==before_reuse.reuses+4,
+            "Current source draw metadata rebuilt identical terrain");
+        // Plane and every geometry projection dependency must invalidate reuse.
+        for(unsigned field=0;field<4;++field) {
+            if(field==0)frame.plan.focal_x*=.75F;
+            if(field==1)frame.plan.focal_y*=1.25F;
+            if(field==2)frame.plan.near_plane*=2;
+            if(field==3)frame.plan.far_plane*=.5F;
+            const auto builds=receiver.atlas_geometry_work().builds;compare_fresh();
+            require(receiver.atlas_geometry_work().builds==builds+1,"Changed projection reused stale terrain");
+            compare_fresh();require(receiver.atlas_geometry_work().builds==builds+1,
+                "Held changed projection rebuilt terrain twice");
+        }
+        scene->landscape_grid_height=-200;
+        auto builds=receiver.atlas_geometry_work().builds;compare_fresh();
+        require(receiver.atlas_geometry_work().builds==builds+1,"Changed source plane reused stale terrain");
+        std::vector<PicaVertex> changed(input.vertices.begin(),input.vertices.end());
+        for(unsigned i:{0U,3U,5U})changed[i].position[0]+=.125F;
+        input.vertices=changed;builds=receiver.atlas_geometry_work().builds;compare_fresh();
+        require(receiver.atlas_geometry_work().builds==builds+1,"Changed source tile reused stale terrain");
+        // A failure on the hot path must not mutate borrowed current geometry
+        // or texture headers, and a valid retry should retain that cache.
+        const auto held=receiver.prepare_tiles(frame,input,owner.coverage_guard(),pica_vertex_limit);
+        const auto held_vertices=std::vector<PicaVertex>(held->vertices.begin(),held->vertices.end());
+        const auto held_image=held->textures[0];
+        std::vector<std::uint8_t> excessive(1024*1024*4);
+        images[0]={excessive,1024,1024,4096,4};bool refused=false;
+        try {static_cast<void>(receiver.prepare_tiles(frame,input,owner.coverage_guard(),pica_vertex_limit));}
+        catch(const std::invalid_argument&){refused=true;}
+        require(refused && held->textures[0].pixels.data()==held_image.pixels.data()
+            && std::equal(held_vertices.begin(),held_vertices.end(),held->vertices.begin(),held->vertices.end()),
+            "Hot terrain preflight exceeded residency budget or mutated previous borrowed state");
+        images[0]=held_image;builds=receiver.atlas_geometry_work().builds;compare_fresh();
+        require(receiver.atlas_geometry_work().builds==builds,"Rejected hot-path input discarded valid terrain reuse");
+        // Previously validated vertices cannot bypass a later, narrower
+        // declared source bound, even when that bound covers the eye receivers.
+        auto wider=changed;const auto wide_guard=owner.coverage_guard()+8;
+        for(unsigned i:{0U,3U,5U})wider[i].position[0]=-float(wide_guard);
+        input.vertices=wider;
+        const auto wide=receiver.prepare_tiles(frame,input,wide_guard,pica_vertex_limit);
+        require(bool(wide),"Wider terrain bounds fixture failed");
+        const auto wide_vertices=std::vector<PicaVertex>(wide->vertices.begin(),wide->vertices.end());
+        refused=false;
+        try {static_cast<void>(receiver.prepare_tiles(frame,input,owner.coverage_guard(),pica_vertex_limit));}
+        catch(const std::invalid_argument&){refused=true;}
+        require(refused && std::equal(wide_vertices.begin(),wide_vertices.end(),wide->vertices.begin(),wide->vertices.end()),
+            "Cached terrain bypassed narrowed source bounds or changed borrowed geometry on failure");
+        input.vertices=changed;compare_fresh();
+        // A successful different receiver replaces this owner's mesh. It
+        // must invalidate terrain reuse even when the next atlas is identical.
+        auto water_frame=source(simulation::GameFlowState::gameplay,1);
+        auto water_scene=std::make_shared<vr::GameSceneSnapshot>(*water_frame.current);
+        water_scene->background_water_surround=true;water_scene->camera.y=-96;water_scene->shadow_height=0;
+        water_frame.current=water_frame.previous=water_scene;
+        PpuBatch water_batch;water_batch.passes={{PpuLayer::bg2}};
+        water_batch.space=PicaSpace::scenery;water_batch.expand_horizontal=true;
+        PicaRaster water_raster;
+        const auto water_input=water_raster.prepare(water_frame.raster->ppu,water_batch,water_frame.plan,15,0,
+            source_water_guard(water_frame));
+        static_cast<void>(receiver.prepare_water(water_frame,water_input,water_raster.coverage_guard()));
+        builds=receiver.atlas_geometry_work().builds;compare_fresh();
+        require(receiver.atlas_geometry_work().builds==builds+1,"Water publication reused a stale terrain bank");
+    }
+}
+void landscape_bg1_priority() {
+    // BG2's fixed entry-height/HDMA reconstruction can be in front of live
+    // camera-local BG1 ink. It must retain stereo parallax but cannot turn
+    // that difference into new occlusion absent from the cartridge painter.
+    auto frame=source(simulation::GameFlowState::gameplay,2);
+    auto scene=std::make_shared<vr::GameSceneSnapshot>(*frame.current);
+    scene->background_landscape=true;scene->landscape_grid_height=-145;
+    scene->landscape_atlas_origin=232;scene->camera.y=-512;
+    frame.current=frame.previous=scene;
+    auto ppu=std::make_shared<simulation::SnesPpuState>(*frame.raster->ppu);
+    ppu->main_screen=2;ppu->bg2_scroll_y=232;
+    for(unsigned i=0;i<1024;++i) {ppu->vram[0x6400+i*2]=1;ppu->vram[0x6401+i*2]=8;}
+    auto raster=std::make_shared<GameRasterSnapshot>(*frame.raster);raster->ppu=ppu;frame.raster=raster;
+    Canvas lower;
+    for(float slider:{0.F,.5F,1.F}) for(unsigned budget:{0U,pica_vertex_limit}) {
+        frame.plan=plan_frame(slider,true,ScreenUse::world);
+        GameLayers layers;const auto art=layers.prepare(frame,budget);
+        std::vector<PicaVertex> ink;
+        const auto quad=[&](double x0,double y0,double x1,double y1,double z) {
+            const std::array<std::array<double,2>,4> corners{{{x0,y0},{x1,y0},{x1,y1},{x0,y1}}};
+            for(unsigned k:{0U,1U,2U,0U,2U,3U}) ink.push_back({
+                {float((corners[k][0]-200)*z/frame.plan.focal_x),
+                    float((120-corners[k][1])*z/frame.plan.focal_y),float(z)}, {1,1,1,1},{}});
+        };
+        quad(195,180,196,181,2048); // A one-source-pixel ground light.
+        quad(210,140,216,230,2048); // Gate/post whose base must remain visible.
+        PicaDraw ink_draw;ink_draw.count=unsigned(ink.size());
+        const PicaFrame bg1{frame.plan,ink,std::span(&ink_draw,1),{}};
+        PicaComposite compositor;
+        const auto composed=compositor.prepare(frame.plan,std::array{art.before_models,bg1},lower.view());
+        validate_pica_frame(composed,lower.view());
+        for(unsigned eye=0;eye<frame.plan.eye_count;++eye) for(const auto mono:
+            std::array<std::array<double,2>,3>{{{195.5,180.5},{213,150},{213,220}}}) {
+            const auto clip=PicaProjection(frame.plan,eye).clip_position({
+                float((mono[0]-200)*2048/frame.plan.focal_x),
+                float((120-mono[1])*2048/frame.plan.focal_y),2048});
+            require(bool(clip),"BG1 priority fixture has invalid eye geometry");
+            const std::array<double,2> sample{200*(1-(*clip)[1]/(*clip)[3]),120*(1-(*clip)[0]/(*clip)[3])};
+            const auto visible_layer=[&](bool former_ground_depth) {
+                double stored=0;unsigned layer=32;
+                for(const auto& draw:composed.draws) for(unsigned i=draw.first;i<draw.first+draw.count;i+=3) {
+                    std::array<PicaProjection::ClipPoint,3> points{};
+                    std::array<std::array<double,2>,3> screen{};
+                    const auto matrix=pica_draw_matrix(frame.plan,eye,draw);
+                    for(unsigned k=0;k<3;++k) {
+                        const auto p=composed.vertices[i+k].position;
+                        for(unsigned r=0;r<4;++r) {
+                            points[k][r]=matrix[r][3];
+                            for(unsigned c=0;c<3;++c) points[k][r]+=matrix[r][c]*double(p[c]);
+                        }
+                        screen[k]={200*(1-points[k][1]/points[k][3]),120*(1-points[k][0]/points[k][3])};
+                    }
+                    const auto cross=[](auto a,auto b,auto p) {return (b[0]-a[0])*(p[1]-a[1])-(b[1]-a[1])*(p[0]-a[0]);};
+                    const auto area=cross(screen[0],screen[1],screen[2]);if(std::abs(area)<1.e-12) continue;
+                    const std::array w{cross(screen[1],screen[2],sample)/area,
+                        cross(screen[2],screen[0],sample)/area,cross(screen[0],screen[1],sample)/area};
+                    if(std::any_of(w.begin(),w.end(),[](double a){return a< -1.e-6;})) continue;
+                    double depth=0;for(unsigned k=0;k<3;++k) depth-=w[k]*points[k][2]/points[k][3];
+                    const bool former=former_ground_depth && draw.source_layer==2 && draw.space==PicaSpace::world;
+                    if((draw.depth_test || former) && depth+1.e-9<stored) continue;
+                    layer=draw.source_layer;
+                    if(draw.depth_write || former) stored=depth;
+                }
+                return layer;
+            };
+            require(visible_layer(false)==1,"Stereo landscape swallowed a BG1 light or model base");
+            require(visible_layer(true)==2,"Negative control did not reproduce conflicting ground-depth occlusion");
+        }
     }
 }
 void unique_landscape_policy() {
@@ -436,8 +618,8 @@ void results_landscape_priorities() {
         unsigned finite=0,screen=0;
         for(const auto& draw:native.draws) {
             if(draw.space==PicaSpace::world) {
-                ++finite;require(draw.source_layer==2 && draw.projected_uv && draw.depth_test && draw.depth_write,
-                    "Results finite ground lost homogeneous source UV or depth ownership");
+                ++finite;require(draw.source_layer==2 && draw.projected_uv && !draw.depth_test && !draw.depth_write,
+                    "Results finite ground lost source UV or occludes the BG1 model layer");
             } else if(draw.space==PicaSpace::screen) {
                 ++screen;require(!draw.depth_test && !draw.depth_write && (draw.source_layer==16
                     || (draw.texture!=pica_no_texture && validate_pica_layers(native.textures[draw.texture])==16)),
@@ -1112,7 +1294,7 @@ void offscreen_landscape_receiver() {
             const auto prepared=layers.prepare(frame);validate_pica_frame(prepared.before_models,lower.view());
             unsigned receivers=0;
             for(const auto& draw:prepared.before_models.draws) if(draw.space==PicaSpace::world) {
-                ++receivers;require(draw.source_layer==2 && draw.projected_uv && draw.depth_test,
+                ++receivers;require(draw.source_layer==2 && draw.projected_uv && !draw.depth_test && !draw.depth_write,
                     "Partially offscreen terrain lost finite source-owned geometry");
             }
             require((receivers!=0)==(horizon<240),"Terrain outside the LCD invented a receiver or visible terrain lost it");
@@ -1402,7 +1584,7 @@ STARFOX_SCENERY_NOINLINE void operator delete[](void* memory,std::size_t) noexce
 #undef STARFOX_SCENERY_NOINLINE
 int main(int argc,char** argv) try {
     if(argc==2 && std::string_view(argv[1])=="--scenery-only") {warmed_scenery_storage();return 0;}
-    priority_pixels();map_single_occurrence();policy_contracts();margins_and_cache();landscape_depth();atlas_landscape_depth();unique_landscape_policy();results_landscape_priorities();atlas_water_depth();water_depth();water_priority_pixels();water_eye_coverage();corridor_source_symbols();corridor_depth();corridor_eye_coverage();corridor_eye_coverage(true);corridor_eye_coverage(false,true);corridor_eye_coverage(true,true);corridor_eye_coverage(false,true,true);corridor_eye_coverage(true,true,true);colony_depth();panorama_depth();panorama_atlas_priority_pixels();offscreen_landscape_receiver();ex_menu_panorama_depth();receiver_eye_coverage();
+    priority_pixels();map_single_occurrence();policy_contracts();margins_and_cache();landscape_depth();atlas_landscape_depth();landscape_bg1_priority();unique_landscape_policy();results_landscape_priorities();atlas_water_depth();water_depth();water_priority_pixels();water_eye_coverage();corridor_source_symbols();corridor_depth();corridor_eye_coverage();corridor_eye_coverage(true);corridor_eye_coverage(false,true);corridor_eye_coverage(true,true);corridor_eye_coverage(false,true,true);corridor_eye_coverage(true,true,true);colony_depth();panorama_depth();panorama_atlas_priority_pixels();offscreen_landscape_receiver();ex_menu_panorama_depth();receiver_eye_coverage();
     warmed_scenery_storage();
     std::cout<<checks<<" 3DS actual source painter-policy checks passed; not full terrain/menu/hardware acceptance\n";
 } catch(const std::exception& error) {count_scenery_allocations=false;std::cerr<<scenario<<error.what()<<'\n';return 1;}

@@ -4,6 +4,8 @@
 #include "starfox/platform/nintendo_3ds/game_menu.hpp"
 #include "starfox/platform/nintendo_3ds/game_layers.hpp"
 #include "starfox/platform/nintendo_3ds/frame_profile.hpp"
+#include "starfox/platform/nintendo_3ds/startup_trace.hpp"
+#include "starfox/compat/bit_cast.hpp"
 #include <cctype>
 
 namespace starfox::platform::nintendo_3ds {
@@ -24,17 +26,37 @@ input::ButtonMask gameplay_buttons(input::ButtonMask held,bool swap) noexcept {
 GameSession::GameSession(assets::RomImage rom,assets::SymbolMap symbols,PcmSink sink,
     std::string initial_map,std::span<const std::uint8_t> cartridge_ram,const GameSessionOptions& options)
     :rom_(std::move(rom)),symbols_(std::move(symbols)),
+     native_model_trig_(simulation::TrigTables::load(rom_,symbols_)),
      cartridge_experience_(symbols_.find("SPECWEPCNTONE").empty()
          ?simulation::Experience::original:simulation::Experience::starfox_ex),
      decoder_(rom_,symbols_),game_(rom_,symbols_,initial_map,cartridge_ram,true),
-     sink_(std::move(sink)),hud_(rom_,symbols_),history_(game_,rom_,symbols_,vr::SceneCameraPolicy::source) {
+     sink_(std::move(sink)),hud_(rom_,symbols_),history_(game_,rom_,symbols_,vr::SceneCameraPolicy::source),
+     stem_executor_(options.stem_executor) {
     if(!sink_) throw std::invalid_argument("3DS game requires a PCM consumer");
+    constexpr std::array native_names{"M_BIGZ","M_DEPTHSTAB","M_DEPTHTABLE",
+        "M_WIREMODE","M_WOBBLEMODE","M_WABBLEMODE","M_CELMODE",
+        "M_SINEOFFSET","M_COLORWARP","M_PROJPNTS"};
+    for(unsigned i=0;i<native_names.size();++i) {
+        for(auto address:symbols_.find(native_names[i])) if((address>>16)==0x70) {
+            native_model_addresses_[i]=address;break;
+        }
+        if(i<3 && !native_model_addresses_[i])
+            throw std::runtime_error(std::string("Missing 3DS viewer symbol: ")+native_names[i]);
+    }
+    const auto& depth_tables=symbols_.find("DEPTHTABLES");
+    if(depth_tables.empty()) throw std::runtime_error("Missing 3DS viewer depth tables");
+    native_model_depth_tables_=depth_tables.front();
     game_.set_experience(cartridge_experience_);
     game_.set_timing_mode(simulation::TimingMode::original_speed);
     game_.set_shape_face_counts(&face_counts_);
     // Native cartridge audio remains available; MSU support must not be
     // advertised without a decoder/streaming adapter connected to this owner.
     game_.set_msu1_available(false);
+    // Match a fresh native SD journal even for hosts constructing a session
+    // without preferences. Do not change shared desktop/VR stereo defaults.
+    const GamePreferences native_defaults;
+    game_.set_stereo_separation(native_defaults.separation);
+    game_.set_stereo_convergence(native_defaults.convergence);
     const auto boot_writes=game_.map().take_apu_port_writes();
     if(!boot_writes.empty()) {
         static_cast<void>(audio_.prime_upload_sequence(boot_writes));
@@ -42,7 +64,7 @@ GameSession::GameSession(assets::RomImage rom,assets::SymbolMap symbols,PcmSink 
         // Match the ordinary runtime's base-driver initialization before a
         // direct stage-bank overlay. Do not queue inaudible startup preroll.
         if(initial_map!="BOOT") for(unsigned tick=0;tick<30;++tick)
-            audio_.render_stems_logic_tick({});
+            audio_.render_stems_logic_tick({},stem_executor_);
         game_.synchronize_apu_output_ports(audio_.output_ports());
     }
     if(options.preferences) {
@@ -62,6 +84,7 @@ GameSession::GameSession(assets::RomImage rom,assets::SymbolMap symbols,PcmSink 
     }
     apply_native_capabilities();
     if(options.preview) {
+        STARFOX_3DS_STARTUP_MARK(preview_preroll);
         if(initial_map=="BOOT" || options.start_after_preview)
             throw std::invalid_argument("3DS preview requires a real stage owner, not BOOT/Start");
         // The same real Corneria/chatter reference as the desktop preview,
@@ -74,7 +97,7 @@ GameSession::GameSession(assets::RomImage rom,assets::SymbolMap symbols,PcmSink 
             if(tick%16==0 && options.preview_progress && !options.preview_progress(tick))
                 throw std::runtime_error("3DS preview loading cancelled");
             const auto advance=game_.tick({});
-            audio_.render_stems_logic_tick(advance.audio_port_writes);
+            audio_.render_stems_logic_tick(advance.audio_port_writes,stem_executor_);
             game_.synchronize_apu_output_ports(audio_.output_ports());
             static_cast<void>(game_.map().take_msu_register_writes());
             const auto meters=game_.peek_meter_state();const auto dialogue=game_.dialogue_state();
@@ -84,7 +107,7 @@ GameSession::GameSession(assets::RomImage rom,assets::SymbolMap symbols,PcmSink 
                 if(++dialogues>=4) {
                     for(unsigned settle=0;settle<12;++settle) {
                         const auto next=game_.tick({});
-                        audio_.render_stems_logic_tick(next.audio_port_writes);
+                        audio_.render_stems_logic_tick(next.audio_port_writes,stem_executor_);
                         game_.synchronize_apu_output_ports(audio_.output_ports());
                         static_cast<void>(game_.map().take_msu_register_writes());
                     }
@@ -96,6 +119,7 @@ GameSession::GameSession(assets::RomImage rom,assets::SymbolMap symbols,PcmSink 
         game_.set_god_mode(god);
         if(!stable) throw std::runtime_error("Cartridge did not produce a stable 3DS preview frame");
         game_.enable_menu_preview();
+        STARFOX_3DS_STARTUP_MARK(preview_preroll_complete);
     }
     start_after_preview_=options.start_after_preview;
     history_.capture();history_.reset_interpolation();publish_raster();
@@ -165,6 +189,36 @@ void GameSession::publish_raster() {
     next->boss_roll=game_.boss_roll_active();
     next->stage_hud=game_.stage_results_state().visible;
     next->final_score=game_.final_score_active();
+    const auto& native=game_.map().native_model_draw();
+    const auto flow=game_.flow_state();
+    if(native.active && native.shape && (flow==simulation::GameFlowState::continue_choice
+        || flow==simulation::GameFlowState::ex_pregame_menu)) {
+        const auto word=[&](unsigned i) {
+            return native_model_addresses_[i]?game_.map().peek_ram_word(native_model_addresses_[i]).value():std::uint16_t{};
+        };
+        const auto byte=[&](unsigned i) {
+            return native_model_addresses_[i]?game_.map().peek_ram_byte(native_model_addresses_[i]).value():std::uint8_t{};
+        };
+        auto& viewer=next->native_model.emplace();viewer.shape=native.shape;viewer.colour_table=native.colour_table;
+        auto& pose=viewer.pose;pose.x=native.x;pose.y=native.y;
+        // The source shoulder handler updates M_BIGZ after the FX launch.
+        // Peek, never read_native_word: even a bus read changes VM latch state.
+        pose.z=starfox::bit_cast<std::int16_t>(word(0));
+        pose.pitch=(native.rotation_x&255U)<<8;pose.yaw=(native.rotation_y&255U)<<8;
+        pose.roll=(native.rotation_z&255U)<<8;
+        pose.rotation_matrix=simulation::rotation_matrix_q15(native_model_trig_,
+            starfox::bit_cast<std::int16_t>(std::uint16_t(pose.pitch)),
+            starfox::bit_cast<std::int16_t>(std::uint16_t(pose.yaw)),
+            starfox::bit_cast<std::int16_t>(std::uint16_t(pose.roll)));
+        pose.use_rotation_matrix=true;pose.scale=1; // MSHOWOBJ3 bypasses Huge Models/normal LODs.
+        pose.vanish_x=native.vanish_x;pose.vanish_y=native.vanish_y;
+        pose.animation_frame=native.animation_frame;pose.colour_frame=native.colour_frame;
+        pose.wireframe_mode=byte(3);pose.wobble_mode=byte(4);pose.wave_mode=byte(5)!=0;
+        pose.cel_mode=byte(6)!=0;pose.wave_offset=starfox::bit_cast<std::int16_t>(word(7));
+        pose.colour_warp=word(8)!=0;
+        if(native_model_addresses_[9]) pose.projected_points_address=std::uint16_t(native_model_addresses_[9]);
+        render::apply_source_depth_tables(rom_,native_model_depth_tables_,word(1),word(2),0,pose);
+    }
     hud_frame_=hud_.capture(game_);hud_.update(hud_frame_);
     raster_=std::move(next);
 }
@@ -246,45 +300,48 @@ GameAdvance GameSession::advance(std::int64_t time,input::ButtonMask held,bool f
             if(game_.logic_tick_ready()) {
                 const bool runtime=game_.runtime_options_open(),paused=game_.paused();
                 auto controls=GameMenu::filter(game_,input_.consume());
-                std::optional<std::uint16_t> native_rate;
-                if(game_.in_setup_menu() && game_.pregame_page()==simulation::PregamePage::main
-                    && game_.pregame_selection()==2
-                    && !(controls.pressed&(input::up|input::down|input::start))
-                    && (controls.pressed&(input::a|input::b|input::select|input::left|input::right))) {
-                    // Native LCD supports 30/60 presentation, not the desktop
-                    // rate list. Still execute the ordinary source raster/tick.
-                    native_rate=game_.presentation_fps()==60?30:60;
-                }
-                if(game_.in_setup_menu() && game_.pregame_page()==simulation::PregamePage::options
-                    && game_.pregame_selection()==3 && (controls.pressed&input::a)
-                    && !(controls.pressed&(input::up|input::down|input::start))) {
-                    requested_hud_customization_=result.requested_hud_customization=true;
-                    controls={};input_.reset();reset_hold_.cancel();
-                }
-                if(game_.in_setup_menu() && game_.pregame_page()==simulation::PregamePage::options
-                    && game_.pregame_selection()==8 && (controls.pressed&input::a)) {
-                    requested_controller_remap_=result.requested_controller_remap=true;
-                    // Consume this host action instead of sending it into the
-                    // cartridge, but finish this raster's ordinary VM/SPC
-                    // cadence before freezing. A partial audio phase survives.
-                    controls={};input_.reset();reset_hold_.cancel();
+                const auto previous_output_rate=game_.presentation_fps();
+                const bool native_fps_menu=game_.in_setup_menu()
+                    && game_.pregame_page()==simulation::PregamePage::main;
+                const auto editor=game_.in_setup_menu()
+                    ?GameMenu::editor(game_.pregame_page(),game_.pregame_selection(),controls)
+                    :GameMenuEditor::none;
+                if(editor!=GameMenuEditor::none) {
+                    if(editor==GameMenuEditor::hud)
+                        requested_hud_customization_=result.requested_hud_customization=true;
+                    else requested_controller_remap_=result.requested_controller_remap=true;
+                    // Consume the host action, but send the same tick's Up/Down
+                    // to the source. Otherwise the editor opens on the row we
+                    // left or returns to a cursor that never reached its row.
+                    // Finish the ordinary VM/SPC phase; partial audio survives.
+                    constexpr auto navigation=input::ButtonMask(input::up|input::down);
+                    controls.held&=navigation;controls.pressed&=navigation;controls.released&=navigation;
+                    input_.reset();reset_hold_.cancel();
                 }
                 if(start_after_preview_ && game_.in_setup_menu() && !game_.menu_preview()) {
                     // A single source Start action, not a jump into gameplay or
                     // a held Start that could pause the newly launched stage.
                     controls.held|=input::start;controls.pressed|=input::start;start_after_preview_=false;
                 }
+#if defined(STARFOX_3DS_PROFILE_FRAMES)
+                if(game_.in_setup_menu() && GameMenu::launch_gesture(game_.pregame_page(),
+                    game_.pregame_selection(),runtime,controls)) {
+                    STARFOX_3DS_STARTUP_RESTART(game_start_input);
+                }
+#endif
                 const auto tick=[&] {
                     STARFOX_3DS_FRAME_PHASE(logic);
                     return game_.tick(controls);
                 }();++result.logic_ticks;
-                // Keep the source menu action and its click/audio writes. The
-                // host only replaces its desktop-only output-rate result.
-                if(native_rate && game_.in_setup_menu() && game_.pregame_page()==simulation::PregamePage::main
-                    && game_.pregame_selection()==2) game_.set_presentation_fps(*native_rate);
-                // Simultaneous navigation/action can enter the FPS row inside
-                // the shared tick, without matching the pre-tick selection.
-                // Never publish its desktop-only rate to the native LCD gate.
+                // Let the source own navigation, Start and confirmation/axis
+                // release guards. Replace only an output-rate change it really
+                // applied, not an action guessed from the pre-tick cursor or
+                // raw pressed bits. The native LCD's list is just 30/60.
+                // A combined Start/action may also leave runtime options in
+                // this tick, after the source has already changed its FPS row.
+                if(native_fps_menu && game_.presentation_fps()!=previous_output_rate)
+                    game_.set_presentation_fps(previous_output_rate==60?30:60);
+                // State/import bounds remain independent of menu activation.
                 const auto output_rate=game_.presentation_fps();
                 if(output_rate!=30 && output_rate!=60) game_.set_presentation_fps(output_rate<=30?30:60);
                 // The native eye projector has a bounded 64-world-unit range,
@@ -314,7 +371,7 @@ GameAdvance GameSession::advance(std::int64_t time,input::ButtonMask held,bool f
             }
             if(!game_.runtime_options_open() && ++audio_phase_==3) {
                 STARFOX_3DS_FRAME_PHASE(audio);
-                audio_.render_stems_logic_tick(pending_audio_);
+                audio_.render_stems_logic_tick(pending_audio_,stem_executor_);
                 audio::mix_stems(audio_.last_music_samples(),audio_.last_effect_samples(),
                     game_.music_volume(),game_.sfx_volume(),mixed_);
                 sink_(mixed_);game_.synchronize_apu_output_ports(audio_.output_ports());

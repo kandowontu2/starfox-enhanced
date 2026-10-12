@@ -53,6 +53,9 @@ def check(reference, directory, frame_numbers, menu_regions, viewport=None, nati
         raise AssertionError("Reference contains no setup-menu glyphs")
     glyph_colors = colors[bright]
     glyph_masks = [menu & (reference == color).all(axis=2) for color in glyph_colors]
+    reference_int = reference.astype(int)
+    glyph_tolerance_masks = [menu & (np.abs(reference_int-color) <= 1).all(axis=2)
+                             for color in glyph_colors]
     glyphs = np.logical_or.reduce(glyph_masks)
     if glyphs.sum() < 100:
         raise AssertionError("Insufficient native glyph coverage")
@@ -81,9 +84,15 @@ def check(reference, directory, frame_numbers, menu_regions, viewport=None, nati
                 int(np.abs(actual_int[model_region]-reference[model_region]).max()))
             if max_model_reference_error > 1:
                 raise AssertionError(f"Native preview models differ/blurred: {directory}, frame {frame}")
-        for color, mask in zip(glyph_colors, glyph_masks):
+        changed_beyond_rounding = (np.abs(actual_int-reference_int) > 1).any(axis=2)
+        for color, reference_coverage in zip(glyph_colors, glyph_tolerance_masks):
             actual_glyphs = menu & (np.abs(actual_int-color) <= 1).all(axis=2)
-            if not np.array_equal(actual_glyphs, mask):
+            # Apply the same colour tolerance to both images. Comparing a
+            # tolerant actual mask to an exact reference mask rejected even
+            # the reference itself when it contained neighbouring white shades.
+            # A coverage boundary may move only through the explicitly allowed
+            # one-code-value backend rounding, never real added/missing ink.
+            if ((actual_glyphs != reference_coverage) & changed_beyond_rounding).any():
                 raise AssertionError(f"Menu glyph coverage moved/softened: {directory}, frame {frame}, ink {color.tolist()}")
         max_text_error = max(max_text_error, int(np.abs(actual_int[glyphs]-reference[glyphs]).max()))
         max_hud_error = max(max_hud_error, int(np.abs(actual_int[shield]-reference[shield]).max()))

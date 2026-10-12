@@ -58,6 +58,7 @@
 #include "starfox/render/gpu_calibrated_scene.hpp"
 #include "starfox/render/displayxr_game_renderer.hpp"
 #include "starfox/render/gpu_calibrated_reflection_history.hpp"
+#include "reflection_source_proof_receipts.hpp"
 #include "starfox/render/fsr1_settings.hpp"
 #include "starfox/render/calibrated_effects.hpp"
 #include "starfox/render/displayxr_desktop.hpp"
@@ -90,6 +91,11 @@ bool native_msaa_reflection_water_only{};
 bool native_msaa_reflection_lava_only{};
 bool native_curved_owner_only{};
 bool native_source_frame_owner_only{};
+// Focused failure diagnosis only; never substitutes for the complete owner gate.
+bool native_source_lava_motion_proof_only{};
+// Raw producer-input capture only. No root/guide/RGB output is replay input,
+// and success of this explicitly separate mode is not owner qualification.
+bool native_source_lava_raw_input_only{};
 bool native_curved_msaa_owner_only{};
 bool native_curved_msaa_resolve_only{};
 bool native_curved_lens_owner_only{};
@@ -988,6 +994,10 @@ XrResult XRAPI_CALL begin_session(XrSession session,const XrSessionBeginInfo* in
     return XR_SUCCESS;
 }
 XrResult XRAPI_CALL end_session(XrSession session) {check(session==session_handle,"Bad session end");return XR_SUCCESS;}
+XrResult XRAPI_CALL request_exit_session(XrSession session) {
+    check(session==session_handle && native_mock.session_open,"Exit requested on a dead session");
+    return XR_SUCCESS;
+}
 XrResult XRAPI_CALL wait_frame(XrSession session,const XrFrameWaitInfo*,XrFrameState* out) {
     check(session==session_handle && !native_mock.frame_open,"Waiting during an active frame");
     ++native_mock.waits;out->predictedDisplayTime=native_mock.waits*10000000;
@@ -1108,6 +1118,7 @@ XrResult XRAPI_CALL get(XrInstance instance,const char* name,PFN_xrVoidFunction*
     ENTRY("xrPollEvent",poll)
     ENTRY("xrBeginSession",begin_session)
     ENTRY("xrEndSession",end_session)
+    ENTRY("xrRequestExitSession",request_exit_session)
     ENTRY("xrWaitFrame",wait_frame)
     ENTRY("xrBeginFrame",begin_frame)
     ENTRY("xrEndFrame",end_frame)
@@ -1198,8 +1209,13 @@ void native_tests(DisplayXrRuntime& runtime) {
                 && native_mock.session_creates==native_mock.session_destroys
                 && native_mock.space_creates==native_mock.space_destroys,"Initialization failure leaked native session");
         }
-        native_mock=NativeMock{};mock.missing="xrEndFrame";
-        check(!session.initialize(runtime,&graphics,window) && native_mock.session_creates==0,"Missing frame entry point accepted");
+        for(const auto* entry:{"xrEndFrame","xrRequestExitSession"}) {
+            native_mock=NativeMock{};mock.missing=entry;
+            check(!session.initialize(runtime,&graphics,window) && native_mock.session_creates==0
+                && session.handle()==XR_NULL_HANDLE && !native_mock.session_open
+                && session.status().find(entry)!=std::string::npos,
+                "Missing lifecycle entry point accepted or created an owned session");
+        }
         mock.missing=nullptr;
         auto wrong=graphics;wrong.type=backend==DisplayXrBackend::direct3d12
             ?XR_TYPE_GRAPHICS_BINDING_VULKAN2_KHR:XR_TYPE_GRAPHICS_BINDING_D3D12_KHR;
@@ -2053,7 +2069,12 @@ void gpu_presenter_tests(DisplayXrRuntime& runtime,const char* rom_path=nullptr,
                 check(closed && !renderer.retained_frame() && !renderer.frame_pending(),"TAA close did not retire pending images");
             }
             std::cout<<"D3D12 TAA owner: real GPU stall/retry and in-flight nonblocking cancellation retired without reacquiring poses or releasing live history.\n";
-            check(renderer.close(),renderer.status().c_str());runtime.close();continue;
+            check(renderer.close(),renderer.status().c_str());runtime.close();
+            // The explicitly separate raw-input mode captures one fixed sRGB
+            // producer case and verifies teardown, not the four-format owner
+            // cohort. Normal qualification modes keep every original format.
+            if(native_source_lava_raw_input_only)return;
+            continue;
         }
         bool aa_changed=false;
         for(unsigned type:{0U,1U,2U,5U}) for(unsigned quality:{1U,2U,3U}) {
@@ -3007,6 +3028,8 @@ int main(int argc,char** argv) try {
         else if(option=="--curved-owner-only") native_taa_only=native_curved_owner_only=true;
         else if(option=="--source-frame-owner-only") native_taa_only=native_curved_owner_only=native_source_frame_owner_only=true;
         else if(option=="--source-motion-owner-only") native_taa_only=native_curved_owner_only=native_source_frame_owner_only=native_curved_motion_owner_only=true;
+        else if(option=="--source-lava-motion-proof-only") native_taa_only=native_curved_owner_only=native_source_frame_owner_only=native_curved_motion_owner_only=native_source_lava_motion_proof_only=true;
+        else if(option=="--source-lava-raw-input-only") native_taa_only=native_curved_owner_only=native_curved_motion_owner_only=native_source_lava_raw_input_only=true;
         else if(option=="--source-camera-owner-only") native_taa_only=native_curved_owner_only=native_source_frame_owner_only=native_curved_motion_owner_only=native_curved_camera_owner_only=true;
         else if(option=="--source-disocclusion-owner-only") native_taa_only=native_curved_owner_only=native_source_frame_owner_only=native_curved_motion_owner_only=native_curved_camera_owner_only=native_curved_disocclusion_owner_only=true;
         else if(option=="--curved-msaa-owner-only") native_taa_only=native_curved_owner_only=native_curved_msaa_owner_only=true;
@@ -3053,6 +3076,10 @@ int main(int argc,char** argv) try {
     else gpu_presenter_tests(runtime,inputs.size()>1?inputs[0]:nullptr,inputs.size()>1?inputs[1]:nullptr);
     if(sdk) sdk->finish();
     if(!vulkan) validate_native_d3d12_errors("SDK and SDL-owner teardown");
+    if(native_source_lava_raw_input_only) {
+        std::cout<<"Raw lava producer-input capture and native teardown completed. NOT source-stream, moving-owner, MSAA, backend or performance qualification.\n";
+        return 0;
+    }
 #endif
     std::cout<<"DisplayXR physical-panel gating, both graphics APIs, malformed/old interfaces, failure cleanup and recovery passed ("
         <<checks<<" assertions). Native rig/session chains, asymmetric FOV, retained tracking and lifecycle also passed. "

@@ -87,16 +87,25 @@ std::optional<PicaFrame> PicaBg2Tiles::prepare(std::shared_ptr<const simulation:
     std::vector<std::uint8_t> pixels;
     if(recolour) {
         pixels.assign(std::size_t(atlas_width)*atlas_height*4,0);
+        // Source fades apply the same integer clamp/brightness calculation to
+        // every occurrence of an ink. Do it once per palette entry, not three
+        // times per atlas texel. Keep explicit RGBA bytes (no alignment/endian
+        // assumptions), tile-ink-zero transparency and opaque RGB black.
+        std::array<std::array<std::uint8_t,4>,256> palette{};
+        for(unsigned ink=0;ink<palette.size();++ink) {
+            const unsigned word=source->cgram[ink];
+            for(unsigned channel=0;channel<3;++channel) {
+                const unsigned five=unsigned(std::max(0,int((word>>(channel*5))&31)-int(subtract)));
+                palette[ink][channel]=std::uint8_t(((five<<3)|(five>>2))*brightness/15);
+            }
+            palette[ink][3]=255;
+        }
         for(unsigned slot=0;slot<active_keys.size();++slot) {
             if(active_keys[slot]>=8192) {
-                const unsigned word=source->cgram[active_keys[slot]-8192];
+                const auto& rgba=palette[active_keys[slot]-8192];
                 for(unsigned y=0;y<8;++y) for(unsigned x=0;x<8;++x) {
                     const auto at=(std::size_t(slot/32*8+y)*atlas_width+slot%32*8+x)*4;
-                    for(unsigned channel=0;channel<3;++channel) {
-                        const unsigned five=unsigned(std::max(0,int((word>>(channel*5))&31)-int(subtract)));
-                        pixels[at+channel]=std::uint8_t(((five<<3)|(five>>2))*brightness/15);
-                    }
-                    pixels[at+3]=255;
+                    std::copy(rgba.begin(),rgba.end(),pixels.begin()+at);
                 }
                 continue;
             }
@@ -109,13 +118,9 @@ std::optional<PicaFrame> PicaBg2Tiles::prepare(std::shared_ptr<const simulation:
                     const unsigned mask=128>>x,ink=unsigned(bool(a&mask))|(unsigned(bool(b&mask))<<1)
                         |(unsigned(bool(c&mask))<<2)|(unsigned(bool(d&mask))<<3);
                     if(!ink) continue; // Only tile colour zero is transparent; black RGB is opaque.
-                    const unsigned word=source->cgram[bank*16+ink];
+                    const auto& rgba=palette[bank*16+ink];
                     const auto at=(std::size_t(slot/32*8+y)*atlas_width+slot%32*8+x)*4;
-                    for(unsigned channel=0;channel<3;++channel) {
-                        const unsigned five=unsigned(std::max(0,int((word>>(channel*5))&31)-int(subtract)));
-                        pixels[at+channel]=std::uint8_t(((five<<3)|(five>>2))*brightness/15);
-                    }
-                    pixels[at+3]=255;
+                    std::copy(rgba.begin(),rgba.end(),pixels.begin()+at);
                 }
             }
         }

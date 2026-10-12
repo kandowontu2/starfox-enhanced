@@ -5056,6 +5056,8 @@ public:
         if (effects.setup_overlay) {
             const auto& overlay = *effects.setup_overlay;
             const auto origin = (framebuffer.width() - 256U) / 2U;
+            const bool protect_bloom_ink=bloom_layer_ready_
+                && bloom_base_rgba_.size()==rgba_.size() && bloom_glow_rgba_.size()==rgba_.size();
             for (std::uint32_t y = 0; y < framebuffer.stored_height(); ++y) {
                 for (std::uint32_t x = 0; x < framebuffer.stored_width(); ++x) {
                     const auto sx = x / render_scale;
@@ -5073,6 +5075,12 @@ public:
                         : std::array<std::uint8_t, 3>{180, 200, 215};
                     for (unsigned c = 0; c < 3; ++c)
                         rgba_[i + c] = static_cast<std::uint8_t>(rgb[c] * effects.setup_brightness / 15U);
+                    if(protect_bloom_ink) {
+                        // Ink can equal clipped world bloom. Give the splitter
+                        // explicit host ownership instead of relying on RGB.
+                        std::copy_n(rgba_.data()+i,4,bloom_base_rgba_.data()+i);
+                        std::copy_n(rgba_.data()+i,4,bloom_glow_rgba_.data()+i);
+                    }
                 }
             }
         }
@@ -8935,6 +8943,7 @@ int main(int argc, char** argv) {
             });
         };
         std::array<std::uint8_t,256> environment_regions{};
+        starfox::render::SourceGroundRamp environment_ramp;
         const auto credits_background = background_id("BG_CRED");
         // Both Macbeth approach/departure lists use the singular "34"
         // planet tilemap, not a repeatable landscape or cloud bank.
@@ -13055,6 +13064,7 @@ int main(int argc, char** argv) {
             const auto shadow_height = static_cast<std::int16_t>(
                 game.map().read_native_word(shadow_height_address));
             starfox::render::EnvironmentEffects environment_effects;
+            starfox::render::SourceGroundRamp ground_ramp;
             std::optional<float> landscape_source_horizon;
             std::optional<unsigned> landscape_backdrop_artwork;
             const bool enhanced_ground_active = game.environment()[0] && !ex_native_menu;
@@ -13073,12 +13083,18 @@ int main(int argc, char** argv) {
                             i==24?224:(i==19 || i==20 || i==22)?248:(i==17 || i==18 || i==21)?240:
                             i==6?(active_experience==starfox::simulation::Experience::starfox_ex?16:272):232);
                     const auto cache_key=unsigned(game.map().background()) | ((ex_menu_choice+1U)<<16);
+                    const auto horizon = ex_native_menu
+                        ? starfox::render::ex_menu_landscape_horizon(ex_menu_choice).value_or(origin + 128U)
+                        : starfox::render::gameplay_landscape_horizon(environment_name,
+                            active_experience==starfox::simulation::Experience::starfox_ex).value_or(origin + 128U);
                     if(environment_cached_id!=cache_key) {
                         environment_regions=starfox::render::environment_palette_regions(ppu,origin);
+                        if(active_experience==starfox::simulation::Experience::starfox_ex && !ex_native_menu)
+                            starfox::render::correct_ex_landscape_palette(environment_name,environment_regions);
+                        environment_ramp=starfox::render::source_ground_ramp(ppu,std::min(horizon,origin+112U),&environment_regions);
                         environment_cached_id=cache_key;
                     }
-                    if(active_experience==starfox::simulation::Experience::starfox_ex && !ex_native_menu)
-                        starfox::render::correct_ex_landscape_palette(environment_name,environment_regions);
+                    ground_ramp=environment_ramp;
                     auto& e=environment_effects;const auto& o=game.environment();
                     e.modes={enhanced_ground_active?unsigned(o[1])+1:0,unsigned(o[2]),o[3]?unsigned(o[4])+1:0,unsigned(o[5])};
                     if(e.modes[0]==1 && !ex_native_menu) {
@@ -13097,10 +13113,6 @@ int main(int argc, char** argv) {
                     const int effective_y=int(starfox::render::environment_landscape_scroll_y(
                         environment_name,active_experience==starfox::simulation::Experience::starfox_ex,
                         ppu,unsigned(background_y)));
-                    const auto horizon = ex_native_menu
-                        ? starfox::render::ex_menu_landscape_horizon(ex_menu_choice).value_or(origin + 128U)
-                        : starfox::render::gameplay_landscape_horizon(environment_name,
-                            active_experience==starfox::simulation::Experience::starfox_ex).value_or(origin + 128U);
                     e.motion={float(int(horizon)-effective_y),float(camera.x),float(camera.z),environment_clock.seconds(interpolation_alpha,game.paused())};
                     landscape_source_horizon=float(horizon);
                     const auto menu_backdrop=starfox::render::ex_menu_landscape_backdrop(ex_menu_choice);
@@ -13197,8 +13209,14 @@ int main(int argc, char** argv) {
                             e.backdrop_projection={1/256.f,1/136.f,.88235294f,0.f};
                         }
                     }
+                    // These authored weather ramps remain basic ground even
+                    // when a live blue phase resembles a water palette. Match
+                    // the calibrated renderer rather than changing material
+                    // in the middle of the source's palette transition.
+                    const bool palette_fading_ground=active_experience==starfox::simulation::Experience::starfox_ex
+                        && (environment_name=="BG_5_1" || environment_name=="BG_6_1" || environment_name=="BG_7_1");
                     for(unsigned c=0;c<256;++c) if(ppu.cgram[c]&0x7fff)
-                        e.classes[c]=environment_regions[c]==1?(i==10?3:
+                        e.classes[c]=environment_regions[c]==1?(palette_fading_ground?4:i==10?3:
                             i==2 ?starfox::render::titania_ground_material(ppu.cgram[c])
                                 :starfox::render::automatic_ground_material(ppu.cgram[c])):environment_regions[c]==2?6:0;
                     if(ex_native_menu && e.backdrop) {
@@ -13336,9 +13354,11 @@ int main(int argc, char** argv) {
                 }
             }
             if(environment_effects.modes[0]
-                && (environment_effects.modes[0]<=5 || environment_effects.modes[0]==9))
-                environment_effects.ground_gradient=starfox::render::source_ground_gradient(
-                    ppu.cgram,environment_effects.classes);
+                && (environment_effects.modes[0]<=5 || environment_effects.modes[0]==9)) {
+                starfox::render::normalize_ground_ramp_classes(ground_ramp,environment_effects.classes);
+                environment_effects.ground_gradient=starfox::render::authored_ground_gradient(
+                    ppu.cgram,environment_effects.classes,ground_ramp);
+            }
             const bool cratered_gameplay=!ex_native_menu && ppu.background_mode==2
                 && ((macbeth_approach_background && game.map().background()==macbeth_approach_background)
                     || (macbeth_departure_background && game.map().background()==macbeth_departure_background));

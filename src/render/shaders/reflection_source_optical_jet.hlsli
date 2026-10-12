@@ -254,7 +254,10 @@ bool optical_jet_residual(OpticalJetRay ray,Interval3 target,bool finiteTerminal
     if(omitted==0){e0=e.y;e1=e.z;}else if(omitted==1){e0=e.z;e1=e.x;}else{e0=e.x;e1=e.y;}
     return !intervalFailed && jetBranchKnown;
 }
-struct OpticalLocalRoot {uint status;float4 enclosure;float contraction;};
+// An unresolved but completely evaluated Krawczyk image is distinct from a
+// failed/incomplete evaluation. Only the former can bound an inherited root.
+// This flag is shader-local; it does not change the stored certificate ABI.
+struct OpticalLocalRoot {uint status;float4 enclosure;float contraction;bool evaluated;};
 bool optical_interval_valid(Interval a) {return isfinite(a.lo) && isfinite(a.hi) && a.lo<=a.hi;}
 // C is an arbitrary finite binary32 preconditioner. We do NOT trust a divide
 // approximation as an interval inverse. All certificate arithmetic is outward.
@@ -263,7 +266,7 @@ bool optical_interval_valid(Interval a) {return isfinite(a.lo) && isfinite(a.hi)
 // It certifies this box ONLY. Global cover/identity/angular/RGB gates remain.
 OpticalLocalRoot optical_local_root(float4 box,float2 centre,Interval f0,Interval f1,
     Interval j00,Interval j01,Interval j10,Interval j11) {
-    OpticalLocalRoot r;r.status=0;r.enclosure=0;r.contraction=1.e30;
+    OpticalLocalRoot r;r.status=0;r.enclosure=0;r.contraction=1.e30;r.evaluated=false;
     if(intervalFailed || !jetBranchKnown || !all(isfinite(box)) || !all(isfinite(centre))
         || any(box.xy>=box.zw) || any(centre<=box.xy) || any(centre>=box.zw)
         || !optical_interval_valid(f0) || !optical_interval_valid(f1)
@@ -283,9 +286,28 @@ OpticalLocalRoot optical_local_root(float4 box,float2 centre,Interval f0,Interva
     const Interval by=isub(ip(centre.y),iadd(imul(ip(c.z),f0),imul(ip(c.w),f1)));
     const Interval kx=iadd(bx,iadd(imul(a,x),imul(b,y))),ky=iadd(by,iadd(imul(d,x),imul(e,y)));
     const Interval norm=imax(iadd(iabs(a),iabs(b)),iadd(iabs(d),iabs(e)));
-    if(intervalFailed)return r;
+    if(intervalFailed || !jetBranchKnown || !optical_interval_valid(kx)
+        || !optical_interval_valid(ky) || !optical_interval_valid(norm))return r;
     r.enclosure=float4(kx.lo,ky.lo,kx.hi,ky.hi);r.contraction=norm.hi;
+    r.evaluated=true;
     if(kx.hi<box.x || kx.lo>box.z || ky.hi<box.y || ky.lo>box.w)r.status=2; // Local no-root, NOT angular exclusion.
     else if(norm.hi<1 && kx.lo>box.x && kx.hi<box.z && ky.lo>box.y && ky.hi<box.w)r.status=1;
     return r;
+}
+bool optical_intersect_inherited_root(inout OpticalLocalRoot proved,OpticalLocalRoot next) {
+    if(proved.status!=1 || !proved.evaluated || !next.evaluated || next.status==2
+        || intervalFailed || !jetBranchKnown)return false;
+    // Existence and uniqueness were already proved on the original domain.
+    // For that root r, the mean-value identity places r in K(X) whenever
+    // r is in X and the full-domain derivative/residual enclosures are valid.
+    // K(X) need not itself prove a NEW existence result or be nested in X.
+    // Intersect two valid enclosures; never promote an unresolved first proof.
+    const float4 intersection=float4(max(proved.enclosure.xy,next.enclosure.xy),
+        min(proved.enclosure.zw,next.enclosure.zw));
+    if(!all(isfinite(intersection)) || any(intersection.xy>intersection.zw))return false;
+    proved.enclosure=intersection;
+    // Keep the ORIGINAL strict contraction/existence certificate, not the
+    // refinement's potentially unresolved row bound. All source/RGB gates
+    // still consume the entire retained enclosure with unchanged tolerances.
+    return true;
 }

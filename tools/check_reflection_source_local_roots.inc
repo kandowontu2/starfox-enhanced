@@ -250,7 +250,7 @@ void exercise_local_roots(Gpu& gpu,unsigned lobes,bool curved,unsigned material,
             // native fold/current-colour acceptance remains explicitly open.
         }
     }
-    Words previous_results;unsigned unique=0;
+    Words previous_results,previous_optical_inputs;unsigned unique=0;
     for(unsigned round=0;round<2;++round) {
         cb=stage(current_inputs);check(!encode(cb),"Native roots without a pending optical batch were accepted");
         check(owner.enqueue_source_queries(cb,pixel*lobes,lobes),owner.status().c_str());
@@ -276,7 +276,31 @@ void exercise_local_roots(Gpu& gpu,unsigned lobes,bool curved,unsigned material,
             "Next optical encoding retained a previous usable local-root descriptor");
         gpu.submit(cb);const auto words=capture.read();
         const unsigned base=capture.capacity*2772;const Words results(words.begin()+base,words.end());
-        if(round)check(results==previous_results,"Held native optical frames changed local classifications");else previous_results=results;
+        if(round) {
+            if(results!=previous_results) {
+                std::cerr<<"Held native local-root mismatch family="<<(curved?material==3?"lava":"water":finite?"finite":"sky")
+                    <<" lobes="<<lobes<<" whole-cover="<<whole_cover<<" boundary="<<boundary<<'\n';
+                unsigned changed=0,printed=0;
+                for(unsigned n=0;n<results.size();++n)if(results[n]!=previous_results[n]) {
+                    ++changed;
+                    if(printed++<32)std::cerr<<" lobe="<<n/6144<<" slot="<<(n%6144)/48<<" field="<<n%48
+                        <<" before=0x"<<std::hex<<previous_results[n]<<" after=0x"<<results[n]<<std::dec
+                        <<" floats="<<std::bit_cast<float>(previous_results[n])<<','<<std::bit_cast<float>(results[n])<<'\n';
+                }
+                std::cerr<<" changed-root-words="<<changed<<'\n';
+                changed=printed=0;
+                for(unsigned n=0;n<base;++n)if(words[n]!=previous_optical_inputs[n]) {
+                    ++changed;
+                    if(printed++<32)std::cerr<<" input-word="<<n<<" before=0x"<<std::hex<<previous_optical_inputs[n]
+                        <<" after=0x"<<words[n]<<std::dec<<'\n';
+                }
+                std::cerr<<" changed-query-domain-frame-words="<<changed<<'\n';
+            }
+            check(results==previous_results,"Held native optical frames changed local classifications");
+        }else {
+            previous_results=results;
+            previous_optical_inputs.assign(words.begin(),words.begin()+base);
+        }
         for(unsigned l=0;l<lobes;++l) {
             const unsigned domain=capture.capacity*80+l*1540,frame=capture.capacity*1620+l*128;
             check(!words[domain+1] && words[domain]>0 && words[frame+124]==1
@@ -458,12 +482,26 @@ void exercise_local_roots(Gpu& gpu,unsigned lobes,bool curved,unsigned material,
             for(unsigned l=0;l<lobes;++l) {
                 const unsigned original=start+l*6144,at=original,header=at+48;
                 if(!std::equal(original_words.begin()+original,original_words.begin()+original+48,words.begin()+at)) {
+                    // Post-submit diagnostic only: distinguish an actual lost
+                    // resident packet from a same-command snapshot/copy fault.
+                    // Never upload this readback, replace either snapshot or
+                    // relax the original full-packet retention assertion.
+                    const auto resident_words=gpu.read(after.results,lobes*24576);
+                    const unsigned resident_at=l*6144;
                     std::cerr<<"Native proof retention diagnostic family="<<(curved?material==3?"lava":"water":finite?"finite":"sky")
                         <<" lobe="<<l<<" boundary="<<boundary<<" original="<<original<<" final="<<at
                         <<" independent-transfer-capacity="<<lobes<<'\n';
                     for(unsigned field=0;field<48;++field)if(original_words[original+field]!=words[at+field])
                         std::cerr<<" field="<<field<<" before=0x"<<std::hex<<original_words[original+field]<<" final=0x"<<words[at+field]
-                            <<std::dec<<" after-footprint=0x"<<std::hex<<footprint_words[at+field]<<std::dec<<'\n';
+                            <<" after-footprint=0x"<<footprint_words[at+field]
+                            <<" fresh-resident=0x"<<resident_words[resident_at+field]<<std::dec<<'\n';
+                    std::cerr<<" fresh-witness-header=";
+                    for(unsigned field=0;field<4;++field)std::cerr<<resident_words[resident_at+48+field]<<',';
+                    std::cerr<<'\n';
+#if defined(_WIN32)
+                    if(gpu.validation)std::cerr<<" stored-critical="<<gpu.validation->GetNumStoredMessagesAllowedByRetrievalFilter()
+                        <<" discarded="<<gpu.validation->GetNumMessagesDiscardedByMessageCountLimit()<<'\n';
+#endif
                 }
                 check(original_words[original]==1 && original_words[original+1]==1 && !original_words[original+3],
                     "Initial full-hull snapshot omitted a certified root; downstream proof retention is not established");

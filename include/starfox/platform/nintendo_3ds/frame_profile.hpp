@@ -11,13 +11,17 @@ enum class FramePhase : unsigned {
     frame, advance, video, logic, capture, audio, raster, checkpoint, menu,
     models, layers, dots, composite, present,
     cpu, strategies, view, cull, audio_irq, music, effects, spc_emulate,
-    spc_filter, bg_decode, bg_colour, count
+    spc_filter, bg_decode, bg_colour,
+    gpu_sync, gpu_wait, gpu_upload, gpu_record, gpu_submit,
+    terrain_build, terrain_reuse, count
 };
 inline constexpr std::array<std::string_view, unsigned(FramePhase::count)> frame_phase_names{
     "frame", "advance", "video", "logic", "capture", "audio", "raster",
     "checkpoint", "menu", "models", "layers", "dots", "composite", "present",
     "cpu", "strategies", "view", "cull", "audio_irq", "music", "effects",
-    "spc_emulate", "spc_filter", "bg_decode", "bg_colour"
+    "spc_emulate", "spc_filter", "bg_decode", "bg_colour",
+    "gpu_sync", "gpu_wait", "gpu_upload", "gpu_record", "gpu_submit",
+    "terrain_build", "terrain_reuse"
 };
 struct FramePhaseTotals {
     std::uint64_t calls{}, ticks{}, maximum{};
@@ -39,6 +43,20 @@ public:
     }
     [[nodiscard]] const auto& totals() const noexcept { return totals_; }
     [[nodiscard]] bool stopped() const noexcept { return stopped_; }
+    // Each joined worker records into its own counters. Merge only after task
+    // completion; a worker never writes the owner's active CSV/window state.
+    [[nodiscard]] FrameProfile fork() const noexcept { return FrameProfile(clock_, frequency_); }
+    void merge_completed(const FrameProfile& child) noexcept {
+        if(!clock_ || !frequency_ || stopped_ || child.clock_ != clock_
+            || child.frequency_ != frequency_) return;
+        for(unsigned phase = 0; phase < totals_.size(); ++phase) {
+            const auto& source = child.totals_[phase];
+            auto& destination = totals_[phase];
+            destination.calls += source.calls;
+            destination.ticks += source.ticks;
+            if(source.maximum > destination.maximum) destination.maximum = source.maximum;
+        }
+    }
     // At most 512 one-second windows and FramePhase::count bounded-width rows
     // per window. New phases are appended so existing phase indices stay stable.
     // A failed/full stream is disabled, never allowed to terminate the game.
@@ -69,7 +87,7 @@ private:
     unsigned windows_{};
     bool stopped_{};
 };
-inline FrameProfile* active_frame_profile{};
+inline thread_local FrameProfile* active_frame_profile{};
 class ScopedFrameProfileActivation {
 public:
     explicit ScopedFrameProfileActivation(FrameProfile& profile) noexcept

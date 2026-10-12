@@ -1,7 +1,9 @@
 #include "starfox/platform/nintendo_3ds/game_scenery.hpp"
 #include "starfox/platform/nintendo_3ds/raster_coverage.hpp"
 #include "starfox/platform/nintendo_3ds/pica_composite.hpp"
+#include "starfox/platform/nintendo_3ds/frame_profile.hpp"
 #include <initializer_list>
+#include <cstring>
 
 namespace starfox::platform::nintendo_3ds {
 namespace {
@@ -205,6 +207,7 @@ void GameScenery::ensure_vertex_space(std::size_t needed) {
 PicaFrame GameScenery::publish(const GamePresentation& source,const PicaFrame& bg2) {
     validate_pica_group({source.plan,pending_vertices_,pending_draws_,pending_images_,bg2.clear},512U*256U*4U);
     vertices_.swap(pending_vertices_);draws_.swap(pending_draws_);images_.swap(pending_images_);
+    atlas_key_.reset(); // Raster, water and corridor publication supersede the cached terrain.
     return {source.plan,vertices_,draws_,images_,bg2.clear};
 }
 PicaFrame GameScenery::prepare(const GamePresentation& source,const PicaFrame& bg2,unsigned decoded_guard) {
@@ -278,6 +281,11 @@ PicaFrame GameScenery::prepare(const GamePresentation& source,const PicaFrame& b
         }
         if(next.size()>first) {
             PicaDraw ground;ground.first=first;ground.count=unsigned(next.size())-first;ground.texture=strip;
+            // BG2's authored horizon is a stereo receiver, not a model-depth
+            // occluder. Its entry-height/HDMA plane is independent of the live
+            // BG1 camera/grid/BSP geometry. Preserve the cartridge's painter
+            // priority, otherwise ground swallows grid lights and model bases.
+            ground.depth_test=ground.depth_write=false;
             ground.source_layer=2;ground.projected_uv=true;draws.push_back(ground);
         }
     }
@@ -294,6 +302,7 @@ std::optional<PicaFrame> GameScenery::prepare_tiles(const GamePresentation& sour
     if(available_guard<guard) throw std::invalid_argument("3DS terrain atlas does not cover both eye receivers");
     if(bg2.draws.empty()) {
         if(!bg2.vertices.empty() || !bg2.textures.empty()) throw std::invalid_argument("Incomplete empty 3DS terrain atlas");
+        atlas_key_.reset();
         vertices_.clear();draws_.clear();images_.clear();return PicaFrame{source.plan,{},{},{},bg2.clear};
     }
     if(bg2.draws.size()!=1 || bg2.textures.size()!=1 || bg2.vertices.size()%6)
@@ -304,8 +313,24 @@ std::optional<PicaFrame> GameScenery::prepare_tiles(const GamePresentation& sour
         || draw.projected_uv || draw.screen_dither || draw.clip || draw.colour_op
         || draw.model!=pica_identity || image.channels!=4 || image.repeat
         || !image.source_layers.empty()) throw std::invalid_argument("Invalid 3DS terrain tile ownership");
-    static_cast<void>(pica_texture_layout(image));
+    if(pica_resident_texture_bytes(image)>pica_texture_budget-512U*256U*4U)
+        throw std::invalid_argument("3DS terrain atlas exceeds the resident dashboard budget");
     if(bg2.vertices.size()>vertex_budget) return {};
+    const AtlasGeometryKey key{plane,{source.plan.focal_x,source.plan.focal_y,
+        source.plan.near_plane,source.plan.far_plane},bg2.vertices.size(),available_guard};
+    if(atlas_key_ && *atlas_key_==key && vertices_.size()>=key.source_vertices
+        && vertices_.size()<=vertex_budget && images_.size()==1
+        && std::memcmp(bg2.vertices.data(),vertices_.data(),bg2.vertices.size_bytes())==0) {
+        STARFOX_3DS_FRAME_PHASE(terrain_reuse);
+        // The retained infinity prefix is the exact previously validated source
+        // atlas. Its finite suffix depends only on the keyed plane/projection.
+        // Update borrowed texture headers transactionally: color/brightness
+        // changes do not require clipping/unprojecting that identical mesh.
+        pending_images_.assign(bg2.textures.begin(),bg2.textures.end());
+        images_.swap(pending_images_);draws_.front()=draw;++atlas_work_.reuses;
+        return PicaFrame{source.plan,vertices_,draws_,images_,bg2.clear};
+    }
+    STARFOX_3DS_FRAME_PHASE(terrain_build); // Includes rejected attempts; no alternate geometry/arithmetic.
     using Point=std::array<double,2>;
     const auto distance=[&](Point p){return p[1]-plane.centre-plane.slope*(p[0]-200);};
     // Two half-plane clips can grow a rectangle to six corners. Stack storage
@@ -346,22 +371,33 @@ std::optional<PicaFrame> GameScenery::prepare_tiles(const GamePresentation& sour
         const unsigned extra=count>=3?(count-2)*3:0;
         if(extra>vertex_budget-vertices.size()) return {};
         ensure_vertex_space(vertices.size()+extra);
-        for(unsigned corner=1;corner+1<count;++corner) for(unsigned i:{0U,corner,corner+1}) {
+        // A fan repeats its origin and shared edges. Transform each retained
+        // corner once, without changing clipping, arithmetic or fan ordering.
+        std::array<PicaVertex,8> transformed;
+        if(count>=3) for(unsigned i=0;i<count;++i) {
             const auto p=polygon[i];const double z=scale/distance(p);
-            vertices.push_back({{float((p[0]-200)*z/source.plan.focal_x),float((120-p[1])*z/source.plan.focal_y),float(z)},
+            transformed[i]={{float((p[0]-200)*z/source.plan.focal_x),float((120-p[1])*z/source.plan.focal_y),float(z)},
                 {1,1,1,1},{float(a.uv[0]+(c.uv[0]-double(a.uv[0]))*(p[0]-x0)/(x1-x0)),
-                    float(a.uv[1]+(c.uv[1]-double(a.uv[1]))*(p[1]-y0)/(y1-y0))}});
+                    float(a.uv[1]+(c.uv[1]-double(a.uv[1]))*(p[1]-y0)/(y1-y0))}};
         }
+        for(unsigned corner=1;corner+1<count;++corner) for(unsigned i:{0U,corner,corner+1})
+            vertices.push_back(transformed[i]);
     }
     auto& draws=pending_draws_;draws.assign(bg2.draws.begin(),bg2.draws.end());
     // The complete infinity atlas must precede every finite tile, exactly as
     // in the raster receiver. Never interleave far artwork over another tile.
     if(vertices.size()>bg2.vertices.size()) {
         PicaDraw ground;ground.first=unsigned(bg2.vertices.size());ground.count=unsigned(vertices.size())-ground.first;
+        // Same BG2-under-BG1 contract as the raster fallback above. Finite
+        // vertices still provide real per-eye parallax without writing a
+        // conflicting reconstructed landscape depth into the model buffer.
+        ground.depth_test=ground.depth_write=false;
         ground.texture=0;ground.source_layer=2;ground.projected_uv=true;draws.push_back(ground);
     }
     auto& images=pending_images_;images.assign(bg2.textures.begin(),bg2.textures.end());
-    return publish(source,bg2);
+    const auto result=publish(source,bg2);
+    atlas_key_=key;++atlas_work_.builds;
+    return result;
 }
 std::optional<PicaFrame> GameScenery::prepare_water_tiles(const GamePresentation& source,const PicaFrame& bg2,
     unsigned available_guard,unsigned vertex_budget) {
@@ -431,13 +467,16 @@ std::optional<PicaFrame> GameScenery::prepare_water_tiles(const GamePresentation
             const unsigned extra=count>=3?(count-2)*3:0;
             if(extra>vertex_budget-vertices.size()) return {};
             ensure_vertex_space(vertices.size()+extra);
-            for(unsigned corner=1;corner+1<count;++corner) for(unsigned i:{0U,corner,corner+1}) {
+            std::array<PicaVertex,8> transformed;
+            if(count>=3) for(unsigned i=0;i<count;++i) {
                 const auto p=polygon[i];const double z=side?distance/(side*(p[1]-120)):0;
                 const Point3 position=side?Point3{float((p[0]-200)*z/source.plan.focal_x),
                     float((120-p[1])*z/source.plan.focal_y),float(z)}:Point3{float(p[0]),float(p[1]),0};
-                vertices.push_back({position,{1,1,1,1},{float(a.uv[0]+(c.uv[0]-double(a.uv[0]))*(p[0]-x0)/(x1-x0)),
-                    float(a.uv[1]+(c.uv[1]-double(a.uv[1]))*(p[1]-y0)/(y1-y0))}});
+                transformed[i]={position,{1,1,1,1},{float(a.uv[0]+(c.uv[0]-double(a.uv[0]))*(p[0]-x0)/(x1-x0)),
+                    float(a.uv[1]+(c.uv[1]-double(a.uv[1]))*(p[1]-y0)/(y1-y0))}};
             }
+            for(unsigned corner=1;corner+1<count;++corner) for(unsigned i:{0U,corner,corner+1})
+                vertices.push_back(transformed[i]);
         }
         if(vertices.size()!=first) {
             PicaDraw next;next.first=first;next.count=unsigned(vertices.size())-first;next.texture=0;next.source_layer=2;

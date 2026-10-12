@@ -10,11 +10,16 @@
 #include "starfox/assets/bps.hpp"
 #include "starfox/platform/nintendo_3ds/game_models.hpp"
 #include "starfox/platform/nintendo_3ds/game_layers.hpp"
+#include "starfox/platform/nintendo_3ds/game_dots.hpp"
+#include "starfox/platform/nintendo_3ds/game_effects.hpp"
 #include "starfox/platform/nintendo_3ds/pica_composite.hpp"
 #include "starfox/platform/nintendo_3ds/presentation_clock.hpp"
 #include "fortuna_route_inputs.hpp"
 #include "corneria_route_inputs.hpp"
 #include "attack_carrier_route_inputs.hpp"
+#if defined(STARFOX_3DS_CHECK_PARALLEL_AUDIO)
+#include "native_stem_executor.hpp"
+#endif
 #include <bit>
 #include <chrono>
 #include <filesystem>
@@ -26,6 +31,32 @@ using namespace starfox;
 using namespace platform::nintendo_3ds;
 unsigned checks{};
 void require(bool value,const char* message) {++checks;if(!value) throw std::runtime_error(message);}
+#if defined(STARFOX_3DS_CHECK_PARALLEL_AUDIO)
+struct CountingStemExecutor final : audio::StemExecutor {
+    NativeStemExecutor worker;
+    std::uint64_t completed{};
+    CountingStemExecutor() {require(worker.parallel_available(),"Parallel session oracle accidentally used serial fallback");}
+    void execute(audio::StemTask foreground,audio::StemTask background) override {
+        worker.execute(foreground,background);++completed;
+    }
+};
+CountingStemExecutor* checked_stem_executor{};
+GameSessionOptions checked_options(const GameSessionOptions& source={}) {
+    require(checked_stem_executor,"Parallel session executor lifetime missing");
+    auto result=source;result.stem_executor=checked_stem_executor;return result;
+}
+// Stack-only wrapper; owners returned by restored_state remain ordinary
+// GameSession objects and inherit their executor through the production path.
+class CheckedSession final : public GameSession {
+public:
+    CheckedSession(assets::RomImage rom,assets::SymbolMap symbols,PcmSink sink,
+        std::string map="BOOT",std::span<const std::uint8_t> ram={},const GameSessionOptions& options={})
+        :GameSession(std::move(rom),std::move(symbols),std::move(sink),std::move(map),ram,checked_options(options)) {}
+};
+#else
+using CheckedSession=GameSession;
+GameSessionOptions checked_options(const GameSessionOptions& source={}) {return source;}
+#endif
 template<class F> void rejects(F f,const char* message) {
     bool rejected=false;try {f();} catch(const std::exception&) {rejected=true;}
     require(rejected,message);
@@ -50,6 +81,7 @@ struct SourceOracle {
             ?simulation::Experience::original:simulation::Experience::starfox_ex);
         game.set_timing_mode(simulation::TimingMode::original_speed);game.set_shape_face_counts(&counts);
         game.set_msu1_available(false); // Same platform capability, not source timing.
+        game.set_stereo_separation(16);game.set_stereo_convergence(512); // Native host optics, not VM writes.
         const auto uploads=game.map().take_apu_port_writes();
         if(!uploads.empty()) {
             static_cast<void>(spc.prime_upload_sequence(uploads));
@@ -81,11 +113,43 @@ struct SourceOracle {
         }
     }
 };
+void native_depth_preferences(const assets::RomImage& rom,const assets::SymbolMap& symbols) {
+    for(const auto map:{"BOOT","LEVEL1_1"}) {
+        CheckedSession fresh(rom,symbols,[](auto){},map);
+        SourceOracle source(rom,symbols,map);
+        require(fresh.preferences().separation==16 && fresh.preferences().convergence==512
+            && fresh.stereo_settings().separation==16 && fresh.stereo_settings().convergence==512,
+            "Native session without saved preferences inherited desktop depth defaults");
+        require(fresh.game().save_state()==source.game.save_state()
+            && fresh.audio().save_state()==source.spc.save_state(),
+            "Native depth default changed cartridge/SPC state beyond declared host preferences");
+        for(const std::uint16_t convergence:{16,512,1024,4096,65535}) {
+            GameSessionOptions options;options.preferences=GamePreferences{};
+            options.preferences->convergence=convergence;
+            CheckedSession saved(rom,symbols,[](auto){},map,{},options);
+            require(saved.preferences().convergence==convergence && saved.stereo_settings().convergence==convergence,
+                "Native constructor overrode saved/custom convergence");
+            const auto state=saved.save_state();const auto restored=saved.restored_state(state);
+            require(restored->save_state()==state && restored->preferences().convergence==convergence,
+                "Native state restore migrated saved/custom convergence");
+            const auto before=saved.game().save_state(),audio=saved.audio().save_state();
+            for(float slider:{0.F,.125F,.5F,1.F}) for(bool hardware:{false,true}) {
+                const auto frame=saved.presentation(slider,hardware,saved.stereo_settings());
+                const bool world=std::string_view(map)!="BOOT";
+                require(frame.plan.convergence==convergence && frame.plan.eye_count==(world && hardware && slider>0?2U:1U),
+                    "Native presentation ignored saved convergence or mono/setup policy");
+            }
+            require(saved.game().save_state()==before && saved.audio().save_state()==audio,
+                "Native slider/depth inspection advanced the cartridge or audio");
+        }
+    }
+    std::cout<<"  Native depth: fresh-session defaults, saved/custom values, full-state restore, mono/setup and slider continuity checked\n";
+}
 void parity(const assets::RomImage& rom,const assets::SymbolMap& symbols,const std::string& map,unsigned polls=720) {
     require(polls>=720 && polls<=14400 && polls%120==0,"Invalid native session parity duration");
     std::vector<std::int16_t> pcm;
     unsigned blocks{},phases{},ticks{},raster_only_updates{};
-    GameSession session(rom,symbols,[&](auto samples) {
+    CheckedSession session(rom,symbols,[&](auto samples) {
         require(samples.size()==AudioPcm::samples,"SPC block is not exactly 50ms of stereo PCM");
         std::array<std::int16_t,AudioPcm::samples> copied{};
         copy_audio_pcm(samples,copied); // Same copy contract as the real NDSP sink.
@@ -231,7 +295,7 @@ void natural_source_route(const assets::RomImage& rom,const assets::SymbolMap& s
     std::vector<std::int16_t> pcm;
     unsigned blocks{},phases{},ticks{};
     GameSessionOptions options;options.preferences=GamePreferences{};options.preferences->god=true;
-    GameSession session(rom,symbols,[&](auto samples) {
+    CheckedSession session(rom,symbols,[&](auto samples) {
         require(samples.size()==AudioPcm::samples,"Natural-route SPC block changed native PCM extent");
         pcm.insert(pcm.end(),samples.begin(),samples.end());++blocks;
     },map,{},options);
@@ -322,8 +386,205 @@ void natural_source_route(const assets::RomImage& rom,const assets::SymbolMap& s
     }
     throw std::runtime_error(std::string("Natural ")+name+" route bound exhausted without boss/results/map completion");
 }
+void natural_death_restart(const assets::RomImage& rom,const assets::SymbolMap& symbols,
+    std::optional<bool> continue_yes={}) {
+    // Ordinary stationary flight, no god preference, source-memory writes,
+    // checkpoint import or synthetic death. The independent cartridge/SPC
+    // owner sees precisely the same input and every source raster.
+    std::cout.setf(std::ios::unitbuf);
+    std::vector<std::int16_t> pcm;
+    unsigned phases=0,ticks=0,blocks=0,windows=0,compositions=0;
+    CheckedSession session(rom,symbols,[&](auto samples) {
+        require(samples.size()==AudioPcm::samples,"Death-route native PCM extent changed");
+        pcm.insert(pcm.end(),samples.begin(),samples.end());++blocks;
+    },"LEVEL1_1");
+    SourceOracle source(rom,symbols,"LEVEL1_1");
+    std::optional<std::uint32_t> flags;
+    for(auto address:symbols.find("GAMEFLAGS")) if(address>>16==0 || address>>16==0x7e) {flags=address;break;}
+    require(flags.has_value(),"Death-route source GAMEFLAGS is missing");
+    require(session.game().save_state()==source.game.save_state()
+        && session.audio().save_state()==source.spc.save_state(),"Death-route initial cartridge/SPC state differs");
+    require(!session.game().god_mode() && !session.game().infinite_lives(),"Death-route enabled survival cheats");
+    GameModels models(rom,symbols);GameDots dots(rom,symbols);GameLayers layers;
+    GameEffects effects;PicaComposite composite;
+    unsigned damaged=0,dying=0,circles=0,black=0,restored=0,bright=0,peak_bytes=0,full_health=0;
+    unsigned deaths=0,game_over=0,continue_screen=0,continue_bright=0,choice=0,confirm=0,returned=0,return_bright=0;
+    unsigned arrival_bright=0,arrival_confirm=0;
+    bool previous_dead=false,route_seen=false;
+    std::optional<std::uint32_t> option;
+    if(continue_yes) {
+        for(auto address:symbols.find("FOXY_OPTION"))if(address>>16==0 || address>>16==0x7e) {option=address;break;}
+        require(option.has_value(),"Natural Continue route has no source option RAM");
+    }
+    session.advance(0,0);
+    // Keep the original single-death 18,000-phase gate unchanged. These are
+    // separate complete natural-reserve-exhaustion routes with a fixed bound;
+    // no lives/health, flow, audio bank or checkpoint is written by the test.
+    const unsigned bound=continue_yes?60000U:18000U;
+    for(unsigned phase=1;phase<=bound;++phase) {
+        input::ButtonMask held=0;
+        if(choice && phase>=choice && phase<choice+6)held=*continue_yes?input::up:input::down;
+        if(confirm && phase>=confirm && phase<confirm+6)held=input::start;
+        if(arrival_confirm && phase>=arrival_confirm && phase<arrival_confirm+6)held=input::start;
+        source.input.sample(held);
+        const auto step=session.advance(timestamp(phase),held);
+        phases+=step.video_phases;ticks+=step.logic_ticks;
+        require(!step.time_clamped && !step.requested_experience && !step.requested_preview
+            && !step.requested_settings_reset,"Natural death route changed native owner or clamped its clock");
+        source.raster();
+        const auto& game=session.game();
+        const auto native=session.presentation(0,true);
+        // A bus read updates the cartridge open-bus latch even through its
+        // const API. Diagnostic observations must use the non-mutating RAM
+        // peek; source and native timelines otherwise stop being comparable.
+        const auto raw_flags=game.map().peek_ram_byte(*flags);
+        require(raw_flags.has_value(),"Death-route GAMEFLAGS is not mapped RAM");
+        const bool dead=(*raw_flags&0x42U)!=0;
+        if(game.flow_state()==simulation::GameFlowState::gameplay && dead && !previous_dead)++deaths;
+        previous_dead=dead;
+        const auto meter=game.peek_meter_state();
+        // The historically named M_DAMAGE is remaining shield/health, not
+        // accumulated damage. The source meter caps it at player_health_max;
+        // a fresh ship may have40 health while its displayed full gauge is36.
+        // Observe a populated full meter before accepting a decrease/restart.
+        const unsigned health=std::min(meter.damage,meter.player_health_max);
+        if(meter.enabled && !dead && health==meter.player_health_max)full_health=health;
+        if(full_health && meter.damage<full_health && !damaged)damaged=phase;
+        if(damaged && dead && !dying)dying=phase;
+        if(dying && dead && native.raster->circle.active && native.raster->circle.radius
+            && (native.raster->circle.affected_layers&63))++circles;
+        if(dying && !native.raster->brightness && !black)black=phase;
+        if(black && !dead && game.flow_state()==simulation::GameFlowState::gameplay
+            && native.raster->brightness==15 && meter.enabled && health==full_health) {
+            if(!restored)restored=phase;
+            ++bright;
+        }else bright=0;
+        if(continue_yes) {
+            if(game.flow_state()==simulation::GameFlowState::game_over && !game_over) {
+                require(damaged && dying && circles && black && deaths>1,
+                    "Natural game-over omitted real reserve-consuming deaths/circles/fade");
+                require(!native.raster->circle.active,"Final death circle leaked into GAME OVER");
+                game_over=phase;
+            }
+            if(game.flow_state()==simulation::GameFlowState::continue_choice) {
+                require(game_over,"Continue screen appeared without natural GAME OVER");
+                if(!continue_screen)continue_screen=phase;
+                if(!choice && native.raster->brightness==15)++continue_bright;
+                if(continue_bright>=30 && !choice) {choice=phase+1;confirm=choice+12;}
+                if(choice && phase==choice+10) {
+                    const auto selected=game.map().peek_ram_byte(*option);
+                    require(selected && *selected==(*continue_yes?0U:0xffU),
+                        "Ordinary Continue UP/DOWN did not select the requested source option");
+                }
+            }
+            if(confirm && phase>=confirm+6) {
+                route_seen|=game.flow_state()==simulation::GameFlowState::planet_travel;
+                // MAIN/PLANETSEQ waits in .rotateforabit for a NEW button
+                // press after Continue returns to stage zero. Do not change
+                // the player to auto-launch or fabricate an arrival flag.
+                // Let the real source consume an ordinary fresh START after
+                // its returned map is fully visible for thirty rasters. If
+                // travel is not actually ready it refuses that press, and
+                // the unchanged full-route recovery requirement still fails.
+                if(*continue_yes && game.flow_state()==simulation::GameFlowState::planet_travel
+                    && native.raster->brightness==15) {
+                    if(!arrival_confirm && ++arrival_bright>=30)arrival_confirm=phase+1;
+                }else if(!arrival_confirm)arrival_bright=0;
+                const bool terminal=*continue_yes
+                    ?game.flow_state()==simulation::GameFlowState::gameplay && route_seen && !dead
+                        && meter.enabled && health==full_health && game.objects().is_active(game.player())
+                    :game.flow_state()==simulation::GameFlowState::title;
+                if(terminal && native.raster->brightness==15) {
+                    if(!returned)returned=phase;
+                    ++return_bright;
+                }else return_bright=0;
+            }
+        }
+        const bool finished=continue_yes?return_bright>=120:bright>=120;
+        // Inspect every live death-effect phase, plus consecutive exact
+        // source/audio windows. Maximum supported optics and original-model
+        // mono use the same immutable completed source, never two ticks.
+        const bool frontend=continue_yes && game_over && (!returned || return_bright<120);
+        if(phase%60==0 || (dying && (!restored || dead)) || frontend || finished) {
+            if(phase%60==0 || finished) {
+                require(phases==phase && ticks==source.ticks && blocks==source.blocks,
+                    "Death/restart changed source raster/logic/SPC cadence");
+                require(game.save_state()==source.game.save_state(),"Natural death/restart cartridge state differs");
+                require(session.audio().save_state()==source.spc.save_state() && pcm==source.pcm,
+                    "Natural death/restart changed SPC handshakes or consecutive PCM");
+                require(*native.raster->ppu==source.game.map().ppu_state()
+                    && native.raster->brightness==source.game.map().display_brightness(),
+                    "Natural death/restart replaced or delayed source raster/fade");
+                pcm.clear();source.pcm.clear();++windows;
+            }
+            const auto state=game.save_state(),apu=session.audio().save_state();
+            StereoSettings settings;settings.separation=64;settings.convergence=16;settings.strength=2;
+            for(const auto& optics:std::array<std::pair<float,bool>,3>{{{0,true},{1,true},{1,false}}}) {
+                const auto eye=session.presentation(optics.first,optics.second,settings);
+                require(eye.current==native.current && eye.previous==native.previous && eye.raster==native.raster,
+                    "Death/restart eye projection changed the completed source tick");
+                const auto geometry=models.prepare(eye),ink=dots.prepare(eye);
+                const auto fx=effects.prepare(eye);
+                const auto occupied=geometry.vertices.size()+ink.vertices.size()+fx.colour.vertices.size()+fx.window.vertices.size();
+                require(occupied<=pica_vertex_limit,"Death effects exceeded complete native scene geometry budget");
+                const auto artwork=layers.prepare(eye,unsigned(pica_vertex_limit-occupied));
+                const auto frame=composite.prepare(eye.plan,
+                    std::array{artwork.before_models,ink,geometry,artwork.after_models,fx.colour,fx.window},
+                    eye.dashboard,artwork.clear);
+                validate_pica_frame(frame,eye.dashboard);++compositions;
+                unsigned bytes=512U*256U*4U;
+                for(const auto image:frame.textures)bytes+=pica_resident_texture_bytes(image);
+                peak_bytes=std::max(peak_bytes,bytes);
+                require(bytes<=pica_texture_budget,"Natural death/restart exceeded padded scene/lower-LCD residency");
+                if(dying && dead && native.raster->circle.active && native.raster->circle.radius
+                    && (native.raster->circle.affected_layers&63))
+                    require(!fx.colour.draws.empty() && !fx.colour.draws.front().clip,
+                        "Natural death circle was omitted or inherited the Controls demo clip");
+                for(const auto& draw:fx.colour.draws)
+                    require(draw.space==PicaSpace::screen && !draw.depth_test && !draw.depth_write,
+                        "Death colour math entered finite model depth instead of screen-layer coverage");
+                require(optics.second || !eye.plan.stereo,"Original-model death route fabricated a stereo eye");
+            }
+            require(game.save_state()==state && session.audio().save_state()==apu,
+                "Death/restart composition or slider reads mutated source/SPC");
+        }
+        if(phase%600==0 || finished) {
+            std::cout<<"Death/restart phase="<<phase<<" damage="<<damaged<<" dying="<<dying
+                <<" circles="<<circles<<" black="<<black<<" restored="<<restored<<" bright="<<bright
+                <<" health="<<unsigned(meter.damage)<<'/'<<full_health<<'\n';
+            if(continue_yes)std::cout<<"Natural Continue "<<(*continue_yes?"YES":"NO")<<" deaths="<<deaths
+                <<" game-over="<<game_over<<" continue="<<continue_screen<<" choice="<<choice<<" confirm="<<confirm
+                <<" returned="<<returned<<" bright="<<return_bright<<" route-seen="<<route_seen
+                <<" arrival-confirm="<<arrival_confirm
+                <<" flow="<<unsigned(game.flow_state())<<'\n';
+        }
+        if(finished) {
+            require(damaged && dying && circles && black && restored,
+                "Natural death/restart lacked damage, live circle, black fade or recovery");
+            if(continue_yes) {
+                require(game_over && continue_screen && choice && confirm && returned,
+                    "Natural Continue route omitted full reserve exhaustion/prompt/input/recovery");
+                require(!*continue_yes || arrival_confirm,
+                    "Continue YES omitted the source-required fresh map confirmation");
+                std::cout<<"3DS natural GAME OVER -> Continue "<<(*continue_yes?"YES -> route/gameplay":"NO -> title")
+                    <<" PASS: "<<windows<<" consecutive cartridge/SPC/PCM/raster parity windows, "
+                    <<compositions<<" complete supported-eye/mono compositions, peak padded scene/lower textures "<<peak_bytes
+                    <<" bytes. Ordinary stationary flight and source UP/DOWN/START only; no survival cheats or source writes. "
+                    <<"HOST source/resource acceptance, not ARM/PICA pixels or physical audio/FPS acceptance.\n";
+                return;
+            }
+            std::cout<<"3DS natural death/restart PASS: "<<windows<<" consecutive cartridge/SPC/PCM parity windows, "
+                <<compositions<<" complete supported-eye/mono compositions, peak padded scene/lower textures "<<peak_bytes
+                <<" bytes. Ordinary stationary flight, no source mutations or survival cheats. HOST source/resource checks; "
+                "not game-over/continue, ARM/PICA pixels or physical audio/FPS acceptance.\n";
+            return;
+        }
+    }
+    throw std::runtime_error(continue_yes?"Natural game-over/Continue bound exhausted without full bright recovery"
+        :"Natural death/restart bound exhausted without 120 bright recovered gameplay phases");
+}
 void handoff(const assets::RomImage& rom,const assets::SymbolMap& symbols) {
-    GameSession session(rom,symbols,[](auto){ });
+    CheckedSession session(rom,symbols,[](auto){ });
     const auto cartridge=session.cartridge_experience();
     session.advance(0,0);
     require(session.advance(0,input::a).duplicate && session.advance(0,0).duplicate,
@@ -340,13 +601,13 @@ void presentation_cadence(const assets::RomImage& rom,const assets::SymbolMap& s
         std::vector<std::int16_t> pcm;unsigned phases{},blocks{},ticks{},renders{};
         GameSessionOptions options;options.preferences=GamePreferences{};
         options.preferences->render_fps=static_cast<std::uint8_t>(rate);options.preferences->show_fps=true;
-        GameSession session(rom,symbols,[&](auto samples){pcm.insert(pcm.end(),samples.begin(),samples.end());++blocks;},map,{},options);
+        CheckedSession session(rom,symbols,[&](auto samples){pcm.insert(pcm.end(),samples.begin(),samples.end());++blocks;},map,{},options);
         SourceOracle source(rom,symbols,map);
         // Loading SD defaults also applies source-side god/laser/language
         // setters (including cartridge RAM writes and pending laser state).
         // Give the independent oracle those same user choices, not just FPS.
         source.game.set_god_mode(false);source.game.set_default_laser(0);source.game.set_language(0);
-        source.game.set_selected_level(0);source.game.set_stereo_separation(16);source.game.set_stereo_convergence(1024);
+        source.game.set_selected_level(0);source.game.set_stereo_separation(16);source.game.set_stereo_convergence(512);
         source.game.set_presentation_fps(static_cast<std::uint16_t>(rate));source.game.set_show_fps(true);
         require(session.game().save_state()==source.game.save_state(),"Output cadence fixture initialized different source preferences");
         PresentationClock gate;PresentationRate measured;session.advance(0,0);
@@ -387,7 +648,7 @@ void presentation_cadence(const assets::RomImage& rom,const assets::SymbolMap& s
     }
     // A real decoded GAME archive, not a guessed byte offset, supplies the
     // cross-platform rates. The native candidate must bound only that setting.
-    GameSession session(rom,symbols,[](auto){},"LEVEL1_1");session.advance(0,0);session.advance(timestamp(1),0);
+    CheckedSession session(rom,symbols,[](auto){},"LEVEL1_1");session.advance(0,0);session.advance(timestamp(1),0);
     const auto saved=session.save_state();const auto crc=assets::crc32(rom.bytes());
     const auto packet=decode_game_state(saved,crc);
     for(const std::uint16_t rate:{0,20,30,60,90,480,65535}) {
@@ -404,13 +665,33 @@ void presentation_cadence(const assets::RomImage& rom,const assets::SymbolMap& s
         require(session.save_state()==saved,"Candidate output-rate normalization mutated the running owner");
     }
     GameSessionOptions invalid;invalid.preferences=GamePreferences{};invalid.preferences->render_fps=90;
-    rejects([&]{GameSession rejected(rom,symbols,[](auto){},"BOOT",{},invalid);},"Invalid native SD FPS accepted by session");
+    rejects([&]{CheckedSession rejected(rom,symbols,[](auto){},"BOOT",{},invalid);},"Invalid native SD FPS accepted by session");
 }
 void native_capability_restore(const assets::RomImage& rom,const assets::SymbolMap& symbols) {
     // Import a real decoded GAME packet with supported cartridge settings and
     // desktop-only rendering enabled. Do not edit guessed serialized offsets.
-    for(const auto map:{"BOOT","LEVEL1_1"}) {
-        GameSession session(rom,symbols,[](auto){},map);
+    struct Temp {
+        std::filesystem::path path;
+        Temp() {
+            const auto stamp=std::chrono::steady_clock::now().time_since_epoch().count();
+            for(unsigned i=0;i<64;++i) {
+                const auto candidate=std::filesystem::temp_directory_path()
+                    /("sfe-3ds-restored-settings-"+std::to_string(stamp)+"-"+std::to_string(i));
+                if(std::filesystem::create_directory(candidate)) {path=candidate;return;}
+            }
+            throw std::runtime_error("Cannot create isolated restored-settings directory");
+        }
+        ~Temp() {
+            std::error_code ignored;GameStorage disk(path.generic_string(),0x76543210);
+            for(unsigned slot=0;slot<2;++slot) std::filesystem::remove(disk.slot_path(slot),ignored);
+            std::filesystem::remove(path,ignored);
+        }
+    } temp;
+    GameStorage storage(temp.path.generic_string(),0x76543210);static_cast<void>(storage.load());
+    for(const auto map:{"BOOT","LEVEL1_1"}) for(const std::uint16_t live_separation:{1,16,64})
+        for(const std::uint16_t separation:{1,16,64,65,512}) {
+        GameSessionOptions options;options.preferences=GamePreferences{};options.preferences->separation=live_separation;
+        CheckedSession session(rom,symbols,[](auto){},map,{},options);
         session.advance(0,0);session.advance(timestamp(1),0);
         const auto saved=session.save_state();const auto crc=assets::crc32(rom.bytes());
         const auto packet=decode_game_state(saved,crc);
@@ -443,6 +724,8 @@ void native_capability_restore(const assets::RomImage& rom,const assets::SymbolM
         desktop->set_timing_mode(simulation::TimingMode::unlocked_20_fps);
         desktop->set_show_fps(true);desktop->set_presentation_fps(90);
         desktop->set_swap_face_buttons(true);desktop->set_infinite_bombs(true);
+        desktop->set_stereo_separation(separation);
+        require(desktop->stereo_separation()==separation,"Desktop stereo import fixture lost its requested setting");
         auto candidate=packet;candidate.game=desktop->save_state();
         const auto native=session.restored_state(encode_game_state(candidate,crc));
         const auto& game=native->game();
@@ -468,6 +751,24 @@ void native_capability_restore(const assets::RomImage& rom,const assets::SymbolM
             && game.timing_mode()==simulation::TimingMode::unlocked_20_fps
             && game.swap_face_buttons() && game.infinite_bombs(),
             "Native capability normalization erased supported preferences");
+        // Output-device stereo belongs to the live native session, not to
+        // the archived desktop cartridge timeline. Preserve its bounded value
+        // even when the valid GAME payload requests 65..512 world units.
+        const auto expected_separation=session.preferences().separation;
+        require(game.stereo_separation()==expected_separation
+            && native->preferences().separation==expected_separation
+            && native->stereo_settings().separation==float(expected_separation),
+            "Desktop archive replaced live native stereo/settings/checkpoint separation");
+        GameSaveData record;record.experience=native->cartridge_experience();record.preferences=native->preferences();
+        const auto ram=native->cartridge_ram();
+        if(!ram.empty()) {record.ex_rom_crc=crc;record.ex_sram.assign(ram.begin(),ram.end());}
+        const bool changed=!storage.current().found || storage.current().data!=record;
+        require(storage.save(record)==changed,"Restored native preferences could not checkpoint to disk");
+        GameStorage reopened(temp.path.generic_string(),0x76543210);
+        const auto& loaded=reopened.load();
+        require(loaded.found && loaded.writable && loaded.data==record,
+            "Restored native checkpoint lost settings or cartridge SRAM");
+        require(!storage.save(record),"Unchanged restored native preferences rewrote the journal");
         const auto after=decode_game_state(native->save_state(),crc);
         require(game.map().save_state()==desktop->map().save_state() && after.audio==packet.audio
             && after.audio_phase==packet.audio_phase && after.pending_audio==packet.pending_audio
@@ -477,7 +778,7 @@ void native_capability_restore(const assets::RomImage& rom,const assets::SymbolM
         const auto roundtrip=native->restored_state(native->save_state());
         require(roundtrip->save_state()==native->save_state(),"Normalized native state did not round-trip exactly");
     }
-    std::cout<<"  Native capabilities: real BOOT/stage state imports clear desktop-only graphics/audio, preserve supported controls and VM/SPC/grid\n";
+    std::cout<<"  Native capabilities: real BOOT/stage imports preserve native stereo and SD checkpoint, clear desktop-only graphics/audio, preserve supported controls and VM/SPC/grid\n";
 }
 struct MenuDriver {
     GameSession& session;std::int64_t time{};GameAdvance last;
@@ -494,10 +795,106 @@ struct MenuDriver {
         require(session.game().pregame_selection()==id,"Actual menu navigation did not reach requested source row");
     }
 };
+void fps_navigation_parity(const assets::RomImage& rom,const assets::SymbolMap& symbols) {
+    constexpr std::array<input::ButtonMask,4> navigation{0,input::up,input::down,input::ButtonMask(input::up|input::down)};
+    unsigned fixtures{};
+    // Exercise both the New-family default and an existing custom depth.
+    // The independent source owner must start with the fixture's declared
+    // preferences, not the old desktop/default convergence of 1024.
+    for(const std::uint16_t convergence:{512,1024})
+    for(bool runtime:{false,true})for(unsigned rate:{30U,60U})for(auto nav:navigation) {
+        std::vector<std::int16_t> pcm;
+        const auto map=runtime?"LEVEL1_1":"BOOT";
+        GameSessionOptions options;options.preferences=GamePreferences{};
+        options.preferences->render_fps=static_cast<std::uint8_t>(rate);
+        options.preferences->convergence=convergence;
+        CheckedSession session(rom,symbols,[&](auto samples){pcm.insert(pcm.end(),samples.begin(),samples.end());},map,{},options);
+        SourceOracle source(rom,symbols,map);
+        // SD defaults invoke source-side setters, including EX's pending
+        // laser/cartridge writes. Match those actual user choices in the
+        // independent owner before comparing any input action.
+        source.game.set_god_mode(false);source.game.set_default_laser(0);source.game.set_language(0);
+        source.game.set_selected_level(0);source.game.set_stereo_separation(16);source.game.set_stereo_convergence(convergence);
+        source.game.set_presentation_fps(static_cast<std::uint16_t>(rate));
+        require(session.game().save_state()==source.game.save_state(),"FPS fixture initialized different source/SD preferences");
+        std::int64_t time{};session.advance(time,0);
+        const auto compare=[&] {
+            require(session.game().save_state()==source.game.save_state(),"Native FPS action changed independent source state");
+            require(session.audio().save_state()==source.spc.save_state() && pcm==source.pcm,
+                "Native FPS action changed source SPC handshakes or PCM");
+        };
+        if(runtime) {
+            require(session.toggle_runtime_options() && source.game.toggle_runtime_options(),"FPS fixture could not open actual runtime options");
+            source.input.reset();session.advance(++time,0);compare();
+        }
+        const auto step=[&](input::ButtonMask held) {
+            time+=50'000'000;source.input.sample(held);
+            const auto result=session.advance(time,held);
+            require(result.video_phases>0 && result.video_phases<=3,"FPS action lost ordinary source raster timing");
+            for(unsigned phase=0;phase<result.video_phases;++phase) {
+                const auto before=source.game.presentation_fps();
+                if(!runtime)source.raster();
+                else {
+                    const bool was_runtime=source.game.runtime_options_open();
+                    source.game.present_frame();
+                    if(source.game.logic_tick_ready()) {
+                        const auto tick=source.game.tick(source.input.consume());
+                        if(!was_runtime)source.pending.insert(source.pending.end(),tick.audio_port_writes.begin(),tick.audio_port_writes.end());
+                        static_cast<void>(source.game.map().take_msu_register_writes());
+                    }
+                    if(!source.game.runtime_options_open() && ++source.phase%3==0) {
+                        source.spc.render_stems_logic_tick(source.pending);source.pending.clear();
+                        std::vector<std::int16_t> samples;
+                        audio::mix_stems(source.spc.last_music_samples(),source.spc.last_effect_samples(),
+                            source.game.music_volume(),source.game.sfx_volume(),samples);
+                        source.pcm.insert(source.pcm.end(),samples.begin(),samples.end());
+                        source.game.synchronize_apu_output_ports(source.spc.output_ports());
+                    }
+                }
+                // Independent direct-source owner plus the native two-rate
+                // policy. Do not call the production input/rate interceptor.
+                if(source.game.presentation_fps()!=before)source.game.set_presentation_fps(before==30?60:30);
+            }
+            compare();return result;
+        };
+        const auto tap=[&](input::ButtonMask held) {step(held);step(0);};
+        const auto select=[&](unsigned id) {
+            const auto order=simulation::pregame_menu_order(source.game.pregame_page());
+            for(std::size_t row=0;source.game.pregame_selection()!=id && row<order.size();++row)tap(input::down);
+            require(source.game.pregame_selection()==id,"FPS fixture could not navigate to actual source row");
+        };
+        const auto order=simulation::pregame_menu_order(simulation::PregamePage::main);
+        const auto target=std::size_t(std::find(order.begin(),order.end(),2U)-order.begin());
+        const auto origin=nav?order[(target+((nav&input::up)?1U:order.size()-1U))%order.size()]:2U;
+        select(origin);tap(input::ButtonMask(nav|input::a));
+        unsigned expected=rate==30?60:30;
+        require(session.game().pregame_selection()==2 && session.game().presentation_fps()==expected,
+            "Direction+confirm did not toggle the destination native FPS row");
+        for(auto action:{input::a,input::b,input::select,input::left,input::right}) {
+            tap(action);expected=expected==30?60:30;
+            require(session.preferences().render_fps==expected,"Native FPS action did not use the same 30/60 list");
+        }
+        step(input::right);expected=expected==30?60:30;
+        require(session.game().presentation_fps()==expected,"Horizontal neutral tap lost FPS action");
+        step(input::ButtonMask(input::left|input::right));step(input::left);
+        require(session.game().presentation_fps()==expected,"Held horizontal direction bypassed source neutral-release guard");
+        step(0);tap(input::left);expected=expected==30?60:30;
+        require(session.game().presentation_fps()==expected,"Released horizontal direction could not toggle FPS again");
+        tap(input::ButtonMask(input::up|input::a));
+        require(session.game().pregame_selection()==1 && session.game().presentation_fps()==expected,
+            "Leaving FPS row applied a rate change to the old row");
+        select(2);step(input::ButtonMask(input::a|input::start));
+        expected=expected==30?60:30;
+        require(session.game().presentation_fps()==expected && !session.game().runtime_options_open(),
+            "Combined FPS/Start action lost source ordering or leaked a desktop rate on menu exit");
+        ++fixtures;
+    }
+    std::cout<<"  Native FPS: "<<fixtures<<" setup/runtime 30/60 fixtures, destination navigation, all actions, horizontal neutral release, old-row departure and combined Start ordering; exact source/SPC/PCM checked\n";
+}
 void actual_menu(const assets::RomImage& rom,const assets::SymbolMap& symbols,const std::filesystem::path& captures) {
     GameSessionOptions native;native.preferences=GamePreferences{};
     native.preferences->hud_layout.widgets[unsigned(HudWidget::shield)].x=20;
-    GameSession session(rom,symbols,[](auto){},"BOOT",{},native);MenuDriver controls(session);
+    CheckedSession session(rom,symbols,[](auto){},"BOOT",{},native);MenuDriver controls(session);
     GameMenu menu(rom,symbols);
     const auto observe=[&] {
         const auto before=session.game().save_state(),spc=session.audio().save_state();
@@ -527,8 +924,8 @@ void actual_menu(const assets::RomImage& rom,const assets::SymbolMap& symbols,co
     controls.tap(input::select);require(session.game().presentation_fps()==30,"Select leaked a desktop-only native target");
     controls.tap(input::left);require(session.game().presentation_fps()==60,"Left did not toggle native 30/60 target");
     controls.tap(input::up);controls.tap(input::down|input::a);
-    require(session.game().pregame_selection()==2 && session.game().presentation_fps()==60,
-        "Simultaneous menu navigation/action leaked a desktop rate into the native render gate");
+    require(session.game().pregame_selection()==2 && session.game().presentation_fps()==30,
+        "Simultaneous menu navigation/action did not toggle the native render target");
     controls.select(14);controls.tap(input::a);
     require(session.game().pregame_page()==simulation::PregamePage::options,"Source Options action not used");observe();
     controls.select(1);controls.tap(input::a);
@@ -581,7 +978,7 @@ void actual_menu(const assets::RomImage& rom,const assets::SymbolMap& symbols,co
     require(session.cartridge_experience()==simulation::Experience::starfox_ex || source_ram.empty(),
         "Retail generic VM RAM was misidentified as battery-backed SRAM");
     const std::vector<std::uint8_t> saved_ram(source_ram.begin(),source_ram.end());
-    GameSession preview(rom,symbols,[](auto){},"LEVEL1_1",saved_ram,options);MenuDriver preview_controls(preview);
+    CheckedSession preview(rom,symbols,[](auto){},"LEVEL1_1",saved_ram,options);MenuDriver preview_controls(preview);
     require(progress>0 && preview.preferences()==prefs,"Preview lost settings or skipped bounded source preroll");
     require(std::equal(preview.cartridge_ram().begin(),preview.cartridge_ram().end(),saved_ram.begin(),saved_ram.end()),
         "Preview source preroll changed the user's preserved cartridge SRAM");
@@ -606,11 +1003,11 @@ void actual_menu(const assets::RomImage& rom,const assets::SymbolMap& symbols,co
     preview_controls.tap(input::start);
     require(preview_controls.last.requested_preview==false && preview_controls.last.start_after_preview,"Preview Start did not request the real BOOT/Start path");
     options.preview=false;options.start_after_preview=true;
-    GameSession started(rom,symbols,[](auto){},"BOOT",{},options);started.advance(0,0);
+    CheckedSession started(rom,symbols,[](auto){},"BOOT",{},options);started.advance(0,0);
     for(unsigned phase=1;phase<=180;++phase) started.advance(timestamp(phase),0);
     require(!started.game().in_setup_menu() && started.preferences()==prefs,"Preview Start failed to launch through source fade/selected level");
     options.preview=true;options.start_after_preview=false;options.preview_progress=[](unsigned){return false;};
-    rejects([&]{GameSession cancelled(rom,symbols,[](auto){},"LEVEL1_1",{},options);},"Cancelled preview was published as a playable owner");
+    rejects([&]{CheckedSession cancelled(rom,symbols,[](auto){},"LEVEL1_1",{},options);},"Cancelled preview was published as a playable owner");
     std::cout<<"  Actual setup: all source pages/rows, font/cache/protected UI, real preview geometry, settings and Start handoff checked\n";
 }
 }
@@ -637,7 +1034,7 @@ void actual_disk_handoff(const assets::RomImage& rom,const assets::SymbolMap& sy
     prefs.hud_layout.widgets[unsigned(HudWidget::radio)]={44,12,3,true};
     prefs.hud_layout.widgets[unsigned(HudWidget::portrait)]={108,120,5,false};
     GameSessionOptions options;options.preferences=prefs;
-    GameSession source(rom,symbols,[](auto){},"BOOT",{},options);
+    CheckedSession source(rom,symbols,[](auto){},"BOOT",{},options);
     require(source.preferences()==prefs,"Real cartridge did not accept persisted supported settings");
     const auto vm=source.game().save_state(),spc=source.audio().save_state();
     GameSaveData record;record.experience=source.cartridge_experience();record.preferences=source.preferences();
@@ -649,7 +1046,7 @@ void actual_disk_handoff(const assets::RomImage& rom,const assets::SymbolMap& sy
     GameStorage reopened(temp.path.generic_string(),manifest);
     const auto loaded=reopened.load();require(loaded.found && loaded.data==record,"Reopening lost real cartridge save data");
     options.preferences=loaded.data.preferences;
-    GameSession resumed(rom,symbols,[](auto){},"BOOT",loaded.data.ex_sram,options);
+    CheckedSession resumed(rom,symbols,[](auto){},"BOOT",loaded.data.ex_sram,options);
     require(resumed.preferences()==prefs && resumed.cartridge_experience()==record.experience,
         "Disk settings were not applied to the real native session");
     require(std::equal(resumed.cartridge_ram().begin(),resumed.cartridge_ram().end(),record.ex_sram.begin(),record.ex_sram.end()),
@@ -666,7 +1063,7 @@ void actual_disk_handoff(const assets::RomImage& rom,const assets::SymbolMap& sy
     require(fallback.found && fallback.writable && !fallback.warning.empty() && fallback.data==record,
         "Interrupted actual settings save did not retain the preceding cartridge save");
     options.preferences=fallback.data.preferences;
-    GameSession old_valid(rom,symbols,[](auto){},"BOOT",fallback.data.ex_sram,options);
+    CheckedSession old_valid(rom,symbols,[](auto){},"BOOT",fallback.data.ex_sram,options);
     require(old_valid.preferences()==prefs,"Recovered settings did not rebind the actual native owner");
     std::cout<<"  Disk handoff: actual settings/ROM-bound EX SRAM reopen and interrupted-slot recovery checked\n";
 }
@@ -674,7 +1071,7 @@ void actual_settings_reset(const assets::RomImage& rom,const assets::SymbolMap& 
     constexpr auto chord=input::ButtonMask(input::left_shoulder|input::right_shoulder);
     GameSessionOptions options;
     options.preferences=GamePreferences{simulation::TimingMode::unlocked_20_fps,35,55,2,2,35,true,true,true,true,true,true,32,4096};
-    GameSession menu(rom,symbols,[](auto){},"BOOT",{},options);MenuDriver controls(menu);
+    CheckedSession menu(rom,symbols,[](auto){},"BOOT",{},options);MenuDriver controls(menu);
     controls.select(14);controls.tap(input::a);controls.select(12); // Real Options page.
     const auto prefs=menu.preferences();const auto start=controls.time+1;
     require(!menu.advance(start,chord).requested_settings_reset && menu.settings_reset_hold().active(),"Real setup did not arm mapped reset");
@@ -697,7 +1094,7 @@ void actual_settings_reset(const assets::RomImage& rom,const assets::SymbolMap& 
     require(defaults.experience==simulation::Experience::original && !defaults.preview
         && defaults.ex_sram==record.ex_sram && defaults.ex_rom_crc==record.ex_rom_crc,"Real reset record erased game progress or retained preview/EX setup");
     options.preferences=defaults.preferences;
-    GameSession rebuilt(rom,symbols,[](auto){},"BOOT",bank,options);
+    CheckedSession rebuilt(rom,symbols,[](auto){},"BOOT",bank,options);
     require(rebuilt.preferences()==GamePreferences{} && rebuilt.game().in_setup_menu() && !rebuilt.game().menu_preview(),"Fresh actual BOOT retained settings/preview instead of defaults");
     require(std::equal(bank.begin(),bank.end(),rebuilt.cartridge_ram().begin(),rebuilt.cartridge_ram().end()),"Default source reconstruction discarded real game progress");
     rebuilt.advance(0,0,false);
@@ -713,7 +1110,7 @@ void actual_settings_reset(const assets::RomImage& rom,const assets::SymbolMap& 
     require(!rebuilt.settings_reset_hold().active(),"Duplicate-time shoulder release did not cancel actual menu hold");
     rebuilt.advance(32'000'000'000LL,chord);rebuilt.advance(31'000'000'000LL,chord);
     require(!rebuilt.settings_reset_hold().active(),"Rewound clock retained a native reset hold");
-    GameSession stage(rom,symbols,[](auto){},"LEVEL1_1");stage.advance(0,chord);
+    CheckedSession stage(rom,symbols,[](auto){},"LEVEL1_1");stage.advance(0,chord);
     require(!stage.game().in_setup_menu(),"Direct-stage reset exclusion fixture is not a real stage");
     for(unsigned frame=1;frame<=120;++frame) {
         const auto next=stage.advance(std::int64_t(frame)*50'000'000,chord);
@@ -722,7 +1119,7 @@ void actual_settings_reset(const assets::RomImage& rom,const assets::SymbolMap& 
     std::cout<<"  Settings reset: mapped five-second menu chord, pure owner handoff, defaults/game-save preservation, focus/release/clock guards checked\n";
 }
 void actual_controller_remap(const assets::RomImage& rom,const assets::SymbolMap& symbols) {
-    GameSession session(rom,symbols,[](auto){});MenuDriver controls(session);
+    CheckedSession session(rom,symbols,[](auto){});MenuDriver controls(session);
     rejects([&]{session.finish_controller_remap();},"Unrequested controller editor acknowledged");
     controls.select(14);controls.tap(input::a);controls.select(8);
     const auto menu=GameMenu::capture(session.game());
@@ -762,7 +1159,7 @@ void actual_controller_remap(const assets::RomImage& rom,const assets::SymbolMap
     // Independent real cartridge oracle for custom gameplay bindings. No
     // production mapping helper is used to build the expected logical inputs.
     std::vector<std::int16_t> pcm;
-    GameSession stage(rom,symbols,[&](auto block){pcm.insert(pcm.end(),block.begin(),block.end());},"LEVEL1_1");
+    CheckedSession stage(rom,symbols,[&](auto block){pcm.insert(pcm.end(),block.begin(),block.end());},"LEVEL1_1");
     SourceOracle direct(rom,symbols,"LEVEL1_1");GameBindings custom;
     custom.sources[0]=12;custom.sources[4]=0;custom.sources[5]=255;custom.sources[6]=255;custom.sources[8]=8;custom.sources[9]=9;
     stage.advance(0,0);
@@ -802,7 +1199,8 @@ void full_state_parity(const assets::RomImage& rom,const assets::SymbolMap& symb
     } temp(crc);
     for(const auto map:{"BOOT","LEVEL1_1"}) for(unsigned partial=0;partial<3;++partial) {
         std::vector<std::int16_t> pcm;
-        auto session=std::make_unique<GameSession>(rom,symbols,[&](auto samples){pcm.insert(pcm.end(),samples.begin(),samples.end());},map);
+        auto session=std::make_unique<GameSession>(rom,symbols,[&](auto samples){pcm.insert(pcm.end(),samples.begin(),samples.end());},map,
+            std::span<const std::uint8_t>{},checked_options());
         SourceOracle oracle(rom,symbols,map);session->advance(0,0);
         const auto before_rasters=30+partial;
         for(unsigned i=1;i<=before_rasters;++i) {session->advance(timestamp(i),0);oracle.raster();}
@@ -865,7 +1263,7 @@ void full_state_parity(const assets::RomImage& rom,const assets::SymbolMap& symb
     // its shared runtime options animate/navigate. Closing rebases wall time.
     for(unsigned partial=0;partial<3;++partial) {
         std::vector<std::int16_t> pcm;
-        GameSession session(rom,symbols,[&](auto samples){pcm.insert(pcm.end(),samples.begin(),samples.end());},"LEVEL1_1");
+        CheckedSession session(rom,symbols,[&](auto samples){pcm.insert(pcm.end(),samples.begin(),samples.end());},"LEVEL1_1");
         SourceOracle oracle(rom,symbols,"LEVEL1_1");session.advance(0,0);
         for(unsigned i=1;i<=30+partial;++i) {session.advance(timestamp(i),0);oracle.raster();}
         const auto map=session.game().map().save_state(),audio=session.audio().save_state();
@@ -904,7 +1302,7 @@ void full_state_parity(const assets::RomImage& rom,const assets::SymbolMap& symb
 }
 void editor_resume_parity(const assets::RomImage& rom,const assets::SymbolMap& symbols,bool hud_editor=false) {
     std::vector<std::int16_t> pcm;
-    GameSession session(rom,symbols,[&](auto samples){pcm.insert(pcm.end(),samples.begin(),samples.end());});
+    CheckedSession session(rom,symbols,[&](auto samples){pcm.insert(pcm.end(),samples.begin(),samples.end());});
     SourceOracle source(rom,symbols,"BOOT");
     std::int64_t time{};session.advance(time,0);
     const auto compare=[&] {
@@ -952,10 +1350,86 @@ void editor_resume_parity(const assets::RomImage& rom,const assets::SymbolMap& s
     std::cout<<(hud_editor?"  HUD editor":"  Controller")<<" resume: independent VM/SPC/PCM parity through partial audio phase "<<frozen_phase%3
         <<" and 24 post-editor rasters checked\n";
 }
+void editor_navigation_parity(const assets::RomImage& rom,const assets::SymbolMap& symbols) {
+    // Independent cartridge/SPC owner, normal input only. Exercise both sides
+    // of each native editor and both Up+Down/Back priorities in setup/runtime.
+    constexpr std::array<input::ButtonMask,4> navigation{0,input::up,input::down,input::ButtonMask(input::up|input::down)};
+    constexpr std::array<input::ButtonMask,3> modifiers{0,input::b,input::start};
+    unsigned fixtures{};
+    for(bool runtime:{false,true})for(unsigned target:{3U,8U})for(auto nav:navigation)for(auto modifier:modifiers) {
+        std::vector<std::int16_t> pcm;
+        const auto map=runtime?"LEVEL1_1":"BOOT";
+        CheckedSession session(rom,symbols,[&](auto samples){pcm.insert(pcm.end(),samples.begin(),samples.end());},map);
+        SourceOracle source(rom,symbols,map);std::int64_t time{};session.advance(time,0);
+        const auto compare=[&] {
+            require(session.game().save_state()==source.game.save_state(),"Editor navigation changed independent source state");
+            require(session.audio().save_state()==source.spc.save_state() && pcm==source.pcm,
+                "Editor navigation lost source handshakes, partial SPC phase or PCM");
+        };
+        if(runtime) {
+            require(session.toggle_runtime_options() && source.game.toggle_runtime_options(),"Editor chord fixture could not open runtime options");
+            source.input.reset();session.advance(++time,0);compare();
+        }
+        const auto step=[&](input::ButtonMask physical,input::ButtonMask expected) {
+            time+=50'000'000;source.input.sample(expected);
+            const auto result=session.advance(time,physical);
+            require(result.video_phases>0 && result.video_phases<=3,"Editor chord lost its ordinary source raster clock");
+            for(unsigned phase=0;phase<result.video_phases;++phase) {
+                if(!runtime)source.raster();
+                else {
+                    source.game.present_frame();
+                    if(source.game.logic_tick_ready())static_cast<void>(source.game.tick(source.input.consume()));
+                }
+            }
+            compare();return result;
+        };
+        const auto tap=[&](input::ButtonMask held) {step(held,held);step(0,0);};
+        const auto select=[&](unsigned id) {
+            const auto order=simulation::pregame_menu_order(session.game().pregame_page());
+            for(std::size_t row=0;session.game().pregame_selection()!=id && row<order.size();++row)tap(input::down);
+            require(session.game().pregame_selection()==id,"Editor chord fixture could not select source row");
+        };
+        select(14);tap(input::a);
+        const auto order=simulation::pregame_menu_order(simulation::PregamePage::options);
+        const auto destination=std::size_t(std::find(order.begin(),order.end(),target)-order.begin());
+        const auto origin=nav?order[(destination+((nav&input::up)?1U:order.size()-1U))%order.size()]:target;
+        select(origin);
+        const bool opens=modifier==0;
+        const auto chord=input::ButtonMask(nav|input::a|modifier);
+        const auto opening=step(chord,opens?nav:chord);
+        require(opening.requested_hud_customization==(opens && target==3)
+            && opening.requested_controller_remap==(opens && target==8),
+            "Same-tick direction/confirm opened the wrong native editor or stole Back/Start");
+        if(opens) {
+            require(session.game().pregame_page()==simulation::PregamePage::options && session.game().pregame_selection()==target,
+                "Native editor froze before source cursor/navigation reached its destination");
+            const auto state=session.game().save_state(),apu=session.audio().save_state();
+            const auto waiting=session.advance(time+1'000'000'000,chord);
+            require(!waiting.video_phases && !waiting.logic_ticks && !waiting.audio_blocks
+                && state==session.game().save_state() && apu==session.audio().save_state(),"Editor chord ticked the frozen cartridge/SPC owner");
+            if(target==3)session.finish_hud_customization();else session.finish_controller_remap();
+            source.input.reset();time+=1'000'000'001;session.advance(time,chord);
+            require(session.game().pregame_selection()==target,"Returning from native editor restored the old source row");
+            source.input.reset();session.advance(++time,0);compare();
+            for(unsigned raster=1;raster<=6;++raster)step(0,0);
+        }
+        // Moving AWAY must act on the new ordinary source row, not reopen the
+        // old editor. Use the controller's supported volume/stereo neighbours.
+        if(opens && nav==0) {
+            const auto away=target==8?input::up:input::down;
+            if(target==3)select(8); // controller -> volume, avoiding disabled desktop controls
+            const auto leaving=step(input::ButtonMask(away|input::a),input::ButtonMask(away|input::a));
+            require(!leaving.requested_controller_remap && !leaving.requested_hud_customization,
+                "Leaving a native editor row opened the old editor");
+        }
+        ++fixtures;
+    }
+    std::cout<<"  Native editor chords: "<<fixtures<<" setup/runtime fixtures, destination/Back/Start/Up priority and exact VM/SPC/PCM navigation/freeze/return checked\n";
+}
 void runtime_editor_resume_parity(const assets::RomImage& rom,const assets::SymbolMap& symbols,bool hud_editor) {
     for(unsigned partial=0;partial<3;++partial) {
         std::vector<std::int16_t> pcm;
-        GameSession session(rom,symbols,[&](auto samples){pcm.insert(pcm.end(),samples.begin(),samples.end());},"LEVEL1_1");
+        CheckedSession session(rom,symbols,[&](auto samples){pcm.insert(pcm.end(),samples.begin(),samples.end());},"LEVEL1_1");
         SourceOracle source(rom,symbols,"LEVEL1_1");std::int64_t time{};session.advance(time,0);
         const auto compare=[&] {
             require(session.game().save_state()==source.game.save_state(),"Runtime editor changed independent cartridge state");
@@ -1015,7 +1489,7 @@ void runtime_editor_resume_parity(const assets::RomImage& rom,const assets::Symb
         <<" resume: paused Options return and independent VM/SPC/PCM continuation for all three partial audio phases checked\n";
 }
 void actual_hud_customization(const assets::RomImage& rom,const assets::SymbolMap& symbols) {
-    GameSession session(rom,symbols,[](auto){});MenuDriver controls(session);
+    CheckedSession session(rom,symbols,[](auto){});MenuDriver controls(session);
     rejects([&]{session.finish_hud_customization();},"Unrequested HUD editor acknowledged");
     controls.select(14);controls.tap(input::a);controls.select(3);
     const auto menu=GameMenu::capture(session.game());
@@ -1058,33 +1532,55 @@ void actual_hud_customization(const assets::RomImage& rom,const assets::SymbolMa
     for(unsigned raster=1;raster<=6;++raster) session.advance(resumed+1+timestamp(raster),0);
     const auto no_hud=session.presentation(0,false).dashboard;
     GameSessionOptions defaults;defaults.preferences=preferences;
-    GameSession pristine(rom,symbols,[](auto){},"BOOT",{},defaults);
+    CheckedSession pristine(rom,symbols,[](auto){},"BOOT",{},defaults);
     require(std::ranges::equal(no_hud.pixels,pristine.presentation(0,false).dashboard.pixels),"Native layout changed setup-only lower-screen status");
     controls.time=resumed+1+timestamp(6);controls.tap(input::a);
     require(session.hud_customization_pending(),"Customize Screen could not reopen after Apply/release");
     session.finish_hud_customization();require(session.preferences()==edited,"Cancel did not preserve applied native layout");
     GameSessionOptions options;options.preferences=edited;
-    GameSession stage(rom,symbols,[](auto){},"LEVEL1_1",{},options);
+    CheckedSession stage(rom,symbols,[](auto){},"LEVEL1_1",{},options);
     require(stage.preferences()==edited && !stage.hud_customization_pending(),"Native profile lost at actual stage-owner handoff");
     GameHud expected(rom,symbols);expected.set_layout(layout);expected.update(expected.capture(stage.game()));
     require(std::ranges::equal(stage.presentation(1,true).dashboard.pixels,expected.view().pixels),"Native stage did not apply customized HUD to split-screen route");
     options.preferences->hud_layout=malformed;
-    rejects([&]{GameSession bad(rom,symbols,[](auto){},"BOOT",{},options);},"Malformed persisted HUD accepted by game owner");
+    rejects([&]{CheckedSession bad(rom,symbols,[](auto){},"BOOT",{},options);},"Malformed persisted HUD accepted by game owner");
     std::cout<<"  HUD customization: actual source option, paused editor, Apply/Cancel, source-state purity, persistent native layout and stage routing checked\n";
 }
 }
 int main(int argc,char** argv) {
     try {
+#if defined(STARFOX_3DS_CHECK_PARALLEL_AUDIO)
+        CountingStemExecutor parallel_executor;
+        checked_stem_executor=&parallel_executor;
+#endif
         const bool states_only=argc==4 && std::string_view(argv[3])=="--states-only";
         const bool capabilities_only=argc==4 && std::string_view(argv[3])=="--capabilities-only";
+        const bool depth_only=argc==4 && std::string_view(argv[3])=="--native-depth-only";
         const bool sweep=argc==4 && std::string_view(argv[3])=="--stage-sweep";
         const bool fortuna_route=argc==4 && std::string_view(argv[3])=="--fortuna-source-route";
         const bool corneria_route=argc==4 && std::string_view(argv[3])=="--corneria-source-route";
         const bool carrier_route=argc==4 && std::string_view(argv[3])=="--attack-carrier-source-route";
         const bool runtime_editors=argc==4 && std::string_view(argv[3])=="--runtime-editor-parity";
-        if(argc!=3 && !states_only && !capabilities_only && !sweep && !fortuna_route && !corneria_route && !carrier_route && !runtime_editors && !(argc==5 && std::string_view(argv[3])=="--capture"))
-            throw std::invalid_argument("Usage: game_session_check ROM SYMBOLS [--capture DIRECTORY | --states-only | --capabilities-only | --stage-sweep | --fortuna-source-route | --corneria-source-route | --attack-carrier-source-route | --runtime-editor-parity]");
+        const bool editor_chords=argc==4 && std::string_view(argv[3])=="--editor-chords";
+        const bool fps_chords=argc==4 && std::string_view(argv[3])=="--fps-chords";
+        const bool death_route=argc==4 && std::string_view(argv[3])=="--death-source-route";
+        const bool continue_yes=argc==4 && std::string_view(argv[3])=="--continue-yes-source-route";
+        const bool continue_no=argc==4 && std::string_view(argv[3])=="--continue-no-source-route";
+        if(argc!=3 && !states_only && !capabilities_only && !depth_only && !sweep && !fortuna_route && !corneria_route && !carrier_route && !runtime_editors && !editor_chords && !fps_chords && !death_route && !continue_yes && !continue_no && !(argc==5 && std::string_view(argv[3])=="--capture"))
+            throw std::invalid_argument("Usage: game_session_check ROM SYMBOLS [--capture DIRECTORY | --states-only | --capabilities-only | --native-depth-only | --stage-sweep | --fortuna-source-route | --corneria-source-route | --attack-carrier-source-route | --runtime-editor-parity | --editor-chords | --fps-chords | --death-source-route | --continue-yes-source-route | --continue-no-source-route]");
         const auto rom=assets::RomImage::load(argv[1]);const auto symbols=assets::SymbolMap::load(argv[2]);
+        if(depth_only) {
+            native_depth_preferences(rom,symbols);
+            std::cout<<"3DS native depth preferences: "<<checks<<" checks passed; host source/state parity, not physical stereo acceptance\n";return 0;
+        }
+        if(continue_yes || continue_no) {
+            natural_death_restart(rom,symbols,continue_yes);
+            std::cout<<"3DS natural game-over/Continue source/composition parity: "<<checks<<" checks passed\n";return 0;
+        }
+        if(death_route) {
+            natural_death_restart(rom,symbols);
+            std::cout<<"3DS death/restart source/composition parity: "<<checks<<" checks passed\n";return 0;
+        }
         if(fortuna_route || corneria_route || carrier_route) {
             if(fortuna_route) natural_source_route(rom,symbols,"LEVEL3_3","Fortuna",fortuna_route_diagnostic::Inputs(symbols));
             else if(carrier_route) natural_source_route(rom,symbols,"LEVEL1_1","Corneria 1",attack_carrier_route_diagnostic::Inputs(symbols));
@@ -1095,6 +1591,14 @@ int main(int argc,char** argv) {
             runtime_editor_resume_parity(rom,symbols,false);runtime_editor_resume_parity(rom,symbols,true);
             std::cout<<"3DS runtime editors: "<<checks<<" checks passed; source parity, not physical NDSP pause acceptance\n";return 0;
         }
+        if(editor_chords) {
+            editor_navigation_parity(rom,symbols);
+            std::cout<<"3DS native editor chords: "<<checks<<" checks passed; source parity, not physical device acceptance\n";return 0;
+        }
+        if(fps_chords) {
+            fps_navigation_parity(rom,symbols);
+            std::cout<<"3DS native FPS chords: "<<checks<<" checks passed; source parity, not physical device acceptance\n";return 0;
+        }
         if(sweep) {stage_sweep(rom,symbols);std::cout<<"3DS stage/flow parity: "<<checks<<" checks passed\n";return 0;}
         if(capabilities_only) {
             native_capability_restore(rom,symbols);
@@ -1104,23 +1608,31 @@ int main(int argc,char** argv) {
             full_state_parity(rom,symbols);
             std::cout<<"3DS actual full states: "<<checks<<" checks passed; host source parity, not console acceptance\n";return 0;
         }
+        native_depth_preferences(rom,symbols);
         parity(rom,symbols,"BOOT");parity(rom,symbols,"LEVEL1_1");handoff(rom,symbols);
         presentation_cadence(rom,symbols);
         native_capability_restore(rom,symbols);
+        fps_navigation_parity(rom,symbols);
         actual_menu(rom,symbols,argc==5?std::filesystem::path(argv[4]):std::filesystem::path{});
         actual_disk_handoff(rom,symbols);
         actual_settings_reset(rom,symbols);
         actual_controller_remap(rom,symbols);
+        editor_navigation_parity(rom,symbols);
         editor_resume_parity(rom,symbols);
         actual_hud_customization(rom,symbols);
         editor_resume_parity(rom,symbols,true);
         runtime_editor_resume_parity(rom,symbols,false);
         runtime_editor_resume_parity(rom,symbols,true);
         full_state_parity(rom,symbols);
-        GameSession failed(rom,symbols,[](auto){throw std::runtime_error("PCM device failed");});
+        CheckedSession failed(rom,symbols,[](auto){throw std::runtime_error("PCM device failed");});
         failed.advance(0,0);rejects([&]{failed.advance(50'000'000,0);},"PCM failure ignored");
         rejects([&]{failed.advance(100'000'000,0);},"Failed source tick retried against partly advanced state");
         rejects([&]{static_cast<void>(failed.presentation(0,true));},"Failed audio/source session presented stale geometry");
         std::cout<<"3DS actual game session: "<<checks<<" checks passed; host source parity, not PICA/NDSP or hardware acceptance\n";
+#if defined(STARFOX_3DS_CHECK_PARALLEL_AUDIO)
+        require(parallel_executor.completed>0,"Full parallel session suite never dispatched the actual worker");
+        std::cout<<"Actual joined parallel SPC blocks: "<<parallel_executor.completed
+            <<"; complete serial-source oracles unchanged, not native/physical performance acceptance\n";
+#endif
     } catch(const std::exception& error) {std::cerr<<"3DS actual game session: "<<error.what()<<'\n';return 1;}
 }

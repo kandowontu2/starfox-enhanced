@@ -31,7 +31,10 @@ struct GamePreferences {
     simulation::TimingMode timing{simulation::TimingMode::original_speed};
     std::uint8_t music{100},sfx{100},language{},laser{},level{};
     bool swap{},god{},bombs{},boost{},lives{},planet_cheat{};
-    std::uint16_t separation{16},convergence{1024};
+    // Native 400-pixel LCD defaults: 8 pixels of infinity disparity at full
+    // slider, with the same parallel cameras for finite terrain/models. Saved
+    // convergence remains authoritative; this is not a background-only shift.
+    std::uint16_t separation{16},convergence{512};
     std::uint8_t render_fps{60};
     bool show_fps{};
     CockpitLayout hud_layout{};
@@ -43,6 +46,9 @@ struct GameSessionOptions {
     // Pump platform events during the bounded, silent source preview preroll.
     // False cancels loading; no half-initialized owner may be presented.
     std::function<bool(unsigned)> preview_progress;
+    // Borrowed synchronous executor: complete both stems before source port
+    // acknowledgement/state handoff. Platform owner must outlive the session.
+    audio::StemExecutor* stem_executor{};
 };
 // Graphics/SDK-independent native game owner. This is the actual simulation,
 // SPC driver and cartridge HUD, not the asset-free frontend diagnostic. Native
@@ -104,6 +110,9 @@ private:
     void publish_raster();
     assets::RomImage rom_;
     assets::SymbolMap symbols_;
+    simulation::TrigTables native_model_trig_;
+    std::array<std::uint32_t,10> native_model_addresses_{};
+    std::uint32_t native_model_depth_tables_{};
     simulation::Experience cartridge_experience_;
     // The counts outlive the simulation's non-owning pace-table pointer.
     std::unordered_map<std::uint32_t,std::uint32_t> face_counts_;
@@ -132,5 +141,6 @@ private:
     bool requested_controller_remap_{};
     bool requested_hud_customization_{};
     CockpitLayout hud_layout_;
+    audio::StemExecutor* stem_executor_{};
 };
 } // namespace starfox::platform::nintendo_3ds

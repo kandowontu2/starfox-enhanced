@@ -10,6 +10,26 @@ struct FullCurvedOwnerReplay {
     std::array<unsigned,16> record{};
     std::vector<reflected_curved_owner_oracle::SourceTap> taps;
 };
+inline reflected_curved_owner_oracle::Path full_replay_optical_path(const FullCurvedOwnerReplay& replay) {
+    namespace o=reflected_curved_owner_oracle;
+    const auto& input=replay.inputs;const auto& record=replay.record;
+    o::Path path;path.hops=record[4]&7U;path.liquid_mask=(record[4]>>4)&15U;path.liquid_primary=replay.primary==0xfffffffdU;
+    const unsigned kind=record[4]>>8;
+    if(path.hops>4 || (path.liquid_mask>>path.hops)!=0 || kind<1 || kind>3
+        || (kind==3)!=(path.hops==4) || replay.lobe>=8 || !std::isfinite(replay.roughness)
+        || replay.roughness<0 || replay.roughness>1)
+        throw std::runtime_error("Malformed bounded replay optical path");
+    path.lobe=replay.lobe;path.roughness=replay.roughness;path.finite_terminal=kind==1;
+    if(!path.liquid_primary)path.receiver=input.previous.at(input.mapping.at(replay.primary));
+    for(unsigned h=0;h<path.hops;++h)if(!(path.liquid_mask&(1U<<h)))path.mirrors[h]=input.previous.at(input.mapping.at(record[h]));
+    for(unsigned c=0;c<3;++c)path.terminal[c]=std::bit_cast<float>(record[6+c]);
+    if(!o::valid_feature(path.terminal,kind))throw std::runtime_error("Malformed raw replay terminal feature");
+    if(path.finite_terminal) {
+        path.terminal_plane=input.previous.at(input.mapping.at(record[5]));path.terminal=o::point(path.terminal_plane,{path.terminal[0],path.terminal[1]});
+        for(auto& value:path.terminal)value=float(value);
+    }else path.terminal=o::old_environment_direction(input,path.terminal);
+    return path;
+}
 inline FullCurvedOwnerReplay load_full_curved_owner_replay(const char* path) {
     namespace o=reflected_curved_owner_oracle;
     std::ifstream stream(path);if(!stream)throw std::runtime_error("Cannot read bounded optical input replay");

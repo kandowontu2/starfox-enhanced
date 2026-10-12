@@ -8,6 +8,7 @@ FetchContent_Declare(starfox_displayxr_headers
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     SOURCE_SUBDIR _starfox_headers_only)
 FetchContent_MakeAvailable(starfox_displayxr_headers)
+include("${CMAKE_CURRENT_LIST_DIR}/Sfvr.cmake")
 add_library(starfox_displayxr STATIC src/render/displayxr_runtime.cpp
     src/render/displayxr_session.cpp src/render/displayxr_d3d12_binding.cpp src/render/displayxr_vulkan_binding.cpp
     src/render/displayxr_d3d12_presenter.cpp src/render/gpu_calibrated_scene.cpp src/render/gpu_calibrated_ray_composite.cpp
@@ -72,7 +73,7 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "src/render/shaders/generated/calibrated_scene_portable.hpp"
     "src/vr/shaders/scene.hlsl" "src/vr/shaders/scene_geometry.hlsli" "src/vr/shaders/scene_colour.hlsli" "src/vr/shaders/connected_grid.hlsli"
     "include/starfox/render/ex_face_planet_regions.inc")
-target_link_libraries(starfox_displayxr PRIVATE SDL3::SDL3 starfox_core)
+target_link_libraries(starfox_displayxr PRIVATE SDL3::SDL3 starfox_core starfox_sfvr)
 if(STARFOX_DXC)
     # Resident index/mapping/support/optical companions, opt-in staging only.
     # Continuum exclusion is NOT root uniqueness or old-colour acceptance.
@@ -176,7 +177,8 @@ if(STARFOX_DXC)
                 src/render/shaders/reflection_source_optical_interval.hlsli src/render/shaders/reflection_source_optical_reciprocals.inc
                 src/render/shaders/reflection_specular_path_motion.hlsli src/render/shaders/reflection_rough_hit_motion.hlsli
                 src/render/shaders/reflection_liquid_hit_motion.hlsli src/render/shaders/liquid_optics.hlsli
-                src/render/shaders/reflection_curved_precision.hlsli VERBATIM)
+                src/render/shaders/reflection_curved_precision.hlsli
+                include/starfox/render/lava_surface.inc include/starfox/render/water_caustics.inc VERBATIM)
         target_sources(starfox_displayxr PRIVATE "${source_header}")
     endforeach()
     endforeach()
@@ -283,12 +285,16 @@ if(STARFOX_BUILD_TOOLS AND STARFOX_DXR_ENABLED)
                 src/render/shaders/reflection_source_index.hlsl src/render/shaders/reflection_source_index_settings.hlsli
                 src/render/shaders/reflection_source_feature.hlsli src/render/shaders/reflection_source_domains.hlsl
                 src/render/shaders/reflection_source_optical.hlsl src/render/shaders/reflection_source_optical_interval.hlsli
+                src/render/shaders/reflection_source_optical_target.hlsli
                 src/render/shaders/reflection_source_optical_reciprocals.inc
                 tools/shaders/reflected_optical_interval.hlsli
                 tools/shaders/reflected_optical_reciprocals.inc
                 src/render/shaders/reflection_specular_path_motion.hlsli
+                src/render/shaders/reflection_rough_hit_motion.hlsli
                 src/render/shaders/reflection_liquid_hit_motion.hlsli
-                src/render/shaders/reflection_curved_precision.hlsli VERBATIM)
+                src/render/shaders/liquid_optics.hlsli
+                src/render/shaders/reflection_curved_precision.hlsli
+                include/starfox/render/lava_surface.inc include/starfox/render/water_caustics.inc VERBATIM)
         if(index_stage STREQUAL "arithmetic")
             list(APPEND visibility_arithmetic_headers "${index_header}")
         else()
@@ -327,6 +333,80 @@ if(STARFOX_BUILD_TOOLS AND STARFOX_DXR_ENABLED)
             target_link_options(${index_check} PRIVATE /STACK:16777216)
         endif()
     endforeach()
+    # Exact shared interval identities, including native Vulkan subnormal
+    # preservation. This standalone diagnostic is not a physical/source/RGB
+    # acceptance gate and is never linked to an ordinary player.
+    set(interval_identity_headers)
+    foreach(identity_format IN ITEMS dxil spirv)
+        set(identity_flags -Gis -O3)
+        if(identity_format STREQUAL "spirv")
+            list(APPEND identity_flags -spirv -fspv-target-env=vulkan1.2)
+        endif()
+        set(identity_name "reflected_interval_identities_${identity_format}")
+        set(identity_binary "${CMAKE_CURRENT_BINARY_DIR}/generated/${identity_name}.bin")
+        set(identity_header "${CMAKE_CURRENT_BINARY_DIR}/generated/${identity_name}.hpp")
+        add_custom_command(OUTPUT "${identity_header}" BYPRODUCTS "${identity_binary}"
+            COMMAND "${STARFOX_DXC}" -T cs_6_0 -E interval_identity_main -WX ${identity_flags}
+                -Fo "${identity_binary}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/shaders/check_reflected_interval_identities.hlsl"
+            COMMAND "${CMAKE_COMMAND}" "-DINPUT=${identity_binary}" "-DOUTPUT=${identity_header}"
+                "-DVARIABLE=${identity_name}" -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedShaderBinary.cmake"
+            DEPENDS cmake/EmbedShaderBinary.cmake tools/shaders/check_reflected_interval_identities.hlsl
+                src/render/shaders/reflection_source_optical_interval.hlsli
+                src/render/shaders/reflection_source_optical_reciprocals.inc
+                src/render/shaders/reflection_curved_precision.hlsli
+                src/render/shaders/reflection_specular_path_motion.hlsli
+                src/render/shaders/reflection_rough_hit_motion.hlsli
+                src/render/shaders/reflection_liquid_hit_motion.hlsli
+                src/render/shaders/liquid_optics.hlsli
+                include/starfox/render/lava_surface.inc include/starfox/render/water_caustics.inc VERBATIM)
+        list(APPEND interval_identity_headers "${identity_header}")
+    endforeach()
+    add_executable(starfox_reflected_interval_identity_check tools/check_reflected_interval_identities.cpp ${interval_identity_headers})
+    target_include_directories(starfox_reflected_interval_identity_check PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated"
+        "${sdl3_SOURCE_DIR}/src/video/khronos")
+    target_compile_features(starfox_reflected_interval_identity_check PRIVATE cxx_std_20)
+    target_link_libraries(starfox_reflected_interval_identity_check PRIVATE SDL3::SDL3)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(starfox_reflected_interval_identity_check PRIVATE -Wall -Wextra -Wconversion -Werror)
+    endif()
+    if(MINGW)
+        target_link_options(starfox_reflected_interval_identity_check PRIVATE -static -static-libgcc -static-libstdc++)
+    endif()
+    # Native scratch/copy protocol, independent of all optical mathematics.
+    # No uploaded proofs; inspect every word in the full 64-slot scratch bank.
+    set(proof_snapshot_headers)
+    foreach(snapshot_entry IN ITEMS seed marker)
+        foreach(snapshot_format IN ITEMS dxil spirv)
+            set(snapshot_flags -Gis -O3)
+            if(snapshot_format STREQUAL "spirv")
+                list(APPEND snapshot_flags -spirv -fspv-target-env=vulkan1.2)
+            endif()
+            set(snapshot_name "gpu_proof_snapshots_${snapshot_entry}_${snapshot_format}")
+            set(snapshot_binary "${CMAKE_CURRENT_BINARY_DIR}/generated/${snapshot_name}.bin")
+            set(snapshot_header "${CMAKE_CURRENT_BINARY_DIR}/generated/${snapshot_name}.hpp")
+            add_custom_command(OUTPUT "${snapshot_header}" BYPRODUCTS "${snapshot_binary}"
+                COMMAND "${STARFOX_DXC}" -T cs_6_0 -E "${snapshot_entry}_main" -WX ${snapshot_flags}
+                    -Fo "${snapshot_binary}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/shaders/check_gpu_proof_snapshots.hlsl"
+                COMMAND "${CMAKE_COMMAND}" "-DINPUT=${snapshot_binary}" "-DOUTPUT=${snapshot_header}"
+                    "-DVARIABLE=${snapshot_name}" -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedShaderBinary.cmake"
+                DEPENDS cmake/EmbedShaderBinary.cmake tools/shaders/check_gpu_proof_snapshots.hlsl VERBATIM)
+            list(APPEND proof_snapshot_headers "${snapshot_header}")
+        endforeach()
+    endforeach()
+    add_executable(starfox_gpu_proof_snapshot_check tools/check_gpu_proof_snapshots.cpp ${proof_snapshot_headers})
+    target_include_directories(starfox_gpu_proof_snapshot_check PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include" "${sdl3_SOURCE_DIR}/src/video/khronos")
+    target_compile_features(starfox_gpu_proof_snapshot_check PRIVATE cxx_std_20)
+    target_link_libraries(starfox_gpu_proof_snapshot_check PRIVATE SDL3::SDL3)
+    if(WIN32)
+        target_link_libraries(starfox_gpu_proof_snapshot_check PRIVATE dxguid)
+    endif()
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(starfox_gpu_proof_snapshot_check PRIVATE -Wall -Wextra -Wconversion -Werror)
+    endif()
+    if(MINGW)
+        target_link_options(starfox_gpu_proof_snapshot_check PRIVATE -static -static-libgcc -static-libstdc++)
+    endif()
     # Small actual-driver scalar diagnosis before spending minutes compiling
     # the complete curved inverse. It includes the exact shared shader header.
     set(curved_scalar_headers)

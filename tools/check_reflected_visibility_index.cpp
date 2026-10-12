@@ -283,8 +283,8 @@ struct Gpu {
         const DomainSettings settings{region_budget,support_budget,region_capacity,0};
         refine_domains(command,u,settings);return download(cancel.command,u,settings);
     }
-    std::vector<JetResult> jet_boxes(const std::vector<JetInput>& input) {
-        require(device && !input.empty() && input.size()<=1024,"Unbounded differential box batch");
+    std::vector<JetResult> jet_boxes(const std::vector<JetInput>& input,unsigned refinements=0,bool intersection_contract=false) {
+        require(device && !input.empty() && input.size()<=1024 && refinements<=2,"Unbounded differential box batch/refinement count");
         if(!jet_pipeline) {
 #if defined(STARFOX_OPTICAL_ARITHMETIC_TRACE_ONLY)
             SDL_GPUComputePipelineCreateInfo info{};info.entrypoint="feature_arithmetic_main";
@@ -326,7 +326,7 @@ struct Gpu {
         SDL_GPUStorageBufferReadWriteBinding output{scratch.buffers[1],false,0,0,0};
         auto* pass=SDL_BeginGPUComputePass(command,nullptr,0,&output,1);require(pass,SDL_GetError());
         SDL_BindGPUComputePipeline(pass,jet_pipeline);SDL_BindGPUComputeStorageBuffers(pass,0,&scratch.buffers[0],1);
-        const std::array<unsigned,4> settings{unsigned(input.size()),0,0,0};SDL_PushGPUComputeUniformData(command,0,settings.data(),sizeof(settings));
+        const std::array<unsigned,4> settings{unsigned(input.size()),refinements,unsigned(intersection_contract),0};SDL_PushGPUComputeUniformData(command,0,settings.data(),sizeof(settings));
         SDL_DispatchGPUCompute(pass,(settings[0]+63)/64,1,1);SDL_EndGPUComputePass(pass);
         copy=SDL_BeginGPUCopyPass(command);require(copy,SDL_GetError());
         const SDL_GPUBufferRegion result{scratch.buffers[1],0,sizes[1]};const SDL_GPUTransferBufferLocation destination{scratch.transfers[1],0};
@@ -626,17 +626,7 @@ void boundary_checks(Gpu& gpu) {
         <<maximum.atlas.size()*4<<" index bytes at the bounded maximum.\n";
 }
 o::Path old_optical_path(const FullCurvedOwnerReplay& replay) {
-    const auto& input=replay.inputs;const auto& record=replay.record;
-    o::Path path;path.hops=record[4]&7U;path.liquid_mask=(record[4]>>4)&15U;path.liquid_primary=replay.primary==0xfffffffdU;
-    path.lobe=replay.lobe;path.roughness=replay.roughness;path.finite_terminal=(record[4]>>8)==1;
-    if(!path.liquid_primary)path.receiver=input.previous.at(input.mapping.at(replay.primary));
-    for(unsigned h=0;h<path.hops;++h)if(!(path.liquid_mask&(1U<<h)))path.mirrors[h]=input.previous.at(input.mapping.at(record[h]));
-    for(unsigned c=0;c<3;++c)path.terminal[c]=std::bit_cast<float>(record[6+c]);
-    if(path.finite_terminal) {
-        path.terminal_plane=input.previous.at(input.mapping.at(record[5]));path.terminal=o::point(path.terminal_plane,{path.terminal[0],path.terminal[1]});
-        for(auto& value:path.terminal)value=float(value);
-    }else path.terminal=o::old_environment_direction(input,path.terminal);
-    return path;
+    return full_replay_optical_path(replay);
 }
 OpticalFrame optical_frame(const o::Inputs& input,const o::Path& path) {
     const auto xyz=[](o::V v,float w){return F4{float(v[0]),float(v[1]),float(v[2]),w};};
@@ -860,15 +850,17 @@ int main(int argc,char** argv)try {
 #if defined(STARFOX_OPTICAL_ARITHMETIC_TRACE_ONLY)
     require(jets_only && !replay && !external_jet,"Primary arithmetic trace requires --jets, no replay or shader override; it is not the complete verifier");
 #endif
-    require(!external_jet || (jets_only && !replay && std::string_view(argv[1])=="vulkan"),
-        "External differential SPIR-V is diagnostic-only: use Vulkan --jets without a replay");
+    require(!external_jet || (jets_only && std::string_view(argv[1])=="vulkan"),
+        "External differential SPIR-V is diagnostic-only: use Vulkan --jets");
     Gpu gpu(argv[1],low_power,jets_only);
     if(external_jet)gpu.load_jet_spirv(external_jet);
-    if(jets_only){require(!replay,"Differential replay coverage is not implemented yet");
+    if(jets_only){
 #if defined(STARFOX_OPTICAL_ARITHMETIC_TRACE_ONLY)
         const auto failures=jet_arithmetic_checks(gpu);gpu.finish();return failures?1:0;
 #else
-        jet_checks(gpu);gpu.finish();return 0;
+        jet_checks(gpu);
+        if(replay)jet_replay_checks(gpu,load_full_curved_owner_replay(replay));
+        gpu.finish();return 0;
 #endif
     }
     synthetic_checks(gpu);refinement_checks(gpu);curved_feature_checks(gpu);boundary_checks(gpu);optical_checks(gpu);curved_optical_checks(gpu);

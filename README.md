@@ -68,9 +68,13 @@ competition cartridges, Star Fox 2 and unknown revisions are not supported.
 Build success does not guarantee identical behavior on every device.
 See the [release notes](https://github.com/kandowontu2/starfox-enhanced/blob/main/docs/RELEASE-0.0.8.md) for verification limits.
 
-An [original 3DS / 3DS XL port](platform/3ds/README.md) is in development,
-with a lower-screen cockpit HUD and slider-controlled stereo planned.
-The current frontend diagnostic is **not a playable game package**.
+An [experimental Nintendo 3DS port](platform/3ds/README.md) has a native
+tester package with the real pre-game menu and lower-screen cockpit HUD.
+New 3DS/XL are the slider-stereo target; New 2DS XL uses mono. Original
+3DS/XL/2DS are unsupported because their performance is insufficient.
+[Installation and testing instructions](platform/3ds/TESTING.md) identify
+the current candidate. Native builds pass CI, but physical-console
+performance and complete gameplay acceptance remain unverified.
 
 **Android/Quest upgrades:** release builds retain the recovered original signing
 certificate. No signing-key change or reinstall is required for 0.0.8.

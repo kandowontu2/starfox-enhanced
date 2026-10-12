@@ -129,6 +129,7 @@ struct CalibratedGameScene::State {
     std::unordered_map<std::uint16_t,std::string_view> ground_names;
     std::shared_ptr<const vr::GameSceneSnapshot> ground_source;
     std::array<std::uint8_t,256> ground_regions{};
+    SourceGroundRamp ground_ramp;
     SceneFxTracker scene_fx;
     std::shared_ptr<const vr::GameSceneSnapshot> fx_source;
     std::uint64_t fx_host_epoch{},fx_epoch{};
@@ -221,7 +222,10 @@ struct CalibratedGameScene::State {
         };
         if(!same()) {
             ground_regions=environment_palette_regions(ppu,scene.landscape_atlas_origin);
+            // The finite landscape packet is authored around its 112px
+            // horizon, independent of the conservative palette sample bands.
             if(ex) correct_ex_landscape_palette(name,ground_regions);
+            ground_ramp=source_ground_ramp(ppu,scene.landscape_atlas_origin+112U,&ground_regions);
             ground_source=source;
         }
         std::array<std::uint32_t,256> classes{};
@@ -235,7 +239,10 @@ struct CalibratedGameScene::State {
             for(unsigned ink=1;ink<256;++ink) if(classes[ink] && (ppu.cgram[ink]&0x7fff)) ++population[classes[ink]];
             if(population[5] && std::max_element(population.begin()+1,population.end())==population.begin()+5) material=5;
         } else for(auto& kind:classes) if(kind) kind=1;
-        const auto endpoints=source_ground_gradient(ppu.cgram,classes,true);
+        const bool basic=material<5 || material==8;
+        if(basic) normalize_ground_ramp_classes(ground_ramp,classes);
+        const auto endpoints=basic?authored_ground_gradient(ppu.cgram,classes,ground_ramp,true)
+            :source_ground_gradient(ppu.cgram,classes,true);
         if(!endpoints[1][3]) return false;
         EnvironmentEffects effects;effects.modes[0]=material+1;
         CalibratedGroundGradient gradient;

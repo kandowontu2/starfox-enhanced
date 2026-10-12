@@ -1,0 +1,37 @@
+.section __TEXT,__const
+.p2align 4
+.globl _starfox_native_metal_shadow
+_starfox_native_metal_shadow:
+.incbin "@STARFOX_NATIVE_METAL_DIRECTORY@/shadow.metallib"
+_starfox_native_metal_shadow_end:
+.p2align 3
+.globl _starfox_native_metal_shadow_size
+_starfox_native_metal_shadow_size:
+.quad _starfox_native_metal_shadow_end-_starfox_native_metal_shadow
+.p2align 4
+.globl _starfox_native_metal_reflection
+_starfox_native_metal_reflection:
+.incbin "@STARFOX_NATIVE_METAL_DIRECTORY@/reflection.metallib"
+_starfox_native_metal_reflection_end:
+.p2align 3
+.globl _starfox_native_metal_reflection_size
+_starfox_native_metal_reflection_size:
+.quad _starfox_native_metal_reflection_end-_starfox_native_metal_reflection
+.p2align 4
+.globl _starfox_native_metal_empty_shadow
+_starfox_native_metal_empty_shadow:
+.incbin "@STARFOX_NATIVE_METAL_DIRECTORY@/empty_shadow.metallib"
+_starfox_native_metal_empty_shadow_end:
+.p2align 3
+.globl _starfox_native_metal_empty_shadow_size
+_starfox_native_metal_empty_shadow_size:
+.quad _starfox_native_metal_empty_shadow_end-_starfox_native_metal_empty_shadow
+.p2align 4
+.globl _starfox_native_metal_empty_reflection
+_starfox_native_metal_empty_reflection:
+.incbin "@STARFOX_NATIVE_METAL_DIRECTORY@/empty_reflection.metallib"
+_starfox_native_metal_empty_reflection_end:
+.p2align 3
+.globl _starfox_native_metal_empty_reflection_size
+_starfox_native_metal_empty_reflection_size:
+.quad _starfox_native_metal_empty_reflection_end-_starfox_native_metal_empty_reflection

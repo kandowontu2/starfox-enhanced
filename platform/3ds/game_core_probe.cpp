@@ -1,6 +1,7 @@
 // Actual VM/SPC/HUD link and SD bring-up, NOT the completed game renderer.
 #include "native_display.hpp"
 #include "native_audio.hpp"
+#include "native_stem_executor.hpp"
 #include "companion_manifest.hpp"
 #include "starfox/platform/nintendo_3ds/game_assets.hpp"
 #include "starfox/platform/nintendo_3ds/game_session.hpp"
@@ -12,6 +13,7 @@
 #include "starfox/platform/nintendo_3ds/game_quick_menu.hpp"
 #include "starfox/platform/nintendo_3ds/presentation_clock.hpp"
 #include "starfox/platform/nintendo_3ds/frame_profile.hpp"
+#include "starfox/platform/nintendo_3ds/startup_trace.hpp"
 #include "starfox/assets/bps.hpp"
 #if defined(STARFOX_3DS_CORE_PICA)
 #include "native_gpu.hpp"
@@ -87,6 +89,9 @@ private:
 int main() {
     using namespace starfox;
     ctr::NativeDisplay display;
+    // APT is initialized by the display. The joined worker outlives every
+    // source owner, including preview/experience/reset/state replacements.
+    ctr::NativeStemExecutor stem_executor;
     ctr::Canvas top(ctr::top_width),lower;
     std::unique_ptr<ctr::NativeAudio> audio;
     std::unique_ptr<ctr::GameSession> session;
@@ -122,6 +127,12 @@ int main() {
     ctr::ScopedFrameProfileActivation profile_activation(frame_profile);
     std::ofstream profile_stream(std::string("sdmc:/3ds/starfox-enhanced/native-frame-profile-")
         +std::to_string(svcGetSystemTick())+".csv");
+    std::ofstream startup_stream(std::string("sdmc:/3ds/starfox-enhanced/native-startup-")
+        +std::to_string(svcGetSystemTick())+".csv");
+    ctr::StartupTrace startup_trace(startup_stream,[]() noexcept -> std::uint64_t {return svcGetSystemTick();});
+    ctr::ScopedStartupTraceActivation startup_activation(startup_trace);
+    if(stem_executor.parallel_available()) STARFOX_3DS_STARTUP_MARK(audio_worker_parallel);
+    else STARFOX_3DS_STARTUP_MARK(audio_worker_serial);
     unsigned profile_background{};
 #endif
     ctr::PresentationClock render_clock;
@@ -161,8 +172,11 @@ int main() {
             auto next=saved;next.experience=session->game().experience();
             next.preferences=session->preferences();
             next.bindings=bindings;
-            if(session->game().in_setup_menu() && !session->game().runtime_options_open())
-                next.preview=session->game().preview_requested();
+            // Preview is session-only on 3DS. Persisting ON before its first
+            // native frame completed trapped subsequent launches in loading.
+            // Retain the compatible field, but never automatically preroll at
+            // boot or discard any of the player's other settings / EX SRAM.
+            next.preview=false;
             if(session->cartridge_experience()==simulation::Experience::starfox_ex) {
                 const auto ram=session->cartridge_ram();
                 next.ex_sram.assign(ram.begin(),ram.end());next.ex_rom_crc=cartridge_crc;
@@ -184,13 +198,20 @@ int main() {
         menu.reset();suspension.reset();models.reset();session.reset();audio.reset();
     };
     const auto load=[&](const char* map,ctr::GameSessionOptions options={}) {
+#if defined(STARFOX_3DS_PROFILE_FRAMES)
+        startup_trace.restart_window();
+#endif
+        STARFOX_3DS_STARTUP_MARK(load_begin);
+        STARFOX_3DS_STARTUP_MARK(owner_retirement);
         release_owners();
+        STARFOX_3DS_STARTUP_MARK(owner_retirement_complete);
         top.clear({8,15,28});lower.clear({8,15,28});
         top.text(24,100,"RENDERING",{240,181,86},2);
         lower.text(12,16,options.preview?"PREPARING REAL CARTRIDGE PREVIEW":"LOADING CARTRIDGE AND SETTINGS",{183,224,240});
         display.present(ctr::plan_frame(0,false,ctr::ScreenUse::setup),top.view(),{},lower.view());
         if(running) rendered_rate.completed(monotonic_time());
         std::ifstream file(companion_path,std::ios::binary);
+        STARFOX_3DS_STARTUP_MARK(companion_read);
         auto cartridge=ctr::read_game_cartridge(file,ctr::companion_manifest,experience);
         cartridge_crc=assets::crc32(cartridge.rom.bytes());
         auto& bank=cartridge_ram[unsigned(experience)];
@@ -200,8 +221,11 @@ int main() {
             bank.clear();save_enabled=false;
             save_warning="EX save belongs to a different cartridge.\nSD saving disabled; back up journal files before recovery.";
         }
+        STARFOX_3DS_STARTUP_MARK(audio_initialize);
         audio=std::make_unique<ctr::NativeAudio>();
         options.preview_progress=[&](unsigned) {return display.poll().running;};
+        options.stem_executor=&stem_executor;
+        STARFOX_3DS_STARTUP_MARK(session_initialize);
         session=std::make_unique<ctr::GameSession>(std::move(cartridge.rom),std::move(cartridge.symbols),
             [&](auto pcm){audio->submit(pcm);},map,cartridge_ram[unsigned(experience)],options);
         models=std::make_unique<ctr::GameModels>(session->rom(),session->symbols());
@@ -217,7 +241,8 @@ int main() {
 #if defined(STARFOX_3DS_CORE_PICA)
         layers=std::make_unique<ctr::GameLayers>();
         dots=std::make_unique<ctr::GameDots>(session->rom(),session->symbols());
-        gpu=std::make_unique<ctr::NativeGpu>(ctr::pica_scene_shader);
+        // Preview OFF is a host menu, not a PICA world. Initialize the native
+        // GPU only when a real preview/game/editor needs it.
 #endif
         running=true;rasters=logic=blocks=0;error.clear();
 #if defined(STARFOX_3DS_PROFILE_FRAMES)
@@ -225,9 +250,21 @@ int main() {
 #endif
         // The initiating physical A/Start belongs to loading, not the new menu.
         session->advance(monotonic_time(),0,false);
+        STARFOX_3DS_STARTUP_MARK(load_complete);
     };
+#if defined(STARFOX_3DS_CORE_PICA)
+    const auto ensure_gpu=[&] {
+        if(!gpu) {
+            STARFOX_3DS_STARTUP_RESTART(first_gpu_frame);
+            STARFOX_3DS_STARTUP_MARK(gpu_initialize);
+            gpu=std::make_unique<ctr::NativeGpu>(ctr::pica_scene_shader);
+            STARFOX_3DS_STARTUP_MARK(gpu_initialize_complete);
+        }
+    };
+#endif
     const auto present_quick=[&] {
 #if defined(STARFOX_3DS_CORE_PICA)
+        ensure_gpu();
         gpu->present(quick->frame(),quick->lower_view());
 #else
         display.present(ctr::plan_frame(0,false,ctr::ScreenUse::setup),quick->upper_view(),{},quick->lower_view());
@@ -235,9 +272,12 @@ int main() {
     };
     while(true) {
 #if defined(STARFOX_3DS_PROFILE_FRAMES)
+        startup_trace.begin_frame();
         NativeProfileFrame profile_frame(frame_profile,profile_stream,session,profile_background,rasters,logic,blocks);
 #endif
+        STARFOX_3DS_STARTUP_MARK(input_poll);
         const auto controls=display.poll();if(!controls.running) break;
+        STARFOX_3DS_STARTUP_MARK(input_poll_complete);
         if(!hud_editor && (controls.held&(input::select|input::start))==(input::select|input::start)) break;
         const auto pressed=static_cast<input::ButtonMask>(controls.held&~previous);previous=controls.held;
         try {
@@ -246,8 +286,10 @@ int main() {
             if(first_load || (!running && (pressed&(input::a|input::y)))) {
                 first_load=false;
                 ctr::GameSessionOptions options;options.preferences=saved.preferences;
-                options.preview=saved.preview && !(pressed&input::y);
-                const auto initial_map=((pressed&input::y) || options.preview)?"LEVEL1_1":"BOOT";
+                // Legacy saves with Preview ON also recover through the menu.
+                // Y remains the explicit direct-stage diagnostic shortcut.
+                options.preview=false;
+                const auto initial_map=(pressed&input::y)?"LEVEL1_1":"BOOT";
                 load(initial_map,options);
             }
             if(running) {
@@ -261,6 +303,7 @@ int main() {
                         audio->pause(session->game().runtime_options_open());checkpoint(true);continue;
                     }
 #if defined(STARFOX_3DS_CORE_PICA)
+                    ensure_gpu();
                     gpu->present(hud_editor->frame(),hud_editor->lower_view());
 #else
                     display.present(ctr::plan_frame(0,false,ctr::ScreenUse::setup),hud_editor->upper_view(),{},hud_editor->lower_view());
@@ -279,6 +322,7 @@ int main() {
                     }
                     checkpoint(false);
 #if defined(STARFOX_3DS_CORE_PICA)
+                    ensure_gpu();
                     gpu->present(remap->frame(),remap->lower_view());
 #else
                     display.present(ctr::plan_frame(0,false,ctr::ScreenUse::setup),remap->upper_view(),{},remap->lower_view());
@@ -368,7 +412,9 @@ int main() {
                     continue;
                 }
                 const bool runtime_before=session->game().runtime_options_open();
+                STARFOX_3DS_STARTUP_MARK(source_advance);
                 const auto advanced=session->advance(monotonic_time(),controls.held,true,ctr::mapped_buttons(bindings,pad));
+                STARFOX_3DS_STARTUP_MARK(source_advance_complete);
                 if(runtime_before!=session->game().runtime_options_open()) audio->pause(session->game().runtime_options_open());
                 rasters+=advanced.video_phases;logic+=advanced.logic_ticks;blocks+=advanced.audio_blocks;
                 if(advanced.requested_controller_remap) {
@@ -457,11 +503,16 @@ int main() {
                 const bool plain=menu->state().visible && !menu->state().preview;
 #if defined(STARFOX_3DS_CORE_PICA)
                 if(plain) {
-                    // Preview OFF does not prepare models, decode BG layers,
-                    // allocate scene textures, or submit either world eye.
-                    { STARFOX_3DS_FRAME_PHASE(present);gpu->present(menu->frame(source.plan),dashboard); }
+                    // Retire the Citro3D queue before using gfxSwapBuffers.
+                    // The menu's exact CPU canvas needs neither scene textures
+                    // nor a GPU submission (including the initial boot frame).
+                    gpu.reset();
+                    STARFOX_3DS_STARTUP_MARK(menu_lcd_present);
+                    { STARFOX_3DS_FRAME_PHASE(present);display.present(source.plan,menu->plain_view(),{},dashboard); }
+                    STARFOX_3DS_STARTUP_MARK(menu_lcd_present_complete);
                     rendered_rate.completed(monotonic_time());continue;
                 }
+                ensure_gpu();
                 const auto model_frame=[&] { STARFOX_3DS_FRAME_PHASE(models);return models->prepare(source); }();
                 const auto dot_frame=[&] { STARFOX_3DS_FRAME_PHASE(dots);return dots->prepare(source); }();
                 const auto effect_frames=effects.prepare(source);
@@ -480,7 +531,7 @@ int main() {
                 const auto artwork=[&] { STARFOX_3DS_FRAME_PHASE(layers);return layers->prepare(source,tile_budget); }();
                 const auto frame=[&] {
                     STARFOX_3DS_FRAME_PHASE(composite);
-                    return composite.prepare(source.plan,
+                    return composite.prepare_validated(source.plan,
                         std::array{artwork.before_models,dot_frame,model_frame,artwork.after_models,math,mask,label,menu_frame},dashboard,artwork.clear);
                 }();
                 { STARFOX_3DS_FRAME_PHASE(present);gpu->present(frame,dashboard); }
@@ -506,7 +557,7 @@ int main() {
         top.clear({8,15,28});
         top.text(12,12,"STAR FOX ENHANCED / ACTUAL SOURCE CORE",{183,224,240});
 #if defined(STARFOX_3DS_TEST_PLAYER)
-        top.text(12,38,"EXPERIMENTAL / ORIGINAL 3DS TEST BUILD",{240,181,86});
+        top.text(12,38,"EXPERIMENTAL / NEW 3DS FAMILY TEST BUILD",{240,181,86});
 #else
         top.text(12,38,"BRING-UP ONLY / FULL FLOW PENDING",{240,181,86});
 #endif

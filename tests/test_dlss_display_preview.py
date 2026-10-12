@@ -46,6 +46,25 @@ class PreviewArtworkTests(unittest.TestCase):
         actual[32:42, 330:338, 0] += 1
         self.assertEqual(self.measure(actual)["text_max_rounding_error"], 1)
 
+    def test_reference_with_neighbouring_ink_shades_matches_itself(self):
+        self.reference[32:42, 318:320] = (254, 255, 255)
+        result = self.measure(self.reference)
+        self.assertEqual(result["text_max_rounding_error"], 0)
+        self.assertEqual(result["glyph_pixels"], 260)
+
+    def test_rounding_neighbouring_shades_does_not_invent_coverage_changes(self):
+        self.reference[32:42, 318:320] = (254, 255, 255)
+        actual = self.reference.copy()
+        actual[32:42, 310:320, 0] -= 1
+        self.assertEqual(self.measure(actual)["text_max_rounding_error"], 1)
+
+    def test_added_near_white_ink_beyond_rounding_is_rejected(self):
+        self.reference[32:42, 318:320] = (252, 255, 255)
+        actual = self.reference.copy()
+        actual[32, 318] = (254, 255, 255)
+        with self.assertRaisesRegex(AssertionError, "moved/softened"):
+            self.measure(actual)
+
     def test_blur_in_each_ink_is_rejected(self):
         for x, color in zip((310, 330, 350), self.inks):
             with self.subTest(ink=color):

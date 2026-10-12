@@ -1,7 +1,7 @@
 #pragma once
 #include "starfox/vr/source_pose_interpolation.hpp"
 #include "starfox/vr/background_tiles.hpp"
-#include "starfox/vr/game_input.hpp"
+#include "starfox/vr/steering_matrix.hpp"
 namespace starfox::vr {
 simulation::MatrixQ15 landscape_scene_view(const GameSceneSnapshot&,const GameSceneSnapshot&,double alpha);
 // Changes presentation space only. Scripted strategies retain source camera.
