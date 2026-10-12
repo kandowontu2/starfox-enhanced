@@ -9,6 +9,7 @@ $ciResult=[IO.Path]::GetFullPath($Output)
 $ciBuild=Join-Path $env:RUNNER_TEMP 'current-native-build'
 $ciPins=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'native-source-manifest.json') -Raw|ConvertFrom-Json
 $ciCompiler='C:/Strawberry/c/bin/g++.exe'
+. (Join-Path $PSScriptRoot 'owned-compiler-resources.ps1')
 if(Test-Path -LiteralPath $ciResult){throw 'Preserve prior native build evidence'}
 [void](New-Item -ItemType Directory -Path $ciResult)
 $ciReceipt=[ordered]@{commit=$env:GITHUB_SHA;run_id=$env:GITHUB_RUN_ID;run_attempt=$env:GITHUB_RUN_ATTEMPT;
@@ -44,37 +45,18 @@ function Invoke-CiOwned([string]$Name,[string]$Program,[string[]]$Arguments){
     $ciBirth=$ciNative.StartTime.ToUniversalTime()
     $ciOut=$ciNative.StandardOutput.ReadToEndAsync();$ciErr=$ciNative.StandardError.ReadToEndAsync()
     $ciRecord=[ordered]@{name=$Name;program=$Program;arguments=$Arguments;pid=$ciNative.Id;birth_utc=$ciBirth.ToString('o');
-        exit_code=$null;peak_private_bytes=0L;resource_stop=$null;completed=$false;cap_workers=@()}
+        exit_code=$null;peak_private_bytes=0L;resource_stop=$null;completed=$false;cap_workers=@();ignored_recycled_snapshot_links=0}
     try {
         while(!$ciNative.WaitForExit(1000)){
             $ciMemory=Get-CimInstance Win32_OperatingSystem
-            $ciNative.Refresh();if($ciNative.HasExited){break}
-            $ciLiveRoot=Get-Process -Id $ciNative.Id
-            if($ciLiveRoot.StartTime.ToUniversalTime() -ne $ciBirth -or $ciLiveRoot.Path -ine $Program){throw 'Owned compiler identity changed'}
-            $ciPrivate=[long]$ciLiveRoot.PrivateMemorySize64
-            $ciChildren=@(Get-CimInstance Win32_Process)
-            $ciParents=[Collections.Generic.HashSet[int]]::new();[void]$ciParents.Add($ciNative.Id)
-            $ciNew=$true
-            while($ciNew){
-                $ciNew=$false
-                foreach($ciChild in $ciChildren){
-                    if($ciParents.Contains([int]$ciChild.ParentProcessId) -and !$ciParents.Contains([int]$ciChild.ProcessId)){
-                        $ciLive=Get-Process -Id $ciChild.ProcessId -ErrorAction SilentlyContinue
-                        if(!$ciLive){continue}
-                        if($ciLive.StartTime.ToUniversalTime() -lt $ciBirth){throw 'Older descendant in owned compiler graph'}
-                        $ciPrivate+=[long]$ciLive.PrivateMemorySize64
-                        [void]$ciParents.Add([int]$ciChild.ProcessId);$ciNew=$true
-                    }
-                }
-            }
+            $ciSample=Read-CiOwnedCompilerResources $ciNative $ciBirth $Program
+            if($ciSample.Completed){break}
+            $ciPrivate=$ciSample.Private
+            $ciRecord.ignored_recycled_snapshot_links+=$ciSample.IgnoredRecycled
             $ciRecord.peak_private_bytes=[Math]::Max($ciRecord.peak_private_bytes,$ciPrivate)
             if($ciPrivate -gt 2147483648){
                 $ciRecord.resource_stop='Original owned compiler private cap above 2 GiB'
-                $ciRecord.cap_workers=@($ciChildren|Where-Object {$ciParents.Contains([int]$_.ProcessId)}|ForEach-Object {
-                    $ciObserved=Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue
-                    if($ciObserved){[ordered]@{pid=$ciObserved.Id;name=$ciObserved.ProcessName;private_bytes=$ciObserved.PrivateMemorySize64;
-                        source_names=@([regex]::Matches($_.CommandLine,'[A-Za-z0-9_]+\.(?:cpp|c|hlsl)\b')|ForEach-Object {$_.Value}|Sort-Object -Unique)}}
-                })
+                $ciRecord.cap_workers=$ciSample.Workers
             }
             elseif($ciMemory.FreePhysicalMemory -lt 6291456 -or $ciMemory.FreeVirtualMemory -lt 2097152){$ciRecord.resource_stop='Original live compiler RAM/commit floor'}
             if($ciRecord.resource_stop){$ciNative.Kill($true);$ciNative.WaitForExit();break}

@@ -33,6 +33,10 @@ jobs:
         run: |
           python ./tools/ci/test-external-dxr-payloads.py
           if ($LASTEXITCODE -ne 0) { throw 'Payload serialization controls failed' }
+      - name: Test owned compiler identity with PID reuse controls
+        shell: pwsh
+        run: |
+          & ./tools/ci/test-owned-compiler-resources.ps1 -Receipt "$env:RUNNER_TEMP/compiler-identity-controls.json"
       - name: Build the complete current CMake rendering target with bounded single-worker compilation
         shell: pwsh
         run: |
@@ -44,5 +48,6 @@ jobs:
           name: current-native-rendering-r420
           path: |
             ${{ runner.temp }}/native-result/*
+            ${{ runner.temp }}/compiler-identity-controls.json
           if-no-files-found: error
           retention-days: 7
