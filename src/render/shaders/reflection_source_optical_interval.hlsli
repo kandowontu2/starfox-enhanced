@@ -49,8 +49,11 @@ bool interval_exact_point(Interval a,float x) {
 // splitting by 4097 stays far below overflow. Unsafe ranges keep the existing
 // one-ULP outward fallback, including subnormal/FTZ-sensitive operands.
 bool endpoint_safe(float a) {
-    return isfinite(a) && (a==0 || (abs(a)>=3.637978807091713e-12F
-        && abs(a)<=274877906944.F)); // [2^-38, 2^38]
+    // Classify representation, not a floating zero comparison that a driver
+    // may flush for subnormal inputs. The checked path requires exact zero or
+    // NORMAL [2^-38,2^38] operands; every other representation uses fallback.
+    const uint magnitude=asuint(a)&0x7fffffffU;
+    return magnitude==0 || (magnitude>=0x2c800000U && magnitude<=0x52800000U);
 }
 float endpoint_sum_bound(float a,float b,bool upper) {
     precise float s=a+b;
