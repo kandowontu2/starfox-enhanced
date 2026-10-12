@@ -319,17 +319,44 @@ uint trace_mirrors(vec3 origin,vec3 direction,uvec2 pixel,float minimum,bool esc
             vec3 hit=origin+direction*distance;
             if(NATIVE_WATER && (flags&15u)==0u) {
                 NativeWaterSample water=native_water_sample(origin,direction,distance,pixel);
+#ifdef STARFOX_VULKAN_REFLECTION_HISTORY
+                if(HISTORY_MODEL_RECORDS>=7u) {
+                    history_current_path.mirrors[bounce]=0xfffffffdu;
+                    history_current_path.control|=1u<<(bounce+4u);
+                }
+#endif
                 accumulated+=throughput*(water.radiance*(1.0-water.fresnel)+water.specular);
                 throughput*=water.fresnel;
-                if(all(lessThan(throughput,vec3(1e-5))))return reflection_pack_linear(accumulated,255u);
+                if(all(lessThan(throughput,vec3(1e-5)))) {
+#ifdef STARFOX_VULKAN_REFLECTION_HISTORY
+                    if(HISTORY_MODEL_RECORDS>=7u) {
+                        history_current_path.base=accumulated;
+                        history_record_terminal(4u,bounce+1u,0xffffffffu,vec3(0),0u,throughput);
+                    }
+#endif
+                    return reflection_pack_linear(accumulated,255u);
+                }
                 origin=water.hit+water.normal*water.bias;direction=reflect(direction,water.normal);minimum=water.bias;
                 continue;
             }
             if((flags&15u)==3u) {
                 SecondaryLava lava=secondary_lava(origin,direction,distance);
+#ifdef STARFOX_VULKAN_REFLECTION_HISTORY
+                if(HISTORY_MODEL_RECORDS>=7u) {
+                    history_current_path.mirrors[bounce]=0xfffffffdu;
+                    history_current_path.control|=1u<<(bounce+4u);
+                }
+#endif
                 accumulated+=throughput*lava.radiance;throughput*=lava.share;
-                if(all(lessThan(throughput,vec3(1e-5))))
+                if(all(lessThan(throughput,vec3(1e-5)))) {
+#ifdef STARFOX_VULKAN_REFLECTION_HISTORY
+                    if(HISTORY_MODEL_RECORDS>=7u) {
+                        history_current_path.base=accumulated;
+                        history_record_terminal(4u,bounce+1u,0xffffffffu,vec3(0),0u,throughput);
+                    }
+#endif
                     return reflection_pack_linear(accumulated,255u);
+                }
                 origin=lava.hit+lava.normal*lava.bias;
                 direction=reflect(direction,lava.normal);minimum=lava.bias;
                 continue;
@@ -339,7 +366,7 @@ uint trace_mirrors(vec3 origin,vec3 direction,uvec2 pixel,float minimum,bool esc
                 return reflected_accumulated(colour,throughput,accumulated);
             }
 #ifdef STARFOX_VULKAN_REFLECTION_HISTORY
-            if(HISTORY_MODEL_RECORDS==3u)history_current_path.mirrors[bounce]=0xfffffffeu;
+            if(HISTORY_MODEL_RECORDS==3u || HISTORY_MODEL_RECORDS>=7u)history_current_path.mirrors[bounce]=0xfffffffeu;
 #endif
             normal=normalize(p.ground_normal.xyz);
             if(dot(normal,direction)>0.0) normal=-normal;
@@ -355,6 +382,7 @@ uint trace_mirrors(vec3 origin,vec3 direction,uvec2 pixel,float minimum,bool esc
 #ifdef STARFOX_VULKAN_REFLECTION_HISTORY
                 if(HISTORY_MODEL_RECORDS!=0u) {
                     vec2 bary=rayQueryGetIntersectionBarycentricsEXT(query,true);uint source=material_colour(primitive,bary,pixel);
+                    if(HISTORY_MODEL_RECORDS>=7u)history_current_path.base=accumulated;
                     history_record_terminal(1u,bounce,primitive,vec3(bary,0),source,throughput);
                     return reflected_accumulated(source,throughput,accumulated);
                 }
@@ -376,7 +404,9 @@ uint trace_mirrors(vec3 origin,vec3 direction,uvec2 pixel,float minimum,bool esc
         } else {
 #ifdef STARFOX_VULKAN_REFLECTION_HISTORY
             if(HISTORY_MODEL_RECORDS!=0u) {
-                uint source=reflected_backdrop(direction);history_record_terminal(2u,bounce,0xffffffffu,direction,source,throughput);
+                uint source=reflected_backdrop(direction);
+                if(HISTORY_MODEL_RECORDS>=7u)history_current_path.base=accumulated;
+                history_record_terminal(2u,bounce,0xffffffffu,direction,source,throughput);
                 return reflected_accumulated(source,throughput,accumulated);
             }
 #endif
@@ -389,7 +419,9 @@ uint trace_mirrors(vec3 origin,vec3 direction,uvec2 pixel,float minimum,bool esc
     }
 #ifdef STARFOX_VULKAN_REFLECTION_HISTORY
     if(HISTORY_MODEL_RECORDS!=0u) {
-        uint source=reflected_backdrop(direction);history_record_terminal(3u,4u,0xffffffffu,direction,source,throughput);
+        uint source=reflected_backdrop(direction);
+        if(HISTORY_MODEL_RECORDS>=7u)history_current_path.base=accumulated;
+        history_record_terminal(3u,4u,0xffffffffu,direction,source,throughput);
         return reflected_accumulated(source,throughput,accumulated);
     }
 #endif
@@ -502,7 +534,7 @@ uint shade_native_water(uvec2 pixel,vec3 direction,float distance,out vec4 surfa
     NativeWaterSample water=native_water_sample(vec3(0.0),direction,distance,pixel);
     surface=vec4(water.normal,water.hit.z);
     vec3 radiance=water.radiance*(1.0-water.fresnel)+water.specular;
-#ifdef STARFOX_VULKAN_LIQUID_HISTORY
+#ifdef STARFOX_VULKAN_REFLECTION_HISTORY
     history_primary_base=radiance;history_primary_response=vec3(water.fresnel);
     history_primary_incoming=0u;
     if(water.fresnel>0.0) {
@@ -538,14 +570,14 @@ uint shade_native_metal(uvec2 pixel,vec3 direction,float distance,vec3 hit,vec3 
     vec3 radiance=(p.material_info.z==2u?calibrated_decode_srgb(base):base)
         *(.65+.35*visibility*max(0.0,dot(normal,light)));
 #ifdef STARFOX_VULKAN_REFLECTION_HISTORY
-    if(HISTORY_MODEL_RECORDS==3u || HISTORY_MODEL_RECORDS==4u) {history_primary_base=radiance;history_primary_response=vec3(0);}
+    if(HISTORY_MODEL_RECORDS==3u || HISTORY_MODEL_RECORDS==4u || HISTORY_MODEL_RECORDS>=9u) {history_primary_base=radiance;history_primary_response=vec3(0);}
 #endif
     if(p.water_settings.y>0.0) {
         uint colour=trace_mirrors(hit+normal*bias,reflect(direction,normal),pixel,bias,true);
         float grazing=pow(1.0-clamp(dot(-direction,normal),0.0,1.0),5.0);
         vec3 f0=material==2.0?vec3(1.0,.766,.336):vec3(1.0);
 #ifdef STARFOX_VULKAN_REFLECTION_HISTORY
-        if(HISTORY_MODEL_RECORDS==3u || HISTORY_MODEL_RECORDS==4u) {
+        if(HISTORY_MODEL_RECORDS==3u || HISTORY_MODEL_RECORDS==4u || HISTORY_MODEL_RECORDS>=9u) {
             history_primary_base=radiance*(1.0-p.water_settings.y);
             history_primary_response=(f0+(1.0-f0)*grazing)*p.water_settings.y;
             if(HISTORY_MODEL_RECORDS==4u)history_primary_incoming=colour;
@@ -556,7 +588,7 @@ uint shade_native_metal(uvec2 pixel,vec3 direction,float distance,vec3 hit,vec3 
     float specular=pow(max(0.0,dot(normal,normalize(light-direction))),96.0)*visibility;
     radiance+=vec3(1.0,.95,.82)*specular*max(authored.r,max(authored.g,authored.b))*.55;
 #ifdef STARFOX_VULKAN_REFLECTION_HISTORY
-    if(HISTORY_MODEL_RECORDS==3u || HISTORY_MODEL_RECORDS==4u)
+    if(HISTORY_MODEL_RECORDS==3u || HISTORY_MODEL_RECORDS==4u || HISTORY_MODEL_RECORDS>=9u)
         history_primary_base+=vec3(1.0,.95,.82)*specular*max(authored.r,max(authored.g,authored.b))*.55;
 #endif
     return reflection_pack_linear(radiance,254u);
@@ -608,7 +640,7 @@ uint shade_water(uvec2 pixel, vec3 direction, float distance) {
         vec3 molten=vec3(colour.r,colour.g,colour.b)*p.water_settings.z;
         bool native_lava=NATIVE_SURFACE;
         if(native_lava)molten=reflection_authored_linear(molten);
-#ifdef STARFOX_VULKAN_LIQUID_HISTORY
+#ifdef STARFOX_VULKAN_REFLECTION_HISTORY
         history_primary_base=molten;history_primary_response=vec3(0);history_primary_incoming=0u;
 #endif
         if(p.water_settings.y>0.0) {
@@ -616,7 +648,7 @@ uint shade_water(uvec2 pixel, vec3 direction, float distance) {
             vec3 reflected=normalize(reflect(direction,normal));
             uint reflected_colour=trace_mirrors(hit+normal*bias,reflected,pixel,bias,true);
             float fresnel=.035+.40*pow(1.0-clamp(dot(-direction,normal),0.0,1.0),5.0);
-#ifdef STARFOX_VULKAN_LIQUID_HISTORY
+#ifdef STARFOX_VULKAN_REFLECTION_HISTORY
             history_primary_incoming=reflected_colour;
             history_primary_response=vec3(fresnel*p.water_settings.y*(.3+.7*liquid.crust));
 #endif

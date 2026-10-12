@@ -152,6 +152,82 @@ void history_model() {
     if(scene_paths)history_store4(count*7u+id*4u,vec4(0,0,0,1));
     output_image.pixels[id]=shade_native_model(pixel,incoming,raw*primary.distance,normal,primary.distance*length(raw),primary.primitive,primary.bary);
 }
+// Complete CURRENT native transport with a distinct 64-byte ordered ABI.
+// There is no old colour, root selection, visibility acceptance or CPU readback
+// in this producer. The source consumer decides whether any history is reusable.
+void history_curved() {
+    uint id=gl_GlobalInvocationID.x,count=p.dimensions.x*p.dimensions.y;
+    if(id>=count)return;
+    bool receivers=HISTORY_MODEL_RECORDS>=9u;
+    uint lobes=uint(p.history_clip.z),stride=16u;
+    uint primary_prefix=receivers?(p.liquid_layers.w!=0u?p.liquid_layers.w:count):count;
+    uint records=primary_prefix+count*(receivers?10u:6u);
+    output_image.pixels[id]=0u;
+    output_image.pixels[primary_prefix+id]=0xffffffffu;
+    output_image.pixels[primary_prefix+count+id]=0u;
+    history_store4(primary_prefix+count*2u+id*4u,vec4(0));
+    if(receivers)history_store4(primary_prefix+count*6u+id*4u,vec4(0));
+    for(uint lobe=0u;lobe<lobes;++lobe)
+        history_path_store(records+(id*lobes+lobe)*stride,history_path_empty());
+    store_liquid_surface(id,vec4(0));
+    if(receivers && NATIVE_WATER && (p.liquid_layers.z&1u)!=0u)
+        output_image.pixels[p.liquid_layers.x+id]=0u;
+    history_record_base=records+id*lobes*stride;
+    history_record_stride=stride;history_record_lobe=0u;
+    history_primary_base=vec3(0);history_primary_response=vec3(0);
+    history_primary_incoming=0u;
+    uvec2 pixel=uvec2(id%p.dimensions.x,id/p.dimensions.x);
+    vec3 raw=vec3((float(pixel.x)+.5-p.camera.z)/p.camera.x,
+        (float(pixel.y)+.5-p.camera.w)/p.camera.y,1);
+    float near_depth=p.primary_range.z>.5?p.primary_range.x:1.0;
+    float far_depth=p.primary_range.z>.5?p.primary_range.y:65536.0;
+    float denominator=dot(raw,p.ground_normal.xyz);
+    float floor_depth=abs(denominator)>1e-10?(NATIVE_WATER?native_ground_depth(pixel)
+        :dot(p.ground_point.xyz,p.ground_normal.xyz)/denominator):far_depth;
+    bool floor_valid=p.settings.y>.5 && floor_depth>near_depth && floor_depth<far_depth;
+    // Analytic plane owns primary visibility; displacement belongs to the
+    // actual optical sample, not a replacement primary depth/horizon.
+    ModelHistoryHit primary=history_model_hit(vec3(0),raw,near_depth,
+        floor_valid?floor_depth:far_depth,pixel);
+    vec3 incoming=normalize(raw);
+    uint floor_colour=0u;vec4 floor_surface=vec4(0);bool floor_shaded=false;
+    if(receivers && floor_valid && NATIVE_WATER && (p.liquid_layers.z&1u)!=0u) {
+        floor_colour=shade_native_water(pixel,incoming,floor_depth*length(raw),floor_surface);
+        floor_shaded=true;
+        output_image.pixels[p.liquid_layers.x+id]=floor_colour;
+    }
+    if(!primary.found) {
+        if(!floor_valid || !receivers)return;
+        if(!floor_shaded) {
+            if(NATIVE_WATER)
+                floor_colour=shade_native_water(pixel,incoming,floor_depth*length(raw),floor_surface);
+            else floor_colour=shade_water(pixel,incoming,floor_depth*length(raw));
+        }
+        output_image.pixels[id]=floor_colour;
+        store_liquid_surface(id,floor_surface);
+        output_image.pixels[primary_prefix+id]=0xfffffffdu;
+        output_image.pixels[primary_prefix+count+id]=floatBitsToUint(floor_depth);
+        history_store4(primary_prefix+count*2u+id*4u,vec4(history_primary_response,1));
+        history_store4(primary_prefix+count*6u+id*4u,vec4(history_primary_base,1));
+        // A floor has one sharp physical ray even when MODEL uses eight lobes.
+        for(uint lobe=1u;lobe<lobes;++lobe)for(uint word=0u;word<stride;++word)
+            output_image.pixels[history_record_base+lobe*stride+word]=output_image.pixels[history_record_base+word];
+        return;
+    }
+    // Hidden world-water never owns the visible MODEL's lobe records or base.
+    history_record_lobe=0u;history_primary_base=vec3(0);history_primary_response=vec3(0);
+    vec3 normal=history_model_normal(primary.primitive,raw),response=vec3(1);
+    if(p.dimensions.w!=0u) {
+        vec3 f0=conductor_f0(material_colour(primary.primitive,primary.bary,pixel),p.dimensions.w);
+        response=f0+(1.0-f0)*pow(1.0-clamp(dot(-incoming,normal),0.0,1.0),5.0);
+    }
+    output_image.pixels[primary_prefix+id]=primary.primitive;
+    output_image.pixels[primary_prefix+count+id]=floatBitsToUint(primary.distance);
+    history_store4(primary_prefix+count*2u+id*4u,vec4(response,1));
+    if(receivers)history_store4(primary_prefix+count*6u+id*4u,vec4(0,0,0,1));
+    output_image.pixels[id]=shade_native_model(pixel,incoming,raw*primary.distance,
+        normal,primary.distance*length(raw),primary.primitive,primary.bary);
+}
 #ifdef STARFOX_VULKAN_GROUND_HISTORY
 vec4 reflected_planar_feature_motion(uint secondary,vec2 bary) {
     if(p.history_clip.w<.5)return vec4(0);
@@ -289,5 +365,5 @@ void history_separated_liquid() {
 }
 void main() {history_separated_liquid();}
 #else
-void main() {if(HISTORY_MODEL_RECORDS==0u)history_sharp();else history_model();}
+void main() {if(HISTORY_MODEL_RECORDS>=7u)history_curved();else if(HISTORY_MODEL_RECORDS==0u)history_sharp();else history_model();}
 #endif

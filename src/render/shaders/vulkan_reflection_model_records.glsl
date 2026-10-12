@@ -1,11 +1,13 @@
 // Hooks in the ORIGINAL native model loop, not a second colour renderer.
 // 0 sharp guide, 1 compact finite lobes, 2 MODEL paths, 3 MODEL/planar paths,
 // 4 separated planar, 5 water, 6 lava motion (not MODEL path records).
+// 7/8 ordered curved MODEL water/surface, 9/10 ordered curved receivers.
+// These opt-in 64-byte records do not alias the existing 52-byte ABI.
 layout(constant_id=3) const uint HISTORY_MODEL_RECORDS=0u;
-struct ModelHistoryPath {uvec4 mirrors;uint control,terminal;vec3 feature;uint incoming;vec3 response;};
+struct ModelHistoryPath {uvec4 mirrors;uint control,terminal;vec3 feature;uint incoming;vec3 response;vec3 base;};
 ModelHistoryPath history_path_empty() {
     ModelHistoryPath path;path.mirrors=uvec4(0xffffffffu);path.control=0u;path.terminal=0xffffffffu;
-    path.feature=vec3(0);path.incoming=0u;path.response=vec3(0);return path;
+    path.feature=vec3(0);path.incoming=0u;path.response=vec3(0);path.base=vec3(0);return path;
 }
 void history_path_store(uint at,ModelHistoryPath path) {
     for(uint i=0u;i<4u;++i)output_image.pixels[at+i]=path.mirrors[i];
@@ -14,6 +16,11 @@ void history_path_store(uint at,ModelHistoryPath path) {
     output_image.pixels[at+8u]=floatBitsToUint(path.feature.z);output_image.pixels[at+9u]=path.incoming;
     output_image.pixels[at+10u]=floatBitsToUint(path.response.x);output_image.pixels[at+11u]=floatBitsToUint(path.response.y);
     output_image.pixels[at+12u]=floatBitsToUint(path.response.z);
+    if(HISTORY_MODEL_RECORDS>=7u) {
+        output_image.pixels[at+13u]=floatBitsToUint(path.base.x);
+        output_image.pixels[at+14u]=floatBitsToUint(path.base.y);
+        output_image.pixels[at+15u]=floatBitsToUint(path.base.z);
+    }
 }
 ModelHistoryPath history_current_path;
 uint history_record_base,history_record_stride,history_record_lobe;
@@ -21,13 +28,14 @@ vec3 history_primary_base,history_primary_response;
 uint history_primary_incoming,history_secondary;
 vec2 history_secondary_bary;
 void history_record_terminal(uint kind,uint count,uint terminal,vec3 feature,uint incoming,vec3 response) {
-    if(HISTORY_MODEL_RECORDS>=4u) {
+    if(HISTORY_MODEL_RECORDS>=4u && HISTORY_MODEL_RECORDS<=6u) {
         // Only a finite one-bounce witness can enter single-hit reuse. Current
         // multi-hop colour still uses the unchanged original transport loop.
         if(kind==1u && count==0u) {history_secondary=terminal;history_secondary_bary=feature.xy;}
         return;
     }
-    history_current_path.control=(kind<<8u)|count;history_current_path.terminal=terminal;
+    history_current_path.control=(kind<<8u)|count
+        |(HISTORY_MODEL_RECORDS>=7u?(history_current_path.control&0xf0u):0u);history_current_path.terminal=terminal;
     history_current_path.feature=feature;history_current_path.incoming=incoming;history_current_path.response=response;
     uint at=history_record_base+history_record_lobe*history_record_stride;
     if(HISTORY_MODEL_RECORDS>=2u)history_path_store(at,history_current_path);

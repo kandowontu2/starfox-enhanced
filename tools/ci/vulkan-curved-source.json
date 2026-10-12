@@ -1,0 +1,87 @@
+{
+  "sources": [
+    {
+      "path": "src/render/shaders/vulkan_reflection_liquid_motion_rayquery.comp",
+      "bytes": 2942,
+      "sha256": "d73d540802d64a630968b572291532fce81bf16c4e4059e5c1878cac4f927cf0"
+    },
+    {
+      "path": "src/render/shaders/generated/vulkan_liquid_hit_motion.glsl",
+      "bytes": 10194,
+      "sha256": "b8a5be44e8a208cac40108eecc502a360848c5cdd062ab696bf6972cd23cf53e"
+    },
+    {
+      "path": "src/render/shaders/generated/vulkan_liquid_optics.glsl",
+      "bytes": 1811,
+      "sha256": "fcd31d0560987c052068843db0ea6fc364c0ff0e2079f587625ce2d35bbe8445"
+    },
+    {
+      "path": "include/starfox/render/lava_surface.inc",
+      "bytes": 5622,
+      "sha256": "b8f9fcaffd17ec44ff018f175be3343667fe2fb3328019422b2a768807a74d00"
+    },
+    {
+      "path": "include/starfox/render/water_caustics.inc",
+      "bytes": 4243,
+      "sha256": "5006aefca36b2f52f9240a81778d4fbdfb0d23a8c7f6ca57fd82f650e0063580"
+    },
+    {
+      "path": "src/render/shaders/vulkan_reflection_rayquery.comp",
+      "bytes": 51270,
+      "sha256": "0b4219e920b5f5551a48b3e36b9113a5d2701b0de4d1510788baba17d2a81314"
+    },
+    {
+      "path": "src/render/shaders/vulkan_reflection_hit_history.glsl",
+      "bytes": 25400,
+      "sha256": "c9c3dd52b9cf4b6cfac2bcdea121324f5ad4b3ee983463c3ebed9f4212aaf826"
+    },
+    {
+      "path": "src/render/shaders/vulkan_reflection_model_records.glsl",
+      "bytes": 3150,
+      "sha256": "b1652312ac53fcd3013b20c06ebeb6c531cc62192665ac2ae81386f85249284d"
+    },
+    {
+      "path": "src/render/shaders/vulkan_native_materials.glsl",
+      "bytes": 3915,
+      "sha256": "a3f53b4e3e82a5a736dcdc22150a57286d4a08ce4ed06acd5eefd653b954ae1e"
+    },
+    {
+      "path": "src/render/shaders/generated/vulkan_material_colour.glsl",
+      "bytes": 6861,
+      "sha256": "b36aa907cd5419cba055bdcb67e29d84cee3a5ae6ffcfe8b4dba69920c67ce32"
+    },
+    {
+      "path": "src/render/shaders/vulkan_indexed_materials.glsl",
+      "bytes": 1382,
+      "sha256": "52087e58ebfaf3b88f5bad3338a367d0464b1254a982308398b71a7ea4e314ea"
+    },
+    {
+      "path": "include/starfox/render/water_transmission.inc",
+      "bytes": 663,
+      "sha256": "d0ff85882f5fadca201e1a82138b4f5db10c043abc0ad34744055ccb54d1a3af"
+    },
+    {
+      "path": "src/render/shaders/vulkan_shadow_rayquery.comp",
+      "bytes": 4677,
+      "sha256": "9fa6169bcacff1876c0a1186491caa60cae29185b06092c8709cbbfbdf4c20bd"
+    },
+    {
+      "path": "src/render/vulkan_hardware_rt.cpp",
+      "bytes": 87293,
+      "sha256": "1f3a93997d59276377bddf3e5c32a481dafe08e71781ca9fe40a3a3da666fc1d"
+    },
+    {
+      "path": "tools/ci/compile-vulkan-curved.py",
+      "bytes": 3175,
+      "sha256": "3017fa5a367ff7d02f289cacaf3159a6c4d1c81693ef30a21c55704e26f63782"
+    },
+    {
+      "path": ".github/workflows/portable-builds.yml",
+      "bytes": 838,
+      "sha256": "87b0c7f2ef218c3808971307dc6111b926cd5d0c544efa8a23f315797e903947"
+    }
+  ],
+  "isolated_candidate": true,
+  "production_adopted": false,
+  "private_assets": false
+}

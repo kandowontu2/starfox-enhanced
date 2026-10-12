@@ -138,6 +138,8 @@ struct VulkanHardwareRt::Impl {
     VkPipeline native_history_pipeline{};
     VkPipeline native_lobe_history_pipeline{},native_path_history_pipeline{},native_scene_history_pipeline{},native_ground_history_pipeline{};
     VkPipeline native_water_history_pipeline{},native_lava_history_pipeline{},native_liquid_motion_pipeline{};
+    VkPipeline native_curved_model_water_pipeline{},native_curved_model_surface_pipeline{};
+    VkPipeline native_curved_receiver_water_pipeline{},native_curved_receiver_surface_pipeline{};
     VkDescriptorPool reflection_descriptor_pool{};
     VkShaderModule reflection_shader{};
     struct Slot {
@@ -295,7 +297,9 @@ struct VulkanHardwareRt::Impl {
         if(reflection_descriptor_pool)vkDestroyDescriptorPool(device,reflection_descriptor_pool,nullptr);
         for(auto* handle:{&reflection_pipeline,&native_water_pipeline,&native_surface_pipeline,&native_model_pipeline,&native_history_pipeline,
             &native_lobe_history_pipeline,&native_path_history_pipeline,&native_scene_history_pipeline,&native_ground_history_pipeline,
-            &native_water_history_pipeline,&native_lava_history_pipeline,&native_liquid_motion_pipeline})
+            &native_water_history_pipeline,&native_lava_history_pipeline,&native_liquid_motion_pipeline,
+            &native_curved_model_water_pipeline,&native_curved_model_surface_pipeline,
+            &native_curved_receiver_water_pipeline,&native_curved_receiver_surface_pipeline})
             if(*handle){vkDestroyPipeline(device,*handle,nullptr);*handle=VK_NULL_HANDLE;}
         if(reflection_pipeline_layout)vkDestroyPipelineLayout(device,reflection_pipeline_layout,nullptr);
         if(reflection_set_layout)vkDestroyDescriptorSetLayout(device,reflection_set_layout,nullptr);
@@ -329,6 +333,8 @@ struct VulkanHardwareRt::Impl {
         pipeline=reflection_pipeline=native_water_pipeline=native_surface_pipeline=native_model_pipeline=native_history_pipeline=VK_NULL_HANDLE;
         native_lobe_history_pipeline=native_path_history_pipeline=native_scene_history_pipeline=native_ground_history_pipeline=VK_NULL_HANDLE;
         native_water_history_pipeline=native_lava_history_pipeline=native_liquid_motion_pipeline=VK_NULL_HANDLE;
+        native_curved_model_water_pipeline=native_curved_model_surface_pipeline=VK_NULL_HANDLE;
+        native_curved_receiver_water_pipeline=native_curved_receiver_surface_pipeline=VK_NULL_HANDLE;
         pipeline_layout=reflection_pipeline_layout=VK_NULL_HANDLE;
         set_layout=reflection_set_layout=VK_NULL_HANDLE;
         shader=reflection_shader=VK_NULL_HANDLE;
@@ -510,14 +516,28 @@ struct VulkanHardwareRt::Impl {
         }
         destination=next;
     }
+    VkPipeline& native_history_variant(unsigned model_records) {
+        switch(model_records) {
+        case 0:return native_history_pipeline;
+        case 1:return native_lobe_history_pipeline;
+        case 2:return native_path_history_pipeline;
+        case 3:return native_scene_history_pipeline;
+        case 4:return native_ground_history_pipeline;
+        case 5:return native_water_history_pipeline;
+        case 6:return native_lava_history_pipeline;
+        case 7:return native_curved_model_water_pipeline;
+        case 8:return native_curved_model_surface_pipeline;
+        case 9:return native_curved_receiver_water_pipeline;
+        case 10:return native_curved_receiver_surface_pipeline;
+        default:throw std::runtime_error("Invalid native reflection producer variant");
+        }
+    }
     void ensure_native_history_pipeline(unsigned model_records=0) {
-        auto& destination=model_records==6?native_lava_history_pipeline:model_records==5?native_water_history_pipeline:
-            model_records==4?native_ground_history_pipeline:model_records==3?native_scene_history_pipeline:model_records==2?native_path_history_pipeline
-            :model_records==1?native_lobe_history_pipeline:native_history_pipeline;
+        auto& destination=native_history_variant(model_records);
         if(destination)return;
         VkShaderModule next=VK_NULL_HANDLE;
         VkShaderModuleCreateInfo module{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
-        const std::span<const std::uint32_t> shader=model_records>=5
+        const std::span<const std::uint32_t> shader=model_records==5 || model_records==6
             ?std::span<const std::uint32_t>(vulkan_reflection_liquid_history_rayquery_spirv):model_records==4
             ?std::span<const std::uint32_t>(vulkan_reflection_ground_history_rayquery_spirv)
             :std::span<const std::uint32_t>(vulkan_reflection_history_rayquery_spirv);
@@ -528,8 +548,9 @@ struct VulkanHardwareRt::Impl {
             VkComputePipelineCreateInfo compute{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
             compute.stage={VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO};
             compute.stage.stage=VK_SHADER_STAGE_COMPUTE_BIT;compute.stage.module=next;compute.stage.pName="main";
-            const std::array<std::uint32_t,4> values{model_records==5?1U:0U,
-                model_records==3 || model_records==4 || model_records==6?1U:0U,model_records?1U:0U,model_records};
+            const std::array<std::uint32_t,4> values{model_records==5 || model_records==7 || model_records==9?1U:0U,
+                model_records==3 || model_records==4 || model_records==6 || model_records==8 || model_records==10?1U:0U,
+                model_records?1U:0U,model_records};
             const std::array<VkSpecializationMapEntry,4> entries{{{0,0,4},{1,4,4},{2,8,4},{3,12,4}}};
             const VkSpecializationInfo specialization{unsigned(entries.size()),entries.data(),sizeof(values),values.data()};
             compute.stage.pSpecializationInfo=&specialization;
@@ -737,9 +758,7 @@ struct VulkanHardwareRt::Impl {
         }
         writes[0].pNext=&structure;
         vkUpdateDescriptorSets(device,unsigned(writes.size()),writes.data(),0,nullptr);
-        vkCmdBindPipeline(command,VK_PIPELINE_BIND_POINT_COMPUTE,history?(history_model_records==6?native_lava_history_pipeline:history_model_records==5?native_water_history_pipeline:
-            history_model_records==4?native_ground_history_pipeline:history_model_records==3?native_scene_history_pipeline:history_model_records==2?native_path_history_pipeline
-            :history_model_records==1?native_lobe_history_pipeline:native_history_pipeline):native_water?native_water_pipeline
+        vkCmdBindPipeline(command,VK_PIPELINE_BIND_POINT_COMPUTE,history?native_history_variant(history_model_records):native_water?native_water_pipeline
             :native_surface?native_surface_pipeline:native_model?native_model_pipeline:reflection_pipeline);
         vkCmdBindDescriptorSets(command,VK_PIPELINE_BIND_POINT_COMPUTE,reflection_pipeline_layout,
             0,1,&slot.reflection_descriptors,0,nullptr);
@@ -953,15 +972,16 @@ bool VulkanHardwareRt::render_reflections(void* raw,
             || !reflection_history_receiver_valid(*history,water,ground.has_value())
             || !reflection_history_transport_valid(*history,roughness,metallic,specular_models)))
             return reject("Invalid native reflection history contract");
-        if(history && history->curved_paths)
-            return reject("Ordered curved native producer ABI is not implemented by this Vulkan pipeline");
+        // Ordered curved paths use their own 64-byte native ABI, never the
+        // legacy single-hit guide or a flat-plane approximation.
         // Curved liquids have their actual old optical frame and unchanged
         // water prefix. Never alias flat-plane motion or MODEL path records.
         const bool liquid_history=history && history->separated && !history->model_lobes && water
             && (water->material==0 || water->material==3);
-        const unsigned history_model_records=history && history->model_lobes?
-            (history->scene_paths?3U:history->model_paths?2U:1U):liquid_history?(water->material==0?5U:6U):history && history->separated?4U:0U;
         const bool native_water=water && water->source_colour.has_value();
+        const unsigned history_model_records=history && history->curved_paths?
+            (history->curved_receivers?9U:7U)+(native_water?0U:1U):history && history->model_lobes?
+            (history->scene_paths?3U:history->model_paths?2U:1U):liquid_history?(water->material==0?5U:6U):history && history->separated?4U:0U;
         const bool native_surface=native_rgba && colour_encoding && water && water->material!=0;
         const bool native_model=native_rgba && colour_encoding;
         std::optional<NativeWaterLayers> layers;
@@ -1062,7 +1082,7 @@ bool VulkanHardwareRt::render_reflections(void* raw,
             }
             material_copy_bytes=end-geometry.material_offset;
             history_layers=native_reflection_history(camera.width,camera.height,history->extent,history->separated,layers.value_or(NativeWaterLayers{}),
-                history->model_lobes,history->model_paths,history->scene_paths);
+                history->model_lobes,history->model_paths,history->scene_paths,history->curved_paths,history->curved_receivers);
             if(!history_layers)return reject("Native reflection history dimensions overflow");
         }
         impl_->initialize(static_cast<SDL_GPUDevice*>(raw));
@@ -1265,7 +1285,7 @@ bool VulkanHardwareRt::render_reflections(void* raw,
         impl_->reflection={raw,impl_->sdl_reflection,camera.width,camera.height,camera.width*4U};
         if(layers) impl_->reflection.water_layers=*layers;
         if(history_layers)impl_->reflection.reflection_history=*history_layers;
-        impl_->status=history?(liquid_history?"Vulkan native separated curved liquid reflected-hit correspondence":history_model_records==4?"Vulkan native separated planar reflected-hit correspondence":history_model_records==3?"Vulkan native ordered MODEL/planar reflection paths":history_model_records==2?"Vulkan native ordered MODEL reflection paths":history_model_records==1
+        impl_->status=history?(history->curved_paths?(history->curved_receivers?"Vulkan native ordered curved MODEL/liquid receivers":"Vulkan native ordered curved MODEL paths"):liquid_history?"Vulkan native separated curved liquid reflected-hit correspondence":history_model_records==4?"Vulkan native separated planar reflected-hit correspondence":history_model_records==3?"Vulkan native ordered MODEL/planar reflection paths":history_model_records==2?"Vulkan native ordered MODEL reflection paths":history_model_records==1
             ?"Vulkan native compact MODEL reflection lobes":"Vulkan native sharp reflected-hit correspondence")
             :native_model?(roughness>0?"Vulkan native calibrated reflections (8 fixed lobes)":"Vulkan native calibrated reflections (sharp)")
             :quality==1?"Vulkan hardware reflections LOW (1 ray)"
