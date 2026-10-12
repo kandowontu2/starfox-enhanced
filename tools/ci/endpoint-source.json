@@ -1,0 +1,76 @@
+{
+  "sources": [
+    {
+      "path": "src/render/shaders/reflection_source_optical_interval.hlsli",
+      "bytes": 21092,
+      "sha256": "20cc7324bcc43f32a643a42e729f7d705e20cb60486619e1a7145982dcffffda"
+    },
+    {
+      "path": "src/render/shaders/reflection_source_optical_reciprocals.inc",
+      "bytes": 528,
+      "sha256": "a60346d521c14ad3f8ab67892703b59dccf8a2b85fe2134e6ed61641327198b8"
+    },
+    {
+      "path": "src/render/shaders/reflection_curved_precision.hlsli",
+      "bytes": 19543,
+      "sha256": "4dc9217abb5b22553b9c6050f457509409258d33005a6208ad3872510937378a"
+    },
+    {
+      "path": "src/render/shaders/reflection_liquid_hit_motion.hlsli",
+      "bytes": 9690,
+      "sha256": "16de9d16dc1213f34830b119c0b368c68f008cebdbc94855295c305a643cb090"
+    },
+    {
+      "path": "src/render/shaders/liquid_optics.hlsli",
+      "bytes": 1764,
+      "sha256": "54df5d2046a3d4f850a5b0dad404eb561441300f1296cfdbd68359f03bb757ee"
+    },
+    {
+      "path": "include/starfox/render/lava_surface.inc",
+      "bytes": 5622,
+      "sha256": "b8f9fcaffd17ec44ff018f175be3343667fe2fb3328019422b2a768807a74d00"
+    },
+    {
+      "path": "include/starfox/render/water_caustics.inc",
+      "bytes": 4243,
+      "sha256": "5006aefca36b2f52f9240a81778d4fbdfb0d23a8c7f6ca57fd82f650e0063580"
+    },
+    {
+      "path": "src/render/shaders/reflection_specular_path_motion.hlsli",
+      "bytes": 8442,
+      "sha256": "7580a1801dec3c0f65120a95ccb4f08fec87e8b64f337cbd1c6a86f1d5f3ce5e"
+    },
+    {
+      "path": "src/render/shaders/reflection_rough_hit_motion.hlsli",
+      "bytes": 9498,
+      "sha256": "938ae6996b5a350b8c139f99381ccff29e825f60b8dae4bd424466f9b2c97baa"
+    },
+    {
+      "path": "tools/ci/checked_endpoints.hlsli",
+      "bytes": 1443,
+      "sha256": "c21b47c7710c44144489d0c2b588c379624ac315dd31628c2ee780ae60c120cd"
+    },
+    {
+      "path": "tools/shaders/check_endpoints.hlsl",
+      "bytes": 959,
+      "sha256": "89732492810833876d129984f9fcc2ff3c86e85db31eda2f4c2323ed4c8a04d3"
+    },
+    {
+      "path": "tools/ci/compile_endpoint.ps1",
+      "bytes": 4058,
+      "sha256": "9488d5b59ca9047bc4ba9a8b46082fead5ef7e15afe8f12ccc30eac18fd341b7"
+    },
+    {
+      "path": ".github/workflows/portable-builds.yml",
+      "bytes": 1470,
+      "sha256": "ee7be758320d7f98f6f6d7f39e248c995fe81162960b361ca3c36bef32237a2d"
+    },
+    {
+      "path": "tools/ci/owned-compiler-resources.ps1",
+      "bytes": 4053,
+      "sha256": "e7c1cd89fde594c9cdbed5e0026bdd99eff2b052988bfe3d3b5659a91397a4f1"
+    }
+  ],
+  "isolated_candidate": true,
+  "production_adopted": false
+}

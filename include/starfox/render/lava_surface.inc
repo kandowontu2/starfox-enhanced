@@ -107,3 +107,4 @@ LAVA_FN LavaColour lava_shade(LavaSample s,float vx,float vy,float vz) {
     return c;
 }
 #endif
+

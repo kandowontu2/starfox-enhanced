@@ -1,3 +1,0 @@
-#define STARFOX_SOURCE_ADMISSION_DIAGNOSTICS 1
-#define feature_publish_main feature_publish_diagnostics_main
-#include "reflection_source_publish.hlsl"
