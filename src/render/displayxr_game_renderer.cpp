@@ -538,7 +538,7 @@ DisplayXrSubmission DisplayXrGameRenderer::submit(std::shared_ptr<const Calibrat
         || !camera_response_world_transform({frame->settings.camera_response_pose[0],frame->settings.camera_response_pose[1],frame->settings.camera_response_pose[2]}))
         {status_="Leia game renderer is not ready for a new source frame";return DisplayXrSubmission::failed;}
     SDL_GPUCommandBuffer* command{};
-    bool native_encoded=false;
+    bool native_encoded=false,scene_segments_submitted=false;
     if(state_->liquid_diagnostics) *state_->liquid_diagnostics={};
     try {
         const auto check=[](bool ok,const char* error) {if(!ok) throw std::runtime_error(error);};
@@ -1019,8 +1019,26 @@ DisplayXrSubmission DisplayXrGameRenderer::submit(std::shared_ptr<const Calibrat
                                 auto event=input;event.eye=observing.eye;event.sample=observing.sample;
                                 observing.callback(observing.context,event);
                             };
-                            check(owner.enqueue_source_frame(command,nullptr,nullptr,
+                            struct Segment {State& state;SDL_GPUCommandBuffer*& command;bool& submitted;};
+                            Segment segment{*state_,command,scene_segments_submitted};
+                            const auto boundary=[](void* context,void*& next) {
+                                auto& segment=*static_cast<Segment*>(context);
+                                check(next==segment.command,"Reflection segment lost its scene command owner");
+                                auto* completed=segment.command;segment.command=nullptr;next=nullptr;
+                                // Submit consumes the command even on failure.
+                                // No per-segment wait or CPU feedback: the final
+                                // ordered scene fence protects every segment.
+                                segment.submitted=true;
+                                if(!SDL_SubmitGPUCommandBuffer(completed)) {
+                                    segment.state.presenter.retain_scene_submission(nullptr);return false;
+                                }
+                                segment.command=SDL_AcquireGPUCommandBuffer(segment.state.device);
+                                next=segment.command;return next!=nullptr;
+                            };
+                            void* next=command;
+                            check(owner.enqueue_source_frame_segmented(next,boundary,&segment,nullptr,nullptr,
                                 observing.callback?+forward:nullptr,observing.callback?&observing:nullptr),owner.status().c_str());
+                            check(next==command,"Reflection continuation lost the final scene command");
                         }
                         reflection=owner.output();
                     } else if(secondary_history) {
@@ -1194,7 +1212,7 @@ DisplayXrSubmission DisplayXrGameRenderer::submit(std::shared_ptr<const Calibrat
         } else if(command) SDL_CancelGPUCommandBuffer(command);
         state_->presentation_failed=true;state_->history_accepted=false;
         state_->settle_history(false);
-        if(native_encoded) {
+        if(native_encoded || scene_segments_submitted) {
             // Native imports/copies may have submitted even when a later trace
             // or composition failed. Fence the ordered queue BEFORE cancellation
             // so cleanup retains both source images and all native producers.

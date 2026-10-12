@@ -17,6 +17,13 @@ int main() try {
         && History::working_bound_fits(gib,gib,true) && !History::working_bound_fits(0,0,false)
         && !History::working_bound_fits(1,UINT64_MAX,false),"Reflection working bound overflowed retained banks or rejected exact same-bank reuse");
     History forecast;
+    void* absent_command=nullptr;bool boundary_called=false;
+    const auto boundary=[](void* context,void*&) { *static_cast<bool*>(context)=true;return true; };
+    check(History::source_batches_per_submission==32
+        && !forecast.enqueue_source_frame_segmented(absent_command,boundary,&boundary_called)
+        && !boundary_called && !absent_command && !forecast.working_image_bytes()
+        && !forecast.enqueue_source_frame_segmented(absent_command,nullptr,nullptr),
+        "Cold segmented source stream submitted, allocated or lost its bounded queue owner");
     bool stage_called=false;
     const auto stage_observer=[](void* context,const render::ReflectionSourceStageEvent&) {
         *static_cast<bool*>(context)=true;

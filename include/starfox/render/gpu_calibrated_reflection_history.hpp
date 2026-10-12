@@ -176,6 +176,16 @@ public:
     // path, with no query allocation, marker dispatch, readback or extra wait.
     bool enqueue_source_frame(void* command,SourceBatchObserver observer=nullptr,void* context=nullptr,
         ReflectionSourceStageObserver stages=nullptr,void* stage_context=nullptr);
+    // The owning renderer may submit a completed segment on the SAME ordered
+    // device queue and replace command. Each segment contains whole batches;
+    // ALL records/lobes are still processed and no image/history is committed
+    // until the final presentation fence. The callback must neither wait nor
+    // read/upload optical inputs, and must leave command null on failure.
+    using SourceCommandBoundary=bool(*)(void* context,void*& command);
+    static constexpr unsigned source_batches_per_submission=32;
+    bool enqueue_source_frame_segmented(void*& command,SourceCommandBoundary boundary,void* boundary_context,
+        SourceBatchObserver observer=nullptr,void* context=nullptr,
+        ReflectionSourceStageObserver stages=nullptr,void* stage_context=nullptr);
     // Complete-frame forecast also reserves the lazy GPU-only optical work map
     // and indirect arguments. Generic manual publication needs neither.
     std::optional<std::uint64_t> source_frame_allocation_bytes() const noexcept;
@@ -187,6 +197,8 @@ public:
     void release_device() noexcept;
     const std::string& status() const noexcept;
 private:
+    bool enqueue_source_frame_impl(void*& command,SourceCommandBoundary boundary,void* boundary_context,
+        SourceBatchObserver observer,void* context,ReflectionSourceStageObserver stages,void* stage_context);
     bool enqueue_source_root_stage(void* command,bool whole_cover);
     bool enqueue_source_guard_stage(void* command,unsigned stage);
     struct State;std::unique_ptr<State> state_;

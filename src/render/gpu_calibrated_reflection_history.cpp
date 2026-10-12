@@ -1098,6 +1098,15 @@ bool GpuCalibratedReflectionHistory::enqueue_source_publication(void* command) {
 }
 bool GpuCalibratedReflectionHistory::enqueue_source_frame(void* command,SourceBatchObserver observer,void* context,
     ReflectionSourceStageObserver stages,void* stage_context) {
+    return enqueue_source_frame_impl(command,nullptr,nullptr,observer,context,stages,stage_context);
+}
+bool GpuCalibratedReflectionHistory::enqueue_source_frame_segmented(void*& command,SourceCommandBoundary boundary,
+    void* boundary_context,SourceBatchObserver observer,void* context,ReflectionSourceStageObserver stages,void* stage_context) {
+    if(!boundary) {if(state_)state_->status="Segmented source stream requires its ordered queue owner";return false;}
+    return enqueue_source_frame_impl(command,boundary,boundary_context,observer,context,stages,stage_context);
+}
+bool GpuCalibratedReflectionHistory::enqueue_source_frame_impl(void*& command,SourceCommandBoundary boundary,
+    void* boundary_context,SourceBatchObserver observer,void* context,ReflectionSourceStageObserver stages,void* stage_context) {
     if(!state_)return false;
     auto& s=*state_;
     if((!observer && context) || (!stages && stage_context) || !command || command!=s.pending_command || !s.pending || s.pending_reset
@@ -1119,12 +1128,14 @@ bool GpuCalibratedReflectionHistory::enqueue_source_frame(void* command,SourceBa
     s.source_stream_encoding=true;
     struct StreamScope {bool& active;~StreamScope(){active=false;}} scope{s.source_stream_encoding};
     const auto total=std::uint64_t(s.candidate.width)*s.candidate.height*source.layout.lobes;
+    unsigned segment=0,batches=0;void* predecessor=nullptr;
     for(std::uint64_t first=0;first<total;) {
         const auto count=std::uint32_t(std::min<std::uint64_t>(GpuReflectionSourceQueries::capacity,total-first));
         const auto mark=[&](ReflectionSourceStage stage) {
             if(!stages)return true;
             try {
                 ReflectionSourceStageEvent event{s.device,command,first,total,count,0,0,stage};
+                event.segment=segment;event.command_predecessor=predecessor;
                 if(stage==ReflectionSourceStage::composition) {
                     const auto& composed=s.source_composition;
                     const auto& queries=composed.colour.guide.folds.witness.hull.optical.queries;
@@ -1152,6 +1163,18 @@ bool GpuCalibratedReflectionHistory::enqueue_source_frame(void* command,SourceBa
         }
         if(!enqueue_source_publication(command) || !mark(ReflectionSourceStage::publication))return false;
         first+=count;
+        if(boundary && ++batches==source_batches_per_submission && first<total) {
+            // Every stage, diagnostic capture and publication in this batch
+            // has ended. Only now may the queue owner submit the command. The
+            // next batch rebinds every resource; accepted banks stay untouched.
+            predecessor=command;
+            try {
+                if(!boundary(boundary_context,command) || !command) {
+                    s.status="Ordered reflection segment submission failed; no partial image accepted";return false;
+                }
+            } catch(const std::exception& e) {s.status=e.what();return false;}
+            s.pending_command=command;++segment;batches=0;
+        }
     }
     return source_publication_complete();
 }

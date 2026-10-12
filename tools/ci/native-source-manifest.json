@@ -941,8 +941,8 @@
     },
     {
       "path": "include/starfox/render/gpu_calibrated_reflection_history.hpp",
-      "bytes": 12751,
-      "sha256": "7351573ca74725a44c909d11dd98d1fa9d04a7b4a2b4ac4292ecc856f138d465"
+      "bytes": 13750,
+      "sha256": "347c8357b2cba538587f2904eea3e4d869ea669ae482964a64dbc2a891340909"
     },
     {
       "path": "include/starfox/render/gpu_calibrated_scene_fx.hpp",
@@ -1246,8 +1246,8 @@
     },
     {
       "path": "include/starfox/render/reflection_source_diagnostics.hpp",
-      "bytes": 1062,
-      "sha256": "36d80d2ac759d2dec83da82cd460997ab2468c3a19a59bedf2d375658b88336a"
+      "bytes": 1354,
+      "sha256": "b17346b77e4536ab44dc6f8554ec146943d72cffa6a37696122b7e9b9d272568"
     },
     {
       "path": "include/starfox/render/reflection_source_index.hpp",
@@ -2556,8 +2556,8 @@
     },
     {
       "path": "src/render/displayxr_game_renderer.cpp",
-      "bytes": 90858,
-      "sha256": "bfb2cdcd7606ffe6ddad1838536a7dd7dd4c70ef28b9ca193fffaa47897fca8a"
+      "bytes": 92382,
+      "sha256": "b45fc7f003ca81765cc487ee4b9e236a5c28e55f7436bf3d95a4c1130623b483"
     },
     {
       "path": "src/render/displayxr_motion_blur.inc",
@@ -2691,8 +2691,8 @@
     },
     {
       "path": "src/render/gpu_calibrated_reflection_history.cpp",
-      "bytes": 102352,
-      "sha256": "ad3ccc29e9dd6d6f3a5baca969f8eb575919c692895d54cebe1d6f5ba48eccf9"
+      "bytes": 104031,
+      "sha256": "d2a395c38cc7a32536fbad82e14ba945171ea46cb28355f4c9f507c20fbb60e3"
     },
     {
       "path": "src/render/gpu_calibrated_scene_fx.cpp",
@@ -4766,8 +4766,8 @@
     },
     {
       "path": "tests/calibrated_reflection_history_tests.cpp",
-      "bytes": 47269,
-      "sha256": "7f58488b25e9a1ad6b3483cbebf3254236c18ce6c5c9671946b83c7ea3ca0fb7"
+      "bytes": 47839,
+      "sha256": "f87f1b282bdcb643cd03309908019261a1c02da7cd8ac4d28013f58caf33e855"
     },
     {
       "path": "tests/calibrated_reflection_owner_checks.inc",
@@ -5226,13 +5226,13 @@
     },
     {
       "path": "tests/reflection_source_stage_timing_tests.cpp",
-      "bytes": 5226,
-      "sha256": "d71f5cfeed1617becb6cbdcf3bd1d702ea66f6d8ebf4f93287d043cac3652dee"
+      "bytes": 6521,
+      "sha256": "939a549f3207c187d1fcf5756e1615f89c7553903c29cdc3d5a0ff08d13de9fb"
     },
     {
       "path": "tests/reflection_source_stage_timings.hpp",
-      "bytes": 7610,
-      "sha256": "90a258b80e6a65b8b5c11cd7727c0b95dc0424e2325867ea96777ed95144db71"
+      "bytes": 8341,
+      "sha256": "284d36d9e3d183bcc4de204d6715871b57994a3437fa4fb836b9e52a3e8735dc"
     },
     {
       "path": "tests/render_scale_policy_tests.cpp",

@@ -19,6 +19,11 @@ struct ReflectionSourceStageEvent {
     void* queries{};
     void* proofs{};
     std::uint32_t query_stride{},proof_stride{},proof_bytes{};
+    // Ordered submission boundaries occur only BETWEEN complete batches.
+    // A new segment must name its predecessor; stages within a batch still
+    // belong to one command. This is scheduling metadata, never optical input.
+    std::uint32_t segment{};
+    void* command_predecessor{};
 };
 using ReflectionSourceStageObserver=void(*)(void*,const ReflectionSourceStageEvent&);
 } // namespace starfox::render

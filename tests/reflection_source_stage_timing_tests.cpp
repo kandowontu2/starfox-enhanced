@@ -40,7 +40,7 @@ template<class F> void rejects(F&& action,const char* message) {
 }
 }
 int main() try {
-    int device{},command{};
+    int device{},command{};std::array<int,72> segment_commands{};
     ReflectionSourceStageTimings disabled(false,lookup);ReflectionSourceStageTimings::observe(&disabled,{});
     require(!created && !written && !read_count && !destroyed,"Disabled diagnostics allocated/encoded/read GPU work");
     ReflectionSourceStageTimings timing(true,lookup);
@@ -50,6 +50,24 @@ int main() try {
     require(!created,"Malformed initial stream allocated timestamps");
     for(unsigned eye=0;eye<2;++eye)for(std::uint64_t first=0;first<event.total;first+=64) {
         event.eye=eye;event.first=first;
+        if(!first) {event.command=&command;event.segment=0;event.command_predecessor=nullptr;}
+        else if((first/64)%32==0) {
+            auto previous=event.command;
+            event.command=&segment_commands[eye*36+unsigned(first/64)/32];
+            event.stage=ReflectionSourceStage::begin;
+            rejects([&]{ReflectionSourceStageTimings::observe(&timing,event);},
+                "Command changed without a segment transition");
+            ++event.segment;event.command_predecessor=previous;
+            auto malformed=event;malformed.command_predecessor=nullptr;
+            rejects([&]{ReflectionSourceStageTimings::observe(&timing,malformed);},
+                "Segment continuation accepted the wrong command predecessor");
+            malformed=event;++malformed.segment;
+            rejects([&]{ReflectionSourceStageTimings::observe(&timing,malformed);},
+                "Segment sequence skipped a submission boundary");
+            malformed=event;malformed.stage=ReflectionSourceStage::queries;
+            rejects([&]{ReflectionSourceStageTimings::observe(&timing,malformed);},
+                "Segment changed inside an incomplete batch");
+        }
         for(unsigned stage=0;stage<10;++stage) {
             event.stage=static_cast<ReflectionSourceStage>(stage);
             ReflectionSourceStageTimings::observe(&timing,event);
@@ -65,6 +83,7 @@ int main() try {
     // Reuse only AFTER retirement; an unfinished/device-lost command must not
     // read unwritten/unavailable GPU timing data even when cleanup is safe.
     fence_retired=false;event.eye=0;event.first=0;event.total=153;event.count=64;event.stage=ReflectionSourceStage::begin;
+    event.command=&command;event.segment=0;event.command_predecessor=nullptr;
     ReflectionSourceStageTimings::observe(&timing,event);
     require(created==7 && destroyed==6,"Fresh frame did not receive a distinct query context");
     fence_retired=true;timing.retired(output,"mock-device-lost",false);

@@ -68,8 +68,8 @@ public:
 private:
     struct Chunk {const StarfoxSdlD3D12TimestampsV1* bridge{};void* context{};std::uint64_t hz{};unsigned used{};};
     struct Group {
-        void* command{};void* device{};std::uint64_t total{};
-        unsigned batches{},completed{},next_stage{};std::vector<unsigned> chunks;
+        void* command{};void* predecessor{};void* device{};std::uint64_t total{};
+        unsigned batches{},completed{},next_stage{},segment{};std::vector<unsigned> chunks;
         std::array<double,9> cpu_ms{};std::chrono::steady_clock::time_point previous;
     };
     bool enabled_{};Lookup lookup_{};
@@ -88,7 +88,8 @@ private:
         const auto now=std::chrono::steady_clock::now();const unsigned stage=unsigned(event.stage),batch=unsigned(event.first/64);
         require(stage<stages,"Invalid source timestamp stage");auto& group=groups_[event.eye*8+event.sample];
         if(!group.total) {
-            require(!stage && !batch,"Source timestamp stream did not start at record zero");
+            require(!stage && !batch && !event.segment && !event.command_predecessor,
+                "Source timestamp stream did not start at record zero");
             group.command=event.command;group.device=event.device;group.total=event.total;
             group.batches=unsigned((event.total+63)/64);
             const unsigned needed=(group.batches+batches_per_chunk-1)/batches_per_chunk;
@@ -104,7 +105,16 @@ private:
                 group.chunks.push_back(unsigned(chunks_.size()));chunks_.push_back({bridge,context,hz,0});
             }
         }
-        require(group.command==event.command && group.device==event.device && group.total==event.total
+        if(event.segment!=group.segment) {
+            require(!stage && batch && group.next_stage==0 && group.completed==batch
+                && event.segment==group.segment+1 && event.command_predecessor==group.command,
+                "Source timestamp command changed outside an ordered whole-batch boundary");
+            require(group.device==event.device && group.total==event.total,
+                "Source timestamp segment changed its device or total");
+            group.predecessor=group.command;group.command=event.command;group.segment=event.segment;
+        }
+        require(group.command==event.command && group.predecessor==event.command_predecessor
+            && group.device==event.device && group.total==event.total
             && group.completed==batch && group.next_stage==stage,"Source timestamp batch/stage/order changed while pending");
         auto& chunk=chunks_[group.chunks[batch/batches_per_chunk]];
         const unsigned local=batch%batches_per_chunk,query=local*stages+stage;
