@@ -272,7 +272,7 @@ public:
     // An already decoded cartridge tile row: ink zero is transparent, but a
     // nonzero index whose CGRAM colour is black remains an ordinary write.
     // Clip once and retain the same ordered point commands/scaled writes as
-    // set(). Native PPU rasters may track coverage and/or tags independently.
+    // set(). Native PPU rasters have coverage + tags and no dither metadata.
     void set_indexed_row(std::int32_t x, std::int32_t y,
         std::span<const std::uint8_t> colours) noexcept {
         if (y < 0 || std::uint32_t(y) >= height() || colours.empty()) return;
@@ -282,30 +282,15 @@ public:
         const auto begin_x = std::int32_t(std::int64_t(x) + first);
         const auto count = std::size_t(last - first);
         const auto* source = colours.data() + first;
-        if (!commands_ && draw_scale_ == 1U && dither_pairs_.empty()) {
+        if (!commands_ && draw_scale_ == 1U && track_coverage_
+            && layer_tags_enabled_ && dither_pairs_.empty()) {
             const auto offset = std::size_t(y) * stored_width_ + unsigned(begin_x);
             auto* destination = pixels_.data() + offset;
+            auto* coverage = coverage_.data() + offset;
+            auto* tags = tags_.data() + offset;
             const auto tag = write_tag(PixelLayer::two_d);
-            // The 3DS mono foreground intentionally omits filter tags. It
-            // must still get the native row path, without repeating set()'s
-            // bounds/scale checks for every nonzero tile pixel.
-            if (track_coverage_) {
-                auto* coverage = coverage_.data() + offset;
-                if (layer_tags_enabled_) {
-                    auto* tags = tags_.data() + offset;
-                    for (std::size_t i = 0; i < count; ++i) if (source[i] != 0U) {
-                        destination[i] = source[i]; coverage[i] = 1; tags[i] = tag;
-                    }
-                } else for (std::size_t i = 0; i < count; ++i) if (source[i] != 0U) {
-                    destination[i] = source[i]; coverage[i] = 1;
-                }
-            } else if (layer_tags_enabled_) {
-                auto* tags = tags_.data() + offset;
-                for (std::size_t i = 0; i < count; ++i) if (source[i] != 0U) {
-                    destination[i] = source[i]; tags[i] = tag;
-                }
-            } else for (std::size_t i = 0; i < count; ++i) if (source[i] != 0U) {
-                destination[i] = source[i];
+            for (std::size_t i = 0; i < count; ++i) if (source[i] != 0U) {
+                destination[i] = source[i]; coverage[i] = 1; tags[i] = tag;
             }
             return;
         }

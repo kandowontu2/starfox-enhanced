@@ -66,8 +66,8 @@ still required.
 ## Current build and validation
 
 The current frame-pipeline candidate is source
-`5256cc508171510680421d7ef7d3eebf520693af`, from
-[ARM run 38431847227](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38431847227).
+`502788c54d311f3d7107b71ae70cfa2cf47d98bf`, from
+[ARM run 38435018896](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38435018896).
 It uses the imported Starwing mono renderer for ordinary mono scenes, retains
 the exact native path for cartridge window/colour effects, and removes gameplay
 profile SD writes. The final SPC block overlaps presentation and independent
@@ -156,6 +156,26 @@ poses and window-end labels differ, and unrelated concurrent work remains.
 There are no replay errors, fallback or retry calls. Planned DSP shutdown
 and profile flush occur; guest GSP retirement remains unverified and the owned
 emulator was stopped afterward. Stable mono 60 FPS is still an open gate.
+
+The next validated source adds a bounded draw-local BG1 row cache and bulk
+opaque-run world composition. 18,552 independent ordered-point comparisons
+cover clipping, scaling, transparency, tags, coverage, dither and in-place
+shifts. The background's pinned pre-optimization trace and 192 cached-versus-
+point cases also pass. Original/EX retain their prior 240-phase frame digests
+and 80 audio blocks. All 52 asset-free CI tests and the ARM/shader/stack/package
+gates pass. Two appended finishing subphases retain the fixed 512-window,
+512-KiB diagnostic cap and shutdown-only SD serialization.
+
+The same accuracy-enabled 300%-clock replay measures background-3 finishing
+at 5.378 ms/call and background-51 at 5.201, versus 5.499/5.160 previously.
+This is a small change, not a major native gain. The new child phases place
+about 3.45 ms/call in the EX overlay and 1.69--1.86 in final canvas work.
+The subsequent tag-free row experiment (`4c308b7f`, ARM run 38437029767) passes
+all correctness/native gates but increases overlay timing to 3.677 ms/call.
+That specialization is being reverted. An opacity-mask follow-up is under
+host validation and is not yet a validated native candidate. The sensitivity,
+window/count/concurrent-load and unverified guest-exit limitations above still
+apply. No new tester package, release or 60-FPS acceptance is implied.
 
 The current candidate removes the EX BG1 staging image and applies the same
 zero-ink/CGRAM-black transparency directly during decoding. The 57,344-byte

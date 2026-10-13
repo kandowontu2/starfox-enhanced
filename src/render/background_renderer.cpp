@@ -282,17 +282,18 @@ std::array<std::uint8_t, 16> decoded_tile_row(
 // A draw-local cache: no VRAM/CGRAM revision can leak into the next draw, and
 // full keys disambiguate direct-map collisions, palette and flip variants.
 // Repeated blank/text tiles are common in the EX foreground overlay. Keep
-// this bounded (648 bytes), rather than allocating a 64-KiB character image.
+// this bounded (712 bytes), rather than allocating a 64-KiB character image.
 struct TileRowCache {
     std::array<std::uint32_t, 32> keys{};
     std::array<std::array<std::uint8_t, 16>, 32> rows{};
+    std::array<std::uint16_t, 32> opaque{};
     std::uint32_t valid{};
 
     template<unsigned bits>
     const std::array<std::uint8_t, 16>& get(
         const simulation::SnesPpuState& ppu, std::uint16_t character_base,
         std::uint16_t tile, int source_y, bool large,
-        bool transparent_black) noexcept {
+        bool transparent_black, std::uint16_t& opacity) noexcept {
         const auto key = (std::uint32_t(tile) << 4U)
             | (unsigned(source_y) & 15U) | (bits << 20U)
             | (unsigned(large) << 24U);
@@ -303,13 +304,18 @@ struct TileRowCache {
             row = decoded_tile_row<bits>(ppu, character_base, tile, source_y, large);
             if (transparent_black) for (auto& ink : row)
                 if ((ppu.cgram[ink] & 32767U) == 0U) ink = 0;
+            auto mask_bits = std::uint16_t{};
+            for (unsigned x = 0; x < row.size(); ++x)
+                if (row[x]) mask_bits |= std::uint16_t(1U << x);
+            opaque[slot] = mask_bits;
             keys[slot] = key;
             valid |= mask;
         }
+        opacity = opaque[slot];
         return rows[slot];
     }
 };
-static_assert(sizeof(TileRowCache) <= 648U);
+static_assert(sizeof(TileRowCache) <= 712U);
 
 // Ordinary rows keep one tilemap word, priority, palette and set of bitplanes
 // for all 8/16 texels. Mosaic, unique artwork, rolled offsets and tunnel edge
@@ -332,9 +338,14 @@ void draw_tile_scanline(const simulation::SnesPpuState& ppu, Framebuffer& target
         const auto tile = vram_word(ppu, unsigned(screen_base) + entry);
         if (selected_priority(tile, priority)) {
             if (cache) {
+                std::uint16_t opacity;
                 const auto& row = cache->get<bits>(ppu, character_base, tile,
-                    source_y, large, transparent_black);
-                target.set_indexed_row(int(x), int(screen_y), std::span(row).subspan(inset, count));
+                    source_y, large, transparent_black, opacity);
+                // Transparent tile ink never writes pixels, coverage, tags,
+                // dither or commands. Avoid entering the row writer at all
+                // for empty clipped runs (including CGRAM-black EX ink).
+                if ((unsigned(opacity) >> inset) & ((1U << count) - 1U))
+                    target.set_indexed_row(int(x), int(screen_y), std::span(row).subspan(inset, count));
             } else {
                 auto row = decoded_tile_row<bits>(ppu, character_base, tile, source_y, large);
                 if (transparent_black) for (auto& ink : row)
