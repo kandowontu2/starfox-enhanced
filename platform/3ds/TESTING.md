@@ -19,7 +19,7 @@ changing the one-eye slider-off/New 2DS XL path.
 
 1. The latest source-only candidate is the experimental
    `StarFoxEnhanced-3ds-test.zip` artifact from
-   [ARM run 38461773934](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38461773934).
+   [ARM run 38464851895](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38464851895).
    R376 remains the hardware-tested baseline, not the latest source candidate.
    Extract the ZIP to the SD card's root, keeping its folder structure. When
    updating an earlier build, replace only the `.3dsx` and `.smdh`; preserve the existing
@@ -345,8 +345,27 @@ failed-call recovery. Eight real Original/EX stage probes match the defensive
 path after all 628 sampled named transfer calls, exercising 564 image reuses;
 complete CPU/VM/pool states, returned registers and instruction counts match.
 The prior 240-phase pixel digests and 80 complete audio blocks remain intact.
-ARM build and native timing for this follow-up remain pending; this is not a
-claim of stable New-model 60 FPS or a request for an incremental hardware test.
+The follow-up (`64fd561b87`, ARM run 38464851895) passes all 52 CI tests and
+native ARM/shader/stack/package checks. Seven actual Original/EX state and
+serial/parallel complete-audio pipeline checks also pass locally (173.97 s,
+with the eight stage probes running concurrently).
+
+The exact image's accuracy-enabled Vulkan/300%-clock replay records logic
+means of 9.122/10.982 ms in backgrounds 3/51. Successful whole-frame returns
+average 58.260/58.502 per second, with minimum adjacent same-label window
+rates of 49.057/52.530. Poses/counts and windows differ and unrelated concurrent
+work is retained. This is a small measured gain, not stable physical New-model
+60 FPS. The 179/245-ms CPU-call maxima occur in scene-boundary windows, excluded
+from those adjacent rates; they do not explain the ordinary slow windows.
+Those ordinary windows still show source advancement, model/layer work and
+audio on the frame path. Investigate that scheduling/critical path next rather
+than treating a transition maximum as steady gameplay cost. Parent timings
+include children and must not be summed as independent frame costs.
+
+No retry/fallback/replay errors occur. Planned DSP shutdown/profile flush
+precede the verified forced owned-host stop; guest GSP retirement is still
+unverified. CPU configuration returns to 100%. This does not request an
+incremental hardware test or claim completed mono acceptance.
 
 The earlier direct-overlay candidate removes the EX BG1 staging image and applies the same
 zero-ink/CGRAM-black transparency directly during decoding. The 57,344-byte
