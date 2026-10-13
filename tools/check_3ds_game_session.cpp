@@ -135,7 +135,11 @@ void audio_render_overlap(const assets::RomImage& rom,const assets::SymbolMap& s
 #endif
     for(bool idle_overlap:{false,true}) for(const auto* map:{"BOOT","LEVEL1_1"}) {
         std::vector<std::int16_t> reference_pcm,overlapped_pcm;
-        CheckedSession reference(rom,symbols,[&](auto pcm) {reference_pcm.insert(reference_pcm.end(),pcm.begin(),pcm.end());},map);
+        // The independent synchronous oracle must not borrow the production
+        // worker: the tested owner can retain its packet even when rendering
+        // is skipped. Sharing that worker serializes unrelated owners or
+        // rejects the oracle's next packet before the tested owner can join.
+        GameSession reference(rom,symbols,[&](auto pcm) {reference_pcm.insert(reference_pcm.end(),pcm.begin(),pcm.end());},map);
         CheckedSession overlapped(rom,symbols,[&](auto pcm) {overlapped_pcm.insert(overlapped_pcm.end(),pcm.begin(),pcm.end());},map,{},options);
         unsigned deferred{},work_calls{};
         for(unsigned frame=0;frame<180;++frame) {
