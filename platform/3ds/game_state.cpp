@@ -6,11 +6,15 @@
 namespace starfox::platform::nintendo_3ds {
 namespace {
 void validate(const GameStateData& data,std::uint32_t rom_crc) {
-    if(data.audio_phase>2 || data.pending_audio.size()>maximum_pending_audio_writes
-        || data.scene_revision==std::numeric_limits<std::uint64_t>::max()
-        || (data.grid.initialized && data.grid.number>data.scene_revision)
-        || data.game.size()>maximum_game_state_bytes || data.audio.size()>maximum_game_state_bytes)
-        throw std::runtime_error("Invalid or oversized native game timeline");
+    if(data.audio_phase>2) throw std::runtime_error("Invalid native partial audio phase");
+    if(data.pending_audio.size()>maximum_pending_audio_writes)
+        throw std::runtime_error("Oversized pending native audio queue");
+    if(data.scene_revision==std::numeric_limits<std::uint64_t>::max())
+        throw std::runtime_error("Invalid native scene revision");
+    if(data.grid.initialized && data.grid.number>data.scene_revision)
+        throw std::runtime_error("Native grid history is ahead of the scene revision");
+    if(data.game.size()>maximum_game_state_bytes || data.audio.size()>maximum_game_state_bytes)
+        throw std::runtime_error("Oversized native VM/SPC state");
     render::GridLineHistory grid;grid.restore(data.grid);
     for(const auto& write:data.pending_audio) if(write.port>3)
         throw std::runtime_error("Invalid pending native APU port");
@@ -31,9 +35,17 @@ std::vector<std::uint8_t> encode_game_state(const GameStateData& data,std::uint3
 }
 GameStateData decode_game_state(std::span<const std::uint8_t> bytes,std::uint32_t rom_crc) {
     if(bytes.size()>maximum_game_state_bytes) throw std::runtime_error("Native save state exceeds 4 MiB limit");
-    state::Reader reader(state::unpack(bytes,game_state_schema,rom_crc));GameStateData result;
+    const auto payload=state::unpack(bytes,game_state_schema,rom_crc);
+    state::Reader reader(payload);GameStateData result;
     std::uint32_t count{};reader(result.game,result.audio,result.audio_phase,count);
     if(count>maximum_pending_audio_writes) throw std::runtime_error("Oversized pending native audio queue");
+    // Three uint32 fields (two component lengths + count), one audio phase,
+    // and the unchanged 30-byte grid/revision tail. Check the actual packet
+    // before allocating: a corrupt small file cannot claim a huge queue.
+    constexpr std::size_t header_bytes=13,tail_bytes=30;
+    const auto fixed=header_bytes+tail_bytes+result.game.size()+result.audio.size();
+    if(payload.size()<fixed || std::size_t(count)*pending_audio_wire_bytes!=payload.size()-fixed)
+        throw std::runtime_error("Invalid pending native audio record count");
     result.pending_audio.resize(count);
     for(auto& write:result.pending_audio) reader(write.port,write.value,write.clock_offset);
     reader(result.grid.initialized,result.grid.committed,result.grid.number,result.grid.previous,result.grid.start,

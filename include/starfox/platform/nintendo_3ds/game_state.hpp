@@ -18,7 +18,12 @@ struct GameStateData {
 };
 inline constexpr std::uint32_t game_state_schema=0x33445310U;
 inline constexpr std::size_t maximum_game_state_bytes=4U*1024U*1024U;
-inline constexpr std::size_t maximum_pending_audio_writes=4096;
+// A source SPC bank transfer can legitimately queue tens of thousands of
+// timestamped port writes before the next 20-Hz audio boundary. Bound their
+// six-byte wire records by the existing whole-state cap, not an arbitrary
+// 4096-command limit that rejects valid partial-phase saves.
+inline constexpr std::size_t pending_audio_wire_bytes=6;
+inline constexpr std::size_t maximum_pending_audio_writes=maximum_game_state_bytes/pending_audio_wire_bytes;
 [[nodiscard]] std::vector<std::uint8_t> encode_game_state(const GameStateData&,std::uint32_t rom_crc);
 [[nodiscard]] GameStateData decode_game_state(std::span<const std::uint8_t>,std::uint32_t rom_crc);
 } // namespace starfox::platform::nintendo_3ds
