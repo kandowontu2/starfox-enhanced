@@ -337,6 +337,17 @@ configuration returns to 100%. The next measured work is the repeated palette,
 sprite and related general-routine synchronization. No incremental hardware
 request or release is implied.
 
+The transfer-chain follow-up also borrows canonical imported objects for the
+consecutive palette, EX colour-cycle, sprite and window-wipe routines after
+DOSOUNDS. It does not skip source routines, palette cadence, native imports or
+audio acknowledgements. Independent bytewise tests cover general calls and
+failed-call recovery. Eight real Original/EX stage probes match the defensive
+path after all 628 sampled named transfer calls, exercising 564 image reuses;
+complete CPU/VM/pool states, returned registers and instruction counts match.
+The prior 240-phase pixel digests and 80 complete audio blocks remain intact.
+ARM build and native timing for this follow-up remain pending; this is not a
+claim of stable New-model 60 FPS or a request for an incremental hardware test.
+
 The earlier direct-overlay candidate removes the EX BG1 staging image and applies the same
 zero-ink/CGRAM-black transparency directly during decoding. The 57,344-byte
 pixel allocation and full-image rescan are gone. All 384 synthetic comparisons

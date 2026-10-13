@@ -253,6 +253,15 @@ private:
         std::uint32_t address, ObjectHandle object, std::uint8_t data_bank,
         std::uint8_t status, std::size_t instruction_limit,
         bool reuse_imported_image);
+    // GameSimulation's consecutive transfer routines use the same guarded
+    // import lease as strategies. Every routine still imports its result.
+    std::size_t call_native_routine_reusing_import(
+        std::uint32_t address, Wdc65816Registers& registers,
+        std::size_t instruction_limit, bool service_transfer_flag);
+    std::size_t call_native_routine_impl(
+        std::uint32_t address, Wdc65816Registers& registers,
+        std::size_t instruction_limit, bool service_transfer_flag,
+        bool reuse_imported_image);
     void invalidate_object_image_write(std::uint32_t address) noexcept;
     void sync_objects_to_cpu(bool reuse_imported_image = false);
     void sync_objects_from_cpu();

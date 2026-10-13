@@ -203,7 +203,7 @@ remain required.
 
 The same reference's `strategy_scheduler.cpp` retains the just-imported native
 image for consecutive strategy calls inside one tick. Our adaptation limits
-that path to the scheduler's private bridge. Standalone/general calls retain
+that path to the scheduler's private bridge. Standalone calls retain
 their full defensive export, and every completed routine still imports its
 complete native result before the scheduler selects the next object.
 
@@ -223,3 +223,24 @@ eight sampled strategy ticks in each of eight Original/EX stages. All 64 paired
 ticks match while exercising 964 complete-image reuses. Their 240-phase image
 digests and 80 complete audio blocks remain unchanged. This establishes sampled
 behavioral equivalence, not sustained native 60 FPS or full hardware acceptance.
+
+## Consecutive transfer-call follow-up
+
+The same pinned reference's `game_simulation.cpp` avoids redundant object
+bridges for palette fades and window wipes. Our transfer chain instead borrows
+the existing canonical import after DOSOUNDS, with the same complete host,
+list, native-pointer/link and mapped-write guards as the strategy chain.
+Palette routines, EX colour cycles, sprite building and window wipes still
+execute in their original order and cadence. Every completed call imports its
+full result; public/general callers outside the chain remain defensive. The
+DOSOUNDS, dialogue, collision and audio acknowledgement paths are unchanged.
+
+The bytewise oracle also compares 128 actual general interpreter calls per
+layout, including returned registers, PPU/APU writes, host/native edits, slot
+reuse, restores, transfer servicing on/off and failed-call recovery. Eight
+real Original/EX stage probes compare 628 named transfer calls against full
+synchronization after each call, with 564 imported-image reuses. Complete
+CPU/VM/pool states, registers and instruction counts match. All eight prior
+240-phase image digests and 80 complete audio blocks remain unchanged.
+These correctness results do not establish sustained native mono 60 FPS;
+the exact ARM image still needs timing and full hardware acceptance.

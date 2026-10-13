@@ -7,11 +7,16 @@
 #include <memory>
 #include <stdexcept>
 #include <string_view>
+#include <tuple>
 using namespace starfox;
 using namespace platform::nintendo_3ds;
 namespace starfox::simulation {
 struct ObjectBridgeTestAccess {
     static auto image_hits(const MapVm& map) {return map.object_bridge_->image_hits;}
+    static auto transfer(MapVm& map, std::uint32_t address,
+        Wdc65816Registers& registers) {
+        return map.call_native_routine_reusing_import(address, registers, 5'000'000, true);
+    }
 };
 }
 int main(int argc,char** argv) try {
@@ -20,6 +25,15 @@ int main(int argc,char** argv) try {
     std::uint64_t blocks=0;
     GameSession session(assets::RomImage::load(argv[1]),assets::SymbolMap::load(argv[2]),
         [&](auto){++blocks;},argv[3]);
+    const auto symbol = [&](const char* name, bool rom) {
+        for (const auto address : session.symbols().find(name)) {
+            const auto bank = address >> 16U;
+            if (rom ? (address & 0xffffU) >= 0x8000U && bank < 0x7eU
+                    : bank == 0U || bank == 0x70U || bank == 0x7eU || bank == 0x7fU)
+                return address;
+        }
+        throw std::runtime_error(std::string{"Missing transfer symbol: "} + name);
+    };
     const auto preload_begin=std::chrono::steady_clock::now();
     if(!session.prepare_mono([](unsigned,unsigned){return true;})) throw std::runtime_error("Preload canceled");
     auto& renderer=session.mono_renderer();
@@ -33,7 +47,9 @@ int main(int argc,char** argv) try {
     unsigned bg1_dependency_hits=0,bg1_dependency_misses=0;
     std::unique_ptr<simulation::SnesPpuState> previous_bg1;
     unsigned bridge_comparisons{};
+    unsigned transfer_comparisons{};
     std::uint64_t reused_images{};
+    std::uint64_t transfer_images{};
     for(unsigned frame=1;frame<=240;++frame) {
         session.advance((std::int64_t(frame)*1000000000+59)/60,
             frame>=120 && frame<180?input::ButtonMask(input::y|input::right):0);
@@ -49,6 +65,52 @@ int main(int argc,char** argv) try {
                 || fast_pool.save_state()!=full_pool.save_state() || fast.save_state()!=full.save_state())
                 throw std::runtime_error("Consecutive strategy image differs from full synchronization");
             ++bridge_comparisons;reused_images+=simulation::ObjectBridgeTestAccess::image_hits(fast);
+            // Run the actual post-DOSOUNDS palette/sprite/wipe sequence from
+            // these cartridge states. Compare after EACH entry, not just the
+            // final image: PPU/APU queues, open bus, returned registers, links
+            // and generations must all match the defensive path.
+            const auto transfer = [&](const char* name, bool reuse = true) {
+                const auto address = symbol(name, true);
+                simulation::Wdc65816Registers x, y;
+                x.status = y.status = 0x24;
+                const auto before_hits = simulation::ObjectBridgeTestAccess::image_hits(fast);
+                const auto count = reuse
+                    ? simulation::ObjectBridgeTestAccess::transfer(fast, address, x)
+                    : fast.call_native_routine(address, x, 5'000'000, true);
+                const auto reference = full.call_native_routine(address, y, 5'000'000, true);
+                if (count != reference
+                    || std::tie(x.a, x.x, x.y, x.direct, x.stack, x.data_bank, x.status)
+                        != std::tie(y.a, y.x, y.y, y.direct, y.stack, y.data_bank, y.status)
+                    || fast_pool.save_state() != full_pool.save_state()
+                    || fast.save_state() != full.save_state())
+                    throw std::runtime_error(std::string{"Transfer differs from full synchronization: "} + name);
+                ++transfer_comparisons;
+                transfer_images += simulation::ObjectBridgeTestAccess::image_hits(fast) - before_hits;
+            };
+            transfer("DOSOUNDS_L", false);
+            const bool ex = session.game().experience() == simulation::Experience::starfox_ex;
+            if (!ex || fast.read_native_byte(symbol("NOBGMODE", false)) == 0) {
+                transfer("PALGOTO_L"); transfer("FADEPALTO_L");
+                if (ex) {
+                    for (const auto name : {"PALFADETOYAMAO_L", "PALFADETOYAMAB_L", "PALFADETOCORN2_L",
+                            "PALFADERANDOM_L", "PALFADETOTITLE_L"}) transfer(name);
+                    const auto cadence = [&](const char* name, unsigned threshold, const auto& routines) {
+                        const auto address = symbol(name, false);
+                        const auto value = fast.read_native_byte(address);
+                        if (value != full.read_native_byte(address)) throw std::runtime_error("Transfer cadence differs");
+                        const bool due = (static_cast<std::uint8_t>(value - threshold) & 0x80U) == 0;
+                        const auto next = due ? 0 : static_cast<std::uint8_t>(value + 1);
+                        fast.write_native_byte(address, next); full.write_native_byte(address, next);
+                        if (due) for (const auto routine : routines) transfer(routine);
+                    };
+                    cadence("TEMPVAL5", 3, std::array{"PALFADETOCORNNITE_L", "PALFADETONEWSPACE1_L",
+                        "PALFADETONEWSPACE2_L", "PALFADETONEWSPACE3_L", "PALFADETONEWSPACE4_L",
+                        "PALFADETONEWSPACE5_L", "PALFADETOBLACK_L", "PALFADETOOOTD_L"});
+                    cadence("TEMPVAL6", 10, std::array{"PALFADETOFXGREEN_L", "PALFADETOFXDES_L",
+                        "PALFADETOFXPINK_L", "PALFADETOFXBLUE_L"});
+                }
+            }
+            transfer("DO_SPRITES_L"); transfer("DO_WINDOW_WIPE_L");
         }
         const auto source=session.presentation(0,true);
         if (session.game().experience() == simulation::Experience::starfox_ex
@@ -119,6 +181,7 @@ int main(int argc,char** argv) try {
         <<" ex_overlay_cache_hits="<<renderer.ex_overlay_cache_hits()
         <<" ex_overlay_cache_misses="<<renderer.ex_overlay_cache_misses()
         <<" bridge_comparisons="<<bridge_comparisons<<" bridge_image_hits="<<reused_images
+        <<" transfer_comparisons="<<transfer_comparisons<<" transfer_image_hits="<<transfer_images
         <<" final_bg="<<session.presentation(0,true).current->background_id
         <<" digest="<<std::hex<<digest<<'\n';
 } catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}

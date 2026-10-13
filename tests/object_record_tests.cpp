@@ -77,6 +77,18 @@ struct ObjectBridgeTestAccess {
         const auto instructions=map.cpu_.call_long(address,registers,1000);
         pull(map,false);map.sync_display_from_cpu();return instructions;
     }
+    static auto call_transfer(MapVm& map, std::uint32_t address,
+        Wdc65816Registers& registers, bool cached, bool reuse,
+        std::size_t limit = 1000, bool service_transfer = true) {
+        if (cached) return reuse
+            ? map.call_native_routine_reusing_import(address, registers, limit, service_transfer)
+            : map.call_native_routine(address, registers, limit, service_transfer);
+        push(map, false);
+        const auto instructions = map.cpu_.call_long(address, registers, limit, service_transfer);
+        pull(map, false);
+        map.sync_display_from_cpu();
+        return instructions;
+    }
 };
 }
 
@@ -339,6 +351,77 @@ void test_consecutive_calls(ObjectMemoryLayout layout) {
     }
     require(image_hits>32,"actual interpreter calls did not reuse the imported image");
 }
+void test_consecutive_transfers(ObjectMemoryLayout layout) {
+    const bool ex = layout == ObjectMemoryLayout::starfox_ex;
+    const unsigned stride = ex ? 57 : 56;
+    const auto symbols = starfox::assets::SymbolMap::parse(ex
+        ? "AL_SIZE $000039\nNUMBER_AL $000008\nALLST $001a00\nALFREELST $001a02\n"
+        : "AL_SIZE $000038\nNUMBER_AL $000008\nALLST $001a00\nALFREELST $001a02\n");
+    std::vector<std::uint8_t> code(32768, 0xea);
+    // INC world-X, emit an APU command, update INIDISP and return altered A/Y.
+    // Caller-supplied registers and transfer servicing must not be lost when
+    // reusing the object image. The second entry never returns, testing expiry.
+    const std::array<std::uint8_t, 16> routine{
+        0xfe, 0x0c, 0x00, 0xe8, 0xa9, 0x37, 0x8d, 0x40,
+        0x21, 0xa9, 0x0f, 0x8d, 0x00, 0x21, 0xc8, 0x6b};
+    std::copy(routine.begin(), routine.end(), code.begin());
+    code[0x40] = 0x80; code[0x41] = 0xfe; // BRA -2
+    const starfox::assets::RomImage rom{std::move(code)};
+    ObjectPool a{8, layout}, b{8, layout};
+    MapVm cached{rom, MapDatabase{rom, 0x008100, 0x008200}, a, &symbols};
+    MapVm oracle{rom, MapDatabase{rom, 0x008100, 0x008200}, b, &symbols};
+    for (unsigned n = 0; n < 4; ++n)
+        require(a.allocate_after() == b.allocate_after(), "transfer allocation differs");
+    std::uint64_t image_hits{};
+    const auto same_registers = [](const auto& x, const auto& y) {
+        return x.a == y.a && x.x == y.x && x.y == y.y && x.direct == y.direct
+            && x.stack == y.stack && x.data_bank == y.data_bank && x.status == y.status;
+    };
+    for (unsigned n = 0; n < 128; ++n) {
+        const auto object = a.first_active();
+        if (n % 8 == 0) a.at(object).world_z = b.at(object).world_z = n * 157;
+        if (n % 11 == 0) {
+            const auto base = 0x800338U + (object - 1) * stride;
+            cached.write_native_byte(base + 4, n); oracle.write_native_byte(base + 4, n);
+        }
+        if (n % 13 == 0) {
+            require(a.remove(object) == b.remove(object), "transfer removal differs");
+            require(a.allocate_after() == b.allocate_after(), "transfer reuse differs");
+        }
+        if (n % 17 == 0) {
+            cached.write_native_byte(0x002100, 0x0a); oracle.write_native_byte(0x002100, 0x0a);
+        }
+        Wdc65816Registers actual;
+        actual.x = 0x0338U + (a.first_active() - 1) * stride;
+        actual.y = n; actual.status = 0x24;
+        auto expected = actual;
+        const auto before = ObjectBridgeTestAccess::image_hits(cached);
+        const bool service_transfer = (n % 2) != 0;
+        require(ObjectBridgeTestAccess::call_transfer(cached, 0x008000, actual, true, n != 0, 1000, service_transfer)
+            == ObjectBridgeTestAccess::call_transfer(oracle, 0x008000, expected, false, false, 1000, service_transfer),
+            "consecutive transfer instructions differ");
+        image_hits += ObjectBridgeTestAccess::image_hits(cached) - before;
+        require(same_registers(actual, expected), "transfer returned different registers");
+        require(a.save_state() == b.save_state(), "transfer changed objects/lists/generations");
+        require(cached.save_state() == oracle.save_state(), "transfer changed CPU/PPU/APU/VM state");
+        if (n % 23 == 0) {
+            const auto state = cached.save_state(); cached.load_state(state); oracle.load_state(state);
+        }
+        if (n == 63) {
+            rejects([&] { ObjectBridgeTestAccess::call_transfer(cached, 0x008040, actual, true, true, 16); });
+            rejects([&] { ObjectBridgeTestAccess::call_transfer(oracle, 0x008040, expected, false, false, 16); });
+            require(cached.save_state() == oracle.save_state(), "failed transfer changed CPU/VM state");
+            const auto failed_hits = ObjectBridgeTestAccess::image_hits(cached);
+            actual = expected = Wdc65816Registers{}; actual.status = expected.status = 0x24;
+            actual.x = expected.x = 0x0338U + (a.first_active() - 1) * stride;
+            ObjectBridgeTestAccess::call_transfer(cached, 0x008000, actual, true, true);
+            ObjectBridgeTestAccess::call_transfer(oracle, 0x008000, expected, false, false);
+            require(ObjectBridgeTestAccess::image_hits(cached) == failed_hits, "failed transfer left an import lease");
+            require(cached.save_state() == oracle.save_state(), "transfer recovery changed CPU/VM state");
+        }
+    }
+    require(image_hits > 32, "transfer interpreter calls never reused the imported image");
+}
 void benchmark() {
     ObjectPool pool{1, ObjectMemoryLayout::starfox_ex};
     const auto handle = pool.allocate_after();
@@ -377,6 +460,8 @@ int main(int argc, char** argv) try {
     test_bridge_io(ObjectMemoryLayout::starfox_ex);
     test_consecutive_calls(ObjectMemoryLayout::original);
     test_consecutive_calls(ObjectMemoryLayout::starfox_ex);
+    test_consecutive_transfers(ObjectMemoryLayout::original);
+    test_consecutive_transfers(ObjectMemoryLayout::starfox_ex);
     if (argc == 2 && std::string_view{argv[1]} == "--benchmark") benchmark();
     std::cout << "PASS original/EX native object records, exact bridge/import reuse, I/O ordering and list generations; cache_bytes="
         << ObjectBridgeTestAccess::cache_bytes() << '\n';

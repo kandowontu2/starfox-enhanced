@@ -547,7 +547,22 @@ std::size_t MapVm::call_native_routine(
     Wdc65816Registers& registers,
     std::size_t instruction_limit,
     bool service_transfer_flag) {
-    sync_objects_to_cpu();
+    return call_native_routine_impl(
+        address, registers, instruction_limit, service_transfer_flag, false);
+}
+
+std::size_t MapVm::call_native_routine_reusing_import(
+    std::uint32_t address, Wdc65816Registers& registers,
+    std::size_t instruction_limit, bool service_transfer_flag) {
+    return call_native_routine_impl(
+        address, registers, instruction_limit, service_transfer_flag, true);
+}
+
+std::size_t MapVm::call_native_routine_impl(
+    std::uint32_t address, Wdc65816Registers& registers,
+    std::size_t instruction_limit, bool service_transfer_flag,
+    bool reuse_imported_image) {
+    sync_objects_to_cpu(reuse_imported_image);
     const auto instructions = cpu_.call_long(
         address, registers, instruction_limit, service_transfer_flag);
     sync_objects_from_cpu();
@@ -703,8 +718,8 @@ void MapVm::write_native_object_byte(
 void MapVm::invalidate_object_image_write(std::uint32_t address) noexcept {
     auto& cache=*object_bridge_;
     if(!cache.imported_image) return;
-    // Only unrelated, plain WRAM writes (ALDEAD and the escape burst flag)
-    // can occur between consecutive scheduler calls. I/O may launch DMA/HLE.
+    // Unrelated plain WRAM writes (scheduler flags or transfer cadence counters)
+    // do not alter the imported objects. I/O may launch DMA/HLE, so revoke it.
     if(!plain_wram(address,1)) {cache.imported_image=false;return;}
     const auto physical=[](std::uint32_t a) {
         return a>=0x7e0000U && a<0x800000U ? a-0x7e0000U : a&0xffffU;
