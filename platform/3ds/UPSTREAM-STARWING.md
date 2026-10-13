@@ -176,11 +176,10 @@ speed acceptance remains outstanding.
 
 The same reference at `01bf4925951515244cdb03d58ad722417919d6ba`
 (`src/simulation/map_vm.cpp` and `object_pool.cpp`) caches host/native object
-records and reuses exact active/free lists. Our adaptation keeps every routine
-bridge, compares both complete host objects and the live WRAM payload, and
-retains native-pointer fixups. It does not adopt the reference's caller-provided
-skip-synchronization flags or assume that a dirty generation identifies every
-host/native write. Reserved scratch lists avoid repeated allocations; unchanged
+records and reuses exact active/free lists. Our first adaptation keeps every
+routine bridge, compares complete host objects and live WRAM payloads, and
+retains native-pointer fixups. It does not assume that a dirty generation
+identifies every host/native write. Reserved scratch lists avoid repeated allocations; unchanged
 lists do not rebuild pool topology. Record scratch is bounded and heap-owned,
 not placed on `load_state`'s native stack or included in saved states.
 
@@ -199,3 +198,28 @@ the cache. Eight real stage probes retain their prior 240-phase pixel digests,
 80 complete audio blocks and source-purity checks. These are correctness checks,
 not a physical-console FPS claim; native timing and sustained mono acceptance
 remain required.
+
+## Consecutive strategy-call follow-up
+
+The same reference's `strategy_scheduler.cpp` retains the just-imported native
+image for consecutive strategy calls inside one tick. Our adaptation limits
+that path to the scheduler's private bridge. Standalone/general calls retain
+their full defensive export, and every completed routine still imports its
+complete native result before the scheduler selects the next object.
+
+Reuse requires exact active/free order, all complete host objects, canonical
+native object references and PREV links. Native record/list writes, including
+low-bank WRAM aliases, revoke the imported image. I/O writes revoke it because
+they can launch DMA/HLE work. Failed native calls and VM restore revoke it too.
+The omitted export's last open-bus byte is retained. Recovery host removals and
+slot reuse are detected by the existing exact list/object checks. No simulation
+phase, source instruction, audio acknowledgement or list generation is dropped.
+
+The independent bytewise oracle now also exercises this complete-image reuse
+through 256 mutation sequences per layout and 128 actual interpreter calls per
+layout. Real-cartridge diagnostics compare complete CPU/VM and pool states,
+instruction counts and run/removal counts against full synchronization at
+eight sampled strategy ticks in each of eight Original/EX stages. All 64 paired
+ticks match while exercising 964 complete-image reuses. Their 240-phase image
+digests and 80 complete audio blocks remain unchanged. This establishes sampled
+behavioral equivalence, not sustained native 60 FPS or full hardware acceptance.

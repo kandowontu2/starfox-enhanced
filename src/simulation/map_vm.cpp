@@ -258,6 +258,7 @@ std::int8_t MapVm::dots_mode() const noexcept {
 }
 
 void MapVm::write_native_byte(std::uint32_t address, std::uint8_t value) {
+    invalidate_object_image_write(address);
     native_memory_[address] = value;
     cpu_.write8(address, value);
 }
@@ -508,10 +509,23 @@ std::size_t MapVm::call_native_object_routine(
     std::uint8_t data_bank,
     std::uint8_t status,
     std::size_t instruction_limit) {
+    return call_native_object_routine_impl(
+        address,object,data_bank,status,instruction_limit,false);
+}
+
+std::size_t MapVm::call_native_object_routine_reusing_import(
+    std::uint32_t address,ObjectHandle object,std::size_t instruction_limit) {
+    return call_native_object_routine_impl(
+        address,object,0x7eU,0x24U,instruction_limit,true);
+}
+
+std::size_t MapVm::call_native_object_routine_impl(
+    std::uint32_t address,ObjectHandle object,std::uint8_t data_bank,
+    std::uint8_t status,std::size_t instruction_limit,bool reuse_imported_image) {
     if (!objects_->is_active(object)) {
         throw std::invalid_argument{"native routine object handle must be active"};
     }
-    sync_objects_to_cpu();
+    sync_objects_to_cpu(reuse_imported_image);
     Wdc65816Registers registers;
     registers.x = original_object_pointer(object);
     // TRANS.ASM's strategy loop advances with LDY _NEXT,X / TYX, so
@@ -587,6 +601,7 @@ Wdc65816TaskResult MapVm::resume_native_task(
     std::size_t instruction_limit,
     bool service_transfer_flag,
     bool sync_objects) {
+    object_bridge_->imported_image=false;
     const auto result = cpu_.resume_task(registers, stop_addresses,
         instruction_limit, service_transfer_flag);
     // Persistent front-end tasks deliberately borrow object-list scratch
@@ -685,12 +700,49 @@ void MapVm::write_native_object_byte(
     objects_->write_base_byte(handle, offset, value);
 }
 
-void MapVm::sync_objects_to_cpu() {
+void MapVm::invalidate_object_image_write(std::uint32_t address) noexcept {
+    auto& cache=*object_bridge_;
+    if(!cache.imported_image) return;
+    // Only unrelated, plain WRAM writes (ALDEAD and the escape burst flag)
+    // can occur between consecutive scheduler calls. I/O may launch DMA/HLE.
+    if(!plain_wram(address,1)) {cache.imported_image=false;return;}
+    const auto physical=[](std::uint32_t a) {
+        return a>=0x7e0000U && a<0x800000U ? a-0x7e0000U : a&0xffffU;
+    };
+    const auto byte=physical(address);
+    const auto contains=[&](std::uint32_t start,std::size_t length) {
+        const auto first=physical(start);
+        return byte>=first && byte-first<length;
+    };
+    if(contains(object_base_,object_count_*object_size_)
+        || contains(extended_object_base_,object_count_*object_size_)
+        || contains(active_list_,2) || contains(free_list_,2)) cache.imported_image=false;
+}
+
+void MapVm::sync_objects_to_cpu(bool reuse_imported_image) {
     auto& cache=*object_bridge_;
     auto& active=cache.active_work;auto& free=cache.free_work;
     active.clear();free.clear();
     for(auto handle=objects_->first_active();handle;handle=objects_->next_active(handle)) active.push_back(handle);
     for(auto handle=objects_->first_free();handle;handle=objects_->next_free(handle)) free.push_back(handle);
+    bool identical=reuse_imported_image && cache.imported_image
+        && active==cache.active && free==cache.free;
+    cache.imported_image=false; // A failed native call must never leave a lease.
+    if(identical) {
+        for(const auto handle:active) {
+            const auto& snapshot=cache.records[handle];
+            if(!snapshot.valid || !snapshot.imported || !snapshot.exportable
+                || snapshot.host!=objects_->at(handle)) {identical=false;break;}
+        }
+    }
+    if(identical) {
+        // The bytewise export's final operation is the last free NEXT word,
+        // or the last active fire pointer for a full pool. Keep open bus exact.
+        if(!free.empty()) (void)cpu_.read8(object_base_+(free.back()-1U)*object_size_+1U);
+        else if(!active.empty()) (void)cpu_.read8(extended_object_base_+(active.back()-1U)*object_size_+20U);
+        ++cache.image_hits;
+        return;
+    }
     if(active!=cache.active) {
         for(auto& record:cache.records) record.valid=false;
         cache.active=active; // Native-pointer fixups depend on active membership.
@@ -767,6 +819,7 @@ void MapVm::sync_objects_to_cpu() {
 
 void MapVm::sync_objects_from_cpu() {
     auto& cache=*object_bridge_;
+    cache.imported_image=false;
     const auto read_list = [this](std::uint16_t pointer,std::vector<ObjectHandle>& result) {
         result.clear();
         std::array<bool, kMaximumObjects + 1> seen{};
@@ -791,6 +844,16 @@ void MapVm::sync_objects_from_cpu() {
         cache.active=active;
     }
     if(!objects_->lists_match(active,free)) objects_->restore_lists(active, free);
+    cache.free=free;
+    bool canonical_links=plain_wram(active_list_,2) && plain_wram(free_list_,2)
+        && plain_wram(object_base_,object_count_*object_size_)
+        && plain_wram(extended_object_base_,object_count_*object_size_);
+    // The next export repairs PREV words even though import follows only NEXT.
+    // Read these plain-RAM links before the original final payload accesses.
+    if(canonical_links) for(std::size_t n=0;n<active.size();++n) {
+        if(cpu_.read16(original_object_pointer(active[n])+2U)
+            !=(n?original_object_pointer(active[n-1U]):0U)) canonical_links=false;
+    }
     for(const auto handle:free) cache.records[handle].valid=false;
     for (const auto handle : active) {
         const auto base = static_cast<std::uint32_t>(original_object_pointer(handle));
@@ -836,6 +899,7 @@ void MapVm::sync_objects_from_cpu() {
                 && word(extended,19U)==original_object_pointer(object.fire_object);
         }
     }
+    cache.imported_image=canonical_links;
 }
 
 void MapVm::execute_inline_65816() {

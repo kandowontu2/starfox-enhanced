@@ -13,8 +13,8 @@ namespace starfox::simulation {
 // Independent pre-cache bytewise bridge. Production has no bypass switch;
 // compare complete CPU and pool state, including open bus and generations.
 struct ObjectBridgeTestAccess {
-    static void push(MapVm& map,bool cached) {
-        if(cached) {map.sync_objects_to_cpu();return;}
+    static void push(MapVm& map,bool cached,bool reuse_imported=false) {
+        if(cached) {map.sync_objects_to_cpu(reuse_imported);return;}
         const auto active=map.objects_->active_handles(),free=map.objects_->free_handles();
         map.cpu_.write16(map.active_list_,active.empty()?0:map.original_object_pointer(active.front()));
         map.cpu_.write16(map.free_list_,free.empty()?0:map.object_base_+(free.front()-1)*map.object_size_);
@@ -62,8 +62,21 @@ struct ObjectBridgeTestAccess {
         }
     }
     static auto hits(const MapVm& map) {return map.object_bridge_->push_hits+map.object_bridge_->pull_hits;}
+    static auto image_hits(const MapVm& map) {return map.object_bridge_->image_hits;}
     static auto cache_bytes() {return sizeof(MapVm::ObjectBridgeCache);}
     static auto cpu_state(const MapVm& map) {return map.cpu_.save_state();}
+    static auto call_strategy(MapVm& map,std::uint32_t address,ObjectHandle object,bool reuse) {
+        return reuse?map.call_native_object_routine_reusing_import(address,object,1000):
+            map.call_native_object_routine(address,object);
+    }
+    static auto call_bytewise(MapVm& map,std::uint32_t address,ObjectHandle object) {
+        push(map,false);
+        Wdc65816Registers registers;
+        registers.x=map.original_object_pointer(object);registers.y=registers.x;
+        registers.data_bank=0x7e;registers.status=0x24;
+        const auto instructions=map.cpu_.call_long(address,registers,1000);
+        pull(map,false);map.sync_display_from_cpu();return instructions;
+    }
 };
 }
 
@@ -158,7 +171,7 @@ void test_lists() {
     const auto reused = pool.allocate_after(3);
     require(reused == 8 && pool.generation(reused) == 7, "free reuse/generation changed");
 }
-void test_bridge(ObjectMemoryLayout layout) {
+void test_bridge(ObjectMemoryLayout layout,bool reuse_imported=false) {
     const bool ex=layout==ObjectMemoryLayout::starfox_ex;
     const unsigned capacity=ex?80:70,stride=ex?57:56,extended_size=ex?56:54;
     const auto symbols=starfox::assets::SymbolMap::parse(ex?
@@ -190,7 +203,7 @@ void test_bridge(ObjectMemoryLayout layout) {
             throw std::runtime_error{"cached bridge changed CPU memory/open bus"};
         }
     };
-    const auto push=[&] {ObjectBridgeTestAccess::push(cached,true);ObjectBridgeTestAccess::push(oracle,false);same();};
+    const auto push=[&] {ObjectBridgeTestAccess::push(cached,true,reuse_imported);ObjectBridgeTestAccess::push(oracle,false);same();};
     const auto pull=[&] {ObjectBridgeTestAccess::pull(cached,true);ObjectBridgeTestAccess::pull(oracle,false);same();};
     // Empty/full pools, repeated cache hits and deliberately inconsistent host
     // mirrors: export alone must never qualify a skipped semantic import.
@@ -202,6 +215,26 @@ void test_bridge(ObjectMemoryLayout layout) {
     }
     push();pull();push();pull();push();pull();
     require(ObjectBridgeTestAccess::hits(cached)>capacity,"bridge did not exercise exact reuse");
+    if(reuse_imported) {
+        require(ObjectBridgeTestAccess::image_hits(cached)>0,"complete imported image was never reused");
+        // Import follows NEXT, but export also repairs PREV. Do not silently
+        // retain a corrupted previous link inside the consecutive-call path.
+        const auto pointer=0x0338U+(a.first_active()-1)*stride;
+        cached.write_native_word(pointer+2,0x1234);oracle.write_native_word(pointer+2,0x1234);
+        pull();const auto before=ObjectBridgeTestAccess::image_hits(cached);
+        push();pull();
+        require(ObjectBridgeTestAccess::image_hits(cached)==before,"noncanonical PREV image was reused");
+        // A source WRAM write can use any low-bank mirror, not just bank 7E.
+        const auto mirror=0x800000U+pointer+12U;
+        cached.write_native_byte(mirror,0x51);oracle.write_native_byte(mirror,0x51);
+        const auto before_write=ObjectBridgeTestAccess::image_hits(cached);
+        push();pull();
+        require(ObjectBridgeTestAccess::image_hits(cached)==before_write,"mirrored native write did not revoke import reuse");
+        cached.write_native_byte(0x002100U,0x0f);oracle.write_native_byte(0x002100U,0x0f);
+        const auto before_io=ObjectBridgeTestAccess::image_hits(cached);
+        push();pull();
+        require(ObjectBridgeTestAccess::image_hits(cached)==before_io,"I/O write did not revoke import reuse");
+    }
     std::mt19937 random{0x51a65816U};
     for(unsigned trial=0;trial<256;++trial) {
         const auto h=a.first_active();
@@ -256,13 +289,55 @@ void test_bridge_io(ObjectMemoryLayout layout) {
             a.at(h).extended[i]=b.at(h).extended[i]=static_cast<std::uint8_t>(i*17+n);
     }
     for(unsigned n=0;n<8;++n) {
-        ObjectBridgeTestAccess::push(cached,true);ObjectBridgeTestAccess::push(oracle,false);
+        ObjectBridgeTestAccess::push(cached,true,true);ObjectBridgeTestAccess::push(oracle,false);
         require(cached.save_state()==oracle.save_state(),"I/O export changed callbacks/open bus");
         ObjectBridgeTestAccess::pull(cached,true);ObjectBridgeTestAccess::pull(oracle,false);
         require(a.save_state()==b.save_state(),"I/O import changed objects");
         require(cached.save_state()==oracle.save_state(),"I/O import changed callbacks/open bus");
     }
     require(ObjectBridgeTestAccess::hits(cached)==0,"I/O records entered WRAM cache");
+    require(ObjectBridgeTestAccess::image_hits(cached)==0,"I/O image entered import reuse");
+}
+void test_consecutive_calls(ObjectMemoryLayout layout) {
+    const bool ex=layout==ObjectMemoryLayout::starfox_ex;
+    const unsigned stride=ex?57:56;
+    const auto symbols=starfox::assets::SymbolMap::parse(ex?
+        "AL_SIZE $000039\nNUMBER_AL $000008\nALLST $001a00\nALFREELST $001a02\n":
+        "AL_SIZE $000038\nNUMBER_AL $000008\nALLST $001a00\nALFREELST $001a02\n");
+    std::vector<std::uint8_t> code(32768,0xea);
+    // 8-bit INC of both world-X bytes through the current native X register.
+    // Real interpreter writes, not a helper impersonating a strategy result.
+    const std::array<std::uint8_t,7> routine{0xfe,0x0c,0x00,0xfe,0x0d,0x00,0x6b};
+    std::copy(routine.begin(),routine.end(),code.begin());
+    const starfox::assets::RomImage rom{std::move(code)};
+    ObjectPool a{8,layout},b{8,layout};
+    MapVm cached{rom,MapDatabase{rom,0x008100,0x008200},a,&symbols};
+    MapVm oracle{rom,MapDatabase{rom,0x008100,0x008200},b,&symbols};
+    for(unsigned n=0;n<4;++n) require(a.allocate_after()==b.allocate_after(),"strategy fixture allocation differs");
+    std::uint64_t image_hits{};
+    for(unsigned n=0;n<128;++n) {
+        const auto object=a.first_active();
+        if(n%8==0) a.at(object).world_z=b.at(object).world_z=static_cast<std::int16_t>(n*157);
+        if(n%11==0) {
+            const auto base=0x7e0338U+(object-1)*stride;
+            cached.write_native_byte(base+4,n);oracle.write_native_byte(base+4,n);
+        }
+        if(n%13==0) {
+            require(a.remove(object)==b.remove(object),"strategy fixture removal differs");
+            require(a.allocate_after()==b.allocate_after(),"strategy fixture reuse differs");
+        }
+        const auto selected=a.first_active();
+        const auto before_hits=ObjectBridgeTestAccess::image_hits(cached);
+        require(ObjectBridgeTestAccess::call_strategy(cached,0x008000,selected,n!=0)
+            ==ObjectBridgeTestAccess::call_bytewise(oracle,0x008000,selected),"consecutive strategies changed instructions");
+        image_hits+=ObjectBridgeTestAccess::image_hits(cached)-before_hits;
+        require(a.save_state()==b.save_state(),"consecutive strategies changed objects/lists/generations");
+        require(cached.save_state()==oracle.save_state(),"consecutive strategies changed CPU/VM state");
+        if(n%23==0) {
+            const auto state=cached.save_state();cached.load_state(state);oracle.load_state(state);
+        }
+    }
+    require(image_hits>32,"actual interpreter calls did not reuse the imported image");
 }
 void benchmark() {
     ObjectPool pool{1, ObjectMemoryLayout::starfox_ex};
@@ -296,10 +371,14 @@ int main(int argc, char** argv) try {
     test_lists();
     test_bridge(ObjectMemoryLayout::original);
     test_bridge(ObjectMemoryLayout::starfox_ex);
+    test_bridge(ObjectMemoryLayout::original,true);
+    test_bridge(ObjectMemoryLayout::starfox_ex,true);
     test_bridge_io(ObjectMemoryLayout::original);
     test_bridge_io(ObjectMemoryLayout::starfox_ex);
+    test_consecutive_calls(ObjectMemoryLayout::original);
+    test_consecutive_calls(ObjectMemoryLayout::starfox_ex);
     if (argc == 2 && std::string_view{argv[1]} == "--benchmark") benchmark();
-    std::cout << "PASS original/EX native object records, exact bridge reuse, I/O ordering and list generations; cache_bytes="
+    std::cout << "PASS original/EX native object records, exact bridge/import reuse, I/O ordering and list generations; cache_bytes="
         << ObjectBridgeTestAccess::cache_bytes() << '\n';
     return 0;
 } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }

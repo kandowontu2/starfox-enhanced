@@ -40,6 +40,7 @@ private:
 
 class MapVm {
     friend class GameSimulation;
+    friend class NativeStrategyScheduler;
     friend struct ObjectBridgeTestAccess;
 public:
     using ConditionHandler = std::function<bool(MapVm&)>;
@@ -243,7 +244,17 @@ private:
         ObjectHandle handle, std::uint16_t offset) const;
     void write_native_object_byte(
         ObjectHandle handle, std::uint16_t offset, std::uint8_t value);
-    void sync_objects_to_cpu();
+    // Only consecutive scheduler calls may borrow the just-imported image.
+    // Host objects/lists and canonical pointer/link bytes still gate reuse.
+    std::size_t call_native_object_routine_reusing_import(
+        std::uint32_t address, ObjectHandle object,
+        std::size_t instruction_limit);
+    std::size_t call_native_object_routine_impl(
+        std::uint32_t address, ObjectHandle object, std::uint8_t data_bank,
+        std::uint8_t status, std::size_t instruction_limit,
+        bool reuse_imported_image);
+    void invalidate_object_image_write(std::uint32_t address) noexcept;
+    void sync_objects_to_cpu(bool reuse_imported_image = false);
     void sync_objects_from_cpu();
     void execute_inline_65816();
     void execute_mapcode_jsl();
@@ -321,8 +332,9 @@ private:
     std::uint32_t number_map_loops_address_{0x0017d8U};
     std::uint32_t map_bank_address_{0x001af7U};
     // Exact host + WRAM snapshots, adapted from EstebanPdN/starwing-3ds
-    // 01bf4925951515244cdb03d58ad722417919d6ba. No sync-skipping flags or
-    // dirty-generation assumptions: every bridge still validates live bytes.
+    // 01bf4925951515244cdb03d58ad722417919d6ba. Standalone bridges validate
+    // live bytes. Consecutive scheduler calls may reuse a complete import;
+    // all host objects/lists, canonical pointers and native write guards apply.
     // Keep this bounded scratch off load_state's native thread stack.
     struct ObjectBridgeSnapshot {
         GameObject host{};
@@ -332,11 +344,12 @@ private:
     };
     struct ObjectBridgeCache {
         std::array<ObjectBridgeSnapshot,kMaximumObjects+1> records{};
-        std::vector<ObjectHandle> active, active_work, free_work;
-        std::uint64_t push_hits{},pull_hits{};
+        std::vector<ObjectHandle> active, free, active_work, free_work;
+        std::uint64_t push_hits{},pull_hits{},image_hits{};
+        bool imported_image{};
         ObjectBridgeCache() {
             active.reserve(kMaximumObjects);active_work.reserve(kMaximumObjects);
-            free_work.reserve(kMaximumObjects);
+            free.reserve(kMaximumObjects);free_work.reserve(kMaximumObjects);
         }
     };
     std::unique_ptr<ObjectBridgeCache> object_bridge_{std::make_unique<ObjectBridgeCache>()};

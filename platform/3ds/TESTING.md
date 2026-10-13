@@ -19,7 +19,7 @@ changing the one-eye slider-off/New 2DS XL path.
 
 1. The latest source-only candidate is the experimental
    `StarFoxEnhanced-3ds-test.zip` artifact from
-   [ARM run 38452274142](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38452274142).
+   [ARM run 38457573595](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38457573595).
    R376 remains the hardware-tested baseline, not the latest source candidate.
    Extract the ZIP to the SD card's root, keeping its folder structure. When
    updating an earlier build, replace only the `.3dsx` and `.smdh`; preserve the existing
@@ -295,8 +295,25 @@ isolated rollback. Canvas/overlay/raster costs remain unchanged. No retry,
 fallback or replay errors occur, and planned DSP shutdown/profile flush
 precede the owned emulator stop. CPU configuration returns to 100%; guest
 GSP retirement and physical New-model performance remain unverified. The
-next investigation is the upstream runtime's exact object-bridge snapshots
-and list reuse, which are absent from our routine-by-routine bridge.
+next investigation was the upstream runtime's exact object-bridge snapshots
+and list reuse.
+
+The exact object-bridge cache (`98adacfda8`, ARM run 38457573595) passes
+the 52 CI checks and native gates. An independent bytewise oracle retains
+complete pool/CPU state through Original/EX mutations, restores, noncanonical
+pointers, stale extended mirrors and I/O ordering. Seven real full-state/audio
+checks and both full Original/EX session regressions also pass (501.23/644.25
+seconds for those broad sessions). Eight real stage probes retain their prior
+240-phase pixel digests and 80 complete audio blocks.
+
+Its accuracy-enabled Vulkan/300%-clock replay averages 57.576/57.198
+successful whole-frame returns per second in backgrounds 3/51, with minimum
+same-label window rates of 48.993/49.873. Logic means are 10.486/12.171 ms;
+strategy means are 3.565/3.954 ms. These are small changes from the previous
+cache-free bridge, not stable mono 60 or physical-console results. Planned DSP
+shutdown and profile flush occur before the owned host is stopped; guest GPU
+retirement remains unverified and CPU configuration returns to 100%. The
+next investigation is the reference's consecutive strategy-call batching.
 
 The earlier direct-overlay candidate removes the EX BG1 staging image and applies the same
 zero-ink/CGRAM-black transparency directly during decoding. The 57,344-byte
