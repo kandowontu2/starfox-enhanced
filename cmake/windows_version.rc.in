@@ -1,0 +1,30 @@
+#include <winver.h>
+
+1 VERSIONINFO
+FILEVERSION @STARFOX_WINDOWS_FIXED_VERSION@
+PRODUCTVERSION @STARFOX_WINDOWS_FIXED_VERSION@
+FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+FILEFLAGS 0
+FILEOS VOS_NT_WINDOWS32
+FILETYPE @STARFOX_WINDOWS_FILE_TYPE@
+FILESUBTYPE 0
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName", "Star Fox Enhanced contributors\0"
+            VALUE "FileDescription", "@STARFOX_WINDOWS_DESCRIPTION@\0"
+            VALUE "FileVersion", "@STARFOX_WINDOWS_VERSION@\0"
+            VALUE "InternalName", "@STARFOX_WINDOWS_INTERNAL_NAME@\0"
+            VALUE "OriginalFilename", "@STARFOX_WINDOWS_FILENAME@\0"
+            VALUE "ProductName", "Star Fox Enhanced\0"
+            VALUE "ProductVersion", "@STARFOX_WINDOWS_VERSION@\0"
+            VALUE "LegalCopyright", "Star Fox Enhanced contributors; see CREDITS.md and THIRD_PARTY_NOTICES.md\0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409, 1200
+    END
+END

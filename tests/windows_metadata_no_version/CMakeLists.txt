@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.22)
+project(starfox_windows_metadata_no_version LANGUAGES CXX)
+include(../../cmake/WindowsMetadata.cmake)
+add_executable(metadata_no_version ../windows_metadata/fixture.cpp)
+starfox_windows_metadata(metadata_no_version "Star Fox Enhanced version fallback fixture")

@@ -40,6 +40,10 @@ jobs:
             -DSTARFOX_ENABLE_LEIASR=ON `
             -DSTARFOX_PACKAGE_MSU1_MUSIC=OFF
           cmake --build build/asset-builder --target starfox_pc starfox_asset_builder
+          if ($LASTEXITCODE -ne 0) { throw 'Windows runtime/builder build failed' }
+          ./tools/check_windows_metadata.ps1 -Binary @(
+            'build/asset-builder/starfox_pc.exe',
+            'build/asset-builder/starfox_asset_builder.exe') -Version '0.0.8.6'
       - name: Verify standalone Windows imports
         shell: pwsh
         run: |
@@ -134,6 +138,19 @@ jobs:
           Copy-Item platform/mobile/ASSET_BUILDER.md $builder/README.md
           Copy-Item THIRD_PARTY_NOTICES.md $builder/
           Compress-Archive -Path "$builder/*" -DestinationPath "$builder.zip"
+      - name: Defender-check the final Windows x64 release files
+        shell: pwsh
+        run: |
+          Update-MpSignature -ErrorAction Stop
+          ./tools/check_windows_defender.ps1 -Path @(
+            'StarFoxEnhanced-0.0.8.6-windows-x64.zip',
+            'StarFoxAssetBuilder-0.0.8.6-windows-x64.zip') -Report windows-defender-report.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-x64-defender-report
+          path: windows-defender-report.json
+          if-no-files-found: warn
       - uses: actions/upload-artifact@v4
         with:
           name: StarFoxEnhanced-0.0.8.6-windows-x64

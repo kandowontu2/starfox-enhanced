@@ -1,0 +1,68 @@
+name: Windows release Defender verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Published release to verify without changing it
+        required: true
+        default: v0.0.8.6
+  push:
+    branches: [codex/windows-defender-review]
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            CMakeLists.txt
+            cmake
+            tests/windows_metadata
+            tests/windows_metadata_no_version
+            tests/test_windows_metadata.ps1
+            tools/check_windows_metadata.ps1
+            tools/check_windows_defender.ps1
+          sparse-checkout-cone-mode: false
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Check Windows file identity compilation
+        shell: pwsh
+        run: ./tests/test_windows_metadata.ps1 -BuildDirectory build/metadata-check
+      - name: Download only the published Windows x64 package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag || 'v0.0.8.6' }}
+        run: |
+          $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:RELEASE_TAG" | ConvertFrom-Json
+          if ($LASTEXITCODE) { throw 'Cannot read release metadata' }
+          $assets = @($release.assets | Where-Object name -match '^StarFoxEnhanced-[0-9.]+-windows-x64\.zip$')
+          if ($assets.Count -ne 1) { throw 'Expected exactly one Windows x64 runtime ZIP' }
+          $asset = $assets[0]
+          if ($asset.digest -notmatch '^sha256:[0-9a-f]{64}$') { throw 'Release has no SHA-256 digest' }
+          New-Item -ItemType Directory -Path artifacts | Out-Null
+          gh release download $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --pattern $asset.name --dir artifacts
+          if ($LASTEXITCODE) { throw 'Download failed or Defender blocked it; do not treat this as clean' }
+          $file = Get-Item -LiteralPath (Join-Path artifacts $asset.name)
+          if ($file.Length -ne $asset.size -or
+              ('sha256:' + (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()) -cne $asset.digest) {
+            throw 'Downloaded release does not match the published size/hash'
+          }
+          "STARFOX_SCAN_FILE=$($file.FullName)" >> $env:GITHUB_ENV
+      - name: Scan the exact published ZIP without executing it
+        shell: pwsh
+        run: |
+          Update-MpSignature -ErrorAction Stop
+          ./tools/check_windows_defender.ps1 -Path $env:STARFOX_SCAN_FILE -Report defender-report.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-defender-verification
+          path: defender-report.json
+          if-no-files-found: warn
+          retention-days: 7

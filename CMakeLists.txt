@@ -1619,6 +1619,12 @@ if(STARFOX_BUILD_RUNTIME)
 
 endif()
 
+include(cmake/WindowsMetadata.cmake)
+starfox_windows_metadata(starfox_pc "Star Fox Enhanced native PC runtime")
+starfox_windows_metadata(starfox_asset_builder "Star Fox Enhanced asset builder")
+starfox_windows_metadata(starfox_pcvr "Star Fox Enhanced PCVR runtime")
+starfox_windows_metadata(starfox_leia_sr_check "Star Fox Enhanced Leia SR diagnostic")
+
 if(STARFOX_BUILD_TESTS)
     # These portable tests exercise the real read-only library provider with
     # fake payloads; they do not claim SDK compilation or GPU execution.
