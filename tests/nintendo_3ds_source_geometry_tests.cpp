@@ -375,7 +375,7 @@ void texture_resources() {
     std::vector<std::uint8_t> lower(bottom_width*screen_height*3);
     validate_pica_frame(frame,{lower,bottom_width,screen_height,bottom_width*3});
     unsigned bytes=512*256*4;
-    for(const auto image:frame.textures) bytes+=pica_texture_layout(image).bytes;
+    for(const auto& image:frame.textures) bytes+=pica_texture_layout(image).bytes;
     require(bytes<pica_texture_budget,"Texture count does not bypass actual resident-byte budget");
     output.clear();prepared.primitives.clear();
     for(unsigned i=1;i<255;++i) {

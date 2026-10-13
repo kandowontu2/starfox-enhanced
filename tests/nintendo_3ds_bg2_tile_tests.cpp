@@ -80,7 +80,7 @@ void parity(std::shared_ptr<const simulation::SnesPpuState> ppu,const PpuBatch& 
         require(actual[std::size_t(y)*width+x]==expected,"GPU atlas disagrees with original indexed pixels/coverage/palette/ownership");
     }
     unsigned bytes=512*256*4;
-    for(const auto image:prepared->textures) bytes+=pica_resident_texture_bytes(image);
+    for(const auto& image:prepared->textures) bytes+=pica_resident_texture_bytes(image);
     require(bytes<=768*1024,"Compact tile atlas exceeded its fixed native budget");
 }
 std::shared_ptr<simulation::SnesPpuState> fixture(unsigned number) {

@@ -609,9 +609,9 @@ void transparent_priority_crop() {
     const auto full=renderer.prepare(ppu,batch,plan);validate_pica_frame(full,lower.view());
     const auto width=full.textures[0].pitch/4;
     const std::vector<std::uint8_t> pixels(full.textures[0].pixels.begin(),full.textures[0].pixels.end());
-    unsigned bytes=0;for(auto image:full.textures) bytes+=pica_resident_texture_bytes(image);
+    unsigned bytes=0;for(const auto& image:full.textures) bytes+=pica_resident_texture_bytes(image);
     const auto cropped=renderer.prepare(ppu,batch,plan,15,0,32,true);validate_pica_frame(cropped,lower.view());
-    unsigned crop_bytes=0;for(auto image:cropped.textures) crop_bytes+=pica_resident_texture_bytes(image);
+    unsigned crop_bytes=0;for(const auto& image:cropped.textures) crop_bytes+=pica_resident_texture_bytes(image);
     require(crop_bytes<bytes/8 && renderer.work().decodes==1 && renderer.work().colour_updates==1,
         "Empty priority rows still consumed full texture pages or cropping decoded the source again");
     unsigned black=0;
