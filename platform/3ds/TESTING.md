@@ -187,15 +187,26 @@ The sensitivity, window/count/concurrent-load and unverified guest-exit
 limitations above still apply. No incremental hardware request, release or
 60-FPS acceptance is implied.
 
-The next source-only experiment keeps all lazily decoded vertical rows for
+The subsequent source-only experiment (`fe4f5f18`,
+[ARM run 38440520170](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38440520170))
+kept all lazily decoded vertical rows for
 each of 32 tile keys, instead of evicting an earlier row when the scanline
 changes. Its draw-local payload is bounded to 9,408 bytes, does not survive a
 draw, and initializes a row before its validity bit permits any read. The
 independent mosaic-size-one decoder comparisons now include deliberate
 tile-key collisions. Local background/extents/composition tests and both
 240-phase Original/EX image digests pass with 80 audio blocks unchanged.
-ARM stack/build and measured native performance are pending; this is not a
-validated replacement for the opacity-mask candidate above.
+All 52 CI tests and ARM/shader/stack/package gates pass, with a 9,944-byte
+static `draw_bg1` frame. It does not improve the native sensitivity replay:
+overlay means are 3.224/3.231 ms in backgrounds 3/51, versus 3.182/3.190 for
+the smaller opacity-mask cache. Finishing is 5.146/4.971 ms and inclusive
+loop means 19.311/17.466 ms; those loop means are not completed FPS.
+No fallback, retry or replay errors occur; planned DSP shutdown/profile flush
+occur, but guest GSP retirement remains unverified. The owned emulator was
+stopped after the flush and restored to 100% CPU. The larger cache is reverted
+because its extra stack is not justified by the measured result; the stronger
+independent collision fixture is retained. The current renderer remains the
+validated opacity-mask implementation above, not a new 60-FPS result.
 
 The current candidate removes the EX BG1 staging image and applies the same
 zero-ink/CGRAM-black transparency directly during decoding. The 57,344-byte

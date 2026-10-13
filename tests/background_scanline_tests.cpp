@@ -273,9 +273,8 @@ void bg1_cached_rows() {
             ppu.main_screen = 1;
             ppu.background_mode = n & 1U ? 3U : 2U;
             ppu.mosaic = 0;
-            // Repeated vertical rows, palette/flip variants and direct-map
-            // collisions. Tile IDs 33*n share the new tile-key hash bucket
-            // before palette/flip folding; row-valid bits must reset on reuse.
+            // Repeated vertical rows and adversarial tile-key patterns,
+            // including palette/flip variants and direct-map collisions.
             // The next invocation changes VRAM/CGRAM but reuses tile IDs.
             if (n % 3U == 0) {
                 ppu.bg1_screen_base = 0x6000;

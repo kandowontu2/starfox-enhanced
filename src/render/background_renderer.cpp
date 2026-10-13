@@ -281,48 +281,41 @@ std::array<std::uint8_t, 16> decoded_tile_row(
 
 // A draw-local cache: no VRAM/CGRAM revision can leak into the next draw, and
 // full keys disambiguate direct-map collisions, palette and flip variants.
-// Repeated blank/text tiles are common in the EX foreground overlay. Retain
-// all lazily decoded rows for each of 32 tiles so changing the scanline does
-// not evict the preceding rows. Keep this bounded (9,408 bytes), rather than
-// allocating a 64-KiB character image or retaining state across draws.
+// Repeated blank/text tiles are common in the EX foreground overlay. Keep
+// this bounded (712 bytes), rather than allocating a 64-KiB character image.
 struct TileRowCache {
-    std::array<std::uint32_t, 32> keys;
-    std::array<std::array<std::array<std::uint8_t, 16>, 16>, 32> rows;
-    std::array<std::array<std::uint16_t, 16>, 32> opaque;
-    // Zero means the slot has no key. Uninitialized payload is never read
-    // before its row bit is set, including after a direct-map collision.
-    std::array<std::uint16_t, 32> valid_rows{};
+    std::array<std::uint32_t, 32> keys{};
+    std::array<std::array<std::uint8_t, 16>, 32> rows{};
+    std::array<std::uint16_t, 32> opaque{};
+    std::uint32_t valid{};
 
     template<unsigned bits>
     const std::array<std::uint8_t, 16>& get(
         const simulation::SnesPpuState& ppu, std::uint16_t character_base,
         std::uint16_t tile, int source_y, bool large,
         bool transparent_black, std::uint16_t& opacity) noexcept {
-        const auto key = std::uint32_t(tile) | (bits << 16U)
-            | (unsigned(large) << 20U);
-        const auto slot = (key ^ (key >> 5U) ^ (key >> 10U) ^ (key >> 15U)) & 31U;
-        const auto row_y = unsigned(source_y) & (large ? 15U : 7U);
-        const auto mask = std::uint16_t(1U << row_y);
-        if (!valid_rows[slot] || keys[slot] != key) {
-            keys[slot] = key;
-            valid_rows[slot] = 0;
-        }
-        if (!(valid_rows[slot] & mask)) {
-            auto& row = rows[slot][row_y];
-            row = decoded_tile_row<bits>(ppu, character_base, tile, int(row_y), large);
+        const auto key = (std::uint32_t(tile) << 4U)
+            | (unsigned(source_y) & 15U) | (bits << 20U)
+            | (unsigned(large) << 24U);
+        const auto slot = (key ^ (key >> 8U) ^ (key >> 14U)) & 31U;
+        const auto mask = 1U << slot;
+        if (!(valid & mask) || keys[slot] != key) {
+            auto& row = rows[slot];
+            row = decoded_tile_row<bits>(ppu, character_base, tile, source_y, large);
             if (transparent_black) for (auto& ink : row)
                 if ((ppu.cgram[ink] & 32767U) == 0U) ink = 0;
             auto mask_bits = std::uint16_t{};
             for (unsigned x = 0; x < row.size(); ++x)
                 if (row[x]) mask_bits |= std::uint16_t(1U << x);
-            opaque[slot][row_y] = mask_bits;
-            valid_rows[slot] |= mask;
+            opaque[slot] = mask_bits;
+            keys[slot] = key;
+            valid |= mask;
         }
-        opacity = opaque[slot][row_y];
-        return rows[slot][row_y];
+        opacity = opaque[slot];
+        return rows[slot];
     }
 };
-static_assert(sizeof(TileRowCache) <= 9408U);
+static_assert(sizeof(TileRowCache) <= 712U);
 
 // Ordinary rows keep one tilemap word, priority, palette and set of bitplanes
 // for all 8/16 texels. Mosaic, unique artwork, rolled offsets and tunnel edge
