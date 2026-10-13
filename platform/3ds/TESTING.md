@@ -495,6 +495,23 @@ Malformed heads and active/free cycles still fail before mutating the pool;
 native list reorders still import and noncanonical PREV words still repair.
 These checks establish the tested state/pixel behavior, not native performance.
 
+The exact list-reuse ARM image (`3a3c7e16`, run `38480792957`) passes all
+53 CI tests (86.15 seconds) and unchanged mandatory native gates. Its identical
+accuracy-enabled Vulkan/explicit-300%-clock sensitivity movie measures mean
+import costs of 0.044/0.042 ms in backgrounds 3/51, versus 0.064/0.062 ms in
+the preceding image. Mean logic costs are 7.103/9.008 ms versus 7.986/9.903 ms.
+Successful whole-frame return rates are 59.404/59.189, with minimum same-label
+windows 54.216/53.751. The extra background-51 window and slightly different
+poses/counts limit direct aggregate comparisons; child timings are not additive
+with their parents. Its ordinary slow window still reaches 18.740 ms of source
+advancement before presentation. No movie errors, invalid-memory messages or
+renderer retry/fallback are recorded. Planned DSP shutdown and buffered profile
+flush occur; the verified host is stopped afterward and its clock restored to
+100%. Stable mono 60 FPS, physical New-model timing and guest GSP clean exit
+remain unproven. The next measurement must isolate actual SPC join/wait time
+from source work before considering any later APU barrier. Full PCM, port,
+state/restore and source-cadence parity remain required; no audio work is dropped.
+
 A separate shutdown-logging replay is excluded: a Qt help window reset the
 clock's explicit-selection flag, so its numeric 300 setting was ignored and
 movie input ordering failed. It is not timing, correctness or clean-exit
