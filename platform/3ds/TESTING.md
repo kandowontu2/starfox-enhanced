@@ -19,7 +19,7 @@ changing the one-eye slider-off/New 2DS XL path.
 
 1. The latest source-only candidate is the experimental
    `StarFoxEnhanced-3ds-test.zip` artifact from
-   [ARM run 38429600664](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38429600664).
+   [ARM run 38438777544](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38438777544).
    R376 remains the hardware-tested baseline, not the latest source candidate.
    Extract the ZIP to the SD card's root, keeping its folder structure. When
    updating an earlier build, replace only the `.3dsx` and `.smdh`; preserve the existing
@@ -66,8 +66,8 @@ still required.
 ## Current build and validation
 
 The current frame-pipeline candidate is source
-`502788c54d311f3d7107b71ae70cfa2cf47d98bf`, from
-[ARM run 38435018896](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38435018896).
+`35c3a4138424a31d1aa21c7b507f44ceba5c3edd`, from
+[ARM run 38438777544](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38438777544).
 It uses the imported Starwing mono renderer for ordinary mono scenes, retains
 the exact native path for cartridge window/colour effects, and removes gameplay
 profile SD writes. The final SPC block overlaps presentation and independent
@@ -172,10 +172,20 @@ This is a small change, not a major native gain. The new child phases place
 about 3.45 ms/call in the EX overlay and 1.69--1.86 in final canvas work.
 The subsequent tag-free row experiment (`4c308b7f`, ARM run 38437029767) passes
 all correctness/native gates but increases overlay timing to 3.677 ms/call.
-That specialization is being reverted. An opacity-mask follow-up is under
-host validation and is not yet a validated native candidate. The sensitivity,
-window/count/concurrent-load and unverified guest-exit limitations above still
-apply. No new tester package, release or 60-FPS acceptance is implied.
+That specialization is reverted in the current candidate. Its draw-local
+opacity masks skip clipped tile rows that cannot write any visible ink, with
+all 52 asset-free host CI tests and native ARM/shader/stack/package gates passing.
+Original/EX retain their previous 240-phase image digests and 80 audio blocks.
+The same accuracy-enabled Vulkan/300%-clock sensitivity replay measures EX
+overlay means of 3.182/3.190 ms in backgrounds 3/51, versus 3.454/3.460 for
+`502788c5` (about 8% lower). Finishing is 5.105/4.931 ms; canvas remains
+1.863/1.694 ms. Inclusive loop means are 19.234/17.557 ms, not completed FPS.
+No fallback, retry or movie errors occur; planned DSP shutdown and profile
+flush occur. Guest GSP retirement remains unverified, so the owned emulator
+was stopped after the flush and its CPU setting restored to 100%.
+The sensitivity, window/count/concurrent-load and unverified guest-exit
+limitations above still apply. No incremental hardware request, release or
+60-FPS acceptance is implied.
 
 The current candidate removes the EX BG1 staging image and applies the same
 zero-ink/CGRAM-black transparency directly during decoding. The 57,344-byte
