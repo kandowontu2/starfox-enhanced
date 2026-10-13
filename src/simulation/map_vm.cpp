@@ -762,6 +762,7 @@ void MapVm::sync_objects_to_cpu(bool reuse_imported_image) {
     }
     if(active!=cache.active) {
         for(auto& record:cache.records) record.valid=false;
+        cache.list_image=false;
         cache.active=active; // Native-pointer fixups depend on active membership.
     }
     cpu_.write16(active_list_,
@@ -850,8 +851,22 @@ void MapVm::sync_objects_from_cpu() {
         }
     };
     auto& active=cache.active_work;auto& free=cache.free_work;
-    read_list(cpu_.read16(active_list_),active);
-    read_list(cpu_.read16(free_list_),free);
+    const bool same_lists=cache.list_image
+        && cpu_.peek_wram_matches(active_list_,cache.active_head)==true
+        && cpu_.peek_wram_matches(free_list_,cache.free_head)==true
+        && cpu_.peek_wram_strided_words_match(object_base_,object_size_,
+            std::span{cache.next_links}.first(object_count_))==true;
+    if(same_lists) {
+        active=cache.active;free=cache.free;
+        // Both original walks terminate with a zero NEXT/head word. Preserve
+        // that final bus access before any later potentially observable I/O.
+        (void)cpu_.read8(free.empty()?free_list_+1U:
+            object_base_+(free.back()-1U)*object_size_+1U);
+        ++cache.list_hits;
+    } else {
+        read_list(cpu_.read16(active_list_),active);
+        read_list(cpu_.read16(free_list_),free);
+    }
     if (active.size() + free.size() != object_count_) {
         throw std::runtime_error{"native active/free lists do not cover the object pool"};
     }
@@ -861,6 +876,22 @@ void MapVm::sync_objects_from_cpu() {
     }
     if(!objects_->lists_match(active,free)) objects_->restore_lists(active, free);
     cache.free=free;
+    if(!same_lists) {
+        cache.list_image=plain_wram(active_list_,2) && plain_wram(free_list_,2)
+            && plain_wram(object_base_,object_count_*object_size_);
+        if(cache.list_image) {
+            const auto pointer=[this](ObjectHandle h) {
+                return h?static_cast<std::uint16_t>(object_base_+(h-1U)*object_size_):std::uint16_t{};
+            };
+            const auto heads=[&](auto& bytes,const auto& list) {
+                const auto head=pointer(list.empty()?0:list.front());
+                bytes[0]=static_cast<std::uint8_t>(head);bytes[1]=static_cast<std::uint8_t>(head>>8U);
+            };
+            heads(cache.active_head,active);heads(cache.free_head,free);
+            for(const auto* list:{&active,&free}) for(std::size_t n=0;n<list->size();++n)
+                cache.next_links[(*list)[n]-1U]=pointer(n+1U<list->size()?(*list)[n+1U]:0);
+        }
+    }
     bool canonical_links=plain_wram(active_list_,2) && plain_wram(free_list_,2)
         && plain_wram(object_base_,object_count_*object_size_)
         && plain_wram(extended_object_base_,object_count_*object_size_);

@@ -64,6 +64,17 @@ struct ObjectBridgeTestAccess {
     }
     static auto hits(const MapVm& map) {return map.object_bridge_->push_hits+map.object_bridge_->pull_hits;}
     static auto image_hits(const MapVm& map) {return map.object_bridge_->image_hits;}
+    static auto list_hits(const MapVm& map) {return map.object_bridge_->list_hits;}
+    static void native_lists(MapVm& map,const std::vector<ObjectHandle>& active,
+        const std::vector<ObjectHandle>& free) {
+        const auto pointer=[&](ObjectHandle h) {
+            return h?std::uint16_t(map.object_base_+(h-1U)*map.object_size_):std::uint16_t{};
+        };
+        map.cpu_.write16(map.active_list_,pointer(active.empty()?0:active.front()));
+        map.cpu_.write16(map.free_list_,pointer(free.empty()?0:free.front()));
+        for(const auto* list:{&active,&free}) for(std::size_t n=0;n<list->size();++n)
+            map.cpu_.write16(pointer((*list)[n]),pointer(n+1<list->size()?(*list)[n+1]:0));
+    }
     static auto cache_bytes() {return sizeof(MapVm::ObjectBridgeCache);}
     static auto cpu_state(const MapVm& map) {return map.cpu_.save_state();}
     static auto call_strategy(MapVm& map,std::uint32_t address,ObjectHandle object,bool reuse) {
@@ -245,7 +256,8 @@ void test_bridge(ObjectMemoryLayout layout,bool reuse_imported=false) {
     };
     // Empty/full pools, repeated cache hits and deliberately inconsistent host
     // mirrors: export alone must never qualify a skipped semantic import.
-    push();pull();
+    push();pull();pull(); // Empty active list must keep the final free-link bus byte.
+    require(ObjectBridgeTestAccess::list_hits(cached)>0,"Empty unchanged lists never used checked link reuse");
     for(unsigned n=0;n<capacity;++n) {
         const auto h=a.allocate_after();require(h==b.allocate_after(),"fixture allocation differs");
         a.at(h).world_x=b.at(h).world_x=static_cast<std::int16_t>(n*173);
@@ -253,6 +265,22 @@ void test_bridge(ObjectMemoryLayout layout,bool reuse_imported=false) {
     }
     push();pull();push();pull();push();pull();
     require(ObjectBridgeTestAccess::hits(cached)>capacity,"bridge did not exercise exact reuse");
+    require(ObjectBridgeTestAccess::list_hits(cached)>2,"Full unchanged lists never used checked link reuse");
+    // A CPU routine can reorder NEXT/heads without changing host membership
+    // first. Decode those actual links and preserve noncanonical PREV repair.
+    for(unsigned n=0;n<2;++n) {
+        const auto h=a.first_active();require(a.remove(h)==b.remove(h),"Native-list fixture removal differs");
+    }
+    push();pull();
+    auto active=a.active_handles(),free=a.free_handles();
+    std::reverse(active.begin(),active.end());std::reverse(free.begin(),free.end());
+    const auto before_native_reorder=ObjectBridgeTestAccess::list_hits(cached);
+    ObjectBridgeTestAccess::native_lists(cached,active,free);
+    ObjectBridgeTestAccess::native_lists(oracle,active,free);
+    pull();
+    require(ObjectBridgeTestAccess::list_hits(cached)==before_native_reorder,"Changed native NEXT/heads reused old lists");
+    require(a.active_handles()==active && a.free_handles()==free,"Changed native order was not imported");
+    push();pull();pull();
     if(reuse_imported) {
         require(ObjectBridgeTestAccess::image_hits(cached)>0,"complete imported image was never reused");
         // Import follows NEXT, but export also repairs PREV. Do not silently
@@ -302,6 +330,29 @@ void test_bridge(ObjectMemoryLayout layout,bool reuse_imported=false) {
             push();pull(); // Fresh caches after restored CPU state.
         }
     }
+    // Different native heads must force the independent walk, even when all
+    // cached NEXT words still match. Neither malformed list may mutate the pool.
+    push();pull();
+    const auto before_bad_head=a.save_state();
+    const auto list_hits=ObjectBridgeTestAccess::list_hits(cached);
+    cached.write_native_word(0x1a00,0x339);oracle.write_native_word(0x1a00,0x339);
+    rejects([&]{ObjectBridgeTestAccess::pull(cached,true);});
+    rejects([&]{ObjectBridgeTestAccess::pull(oracle,false);});
+    require(a.save_state()==before_bad_head && a.save_state()==b.save_state()
+        && cached.save_state()==oracle.save_state(),"Bad native head changed pool or CPU state");
+    require(ObjectBridgeTestAccess::list_hits(cached)==list_hits,"Malformed head reused cached lists");
+    push();pull();
+    if(!a.first_free()) {
+        const auto h=a.first_active();require(a.remove(h)==b.remove(h),"Free-cycle fixture removal differs");
+        push();pull();
+    }
+    const auto free_pointer=std::uint16_t(0x338+(a.first_free()-1)*stride);
+    const auto before_free_cycle=a.save_state();
+    cached.write_native_word(free_pointer,free_pointer);oracle.write_native_word(free_pointer,free_pointer);
+    rejects([&]{ObjectBridgeTestAccess::pull(cached,true);});
+    rejects([&]{ObjectBridgeTestAccess::pull(oracle,false);});
+    require(a.save_state()==before_free_cycle && a.save_state()==b.save_state()
+        && cached.save_state()==oracle.save_state(),"Free-list cycle changed pool or CPU state");
     // Corrupt a native list, without letting a stale cache turn it into a hit.
     push();const auto first=a.first_active();const auto pointer=static_cast<std::uint16_t>(0x0338+(first-1)*stride);
     cached.write_native_word(pointer,pointer);oracle.write_native_word(pointer,pointer);

@@ -354,8 +354,13 @@ private:
     struct ObjectBridgeCache {
         std::array<ObjectBridgeSnapshot,kMaximumObjects+1> records{};
         std::vector<ObjectHandle> active, free, active_work, free_work;
-        std::uint64_t push_hits{},pull_hits{},image_hits{};
-        bool imported_image{};
+        // One NEXT word for every slot plus both list heads, from the last
+        // completely validated import. Every live word must match before
+        // bypassing pointer decoding/cycle checks; no write lease is assumed.
+        std::array<std::uint16_t,kMaximumObjects> next_links{};
+        std::array<std::uint8_t,2> active_head{},free_head{};
+        std::uint64_t push_hits{},pull_hits{},image_hits{},list_hits{};
+        bool imported_image{},list_image{};
         ObjectBridgeCache() {
             active.reserve(kMaximumObjects);active_work.reserve(kMaximumObjects);
             free.reserve(kMaximumObjects);free_work.reserve(kMaximumObjects);

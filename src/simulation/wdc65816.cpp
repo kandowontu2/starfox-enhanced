@@ -17,6 +17,7 @@
 #include <bit>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <map>
 #include <optional>
 #include <sstream>
@@ -2889,6 +2890,30 @@ std::optional<bool> Wdc65816::peek_wram_matches(
         && offset < 0x2000U && expected.size() <= 0x2000U - offset)
         return std::equal(expected.begin(), expected.end(), impl_->wram.begin() + offset);
     return std::nullopt;
+}
+
+std::optional<bool> Wdc65816::peek_wram_strided_words_match(
+    std::uint32_t address, std::size_t stride,
+    std::span<const std::uint16_t> expected) const noexcept {
+    if(expected.empty() || stride < 2
+        || expected.size() - 1 > (std::numeric_limits<std::size_t>::max() - 2) / stride)
+        return std::nullopt;
+    const auto length = (expected.size() - 1) * stride + 2;
+    std::size_t offset{};
+    if(address >= 0x7e0000U && address < 0x800000U && length <= 0x800000U - address)
+        offset = address - 0x7e0000U;
+    else {
+        const auto bank = address >> 16U, low = address & 0xffffU;
+        if(!((bank < 0x40U || (bank >= 0x80U && bank < 0xc0U))
+            && low < 0x2000U && length <= 0x2000U - low)) return std::nullopt;
+        offset = low;
+    }
+    for(const auto word : expected) {
+        if(impl_->wram[offset] != static_cast<std::uint8_t>(word)
+            || impl_->wram[offset + 1] != static_cast<std::uint8_t>(word >> 8U)) return false;
+        offset += stride;
+    }
+    return true;
 }
 
 void Wdc65816::write8(std::uint32_t address, std::uint8_t value) {

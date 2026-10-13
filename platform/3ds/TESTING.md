@@ -465,6 +465,29 @@ Independent adapter checks cover mirrors, mismatches, writes, restore, boundary
 rejection and complete CPU/I/O state. Performance improvement must be measured
 on the newly compiled native image, not inferred from this implementation.
 
+That image (`eb8c4b7a`, ARM run `38477936637`) passes all 53 CI tests
+(126.51 seconds), the unchanged native gates, eight actual Original/EX
+pixel/state probes, and actual source PCM/state checks. The same accuracy-enabled
+Vulkan/explicit-300%-clock sensitivity replay measures 58.818/59.110 successful
+whole-frame returns per second in backgrounds 3/51, up from 58.258/58.400;
+the minimum windows remain 49.112/52.515. Mean export/import cost falls from
+0.039/0.084 to 0.031/0.064 ms in background 3 and from 0.037/0.080 to
+0.030/0.062 ms in background 51. Ordinary slow-window source advancement still
+reaches 19.777 ms before presentation. Counts and poses vary slightly between
+runs. This modest improvement does not establish sustained 60 FPS, physical
+New-model CPU/cache timing, or GPU retirement. No movie errors or renderer
+retry/fallback are recorded; planned DSP shutdown and profile flush occur, then
+the verified owned host is stopped and its clock restored to 100%.
+
+The next source experiment checks unchanged active/free lists against both
+live heads and every live NEXT word before reusing their already validated
+order. The new strided-word peek accepts only a fully bounded plain-WRAM range,
+does not compare payload gaps or expose pointers, and preserves the final bus
+access before later I/O. A changed head/link takes the original cycle, alignment,
+coverage and duplicate validation path. PREV repair and all changed payload
+imports remain unchanged. This is not an unchecked lease on native writes or
+a measured speed improvement until the actual ARM replay establishes one.
+
 A separate shutdown-logging replay is excluded: a Qt help window reset the
 clock's explicit-selection flag, so its numeric 300 setting was ignored and
 movie input ordering failed. It is not timing, correctness or clean-exit

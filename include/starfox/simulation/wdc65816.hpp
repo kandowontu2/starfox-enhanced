@@ -129,6 +129,12 @@ public:
     // Callers eliding bus reads must still reproduce their final open-bus byte.
     [[nodiscard]] std::optional<bool> peek_wram_matches(
         std::uint32_t address, std::span<const std::uint8_t> expected) const noexcept;
+    // The same strict plain-WRAM contract for little-endian words separated
+    // by a fixed byte stride. Validate the entire range before comparing;
+    // no mapped pointer escapes, and gaps are neither read nor compared.
+    [[nodiscard]] std::optional<bool> peek_wram_strided_words_match(
+        std::uint32_t address, std::size_t stride,
+        std::span<const std::uint16_t> expected) const noexcept;
     void write8(std::uint32_t address, std::uint8_t value);
     void write16(std::uint32_t address, std::uint16_t value);
     [[nodiscard]] bool load_cartridge_ram(
