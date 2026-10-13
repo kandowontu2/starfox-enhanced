@@ -273,7 +273,6 @@ int main() {
     };
 #if defined(STARFOX_3DS_CORE_PICA)
     const auto ensure_gpu=[&] {
-        mono.reset();
         if(!gpu) {
             // Damage/wipe effects switch GPU owners repeatedly. Preserve the
             // first-init freeze receipt without rearming SD flushes each time.
@@ -569,7 +568,6 @@ int main() {
                 const bool source_effect=source.raster && (source.raster->circle.active
                     || source.raster->wipe.active || source.raster->colour_math.active);
                 if(!source.plan.stereo && !source_effect && !menu->state().visible && !session->game().runtime_options_open()) {
-                    gpu.reset();
                     if(!mono) mono=std::make_unique<ctr::NativeMono>();
                     if(mono->present(*session,source,dashboard)) presentation_completed();
                     frame_handled=true;return;

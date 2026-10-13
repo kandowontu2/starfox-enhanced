@@ -3,6 +3,7 @@
 #include "display_3ds.hpp"
 #include "display_retirement.hpp"
 #include "stereo_3ds.hpp"
+#include "../native_context.hpp"
 
 #include <algorithm>
 #include <array>
@@ -185,14 +186,16 @@ void Display3ds::prepare_mode2_plan(
 
 bool Display3ds::open() {
     close();
+    if (!platform::nintendo_3ds::acquire_native_context(this,
+        [](void* owner) noexcept { static_cast<Display3ds*>(owner)->suspend(); })) return false;
+    c3d_ready_ = true;
+    activate();
     gfxSetScreenFormat(GFX_TOP, GSP_RGB565_OES);
     // Bottom telemetry is written directly at native 320x240 pixel positions.
     gfxSetScreenFormat(GFX_BOTTOM, GSP_RGBA8_OES);
     // Mono submissions still duplicate the left buffer through libctru.
     // Only paired gameplay submissions address the right render target.
     gfxSet3D(true);
-    if (!C3D_Init(C3D_DEFAULT_CMDBUF_SIZE)) return false;
-    c3d_ready_ = true;
     // Per-line HDMA on the 400x240 native raster can approach 16k fragments.
     if (!C2D_Init(16384U)) {
         close();
@@ -258,6 +261,7 @@ bool Display3ds::open() {
         | GX_TRANSFER_SCALING(GX_TRANSFER_SCALE_NO);
     C3D_RenderTargetSetOutput(top_, GFX_TOP, GFX_LEFT, output);
     C3D_RenderTargetSetOutput(top_right_, GFX_TOP, GFX_RIGHT, output);
+    prepare_draw_state();
     gpu_active_ = true;
     LightEvent_Init(&bg2_plan_requested_, RESET_ONESHOT);
     LightEvent_Init(&bg2_plan_completed_, RESET_ONESHOT);
@@ -273,6 +277,43 @@ bool Display3ds::open() {
     return true;
 }
 
+void Display3ds::suspend() noexcept {
+    wait_for_bg2_plan();
+    if (top_ && top_->linked) C3D_RenderTargetDetachOutput(top_);
+    if (top_right_ && top_right_->linked) C3D_RenderTargetDetachOutput(top_right_);
+    // Texture/atlas certificates survive; the LCD front image does not.
+    front_buffer_valid_ = false;
+}
+
+bool Display3ds::activate() {
+    if (!c3d_ready_) return false;
+    if (!platform::nintendo_3ds::activate_native_context(this)) return false;
+    gfxSetScreenFormat(GFX_TOP, GSP_RGB565_OES);
+    gfxSetScreenFormat(GFX_BOTTOM, GSP_RGBA8_OES);
+    constexpr auto output = GX_TRANSFER_FLIP_VERT(0) | GX_TRANSFER_OUT_TILED(0)
+        | GX_TRANSFER_RAW_COPY(0) | GX_TRANSFER_IN_FORMAT(GX_TRANSFER_FMT_RGBA8)
+        | GX_TRANSFER_OUT_FORMAT(GX_TRANSFER_FMT_RGB565) | GX_TRANSFER_SCALING(GX_TRANSFER_SCALE_NO);
+    if (top_) C3D_RenderTargetSetOutput(top_, GFX_TOP, GFX_LEFT, output);
+    if (top_right_) C3D_RenderTargetSetOutput(top_right_, GFX_TOP, GFX_RIGHT, output);
+    if (c2d_ready_) prepare_draw_state();
+    front_buffer_valid_ = false;
+    return true;
+}
+
+void Display3ds::prepare_draw_state() {
+    // C2D_Prepare does not restore stencil, early-depth, alpha-test or scissor.
+    // This is also required on first construction after a native-effects frame.
+    C3D_StencilTest(false, GPU_ALWAYS, 0, 63, 0);
+    C3D_StencilOp(GPU_STENCIL_KEEP, GPU_STENCIL_KEEP, GPU_STENCIL_KEEP);
+    C3D_EarlyDepthTest(false, GPU_EARLYDEPTH_GREATER, 0);
+    C3D_DepthMap(true, -1, 0);
+    C3D_AlphaTest(false, GPU_ALWAYS, 0);
+    C3D_BlendingColor(0);
+    C3D_SetScissor(GPU_SCISSOR_DISABLE, 0, 0, 0, 0);
+    C3D_TexBind(1, &texture_);C3D_TexBind(2, &texture_);
+    C2D_Prepare();
+}
+
 void Display3ds::close() noexcept {
     if (bg2_plan_pending_) wait_for_bg2_plan();
     if (bg2_plan_worker_ != nullptr) {
@@ -283,9 +324,14 @@ void Display3ds::close() noexcept {
         bg2_plan_worker_ = nullptr;
     }
     gpu_active_ = false;
+    if (c3d_ready_) platform::nintendo_3ds::suspend_native_context(this);
     retire_display_context(c3d_ready_, c2d_ready_, top_, top_right_,
         [](C3D_RenderTarget* target) { C3D_RenderTargetDetachOutput(target); },
-        [] { C2D_Fini(); }, [] { C3D_Fini(); });
+        [] { C2D_Fini(); }, [&] {
+            if (top_) C3D_RenderTargetDelete(top_);
+            if (top_right_) C3D_RenderTargetDelete(top_right_);
+            platform::nintendo_3ds::release_native_context(this);
+        });
     if (texture_.data != nullptr) C3D_TexDelete(&texture_);
     texture_ = {};
     if (overlay_texture_.data != nullptr) C3D_TexDelete(&overlay_texture_);
@@ -310,7 +356,7 @@ void Display3ds::close() noexcept {
     overlay_texture_valid_ = false;
     right_texture_valid_ = right_overlay_valid_ = false;
     c2d_ready_ = c3d_ready_ = false;
-    gfxSet3D(false);
+    front_buffer_valid_ = false;
 }
 
 bool Display3ds::show_full_dump_progress(const char* stage,
@@ -448,7 +494,7 @@ bool Display3ds::present(const render::Framebuffer& indexed,
     std::array<std::uint16_t, 256U> colours{};
     for (std::uint32_t index = 0U; index < 256U; ++index)
         colours[index] = rgb565(palette[index]);
-    if (reuse_source && frame_texture_valid_
+    if (reuse_source && front_buffer_valid_ && frame_texture_valid_
         && width == cached_frame_width_
         && height == cached_frame_height_
         && indexed.draw_scale() == cached_frame_draw_scale_
@@ -532,6 +578,7 @@ bool Display3ds::present(const render::Framebuffer& indexed,
     // Every split also flushes its command list before PICA consumes it.
     C3D_FrameEnd(GX_CMDLIST_FLUSH);
     frame_timing_.gpu_submitted = true;
+    front_buffer_valid_ = true;
     cached_frame_width_ = static_cast<std::uint16_t>(width);
     cached_frame_height_ = static_cast<std::uint16_t>(height);
     cached_frame_draw_scale_ = indexed.draw_scale();
@@ -543,6 +590,7 @@ bool Display3ds::present(const render::Framebuffer& indexed,
 }
 
 bool Display3ds::present_black() {
+    front_buffer_valid_ = false;
     if (gpu_active_) {
         if (!C3D_FrameBegin(0)) return false;
         C2D_TargetClear(top_, C2D_Color32(0, 0, 0, 255));
@@ -738,6 +786,7 @@ bool Display3ds::present_mode2(
     const render::Palette256& palette, bool reuse_source,
     const render::Framebuffer* right, bool wait_for_gpu) {
     frame_timing_ = {};
+    front_buffer_valid_ = false; // Its visible image is not the full-raster cache.
     if (!eligible_mode2(ppu) || foreground.width() != 400U
         || foreground.height() != 240U || foreground.draw_scale() != 1U) {
         wait_for_bg2_plan();
@@ -836,6 +885,7 @@ bool Display3ds::present_mode2(
     if (right != nullptr && !stereo_bg2_quads_fit(tile_quads_.size())) {
         C3D_FrameEnd(GX_CMDLIST_FLUSH);
         frame_timing_.gpu_submitted = true;
+        front_buffer_valid_ = false;
         return false;
     }
 

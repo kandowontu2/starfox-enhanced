@@ -5,8 +5,8 @@
 
 namespace starfox::platform::nintendo_3ds {
 class PicaValidatedFrame;
-// NativeDisplay owns gfx/HID; this owns the sole Citro3D presenter. Do not call
-// NativeDisplay::present/gfxSwapBuffers while this renderer is alive.
+// NativeDisplay owns gfx/HID. This and NativeMono can retain resources in one
+// context, but only the activated owner submits. Retire both before CPU swaps.
 class NativeGpu {
 public:
     explicit NativeGpu(std::span<const std::uint8_t> shader);

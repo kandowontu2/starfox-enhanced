@@ -1,4 +1,5 @@
 #include "native_gpu.hpp"
+#include "native_context.hpp"
 #include "starfox/platform/nintendo_3ds/pica_composite.hpp"
 #include "starfox/platform/nintendo_3ds/pica_residency.hpp"
 #include "starfox/platform/nintendo_3ds/pica_texture_update.hpp"
@@ -24,7 +25,6 @@ extern "C" void starfox_c2d_release_retired_program(void) __attribute__((weak));
 
 namespace starfox::platform::nintendo_3ds {
 namespace {
-constexpr unsigned command_bytes=1024*1024;
 constexpr u32 transfer_flags=GX_TRANSFER_FLIP_VERT(0)|GX_TRANSFER_OUT_TILED(0)|GX_TRANSFER_RAW_COPY(0)
     |GX_TRANSFER_IN_FORMAT(GX_TRANSFER_FMT_RGBA8)|GX_TRANSFER_OUT_FORMAT(GX_TRANSFER_FMT_RGB8)
     |GX_TRANSFER_SCALING(GX_TRANSFER_SCALE_NO);
@@ -161,9 +161,11 @@ struct NativeGpu::Impl {
     Impl(std::span<const std::uint8_t> shader) {
         if(shader.size()<32 || shader.size()>65536 || shader.size()%4 || !shader.data()
             || std::memcmp(shader.data(),"DVLB",4)) throw std::invalid_argument("Invalid 3DS GPU shader library");
-        if(!C3D_Init(command_bytes)) throw std::runtime_error("Citro3D initialization failed");
+        if(!acquire_native_context(this,[](void* owner) noexcept {static_cast<Impl*>(owner)->suspend();}))
+            throw std::runtime_error("Citro3D initialization failed");
         initialized=true;
         try {
+            activate();
             shader_program=std::make_unique<NativeShaderProgram>(shader);
             const auto& program=shader_program->program;
             transform_location=shaderInstanceGetUniformLocation(program.vertexShader,"transform");
@@ -195,13 +197,30 @@ struct NativeGpu::Impl {
         C3D_RenderTargetSetOutput(target,screen,side,transfer_flags);return target;
     }
     void shutdown() noexcept {
-        // Fini waits for command/transfer completion and owns target cleanup.
-        // Shader data, textures and the shared VBO stay alive until it returns.
-        if(initialized) {C3D_Fini();initialized=false;}
+        if(initialized) {
+            suspend_native_context(this);
+            // Delete only this owner's targets. SDK deletion joins the queue
+            // even for an unlinked target from partial construction.
+            for(auto& target:top) if(target) {C3D_RenderTargetDelete(target);target=nullptr;}
+            if(bottom) {C3D_RenderTargetDelete(bottom);bottom=nullptr;}
+        }
         for(auto& texture:textures) texture.release();
         dashboard.release();
         if(vbo) {linearFree(vbo);vbo=nullptr;}
         program_binding.retire(shader_program);
+        if(initialized) {release_native_context(this);initialized=false;}
+    }
+    void suspend() noexcept {
+        for(auto* target:top) if(target && target->linked) C3D_RenderTargetDetachOutput(target);
+        if(bottom && bottom->linked) C3D_RenderTargetDetachOutput(bottom);
+        display_sync=PicaDisplaySync{};
+    }
+    void activate() {
+        if(!activate_native_context(this)) return;
+        gfxSetScreenFormat(GFX_TOP,GSP_BGR8_OES);gfxSetScreenFormat(GFX_BOTTOM,GSP_BGR8_OES);
+        for(unsigned eye=0;eye<top.size();++eye) if(top[eye])
+            C3D_RenderTargetSetOutput(top[eye],GFX_TOP,eye?GFX_RIGHT:GFX_LEFT,transfer_flags);
+        if(bottom) C3D_RenderTargetSetOutput(bottom,GFX_BOTTOM,GFX_LEFT,transfer_flags);
     }
     void configure() {
         program_binding.bind(*shader_program,[](NativeShaderProgram& next) {C3D_BindProgram(&next.program);});
@@ -214,6 +233,13 @@ struct NativeGpu::Impl {
         C3D_DepthMap(true,-1,0);C3D_AlphaTest(true,GPU_GREATER,0);
         C3D_EarlyDepthTest(false,GPU_EARLYDEPTH_GEQUAL,0);
         C3D_SetScissor(GPU_SCISSOR_DISABLE,0,0,0,0);
+        C3D_StencilTest(false,GPU_ALWAYS,0,63,0);
+        C3D_ProcTexBind(0,nullptr);
+        C3D_ProcTexLutBind(GPU_LUT_NOISE,nullptr);C3D_ProcTexLutBind(GPU_LUT_RGBMAP,nullptr);
+        C3D_ProcTexLutBind(GPU_LUT_ALPHAMAP,nullptr);C3D_ProcTexColorLutBind(nullptr);
+        // Units 1/2 cannot be bound to nullptr in the pinned SDK. Their old
+        // owner may have closed; use our live resident 2D dashboard instead.
+        C3D_TexBind(1,&dashboard.texture);C3D_TexBind(2,&dashboard.texture);
         for(unsigned stage=0;stage<6;++stage) C3D_TexEnvInit(C3D_GetTexEnv(stage));
     }
     void material(ResidentTexture* texture,bool alpha,bool depth,bool write,bool screen_dither=false,
@@ -284,6 +310,7 @@ void NativeGpu::present(const PicaValidatedFrame& prepared,ImageView lower,PicaD
     present_checked(frame,lower,pacing);
 }
 void NativeGpu::present_checked(const PicaFrame& frame,ImageView lower,PicaDisplayPacing pacing) {
+    impl_->activate(); // Drains/detaches the previous owner before LCD/texture writes.
     // Keep display pacing separate from queue retirement. If preparation has
     // already crossed BOTH LCD refresh intervals, no extra refresh sleep is
     // needed. Source-paced gameplay needs no second display deadline at all.

@@ -518,6 +518,43 @@ movie input ordering failed. It is not timing, correctness or clean-exit
 evidence. The validation launcher now fails closed unless the requested
 comparison clock is explicitly selected as well as numerically configured.
 
+The actual SPC-owner join measurement is now complete (`a9bc520e`, ARM run
+`38482979365`): all 53 CI tests and unchanged native gates pass. The appended
+`audio_join` phase times only accepted packet `finish()` calls, excluding worker
+work, rendering, profile merging, PCM delivery and port acknowledgement. The
+512-KiB profile cap now holds 478 windows. Independent held-worker tests verify
+the boundary and failure cleanup with profiling both enabled and disabled;
+actual Original/EX PCM, VM/SPC and restore checks pass without moving any barrier.
+In the same accuracy-enabled, explicit-300%-clock sensitivity replay, 927 joins
+across 46 adjacent same-label gameplay windows total only 0.595 ms (summing
+rounded window totals); their reported maximum is 0.001 ms per join. Larger
+load/transition waits are not included in that steady-window result.
+Successful whole-frame rates are 59.404/58.898 in backgrounds 3/51, with minima
+54.216/52.899. The slowest ordinary background-51 window still reaches 18.705 ms
+of source advancement before drawing. Therefore steady audio waiting is ruled
+out for these dips; source-frame work and renderer owner handoffs are the next
+targets, not later APU joins. The movie has no input errors or renderer fallback,
+and reaches planned DSP shutdown/profile flush before the verified host is
+stopped. CPU configuration returns to explicit 100%. Physical New-model timing,
+guest GSP clean exit and sustained mono 60 FPS remain unproven. Slightly differing
+poses/counts and emulator clock/cache limits still preclude hardware claims.
+
+The next candidate retains the reference-mono and source-effects presenters
+inside one bounded Citro3D context, rather than destroying/recreating both
+whenever a cartridge colour/window effect changes. Only one owner is active.
+A handoff detaches the old LCD outputs and joins the SDK command queue before
+changing formats, binding the new targets or writing LCD/texture memory. Targets,
+textures, shaders and CPU BG2 planning caches remain owned by their original
+presenter. Returning to mono restores C2D draw state and invalidates physical
+LCD certificates, so a cached texture is never confused with an unchanged
+front-buffer image. Closing deletes only that owner's targets; the final lease
+retires Citro3D. Plain pre-game menus, cartridge replacements and model preload
+still retire both presenters. Existing source effects and stereo projection
+remain unchanged. The two-resident-owner bound is covered by 2,000 host handoffs,
+including pending queues, failed init, duplicate/unknown owners, partial close,
+reopen and final retirement. This is an unmeasured native candidate until ARM
+compilation and an accuracy-enabled replay complete; it is not 60-FPS acceptance.
+
 The earlier direct-overlay candidate removes the EX BG1 staging image and applies the same
 zero-ink/CGRAM-black transparency directly during decoding. The 57,344-byte
 pixel allocation and full-image rescan are gone. All 384 synthetic comparisons

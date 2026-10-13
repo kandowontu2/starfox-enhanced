@@ -2,8 +2,8 @@
 #include "starfox/platform/nintendo_3ds/game_session.hpp"
 #include <memory>
 namespace starfox::platform::nintendo_3ds {
-// Reference mono presentation owns Citro2D/Citro3D exclusively. The caller
-// must retire NativeGpu before constructing it, and retire this before stereo.
+// Reference mono retains its art/planning resources beside NativeGpu. Only
+// the activated owner submits; retire both before NativeDisplay CPU swaps.
 class NativeMono {
 public:
     NativeMono();~NativeMono();

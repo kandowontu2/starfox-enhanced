@@ -50,6 +50,9 @@ public:
 
     [[nodiscard]] bool open();
     void close() noexcept;
+    // Reactivates the retained owner after source effects/stereo. Returns true
+    // on a handoff, requiring the lower-LCD cache to be invalidated.
+    bool activate();
     // False means that no frame was submitted (the GPU is busy, or the
     // direct-framebuffer fallback is unavailable).
     // wait_for_gpu joins the prior command queue at acquire, before changing
@@ -104,6 +107,8 @@ public:
     }
 
 private:
+    void suspend() noexcept;
+    void prepare_draw_state();
     struct TileQuad {
         std::uint16_t x, y, width, height, slot;
         std::uint8_t first_x, first_y;
@@ -198,6 +203,7 @@ private:
     bool c3d_ready_{};
     bool c2d_ready_{};
     bool gpu_active_{};
+    bool front_buffer_valid_{};
     bool wide_{true};
     DisplayFrameTiming frame_timing_{};
     const u8* last_top_framebuffer_{};

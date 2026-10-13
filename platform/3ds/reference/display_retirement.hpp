@@ -20,7 +20,8 @@ void retire_display_context(bool& c3d_ready, bool& c2d_ready,
     c2d_ready = false;
     if (c3d_ready) retire_3d();
     c3d_ready = false;
-    // C3D_Fini owns target deletion, including unlinked partial construction.
+    // retire_3d deletes this owner's targets (including partial construction)
+    // before releasing its context lease. Other resident presenters survive.
     left = right = nullptr;
 }
 

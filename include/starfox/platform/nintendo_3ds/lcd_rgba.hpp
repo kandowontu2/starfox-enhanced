@@ -37,6 +37,9 @@ inline void copy_rgba_lcd(ImageView source, std::span<std::uint8_t> destination)
 class RgbaLcdCache {
 public:
     RgbaLcdCache() : pixels_(std::size_t(bottom_width) * screen_height * 3) {}
+    void invalidate() noexcept {
+        slots_ = {};pending_ = nullptr;next_slot_ = 0;valid_ = false;
+    }
     bool prepare(ImageView source, std::span<std::uint8_t> destination) {
         validate_rgba_lcd(source, destination);
         pending_ = nullptr;

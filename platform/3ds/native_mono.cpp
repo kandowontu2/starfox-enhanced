@@ -5,26 +5,23 @@
 #include "starfox/platform/nintendo_3ds/lcd_rgba.hpp"
 #include "starfox/platform/nintendo_3ds/mono_presentation.hpp"
 namespace starfox::platform::nintendo_3ds {
-namespace {
-void restore_formats() noexcept {
-    gfxSet3D(false);gfxSetScreenFormat(GFX_TOP,GSP_BGR8_OES);gfxSetScreenFormat(GFX_BOTTOM,GSP_BGR8_OES);
-}
-}
 struct NativeMono::Impl {
     platform_3ds::Display3ds display;
     RgbaLcdCache dashboard;
     Impl() {
-        if(!display.open()) {display.close();restore_formats();throw std::runtime_error("Reference 3DS mono display initialization failed");}
+        if(!display.open()) {display.close();throw std::runtime_error("Reference 3DS mono display initialization failed");}
         // Physical slider stereo remains on our separate native-eye path.
         gfxSet3D(false);
     }
-    ~Impl() {display.close();restore_formats();}
+    ~Impl() {display.close();}
 };
 NativeMono::NativeMono():impl_(std::make_unique<Impl>()) {}
 NativeMono::~NativeMono()=default;
 bool NativeMono::present(GameSession& session,const GamePresentation& source,ImageView dashboard) {
     if(source.plan.stereo || !valid_image(dashboard,bottom_width,screen_height))
         throw std::invalid_argument("Incomplete reference mono frame");
+    if(impl_->display.activate()) impl_->dashboard.invalidate();
+    gfxSet3D(false);
     auto& renderer=session.mono_renderer();
     renderer.set_sprite_selection(source.sprites);
     const auto& game=session.game();const auto& ppu=game.map().ppu_state();

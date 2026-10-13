@@ -326,6 +326,14 @@ void rgba_lcd_tests() {
         std::copy_n(pixels.data()+std::size_t(y)*pitch,row_bytes,packed.data()+std::size_t(y)*row_bytes);
     const ImageView contiguous{packed,bottom_width,screen_height,row_bytes};
     require(!cache.prepare(contiguous,b),"Equivalent packed RGB content lost residency");
+    // A resident presenter returning from the other GPU owner must repaint
+    // both physical buffers, even if their pointers and desired RGB are equal.
+    cache.invalidate();
+    require(cache.prepare(source,a),"Handoff retained old first-buffer LCD certificate");cache.commit(a);
+    require(cache.prepare(source,b),"Handoff retained old second-buffer LCD certificate");cache.commit(b);
+    require(!cache.prepare(source,a) && !cache.prepare(source,b),"Repainted handoff buffers did not recertify");
+    cache.invalidate();cache.invalidate();
+    require(cache.prepare(source,a),"Repeated invalidation did not discard LCD certificate");cache.commit(a);
     RgbaLcdCache next_owner;
     require(next_owner.prepare(source,a),"A different display owner inherited old LCD residency");
     const auto before=first;

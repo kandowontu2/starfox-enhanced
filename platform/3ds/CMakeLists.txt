@@ -159,9 +159,14 @@ if(STARFOX_3DS_BUILD_NATIVE)
                 -P "${CMAKE_CURRENT_SOURCE_DIR}/embed_shader.cmake"
             DEPENDS starfox_3ds_pica_shader "${pica_shader}" "${pica_shader_check}" "${CMAKE_CURRENT_SOURCE_DIR}/embed_shader.cmake"
             VERBATIM)
+        add_library(starfox_3ds_native_context STATIC native_context.cpp)
+        target_compile_features(starfox_3ds_native_context PUBLIC cxx_std_20)
+        target_include_directories(starfox_3ds_native_context PRIVATE ../../include)
+        target_include_directories(starfox_3ds_native_context SYSTEM PRIVATE "${STARFOX_CTRU_INCLUDE}" "${STARFOX_CITRO3D_INCLUDE}")
+        target_link_libraries(starfox_3ds_native_context PUBLIC "${STARFOX_CITRO3D_LIBRARY}" "${STARFOX_CTRU_LIBRARY}")
         add_library(starfox_3ds_native_gpu STATIC native_gpu.cpp)
         target_link_libraries(starfox_3ds_native_gpu PUBLIC starfox_3ds_frontend
-            PRIVATE "${STARFOX_CITRO3D_LIBRARY}" "${STARFOX_CTRU_LIBRARY}")
+            PRIVATE starfox_3ds_native_context "${STARFOX_CITRO3D_LIBRARY}" "${STARFOX_CTRU_LIBRARY}")
         target_include_directories(starfox_3ds_native_gpu SYSTEM PRIVATE
             "${STARFOX_CTRU_INCLUDE}" "${STARFOX_CITRO3D_INCLUDE}")
         if(STARFOX_3DS_PROFILE_FRAMES)
@@ -173,7 +178,7 @@ if(STARFOX_3DS_BUILD_NATIVE)
             target_compile_features(starfox_3ds_reference_display PUBLIC cxx_std_20)
             target_include_directories(starfox_3ds_reference_display PUBLIC ../../include)
             target_include_directories(starfox_3ds_reference_display SYSTEM PRIVATE "${STARFOX_CTRU_INCLUDE}" "${STARFOX_CITRO3D_INCLUDE}")
-            target_link_libraries(starfox_3ds_reference_display PUBLIC starfox_3ds_cartridge_core PRIVATE starfox_3ds_citro2d "${STARFOX_CITRO3D_LIBRARY}" "${STARFOX_CTRU_LIBRARY}")
+            target_link_libraries(starfox_3ds_reference_display PUBLIC starfox_3ds_cartridge_core PRIVATE starfox_3ds_native_context starfox_3ds_citro2d "${STARFOX_CITRO3D_LIBRARY}" "${STARFOX_CTRU_LIBRARY}")
             target_sources(starfox_3ds_game_core_check PRIVATE "${pica_header}")
             target_link_libraries(starfox_3ds_game_core_check PRIVATE starfox_3ds_native_gpu starfox_3ds_reference_display)
             target_compile_definitions(starfox_3ds_game_core_check PRIVATE STARFOX_3DS_CORE_PICA=1)
@@ -207,7 +212,7 @@ if(STARFOX_3DS_BUILD_NATIVE)
             starfox_3ds_native_audio starfox_3ds_frontend_check starfox_3ds_spc_saturation_check starfox_3ds_spc_counters_check
             starfox_3ds_spc_output_check
             starfox_3ds_cartridge_core starfox_3ds_spc starfox_3ds_cpu
-            starfox_3ds_native_gpu starfox_3ds_reference_display starfox_3ds_gpu_check
+            starfox_3ds_native_context starfox_3ds_native_gpu starfox_3ds_reference_display starfox_3ds_gpu_check
             starfox_3ds_game_core_check starfox_3ds_test_player)
         if(TARGET ${target})
             target_compile_options(${target} PRIVATE -fstack-usage)
@@ -347,6 +352,10 @@ elseif(STARFOX_3DS_BUILD_HOST_TESTS)
     target_include_directories(starfox_3ds_program_binding_tests PRIVATE ../../include)
     target_compile_features(starfox_3ds_program_binding_tests PRIVATE cxx_std_20)
     add_test(NAME starfox_3ds_program_binding_tests COMMAND starfox_3ds_program_binding_tests)
+    add_executable(starfox_3ds_context_owners_tests ../../tests/nintendo_3ds_context_owners_tests.cpp)
+    target_include_directories(starfox_3ds_context_owners_tests PRIVATE ../../include)
+    target_compile_features(starfox_3ds_context_owners_tests PRIVATE cxx_std_20)
+    add_test(NAME starfox_3ds_context_owners_tests COMMAND starfox_3ds_context_owners_tests)
     add_executable(starfox_3ds_c2d_retirement_tests ../../tests/nintendo_3ds_c2d_retirement_tests.cpp)
     target_compile_features(starfox_3ds_c2d_retirement_tests PRIVATE cxx_std_20)
     add_test(NAME starfox_3ds_c2d_retirement_tests COMMAND starfox_3ds_c2d_retirement_tests)
