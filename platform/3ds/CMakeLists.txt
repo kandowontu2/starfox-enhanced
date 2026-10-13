@@ -466,4 +466,17 @@ if(STARFOX_3DS_ENABLE_IPO)
             message(STATUS "3DS IPO enabled: ${target}")
         endif()
     endforeach()
+    if(STARFOX_3DS_BUILD_NATIVE AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        # These real compilation units are inspected by the unchanged ARM
+        # timer/saturation/counter/RAM/output gates. Slim LTO objects contain
+        # only GIMPLE, so objdump cannot inspect their instructions. Retain
+        # native code alongside GIMPLE in these objects; the player still
+        # links their LTO representation. No baseline object enters the app.
+        foreach(target starfox_3ds_spc starfox_3ds_spc_saturation_check
+                starfox_3ds_spc_counters_check starfox_3ds_spc_output_check)
+            if(TARGET ${target})
+                target_compile_options(${target} PRIVATE -ffat-lto-objects)
+            endif()
+        endforeach()
+    endif()
 endif()

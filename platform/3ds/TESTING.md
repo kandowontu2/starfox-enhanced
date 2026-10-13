@@ -397,6 +397,17 @@ it in `BUILD-INFO.json`; stack, shader and arithmetic gates remain mandatory.
 A successful compile alone is not grounds to enable it in a production build.
 Native timing and source correctness must still be checked.
 
+The first explicit IPO run, `38471535057` at source `37bb31d2`, passes all
+52 host tests (128.26 seconds) and links the actual ARM player, but fails the
+mandatory timer assembly gate: its slim LTO objects contain GIMPLE without
+the ARM instructions that `objdump` must inspect. It produces no accepted
+player package. The follow-up retains fat LTO objects only for the actual SPC
+library and native arithmetic probes. Those objects keep inspectable ARM code
+alongside their LTO representation; the player still links with IPO. All
+existing instruction/source/size assertions remain unchanged. These component
+object checks do not prove the final LTO-linked player's runtime arithmetic or
+speed, so exact native replay and timing remain required after CI succeeds.
+
 The earlier direct-overlay candidate removes the EX BG1 staging image and applies the same
 zero-ink/CGRAM-black transparency directly during decoding. The 57,344-byte
 pixel allocation and full-image rescan are gone. All 384 synthetic comparisons

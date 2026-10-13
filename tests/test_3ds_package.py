@@ -194,6 +194,14 @@ class PackageTests(unittest.TestCase):
         self.assertIn('STARFOX_3DS_ENABLE_IPO="$CTR_ENABLE_IPO"', workflow)
         self.assertIn('--enable-ipo "$CTR_ENABLE_IPO"', workflow)
         self.assertIn('-DSTARFOX_3DS_ENABLE_IPO="$CTR_ENABLE_IPO"', workflow)
+        cmake = (ROOT / "platform/3ds/CMakeLists.txt").read_text(encoding="utf-8")
+        self.assertIn('option(STARFOX_3DS_ENABLE_IPO "Optimize the real native/core graph across translation units" OFF)', cmake)
+        self.assertIn('if(STARFOX_3DS_BUILD_NATIVE AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")', cmake)
+        self.assertIn('target_compile_options(${target} PRIVATE -ffat-lto-objects)', cmake)
+        # The unchanged code-generation gates need the actual SPC and all
+        # arithmetic-probe objects, not a separately compiled substitute.
+        self.assertIn('foreach(target starfox_3ds_spc starfox_3ds_spc_saturation_check\n'
+                      '                starfox_3ds_spc_counters_check starfox_3ds_spc_output_check)', cmake)
 
 
 if __name__ == "__main__":
