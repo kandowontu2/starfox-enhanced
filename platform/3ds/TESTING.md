@@ -487,6 +487,13 @@ access before later I/O. A changed head/link takes the original cycle, alignment
 coverage and duplicate validation path. PREV repair and all changed payload
 imports remain unchanged. This is not an unchecked lease on native writes or
 a measured speed improvement until the actual ARM replay establishes one.
+The host experiment passes the independent bytewise Original/EX bridge,
+1,054,116 bus/adapter checks, all eight unchanged real-stage pixel digests,
+and actual source PCM/state-restore checks. Its transient host cache grows by
+176 bytes to 20,072 bytes, with no extra cartridge or presentation snapshot.
+Malformed heads and active/free cycles still fail before mutating the pool;
+native list reorders still import and noncanonical PREV words still repair.
+These checks establish the tested state/pixel behavior, not native performance.
 
 A separate shutdown-logging replay is excluded: a Qt help window reset the
 clock's explicit-selection flag, so its numeric 300 setting was ignored and
