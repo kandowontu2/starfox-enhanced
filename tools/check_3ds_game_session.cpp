@@ -715,7 +715,7 @@ void presentation_cadence(const assets::RomImage& rom,const assets::SymbolMap& s
             require(valid_image(first.dashboard,bottom_width,screen_height),"FPS overlay source dashboard invalid");
             measured.completed(now);++renders;
         };
-        require(gate.due(0,rate),"New native output gate did not render its first frame");present(0);
+        require(gate.due(0,rate,0),"New native output gate did not render its first frame");present(0);
         for(unsigned poll=1;poll<=1200;++poll) {
             const input::ButtonMask held=std::string_view(map)=="BOOT" && poll==32?input::start
                 :std::string_view(map)!="BOOT" && poll>=120 && poll<400?input::ButtonMask(input::y|input::up|input::right):0;
@@ -725,7 +725,7 @@ void presentation_cadence(const assets::RomImage& rom,const assets::SymbolMap& s
             require(!result.time_clamped && !result.requested_experience && !result.requested_preview,
                 "Ordinary native cadence fixture clamped or changed source owner");
             if(poll%4==0) source.raster();
-            if(gate.due(now,rate)) present(now);
+            if(gate.due(now,rate,result.video_phases)) present(now);
             if(poll%240==0) {
                 require(phases==poll/4 && ticks==source.ticks && blocks==source.blocks,
                     "30/60 presentation target altered source raster, logic or SPC cadence");
