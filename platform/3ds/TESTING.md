@@ -95,6 +95,19 @@ No further incremental hardware test is requested for this baseline.
 The mono performance gate is still open. Emulator speed is not physical New
 3DS speed; no incremental tester request is implied by these source changes.
 
+### Mono landscape work reduction
+
+With the slider at zero, GameLayers now submits the original camera-projected
+BG2 artwork once instead of also constructing/drawing its duplicate finite
+stereo receiver. It retains the direct atlas and raster fallback, source HDMA,
+opacity, colour-math layer ownership and LCD edge clamping. Isolated BG2 needs
+no resident A8 ownership copy. Results-screen BG2/OBJ painter groups remain in
+their authored order. Nonzero-slider receiver geometry is unchanged.
+Independent host checks compare all 400x240 pixels in 27 rolled/unique-sky,
+atlas/raster/budget cases, plus black opacity, lights, gate bases and results
+sprite priorities. These are correctness checks, not measured FPS gains;
+the diagnostics-free ARM/emulator performance check remains required.
+
 ### Earlier R412 source candidate
 
 The earlier source candidate (R412) is commit

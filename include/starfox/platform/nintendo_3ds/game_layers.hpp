@@ -32,6 +32,9 @@ private:
     PicaRaster before_,after_;
     PicaBg2Tiles before_tiles_;
     GameScenery scenery_;
+    // Mono landscape borrows the isolated BG2 raster directly. Only image
+    // descriptors are owned here; no second pixel image or provenance upload.
+    std::array<PicaImage,pica_raster_max_strips> mono_landscape_images_{};
     struct PainterOwner {
         PicaRaster raster;
         PicaBg2Tiles tiles;
