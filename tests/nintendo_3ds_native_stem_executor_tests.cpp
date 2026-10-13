@@ -135,6 +135,49 @@ void overlap_case() {
     executor.execute(work.task(), {&nested, Overlap::run});
     require(nested.rejected && work.calls == 2, "Reentrant worker call deadlocked or overwrote the job");
 }
+void deferred_cases() {
+    new_model=true;
+    struct SlowWork {
+        std::atomic<bool> started{},release{},completed{};
+        static void run(void* context) {
+            auto& self=*static_cast<SlowWork*>(context);
+            self.started.store(true);
+            while(!self.release.load()) std::this_thread::yield();
+            self.completed.store(true);
+        }
+        Task task() {return {this,run};}
+    } slow;
+    Executor executor;
+    require(executor.begin(slow.task()),"New worker rejected independent complete-block dispatch");
+    while(!slow.started.load()) std::this_thread::yield();
+    require(!slow.completed.load(),"begin waited for the blocked audio worker");
+    Work work;
+    bool rejected{};
+    try {executor.begin(work.task());} catch(const std::logic_error&) {rejected=true;}
+    require(rejected && work.calls==0,"Pending task was overwritten by a second dispatch");
+    rejected=false;
+    try {executor.execute(work.task(),work.task());} catch(const std::logic_error&) {rejected=true;}
+    require(rejected && work.calls==0,"Joined dispatch overwrote a borrowed pending task");
+    slow.release.store(true);executor.finish();
+    require(slow.completed.load(),"finish returned before borrowed output was complete");
+    executor.finish(); // Idempotent when no job remains.
+    work.fail=true;require(executor.begin(work.task()),"Failed next job was not dispatched");
+    bool caught{};
+    try {executor.finish();} catch(const std::runtime_error&) {caught=true;}
+    require(caught && work.calls==1,"Deferred failure was not joined/reported");
+    work.fail=false;require(executor.begin(work.task()),"Deferred failure poisoned the next job");
+    executor.finish();require(work.calls==2,"Deferred recovery lost/duplicated a job");
+    new_model=false;
+    {Executor serial;require(!serial.begin(work.task()) && work.calls==2,
+        "Unavailable worker launched work instead of retaining joined fallback");serial.finish();}
+    new_model=true;
+    const auto joins_before=joins;
+    {
+        Executor retiring;require(retiring.begin(work.task()),"Retirement job failed to launch");
+        // Work/context stays alive through destructor's actual thread join.
+    }
+    require(work.calls==3 && joins==joins_before+1,"Owner retired before its outstanding task completed");
+}
 void budgeted_cases() {
     for(unsigned mode=0;mode<9;++mode) {
         new_model=mode!=0;model_failure=mode==1;budget_query_failure=mode==2;
@@ -230,7 +273,7 @@ void LightEvent_Wait(LightEvent* event) {
     if (event->reset == RESET_ONESHOT) event->ready = false;
 }
 int main() try {
-    serial_cases(); parallel_cases(); overlap_case();budgeted_cases();
+    serial_cases(); parallel_cases(); overlap_case();deferred_cases();budgeted_cases();
     require(joins == frees, "A worker outlived its source task owner");
     std::cout << "Native stem executor: " << checks << " host synchronization/retirement checks passed; "
         << "not accurate SPC PCM, ARM, core permissions or console performance acceptance.\n";

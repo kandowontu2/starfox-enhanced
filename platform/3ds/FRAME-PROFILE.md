@@ -146,3 +146,14 @@ The idle VBlank decision includes source work elapsed since that phase sample.
 Profile `frame` counts still include non-presenting retries, so dividing by
 mean loop duration is not completed-display FPS. Use the on-device completed
 presentation counter; do not substitute source phases or two stereo eyes.
+
+Native frame audio may now complete during the interval between presentation
+and the next source phase, rather than forcing every rendered frame to wait
+for its SPC packet. The next advance (also on duplicate time or focus loss)
+joins before changing cartridge state; normal host calls retain the joined
+API. Worker timing counters are merged only after completion, into the active
+profiling window. A packet crossing a window boundary is attributed to its
+completion window, so compare sustained intervals rather than one row.
+No commands, PCM samples, source phases or logic ticks are skipped. This is
+a scheduling change awaiting native performance measurement, not 60-FPS
+hardware acceptance.

@@ -87,14 +87,16 @@ public:
     // Optional presentation-only work can run on the owner thread while the
     // last source phase's complete SPC block runs on the joined worker. Work
     // must not advance/replace the session or inspect the mutable SPC owner.
-    // All PCM/port acknowledgements finish before this method returns; no task
-    // escapes into a later source phase, save, suspension or owner destruction.
-    void run_frame_work(audio::StemTask work);
+    // By default PCM/ports finish before returning. Native presentation can
+    // leave audio running across the idle interval with complete_audio=false;
+    // advance() joins it before *any* next source phase. Saves remain disabled
+    // while pending, and destruction joins before retiring borrowed storage.
+    void run_frame_work(audio::StemTask work,bool complete_audio=true);
     template<class Work> requires std::is_invocable_v<Work&>
-    void run_frame_work(Work&& work) {
+    void run_frame_work(Work&& work,bool complete_audio=true) {
         run_frame_work(audio::StemTask{const_cast<void*>(static_cast<const void*>(std::addressof(work))),[](void* context) {
             (*static_cast<std::remove_reference_t<Work>*>(context))();
-        }});
+        }},complete_audio);
     }
     // Explicitly acknowledge the host editor; source cursor/state and partial
     // SPC cadence survive. Suppress held input before returning to Options.
@@ -134,6 +136,8 @@ private:
     void apply_native_capabilities() noexcept;
     void prepare_pace_shapes();
     void publish_raster();
+    void finish_frame_audio();
+    struct FrameAudioWork;
     assets::RomImage rom_;
     assets::SymbolMap symbols_;
     simulation::TrigTables native_model_trig_;
@@ -169,6 +173,7 @@ private:
     CockpitLayout hud_layout_;
     audio::StemExecutor* stem_executor_{};
     audio::StemExecutor* frame_audio_stem_executor_{};
+    std::unique_ptr<FrameAudioWork> frame_audio_work_;
     // Destroy the borrowed-ROM renderer before game_, symbols_ and rom_.
     std::unique_ptr<platform_3ds::Frame3ds> mono_renderer_;
     bool mono_prepared_{};

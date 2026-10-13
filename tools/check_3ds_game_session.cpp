@@ -41,6 +41,8 @@ struct CountingStemExecutor final : audio::StemExecutor {
     void execute(audio::StemTask foreground,audio::StemTask background) override {
         worker.execute(foreground,background);++completed;
     }
+    bool begin(audio::StemTask background) override {return worker.begin(background);}
+    void finish() override {worker.finish();++completed;}
 };
 CountingStemExecutor* checked_stem_executor{};
 CountingStemExecutor* checked_frame_audio_stem_executor{};
@@ -131,7 +133,7 @@ void audio_render_overlap(const assets::RomImage& rom,const assets::SymbolMap& s
 #if defined(STARFOX_3DS_CHECK_PARALLEL_AUDIO)
     const auto inner_before=checked_frame_audio_stem_executor->completed;
 #endif
-    for(const auto* map:{"BOOT","LEVEL1_1"}) {
+    for(bool idle_overlap:{false,true}) for(const auto* map:{"BOOT","LEVEL1_1"}) {
         std::vector<std::int16_t> reference_pcm,overlapped_pcm;
         CheckedSession reference(rom,symbols,[&](auto pcm) {reference_pcm.insert(reference_pcm.end(),pcm.begin(),pcm.end());},map);
         CheckedSession overlapped(rom,symbols,[&](auto pcm) {overlapped_pcm.insert(overlapped_pcm.end(),pcm.begin(),pcm.end());},map,{},options);
@@ -155,7 +157,15 @@ void audio_render_overlap(const assets::RomImage& rom,const assets::SymbolMap& s
                     && current.interpolation_alpha==view.interpolation_alpha,
                     "Audio worker changed borrowed rendering snapshots");
                 require(overlapped_pcm.size()==emitted,"SPC worker submitted PCM off the presentation owner thread");
-            });
+            },!idle_overlap);
+            if(idle_overlap) {
+                // A duplicate-time host call is still a source ownership
+                // barrier. It must join/acknowledge the independent packet,
+                // without adding a raster, logic tick or input transition.
+                reference.advance(timestamp(frame),held);
+                const auto joined=overlapped.advance(timestamp(frame),held,true,{},true);
+                require(joined.duplicate,"Idle overlap advanced an extra source video phase");
+            }
             require(reference_pcm==overlapped_pcm,"Overlap changed a PCM sample or packet order");
             try {
                 require(reference.save_state()==overlapped.save_state(),

@@ -601,7 +601,7 @@ int main() {
                 if(dashboard.pixels.data()!=lower.view().pixels.data()) {
                     lower.clear({0,0,0});lower.image(0,0,dashboard);
                 }
-                });
+                },false); // Keep independent SPC work running during LCD idle.
                 if(frame_handled) continue;
             }
         } catch(const std::exception& failure) {

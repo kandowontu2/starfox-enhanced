@@ -17,6 +17,8 @@ public:
     NativeStemExecutor& operator=(const NativeStemExecutor&) = delete;
     [[nodiscard]] bool parallel_available() const noexcept;
     void execute(audio::StemTask foreground, audio::StemTask background) override;
+    bool begin(audio::StemTask background) override;
+    void finish() override;
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

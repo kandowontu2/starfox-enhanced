@@ -120,8 +120,11 @@ That scheduling idea motivates our optional `GameSession::run_frame_work`
 path; no additional reference implementation or assets are copied. Our
 persistent executor runs the complete, unchanged SPC block in its background
 task and presentation on the owner thread, then joins both before submitting
-PCM or acknowledging the source ports. No task survives that frame or overlaps
-a later source phase, state save or session replacement. Earlier audio blocks
+PCM or acknowledging the source ports. The original joined mode remains the
+default host API. Native presentation now permits that same complete block to
+continue across the LCD idle interval; the next `advance()` joins it before
+any video phase, including duplicate/focus-loss calls. It cannot overlap a
+later source phase, state save or session replacement. Earlier audio blocks
 in a source catch-up batch retain their synchronous acknowledgements. Denied
 core-2 allocation retains a serial fallback, and the default host session path
 is unchanged. Original and EX parity checks compare every PCM sample and the

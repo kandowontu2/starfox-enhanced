@@ -53,6 +53,9 @@ struct NativeStemExecutor::Impl {
     }
     ~Impl() {
         if (!worker) return;
+        // A dispatch may not have started yet. Finish it before setting stop;
+        // otherwise the worker could consume ready, see stop and drop the job.
+        try {finish();} catch(...) {}
         LightLock_Lock(&lock);
         stopping = true;
         LightLock_Unlock(&lock);
@@ -81,6 +84,33 @@ struct NativeStemExecutor::Impl {
             LightLock_Unlock(&self.lock);
             LightEvent_Signal(&self.done);
         }
+    }
+    bool begin(audio::StemTask background) {
+        if(!background.run) throw std::invalid_argument("Missing background SPC task");
+        LightLock_Lock(&lock);
+        if(busy) {
+            LightLock_Unlock(&lock);
+            throw std::logic_error("Overlapping SPC stem executor call");
+        }
+        if(!worker) {LightLock_Unlock(&lock);return false;}
+        busy=true;task=background;failure={};
+        LightLock_Unlock(&lock);
+        STARFOX_3DS_STARTUP_DETAIL_MARK(audio_worker_dispatch);
+        LightEvent_Signal(&ready);
+        return true;
+    }
+    void finish() {
+        LightLock_Lock(&lock);
+        const bool pending=busy;
+        LightLock_Unlock(&lock);
+        if(!pending) return;
+        STARFOX_3DS_STARTUP_DETAIL_MARK(audio_worker_wait);
+        LightEvent_Wait(&done);
+        STARFOX_3DS_STARTUP_DETAIL_MARK(audio_worker_complete);
+        LightLock_Lock(&lock);
+        const auto error=failure;failure={};busy=false;
+        LightLock_Unlock(&lock);
+        if(error) std::rethrow_exception(error);
     }
     void execute(audio::StemTask foreground, audio::StemTask background) {
         if (!foreground.run || !background.run)
@@ -126,4 +156,6 @@ bool NativeStemExecutor::parallel_available() const noexcept { return impl_->wor
 void NativeStemExecutor::execute(audio::StemTask foreground, audio::StemTask background) {
     impl_->execute(foreground, background);
 }
+bool NativeStemExecutor::begin(audio::StemTask background) {return impl_->begin(background);}
+void NativeStemExecutor::finish() {impl_->finish();}
 } // namespace starfox::platform::nintendo_3ds

@@ -127,7 +127,34 @@ GameSession::GameSession(assets::RomImage rom,assets::SymbolMap symbols,PcmSink 
     start_after_preview_=options.start_after_preview;
     history_.capture();history_.reset_interpolation();publish_raster();
 }
-GameSession::~GameSession()=default;
+struct GameSession::FrameAudioWork {
+    GameSession& session;
+    unsigned music{},sfx{};
+    bool running{};
+    std::optional<FrameProfile> profile;
+    explicit FrameAudioWork(GameSession& owner):session(owner) {}
+    static void run(void* context) {
+        auto& task=*static_cast<FrameAudioWork*>(context);
+        std::optional<ScopedFrameProfileActivation> activation;
+        if(task.profile) activation.emplace(*task.profile);
+        STARFOX_3DS_FRAME_PHASE(audio);
+        task.session.audio_.render_stems_logic_tick(task.session.pending_audio_,
+            task.session.frame_audio_stem_executor_);
+        audio::mix_stems(task.session.audio_.last_music_samples(),task.session.audio_.last_effect_samples(),
+            task.music,task.sfx,task.session.mixed_);
+    }
+    void merge_profile() noexcept {
+        // Completion can fall in the following timing window. Never retain a
+        // borrowed profiling parent across frames; merge into the active owner.
+        if(profile && active_frame_profile) active_frame_profile->merge_completed(*profile);
+        profile.reset();
+    }
+};
+GameSession::~GameSession() {
+    // The native executor outlives this owner, but its borrowed job does not.
+    // A failed presentation still must retire the worker before SPC/context.
+    try {finish_frame_audio();} catch(...) {}
+}
 platform_3ds::Frame3ds& GameSession::mono_renderer() {
     if(!mono_renderer_) {
         auto next=std::make_unique<platform_3ds::Frame3ds>(rom_,symbols_);
@@ -435,45 +462,49 @@ GameAdvance GameSession::advance(std::int64_t time,input::ButtonMask held,bool f
     } catch(...) {failed_=true;throw;}
     return result;
 }
-void GameSession::run_frame_work(audio::StemTask work) {
+void GameSession::finish_frame_audio() {
+    if(!deferred_audio_) return;
+    if(!frame_audio_work_ || !frame_audio_work_->running) {
+        run_frame_work([] {});return;
+    }
+    auto& background=*frame_audio_work_;
+    try {stem_executor_->finish();}
+    catch(...) {background.running=false;background.merge_profile();failed_=true;throw;}
+    background.running=false;background.merge_profile();
+    sink_(mixed_);game_.synchronize_apu_output_ports(audio_.output_ports());
+    pending_audio_.clear();deferred_audio_=false;
+}
+void GameSession::run_frame_work(audio::StemTask work,bool complete_audio) {
     if(!work.run) throw std::invalid_argument("Missing 3DS presentation work");
     if(failed_) throw std::runtime_error("Cannot render a failed 3DS game session");
     if(frame_work_active_) throw std::logic_error("Overlapping 3DS frame work call");
-    struct AudioWork {
-        GameSession& session;
-        unsigned music,sfx;
-        std::optional<FrameProfile> profile;
-    } background{*this,game_.music_volume(),game_.sfx_volume(),{}};
-    auto* parent=active_frame_profile;
-    if(deferred_audio_ && parent) background.profile.emplace(parent->fork());
-    const auto merge_profile=[&] {
-        if(background.profile) {parent->merge_completed(*background.profile);background.profile.reset();}
-    };
     frame_work_active_=true;
     try {
         if(deferred_audio_) {
-            stem_executor_->execute(work,{&background,[](void* context) {
-                auto& task=*static_cast<AudioWork*>(context);
-                std::optional<ScopedFrameProfileActivation> activation;
-                if(task.profile) activation.emplace(*task.profile);
-                STARFOX_3DS_FRAME_PHASE(audio);
-                // The optional inner executor is a distinct, joined owner:
-                // core 2 runs music while its budgeted worker runs effects.
-                // A denied inner worker executes both stems serially here.
-                task.session.audio_.render_stems_logic_tick(task.session.pending_audio_,
-                    task.session.frame_audio_stem_executor_);
-                audio::mix_stems(task.session.audio_.last_music_samples(),task.session.audio_.last_effect_samples(),
-                    task.music,task.sfx,task.session.mixed_);
-            }});
-            merge_profile();
-            // NDSP/VM ownership stays on the main thread. The executor has
-            // joined both tasks, including if presentation threw an exception.
-            sink_(mixed_);game_.synchronize_apu_output_ports(audio_.output_ports());
-            pending_audio_.clear();deferred_audio_=false;
+            if(!frame_audio_work_) frame_audio_work_=std::make_unique<FrameAudioWork>(*this);
+            auto& background=*frame_audio_work_;
+            if(!background.running) {
+                background.music=game_.music_volume();background.sfx=game_.sfx_volume();
+                if(active_frame_profile) background.profile.emplace(active_frame_profile->fork());
+                const audio::StemTask task{&background,FrameAudioWork::run};
+                background.running=!complete_audio && stem_executor_->begin(task);
+                if(!background.running) {
+                    stem_executor_->execute(work,task);background.merge_profile();
+                    sink_(mixed_);game_.synchronize_apu_output_ports(audio_.output_ports());
+                    pending_audio_.clear();deferred_audio_=false;
+                } else work.run(work.context);
+            } else work.run(work.context);
+            if(complete_audio) finish_frame_audio();
         } else work.run(work.context);
         frame_work_active_=false;
     } catch(...) {
-        merge_profile();frame_work_active_=false;failed_=true;throw;
+        // Join even if foreground rendering failed. Preserve the original
+        // exception, and never free/retry a still-borrowed SPC job.
+        if(frame_audio_work_) {
+            if(frame_audio_work_->running) try {stem_executor_->finish();} catch(...) {}
+            frame_audio_work_->running=false;frame_audio_work_->merge_profile();
+        }
+        frame_work_active_=false;failed_=true;throw;
     }
 }
 GamePresentation GameSession::presentation(float slider,bool hardware,const StereoSettings& settings) const {
