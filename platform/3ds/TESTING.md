@@ -19,7 +19,7 @@ changing the one-eye slider-off/New 2DS XL path.
 
 1. The latest source-only candidate is the experimental
    `StarFoxEnhanced-3ds-test.zip` artifact from
-   [ARM run 38415838379](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38415838379).
+   [ARM run 38425979927](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38425979927).
    R376 remains the hardware-tested baseline, not the latest source candidate.
    Extract the ZIP to the SD card's root, keeping its folder structure. When
    updating an earlier build, replace only the `.3dsx` and `.smdh`; preserve the existing
@@ -66,8 +66,8 @@ still required.
 ## Current build and validation
 
 The current frame-pipeline candidate is source
-`2780dcaaf1aaf6d460b76ae7fe327457f853c9c8`, from
-[ARM run 38415838379](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38415838379).
+`61acaae160b1e4540861cca407856292cd7daf2c`, from
+[ARM run 38425979927](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38425979927).
 It uses the imported Starwing mono renderer for ordinary mono scenes, retains
 the exact native path for cartridge window/colour effects, and removes gameplay
 profile SD writes. The final SPC block overlaps presentation and independent
@@ -76,7 +76,8 @@ APT-budgeted effects worker can split that complete block on supported models.
 Warm GPU handoffs no longer restart startup-trace SD writes. Presentation now
 consumes completed source phases instead of independently gating those frames
 with a second wall clock. The native ARM, shader and stack gates pass. Eight
-latest-source Original/EX serial/parallel audio tests pass, including deliberately
+Original/EX serial/parallel audio tests passed for the earlier pipeline source
+`2780dcaa`, including deliberately
 held packets across intervening rasters and exact PCM/VM state at barriers.
 Earlier full-suite baselines each made 22,173 checks, including menu/editor
 handoffs, disk settings/SRAM reopen, restores and 30/60 output cadence; those
@@ -85,7 +86,7 @@ No source audio command or simulation phase is dropped. The save codec also
 retains legitimate full-bank SPC transfers in partial-phase states within its
 unchanged 4-MiB whole-file cap and wire schema.
 
-Accuracy-enabled OpenGL and explicitly selected Vulkan input replays of this
+Accuracy-enabled OpenGL and explicitly selected Vulkan input replays of that earlier
 image reach planned DSP shutdown without movie errors. The OpenGL visual samples
 retain white ground dots and foreground models. Complete guest GSP retirement
 and clean emulator shutdown are not established by every run; stopping the owned
@@ -121,8 +122,22 @@ coverage. The corresponding Original probe retains exact pixels in 43 sampled
 frames and does not introduce budget failures. Asset-free tests additionally
 cover scanline HDMA, rolled carry, palettes/flips, 16-pixel tiles, character
 address wrapping, transparent ink, exact capacity and cleared failure output.
-These are planner/source-parity results, not measured native FPS. Native ARM
-and accuracy-enabled replay validation of this compaction follow-up is pending.
+The new asset-free reference-planner test passes 43,613,479 checks, and the
+native source-only CI passes all 51 host tests plus ARM/shader/stack/package
+gates. The ARM planner's static frame is 81,288 bytes within its 128-KiB worker
+reservation; this is not a full call-chain/physical peak-memory result.
+
+The same validated 300%-clock Vulkan movie now records no `mono_fallback` or
+`mono_retry` calls. In its background-3 interval, mean inclusive loop time
+drops from 38.484 to 23.169 ms, and mono finishing from 11.988 to 5.934 ms/call.
+The background-51 interval is broadly unchanged (19.381 to 19.094 ms/loop).
+Window labels may include transitions, and presentation counts/poses differ;
+these means are not completed-presentation FPS. Unrelated concurrent work was
+retained. This removes a reproduced expensive fallback, but does not establish
+sustained 60 FPS or native New-model CPU/cache performance. Input replay has no
+movie errors and reaches planned DSP shutdown/profile flush; complete guest GSP
+retirement remains unverified, so the owned emulator was stopped afterward.
+No incremental hardware test or release is implied.
 
 CI dispatch now accepts `profile_frames=false` for production-style timing.
 `BUILD-INFO.json` records the explicit native profiling setting; older packages
