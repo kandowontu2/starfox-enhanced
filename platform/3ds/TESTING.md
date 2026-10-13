@@ -19,7 +19,7 @@ changing the one-eye slider-off/New 2DS XL path.
 
 1. The latest source-only candidate is the experimental
    `StarFoxEnhanced-3ds-test.zip` artifact from
-   [ARM run 38425979927](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38425979927).
+   [ARM run 38429600664](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38429600664).
    R376 remains the hardware-tested baseline, not the latest source candidate.
    Extract the ZIP to the SD card's root, keeping its folder structure. When
    updating an earlier build, replace only the `.3dsx` and `.smdh`; preserve the existing
@@ -66,8 +66,8 @@ still required.
 ## Current build and validation
 
 The current frame-pipeline candidate is source
-`61acaae160b1e4540861cca407856292cd7daf2c`, from
-[ARM run 38425979927](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38425979927).
+`0c07c35f0c0b8b4042e0677bcbd832ba4b9cc90d`, from
+[ARM run 38429600664](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38429600664).
 It uses the imported Starwing mono renderer for ordinary mono scenes, retains
 the exact native path for cartridge window/colour effects, and removes gameplay
 profile SD writes. The final SPC block overlaps presentation and independent
@@ -138,6 +138,29 @@ sustained 60 FPS or native New-model CPU/cache performance. Input replay has no
 movie errors and reaches planned DSP shutdown/profile flush; complete guest GSP
 retirement remains unverified, so the owned emulator was stopped afterward.
 No incremental hardware test or release is implied.
+
+The current candidate removes the EX BG1 staging image and applies the same
+zero-ink/CGRAM-black transparency directly during decoding. The 57,344-byte
+pixel allocation and full-image rescan are gone. All 384 synthetic comparisons
+match the removed path's pixels, coverage and tags, and both Original/EX
+240-phase source checks retain their prior image digests and 80 audio blocks.
+Display retirement now detaches linked outputs to join the GPU command queue
+before Citro2D frees vertex/index buffers; `C3D_FrameSync` only waits for VBlank.
+The shared retirement helper passes 700 cold/partial/paired/busy-state cycles
+plus idempotent closes. All 51 asset-free host CI tests and native ARM,
+shader, stack and package gates pass. These host checks do not establish
+physical GPU lifetime or full audio-suite acceptance for this commit.
+
+The same accuracy-enabled Vulkan/300% sensitivity replay reports EX background-3
+mono finishing at 5.417 ms/call versus 5.934 for `61acaae1`, with inclusive
+loop means of 22.296 versus 23.169 ms. Background-51 finishing is 5.151 versus
+5.673 ms/call. No fallback or retry occurs. Counts/poses and window-end labels
+differ, concurrent unrelated work remains, and these durations are not completed
+presentation FPS. Planned DSP shutdown and profile flush occur without replay
+errors. Guest GSP exit remains unverified; the owned emulator was stopped after
+the flush and its configuration restored to 100%. Model scan conversion and
+final composition remain the next measured hot paths. The mono 60 FPS gate is
+still open. No incremental hardware request or release is implied.
 
 CI dispatch now accepts `profile_frames=false` for production-style timing.
 `BUILD-INFO.json` records the explicit native profiling setting; older packages
