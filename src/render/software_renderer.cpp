@@ -25,28 +25,28 @@ namespace {
 
 constexpr double kTau = 6.283185307179586476925286766559;
 
-struct Vec3 {
-    double x{};
-    double y{};
-    double z{};
-};
+using Vec3 = software_renderer_detail::Vec3;
+using ScreenPoint = software_renderer_detail::ScreenPoint;
+using TexturePoint = software_renderer_detail::TexturePoint;
+using RasterVertex = software_renderer_detail::RasterVertex;
 
-struct ScreenPoint {
-    double x{};
-    double y{};
-    double z{};
-    bool visible{};
-};
-
-struct TexturePoint {
-    double u{};
-    double v{};
-};
-
-struct RasterVertex {
-    ScreenPoint point{};
-    TexturePoint texture{};
-};
+template <typename Record>
+const Record* find_bsp_record(const std::vector<Record>& records,
+    const std::vector<std::pair<std::uint32_t, std::size_t>>& lookup,
+    std::uint32_t address) {
+    if (lookup.empty()) {
+        const auto found = std::find_if(records.begin(), records.end(),
+            [address](const auto& record) { return record.address == address; });
+        return found == records.end() ? nullptr : &*found;
+    }
+    const auto found = std::lower_bound(lookup.begin(), lookup.end(), address,
+        [](const auto& entry, std::uint32_t key) {
+            return entry.first < key;
+        });
+    if (found == lookup.end() || found->first != address
+        || found->second >= records.size()) return nullptr;
+    return &records[found->second];
+}
 
 std::int16_t rounded_word(double value) {
     return starfox::simulation::wrap16(
@@ -129,14 +129,17 @@ bool clip_near_line(Vec3& a, Vec3& b, bool word_exact) {
     return true;
 }
 
-std::vector<Vec3> clip_near_polygon(
-    const std::vector<Vec3>& input, bool word_exact) {
-    std::vector<Vec3> output;
-    if (input.empty()) return output;
+void clip_near_polygon(
+    const std::vector<Vec3>& input, bool word_exact,
+    std::vector<Vec3>& output) {
+    output.clear();
+    if (input.empty()) return;
     output.reserve(input.size() + 2U);
     for (std::size_t index = 0; index < input.size(); ++index) {
         const auto& current = input[index];
-        const auto& next = input[(index + 1U) % input.size()];
+        const auto next_index = index + 1U == input.size()
+            ? std::size_t{0U} : index + 1U;
+        const auto& next = input[next_index];
         const auto current_inside = current.z >= 0.0;
         const auto next_inside = next.z >= 0.0;
         if (current_inside) {
@@ -148,7 +151,6 @@ std::vector<Vec3> clip_near_polygon(
             output.push_back(near_intersection(current, next, word_exact));
         }
     }
-    return output;
 }
 
 ScreenPoint project_point(
@@ -311,12 +313,13 @@ RasterVertex interpolate_at(
 }
 
 template <typename Inside, typename Intersect>
-std::vector<RasterVertex> clip_screen_edge(
+void clip_screen_edge(
     const std::vector<RasterVertex>& input,
+    std::vector<RasterVertex>& output,
     Inside inside,
     Intersect intersect) {
-    std::vector<RasterVertex> output;
-    if (input.empty()) return output;
+    output.clear();
+    if (input.empty()) return;
     output.reserve(input.size() + 2U);
     auto previous = input.back();
     auto previous_inside = inside(previous);
@@ -329,7 +332,6 @@ std::vector<RasterVertex> clip_screen_edge(
         previous = current;
         previous_inside = current_inside;
     }
-    return output;
 }
 
 // Scan conversion is the only stage that follows the render scale. Projection,
@@ -359,7 +361,8 @@ void scale_to_stored(ScreenPoint& point, std::uint32_t scale) noexcept {
 std::vector<RasterVertex> clip_screen_polygon(
     std::vector<RasterVertex> polygon,
     const Framebuffer& target,
-    bool source_exact) {
+    bool source_exact,
+    std::vector<RasterVertex>& scratch) {
     // MOBJ.MC stores m_xright/m_ybot as the first coordinates outside the
     // viewport (224/192), and MCLIP.MC intersects edges with those values.
     // Keeping the intersection on that exclusive plane is important because
@@ -384,13 +387,14 @@ std::vector<RasterVertex> clip_screen_polygon(
             return starfox::simulation::add16(inside_value,
                 starfox::simulation::wrap16(quotient));
         };
-        const auto clip_edge = [&source_value_at](
-                                   const std::vector<RasterVertex>& input,
+        const auto clip_edge = [&source_value_at, &scratch](
+                                   std::vector<RasterVertex>& input,
                                    bool vertical,
                                    std::int16_t boundary,
                                    bool keep_less) {
-            std::vector<RasterVertex> output;
-            if (input.empty()) return output;
+            scratch.clear();
+            if (input.empty()) return;
+            auto& output = scratch;
             output.reserve(input.size() + 2U);
             const auto coordinate = [vertical](const RasterVertex& vertex) {
                 return rounded_word(vertical
@@ -442,44 +446,48 @@ std::vector<RasterVertex> clip_screen_polygon(
                 previous = current;
                 previous_inside = current_inside;
             }
-            return output;
+            input.swap(output);
         };
-        polygon = clip_edge(polygon, true, 0, false);
-        polygon = clip_edge(polygon, true,
+        clip_edge(polygon, true, 0, false);
+        clip_edge(polygon, true,
             static_cast<std::int16_t>(target.width()), true);
-        polygon = clip_edge(polygon, false, 0, false);
-        polygon = clip_edge(polygon, false,
+        clip_edge(polygon, false, 0, false);
+        clip_edge(polygon, false,
             static_cast<std::int16_t>(target.height()), true);
         return polygon;
     }
-    polygon = clip_screen_edge(polygon,
+    clip_screen_edge(polygon, scratch,
         [](const RasterVertex& vertex) { return vertex.point.x >= 0.0; },
         [](const RasterVertex& a, const RasterVertex& b) {
             const auto denominator = b.point.x - a.point.x;
             return interpolate_at(a, b,
                 denominator == 0.0 ? 0.0 : -a.point.x / denominator);
         });
-    polygon = clip_screen_edge(polygon,
+    polygon.swap(scratch);
+    clip_screen_edge(polygon, scratch,
         [right](const RasterVertex& vertex) { return vertex.point.x < right; },
         [right](const RasterVertex& a, const RasterVertex& b) {
             const auto denominator = b.point.x - a.point.x;
             return interpolate_at(a, b, denominator == 0.0 ? 0.0
                 : (right - a.point.x) / denominator);
         });
-    polygon = clip_screen_edge(polygon,
+    polygon.swap(scratch);
+    clip_screen_edge(polygon, scratch,
         [](const RasterVertex& vertex) { return vertex.point.y >= 0.0; },
         [](const RasterVertex& a, const RasterVertex& b) {
             const auto denominator = b.point.y - a.point.y;
             return interpolate_at(a, b,
                 denominator == 0.0 ? 0.0 : -a.point.y / denominator);
         });
-    polygon = clip_screen_edge(polygon,
+    polygon.swap(scratch);
+    clip_screen_edge(polygon, scratch,
         [bottom](const RasterVertex& vertex) { return vertex.point.y < bottom; },
         [bottom](const RasterVertex& a, const RasterVertex& b) {
             const auto denominator = b.point.y - a.point.y;
             return interpolate_at(a, b, denominator == 0.0 ? 0.0
                 : (bottom - a.point.y) / denominator);
         });
+    polygon.swap(scratch);
     return polygon;
 }
 
@@ -721,13 +729,22 @@ void fill_source_polygon(
     bool winding_independent,
     SurfaceBuffer* surfaces,
     const SurfaceSample& surface) {
-    std::vector<SourceSpanPoint> points;
-    points.reserve(polygon.size());
-    for(const auto& vertex:polygon) points.push_back({
+    // Reference port keeps ordinary faces inline; retain a safe overflow
+    // path for arbitrary host-authored polygons without changing span rules.
+    std::array<SourceSpanPoint,16> inline_points{};
+    std::vector<SourceSpanPoint> overflow_points;
+    if(polygon.size()>inline_points.size()) overflow_points.resize(polygon.size());
+    auto points=polygon.size()<=inline_points.size()
+        ?std::span<SourceSpanPoint>(inline_points.data(),polygon.size())
+        :std::span<SourceSpanPoint>(overflow_points);
+    for(std::size_t i=0;i<polygon.size();++i) {
+        const auto& vertex=polygon[i];
+        points[i]={
         std::clamp<std::int32_t>(static_cast<std::int32_t>(std::lround(vertex.point.x)),
             0,static_cast<std::int32_t>(target.width())),
         std::clamp<std::int32_t>(static_cast<std::int32_t>(std::lround(vertex.point.y)),
-            0,static_cast<std::int32_t>(target.height()))});
+            0,static_cast<std::int32_t>(target.height()))};
+    }
     const SourceSpanModes modes{pose.wireframe_mode,pose.wobble_mode,
         pose.cel_mode,pose.wave_mode,winding_independent,pose.wave_offset,pose.animation_frame};
     source_polygon_spans(points,target.width(),modes,[&](SourcePolygonSpan span) {
@@ -1312,8 +1329,9 @@ void apply_source_depth_tables(
 
 void SoftwareRenderer::draw(
     const assets::Shape& shape,const RenderPose& pose,Framebuffer& target,bool clear_target,
-    SurfaceBuffer* surfaces,shadows::Scene* shadow_scene,RenderDiagnostics* diagnostics) const {
-    draw_impl(shape,pose,target,clear_target,surfaces,shadow_scene,diagnostics,false);
+    SurfaceBuffer* surfaces,shadows::Scene* shadow_scene,RenderDiagnostics* diagnostics,
+    software_renderer_detail::Scratch* reusable_scratch) const {
+    draw_impl(shape,pose,target,clear_target,surfaces,shadow_scene,diagnostics,false,nullptr,reusable_scratch);
 }
 void SoftwareRenderer::collect_shadow_casters(const assets::Shape& shape,const RenderPose& pose,shadows::Scene& scene) const {
     Framebuffer unused(1,1);
@@ -1337,7 +1355,8 @@ void SoftwareRenderer::draw_impl(
     bool clear_target,
     SurfaceBuffer* surfaces, shadows::Scene* shadow_scene,
     RenderDiagnostics* axis_diagnostics,bool shadow_only,
-    PreparedShapePrimitives* primitives) const {
+    PreparedShapePrimitives* primitives,
+    software_renderer_detail::Scratch* reusable_scratch) const {
     if (axis_diagnostics) *axis_diagnostics = {};
     if(!primitives && !shadow_only && !target.command_buffer() && settings_.render_scale>1) target.enable_dither_pairs(true);
     // Everything this renderer emits is the Super FX layer, whatever draw
@@ -1400,8 +1419,24 @@ void SoftwareRenderer::draw_impl(
         }
         return;
     }
-    std::vector<Vec3> transformed_vertices;
-    std::vector<ScreenPoint> projected;
+    software_renderer_detail::Scratch local_scratch;
+    auto& scratch = reusable_scratch ? *reusable_scratch : local_scratch;
+    auto& transformed_vertices = scratch.transformed_vertices;
+    auto& projected = scratch.projected;
+    auto& ordered_faces = scratch.ordered_faces;
+    auto& camera_polygon = scratch.camera_polygon;
+    auto& camera_clipping_scratch = scratch.camera_clipping_scratch;
+    auto& polygon = scratch.polygon;
+    auto& raster_polygon = scratch.raster_polygon;
+    auto& clipping_scratch = scratch.clipping_scratch;
+    transformed_vertices.clear();
+    projected.clear();
+    ordered_faces.clear();
+    camera_polygon.clear();
+    camera_clipping_scratch.clear();
+    polygon.clear();
+    raster_polygon.clear();
+    clipping_scratch.clear();
     const auto& vertices = shape.frames.empty()
         ? shape.vertices
         : shape.frames[pose.animation_frame % shape.frames.size()].vertices;
@@ -1592,55 +1627,70 @@ void SoftwareRenderer::draw_impl(
         return;
     }
 
-    std::vector<const assets::Face*> ordered_faces;
     if (shape.bsp_root_address == 0 || pose.explosion_progress != 0U) {
-        ordered_faces.reserve(shape.faces.size());
         for (const auto& face : shape.faces) {
             ordered_faces.push_back(&face);
         }
     } else {
-        std::unordered_map<std::uint32_t, const assets::BspNode*> nodes;
-        std::unordered_map<std::uint32_t, const assets::BspLeaf*> leaves;
-        std::unordered_map<std::uint32_t, const assets::FaceBatch*> batches;
-        for (const auto& node : shape.bsp_nodes) {
-            nodes.emplace(node.address, &node);
-        }
-        for (const auto& leaf : shape.bsp_leaves) {
-            leaves.emplace(leaf.address, &leaf);
-        }
-        for (const auto& batch : shape.face_batches) {
-            batches.emplace(batch.address, &batch);
-        }
-
-        const auto append_batch = [&ordered_faces, &batches](std::uint32_t address) {
-            const auto batch = batches.find(address);
-            if (batch == batches.end()) {
-                return;
-            }
-            for (const auto& face : batch->second->faces) {
+        const auto append_batch = [&ordered_faces, &shape](std::uint32_t address) {
+            const auto* batch = find_bsp_record(shape.face_batches,
+                shape.bsp_batch_lookup, address);
+            if (batch == nullptr) return;
+            for (const auto& face : batch->faces) {
                 ordered_faces.push_back(&face);
             }
         };
-        std::unordered_set<std::uint32_t> active;
-        std::function<void(std::uint32_t)> traverse = [&](std::uint32_t address) {
-            if (address == 0 || !active.insert(address).second) {
+        // BSP traversal only needs the active recursion path for cycle
+        // detection. Keep the common path inline so each model draw does not
+        // allocate an unordered_set and a type-erased recursive callback.
+        constexpr std::size_t kInlineBspDepth = 64U;
+        std::array<std::uint32_t, kInlineBspDepth> active_path{};
+        std::vector<std::uint32_t> active_path_overflow;
+        auto active_path_size = std::size_t{};
+        const auto is_active = [&](std::uint32_t address) {
+            const auto inline_size = std::min(active_path_size,
+                active_path.size());
+            for (std::size_t index = 0; index < inline_size; ++index) {
+                if (active_path[index] == address) return true;
+            }
+            return std::find(active_path_overflow.begin(),
+                active_path_overflow.end(), address)
+                != active_path_overflow.end();
+        };
+        const auto push_active = [&](std::uint32_t address) {
+            if (active_path_size < active_path.size()) {
+                active_path[active_path_size] = address;
+            } else {
+                active_path_overflow.push_back(address);
+            }
+            ++active_path_size;
+        };
+        const auto pop_active = [&] {
+            --active_path_size;
+            if (active_path_size >= active_path.size()) {
+                active_path_overflow.pop_back();
+            }
+        };
+        const auto traverse = [&](auto&& self, std::uint32_t address) -> void {
+            if (address == 0 || is_active(address)) return;
+            push_active(address);
+            const auto* leaf = find_bsp_record(shape.bsp_leaves,
+                shape.bsp_leaf_lookup, address);
+            if (leaf != nullptr) {
+                append_batch(leaf->face_batch_address);
+                pop_active();
                 return;
             }
-            const auto leaf = leaves.find(address);
-            if (leaf != leaves.end()) {
-                append_batch(leaf->second->face_batch_address);
-                active.erase(address);
-                return;
-            }
-            const auto node = nodes.find(address);
-            if (node == nodes.end()) {
-                active.erase(address);
+            const auto* node = find_bsp_record(shape.bsp_nodes,
+                shape.bsp_node_lookup, address);
+            if (node == nullptr) {
+                pop_active();
                 return;
             }
 
             bool plane_visible = false;
-            if (node->second->visibility_index < shape.visibilities.size()) {
-                const auto& visibility = shape.visibilities[node->second->visibility_index];
+            if (node->visibility_index < shape.visibilities.size()) {
+                const auto& visibility = shape.visibilities[node->visibility_index];
                 if (visibility.a < visibility_projected.size()
                     && visibility.b < visibility_projected.size()
                     && visibility.c < visibility_projected.size()) {
@@ -1649,16 +1699,16 @@ void SoftwareRenderer::draw_impl(
             }
 
             if (plane_visible) {
-                traverse(node->second->fallthrough_address);
-                append_batch(node->second->face_batch_address);
-                traverse(node->second->alternate_address);
+                self(self, node->fallthrough_address);
+                append_batch(node->face_batch_address);
+                self(self, node->alternate_address);
             } else {
-                traverse(node->second->alternate_address);
-                traverse(node->second->fallthrough_address);
+                self(self, node->alternate_address);
+                self(self, node->fallthrough_address);
             }
-            active.erase(address);
+            pop_active();
         };
-        traverse(shape.bsp_root_address);
+        traverse(traverse, shape.bsp_root_address);
     }
 
     for (const auto* face_pointer : ordered_faces) {
@@ -1715,7 +1765,7 @@ void SoftwareRenderer::draw_impl(
             }
             continue;
         }
-        std::vector<Vec3> camera_polygon;
+        camera_polygon.clear();
         camera_polygon.reserve(face.vertex_indices.size());
         bool valid = true;
         bool any_behind = false;
@@ -1773,12 +1823,13 @@ void SoftwareRenderer::draw_impl(
                 continue;
             }
         } else if (any_behind) {
-            camera_polygon = clip_near_polygon(
-                camera_polygon, raster_word_exact);
+            clip_near_polygon(camera_polygon, raster_word_exact,
+                camera_clipping_scratch);
+            camera_polygon.swap(camera_clipping_scratch);
             if (camera_polygon.size() < 3U) continue;
         }
 
-        std::vector<ScreenPoint> polygon;
+        polygon.clear();
         polygon.reserve(camera_polygon.size());
         for (const auto& point : camera_polygon) {
             polygon.push_back(project_point(
@@ -1840,7 +1891,7 @@ void SoftwareRenderer::draw_impl(
             primitives->primitives.push_back(std::move(primitive));
             continue;
         }
-        std::vector<RasterVertex> raster_polygon;
+        raster_polygon.clear();
         raster_polygon.reserve(polygon.size());
         for (std::size_t index = 0; index < polygon.size(); ++index) {
             auto texture = TexturePoint{};
@@ -1853,7 +1904,8 @@ void SoftwareRenderer::draw_impl(
             raster_polygon.push_back({polygon[index], texture});
         }
         raster_polygon = clip_screen_polygon(
-            std::move(raster_polygon), target, raster_word_exact);
+            std::move(raster_polygon), target, raster_word_exact,
+            clipping_scratch);
         if (raster_polygon.size() < 3U) continue;
         const StoredRasterScope raster{target, settings_.render_scale};
         for (auto& vertex : raster_polygon) {

@@ -122,6 +122,12 @@ public:
     [[nodiscard]] const SnesPpuState& ppu_state() const noexcept {
         return cpu_.ppu_state();
     }
+    [[nodiscard]] std::uint64_t ppu_memory_revision() const noexcept {
+        return cpu_.ppu_memory_revision();
+    }
+    [[nodiscard]] std::uint64_t ppu_vram_revision() const noexcept {
+        return cpu_.ppu_vram_revision();
+    }
     [[nodiscard]] const NativeModelDrawState& native_model_draw() const noexcept {
         return cpu_.native_model_draw();
     }

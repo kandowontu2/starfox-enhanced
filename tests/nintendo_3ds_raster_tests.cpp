@@ -675,6 +675,100 @@ void composition() {
     auto empty=compositor.prepare_layers(plan,{});validate_pica_frame(empty,dashboard.view());
     require(empty.vertices.empty() && empty.draws.empty() && empty.textures.empty(),"Clear-only composition manufactured geometry");
 }
+void residency_benchmark() {
+    const auto ppu=source();const auto plan=plan_frame(0,true,ScreenUse::world);
+    PpuBatch batch{{{PpuLayer::bg2}},PicaSpace::scenery,true};PicaRaster producer;
+    const auto frame=producer.prepare(ppu,batch,plan);
+    const auto owned=frame.textures.front();auto raw=owned;raw.content={};
+    std::uint64_t digest=0;
+    const auto measure=[&](const PicaImage& image) {
+        PicaTextureResidency residency;
+        residency.prepare(image,[](auto,auto){},[](auto,auto,auto){});
+        for(unsigned n=0;n<32;++n) require(!residency.prepare(image,[](auto,auto){},[](auto,auto,auto){}),"Warm unchanged fixture uploaded");
+        const auto started=std::chrono::steady_clock::now();
+        for(unsigned n=0;n<1024;++n) {
+            const bool changed=residency.prepare(image,[](auto,auto){},[](auto,auto,auto){});
+            digest+=changed+residency.classes();
+        }
+        return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now()-started).count();
+    };
+    for(unsigned pair=0;pair<4;++pair) {
+        std::int64_t checked,certified;
+        if(pair&1) {certified=measure(owned);checked=measure(raw);}
+        else {checked=measure(raw);certified=measure(owned);}
+        std::cout<<"Unchanged residency pair="<<pair<<" frames=1024 exact_rows_ns="<<checked
+            <<" owned_generation_ns="<<certified<<" digest="<<digest<<"; host component only, NOT console FPS\n";
+    }
+}
+void content_certificates() {
+    const auto plan=plan_frame(0,true,ScreenUse::world);
+    for(bool indexed:{false,true}) {
+        auto ppu=source();ppu->cgram[17]=0x7fff;
+        PpuBatch batch{{{PpuLayer::bg2}},PicaSpace::scenery,true};
+        PicaRaster owner;PicaTextureResidency cache;
+        auto prepare=[&](unsigned brightness=15) {return owner.prepare(ppu,batch,plan,brightness,0,32,false,indexed).textures.front();};
+        auto image=prepare();const auto first=image.content;
+        require(first.colour_valid(image) && first.layers_valid(image),"Producer omitted its complete content certificate");
+        unsigned colours=0,masks=0;
+        const auto colour=[&](PicaImage source,PicaTextureLayout layout) {
+            ++colours;std::vector<std::uint8_t> packed(layout.bytes);pack_pica_texture(source,packed);
+        };
+        const auto layer=[&](PicaImage source,PicaTextureLayout layout,unsigned classes) {
+            ++masks;if(classes) {std::vector<std::uint8_t> packed(layout.width*layout.height);pack_pica_layers(source,packed);}
+        };
+        require(cache.prepare(image,colour,layer),"Certified image missed its first native upload");
+        for(unsigned repeat=0;repeat<8;++repeat) {
+            ppu=std::make_shared<simulation::SnesPpuState>(*ppu);image=prepare();
+            require(first.same(image.content) && image.content.colour_valid(image)
+                && !cache.prepare(image,colour,layer),"Unchanged owned bytes lost their residency proof");
+        }
+        require(colours==1 && masks==1,"Unchanged producer certificate repeated a native upload");
+        auto detached=image;detached.source_layers={};detached.layer_pitch=0;
+        require(detached.content.colour_valid(detached) && !detached.content.layers_valid(detached),
+            "Omitting isolated A8 artwork lost colour proof or retained a false ownership proof");
+        require(cache.prepare(detached,colour,layer) && colours==1,"Removing A8 unnecessarily uploaded colour");
+        require(cache.prepare(image,colour,layer) && colours==1,"Restoring A8 unnecessarily uploaded colour");
+        auto altered=image;std::vector<std::uint8_t> copy(image.pixels.begin(),image.pixels.end());
+        altered.pixels=copy;
+        require(!altered.content.colour_valid(altered) && cache.colour_matches(altered),
+            "Copied storage forged a producer proof or lost exact-byte fallback");
+        copy[0]^=1;
+        require(!cache.colour_matches(altered),"A foreign edited plane bypassed byte verification");
+        require(cache.prepare(altered,colour,layer) && !cache.colour_matches(image),
+            "Foreign bytes inherited the original producer certificate");
+        require(cache.prepare(image,colour,layer),"Restoring producer bytes retained a foreign residency base");
+        for(unsigned field=0;field<7;++field) {
+            altered=image;
+            if(field==0) --altered.width;
+            if(field==1) --altered.height;
+            if(field==2) ++altered.pitch;
+            if(field==3) altered.repeat=!altered.repeat;
+            if(field==4) --altered.layer_pitch;
+            if(field==5) altered.source_layers=altered.source_layers.subspan(1);
+            if(field==6) altered.pixels=altered.pixels.subspan(1);
+            require(field==4 || field==5 || !altered.content.colour_valid(altered),"Reshaped descriptor forged unchanged colour proof");
+            require(!altered.content.layers_valid(altered),"Reshaped descriptor forged unchanged ownership proof");
+        }
+        auto invalid=batch;invalid.last_row=225;
+        rejected([&]{owner.prepare(ppu,invalid,plan);},"Invalid prepare unexpectedly succeeded");
+        require(first.same(image.content) && image.content.colour_valid(image),"Failed preparation retired the previous complete certificate");
+        const auto old=image;image=prepare(7);
+        require(!old.content.colour_valid(old) && !old.content.same(image.content)
+            && image.content.colour_valid(image),"Palette/brightness edit retained the preceding generation");
+        rejected([&]{cache.prepare(image,[](auto,auto){throw std::runtime_error("flush");},layer);},"Injected colour failure did not propagate");
+        require(!cache.colour_matches(image),"Failed upload retained a valid native proof");
+        require(cache.prepare(image,colour,layer),"Failed upload skipped required repair");
+        const auto prior=image;
+        PicaRaster moved=std::move(owner);
+        require(!prior.content.colour_valid(prior),"Moving inline producer storage left an old live proof");
+        image=moved.prepare(ppu,batch,plan,7,0,32,false,indexed).textures.front();
+        require(image.content.colour_valid(image) && !cache.prepare(image,colour,layer),"Moved producer lost exact content reuse");
+        moved=PicaRaster{};
+        require(!image.content.colour_valid(image),"Retiring a producer left a resident proof alive");
+        cache.release_layers();cache.release_colour();
+        require(cache.pixels().empty() && cache.layers().empty(),"Retired native allocation retained comparison storage");
+    }
+}
 void corridor_batch_contract() {
     auto ppu=source();ppu->background_mode=1;ppu->tunnel_scene=true;
     PpuBatch batch{{{PpuLayer::bg2}},PicaSpace::scenery,true};batch.corridor_receiver=true;
@@ -996,6 +1090,7 @@ void window_masks() {
 }
 int main(int argc,char** argv) try {
     if(argc==2 && std::string_view(argv[1])=="--indexed-benchmark") {indexed_pipeline_benchmark();return 0;}
+    if(argc==2 && std::string_view(argv[1])=="--residency-benchmark") {residency_benchmark();return 0;}
     require(argc==1,"Use no arguments for contracts or --indexed-benchmark");
-    game_effect_flow();raster();indexed_raster_pipeline();pass_memory_dependencies();referenced_character_cache();optical_coverage();disjoint_scenery_coverage();transparent_priority_crop();unique_sky_halves();composition();corridor_batch_contract();compact_strip_contract();screen_sprite_crop();window_masks();colour_effects();std::cout<<checks<<" 3DS native PPU/cache/composition checks passed; NOT full game/hardware acceptance\n";}
+    game_effect_flow();raster();indexed_raster_pipeline();content_certificates();pass_memory_dependencies();referenced_character_cache();optical_coverage();disjoint_scenery_coverage();transparent_priority_crop();unique_sky_halves();composition();corridor_batch_contract();compact_strip_contract();screen_sprite_crop();window_masks();colour_effects();std::cout<<checks<<" 3DS native PPU/cache/composition checks passed; NOT full game/hardware acceptance\n";}
 catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}

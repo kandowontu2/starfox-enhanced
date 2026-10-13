@@ -61,6 +61,7 @@ public:
         return indexed_ && indexed_->width()>top_width?unsigned(indexed_->width()-top_width)/2:0;
     }
 private:
+    PicaImageContentOwner content_;
     std::shared_ptr<const simulation::SnesPpuState> source_;
     PpuBatch batch_;
     std::unique_ptr<render::Framebuffer> indexed_;

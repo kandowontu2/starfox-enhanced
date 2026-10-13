@@ -2,6 +2,7 @@
 #include "starfox/platform/nintendo_3ds/pica_projection.hpp"
 #include <bit>
 #include <cstring>
+#include <memory>
 
 namespace starfox::platform::nintendo_3ds {
 inline constexpr unsigned pica_vertex_limit=32'766,pica_draw_limit=256;
@@ -104,6 +105,23 @@ struct PicaIndexedPixels {
     // Upload fuses palette expansion, opacity and Morton/ABGR packing.
     std::span<const std::uint32_t> palette;
 };
+struct PicaImage;
+class PicaImageContentOwner;
+// Only the owning PPU producer can certify unchanged bytes. Generic borrowed
+// images retain exact byte comparisons; a copied certificate is also bound to
+// the complete colour/ownership descriptor and to the producer's lifetime.
+class PicaImageContent {
+public:
+    [[nodiscard]] bool colour_valid(const PicaImage&) const noexcept;
+    [[nodiscard]] bool layers_valid(const PicaImage&) const noexcept;
+    [[nodiscard]] bool same(const PicaImageContent&) const noexcept;
+private:
+    struct State;
+    std::shared_ptr<const State> state_;
+    std::uint64_t generation_{};
+    unsigned slot_{};
+    friend class PicaImageContentOwner;
+};
 struct PicaImage {
     std::span<const std::uint8_t> pixels;
     unsigned width{},height{},pitch{},channels{4}; // RGB24/RGBA8, or indexed when channels==1.
@@ -113,6 +131,100 @@ struct PicaImage {
     std::span<const std::uint8_t> source_layers{};
     unsigned layer_pitch{};
     std::optional<PicaIndexedPixels> indexed{};
+    PicaImageContent content{};
+};
+struct PicaImageContent::State {
+    struct Binding {
+        std::span<const std::uint8_t> pixels,layers,indexed_layers;
+        std::span<const std::uint32_t> palette;
+        unsigned width{},height{},pitch{},channels{},layer_pitch{};
+        bool repeat{},indexed{};
+        explicit Binding(const PicaImage& image) noexcept
+            :pixels(image.pixels),layers(image.source_layers),
+             indexed_layers(image.indexed?image.indexed->layers:std::span<const std::uint8_t>{}),
+             palette(image.indexed?image.indexed->palette:std::span<const std::uint32_t>{}),
+             width(image.width),height(image.height),pitch(image.pitch),channels(image.channels),
+             layer_pitch(image.layer_pitch),repeat(image.repeat),indexed(bool(image.indexed)) {}
+        Binding()=default;
+        template<class T> static bool same_span(std::span<const T> a,std::span<const T> b) noexcept {
+            return a.data()==b.data() && a.size()==b.size();
+        }
+        bool colour_equal(const Binding& other) const noexcept {
+            return width==other.width && height==other.height && pitch==other.pitch
+                && channels==other.channels && repeat==other.repeat && indexed==other.indexed
+                && same_span(pixels,other.pixels) && same_span(indexed_layers,other.indexed_layers)
+                && same_span(palette,other.palette);
+        }
+        bool layers_equal(const Binding& other) const noexcept {
+            return layer_pitch==other.layer_pitch && same_span(layers,other.layers);
+        }
+    };
+    static constexpr unsigned slots=4; // Bounded PPU raster strips, not all model textures.
+    std::array<Binding,slots> bindings{};
+    std::uint64_t generation{};
+    unsigned count{};
+    bool alive{true};
+};
+inline bool PicaImageContent::same(const PicaImageContent& other) const noexcept {
+    return state_ && state_->alive && generation_==state_->generation && slot_<state_->count
+        && state_==other.state_ && generation_==other.generation_ && slot_==other.slot_;
+}
+inline bool PicaImageContent::colour_valid(const PicaImage& image) const noexcept {
+    return same(*this) && state_->bindings[slot_].colour_equal(State::Binding(image));
+}
+inline bool PicaImageContent::layers_valid(const PicaImage& image) const noexcept {
+    return colour_valid(image) && state_->bindings[slot_].layers_equal(State::Binding(image));
+}
+class PicaRaster;
+class PicaBg2Tiles;
+class PicaImageContentOwner {
+    // Allocate before any prepare transaction, never during publication. A
+    // move transfers ownership; replacing/destroying a producer retires its
+    // certificates even if a resident texture still retains the metadata.
+    PicaImageContentOwner():state_(std::make_shared<PicaImageContent::State>()) {}
+public:
+    ~PicaImageContentOwner() {retire();}
+    PicaImageContentOwner(const PicaImageContentOwner&)=delete;
+    PicaImageContentOwner& operator=(const PicaImageContentOwner&)=delete;
+    PicaImageContentOwner(PicaImageContentOwner&& other) noexcept:state_(std::move(other.state_)) {moved();}
+    PicaImageContentOwner& operator=(PicaImageContentOwner&& other) noexcept {
+        if(this!=&other) {retire();state_=std::move(other.state_);moved();} return *this;
+    }
+private:
+    void retire() noexcept {if(state_) state_->alive=false;}
+    void moved() noexcept {
+        // Inline palettes/descriptors can change addresses during a move.
+        // Old borrowed frames must not keep a live proof of those addresses.
+        if(!state_)return;
+        if(state_->generation==std::numeric_limits<std::uint64_t>::max()) {retire();state_.reset();}
+        else {++state_->generation;state_->count=0;}
+    }
+    void publish(std::span<PicaImage> images,bool changed) noexcept {
+        // A moved-from owner or impossible generation overflow simply loses
+        // the optimization. The byte-verified path remains fully functional.
+        if(!state_ || images.size()>PicaImageContent::State::slots) return;
+        changed=changed || state_->count!=images.size();
+        for(unsigned i=0;i<images.size();++i) {
+            const PicaImageContent::State::Binding binding(images[i]);
+            changed=changed || !state_->bindings[i].colour_equal(binding)
+                || !state_->bindings[i].layers_equal(binding);
+        }
+        if(changed) {
+            if(state_->generation==std::numeric_limits<std::uint64_t>::max()) {
+                retire();state_.reset();return;
+            }
+            ++state_->generation;
+        }
+        state_->count=unsigned(images.size());
+        for(unsigned i=0;i<images.size();++i) {
+            state_->bindings[i]=PicaImageContent::State::Binding(images[i]);
+            images[i].content.state_=state_;images[i].content.generation_=state_->generation;
+            images[i].content.slot_=i;
+        }
+    }
+    std::shared_ptr<PicaImageContent::State> state_;
+    friend class PicaRaster;
+    friend class PicaBg2Tiles;
 };
 struct PicaTextureLayout {
     unsigned width{},height{},bytes{};

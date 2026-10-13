@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <bit>
 #include <cmath>
 #include <cstring>
@@ -29,6 +30,15 @@ void serialize(Archive& archive, T& write) { archive(write.port,write.value,writ
 template<class Archive, class T> requires std::same_as<std::remove_const_t<T>, MsuRegisterWrite>
 void serialize(Archive& archive, T& write) { archive(write.address,write.value,write.clock_offset); }
 namespace {
+
+// Presentation-only cache epochs; not part of the serialized CPU timeline.
+std::uint64_t next_ppu_revision_epoch() noexcept {
+    static std::atomic_uint32_t next{1U};
+    return std::uint64_t{next.fetch_add(1U,std::memory_order_relaxed)} << 32U;
+}
+void advance_ppu_revision(std::uint64_t& epoch,std::uint32_t& revision) noexcept {
+    if (++revision == 0U) epoch=next_ppu_revision_epoch();
+}
 
 constexpr std::uint32_t kAddressSpaceSize = 1U << 24U;
 constexpr std::uint32_t kPageBits = 12U;
@@ -110,6 +120,8 @@ struct Wdc65816::Impl {
     std::array<std::uint8_t, 0x40> ppu_registers{};
     std::array<std::uint8_t, 0x80> dma_registers{};
     SnesPpuState ppu{};
+    std::uint64_t ppu_memory_epoch{next_ppu_revision_epoch()},ppu_vram_epoch{next_ppu_revision_epoch()};
+    std::uint32_t ppu_memory_revision{},ppu_vram_revision{};
     std::uint16_t vram_address{};
     std::uint8_t cgram_address{};
     bool cgram_high_byte{};
@@ -296,6 +308,12 @@ struct Wdc65816::Impl {
     std::uint32_t task_entry{};
     std::uint32_t task_return_sentinel{};
     WDC65C816 cpu{&bus};
+    void mark_ppu_memory_changed() noexcept {
+        advance_ppu_revision(ppu_memory_epoch,ppu_memory_revision);
+    }
+    void mark_ppu_vram_changed() noexcept {
+        mark_ppu_memory_changed();advance_ppu_revision(ppu_vram_epoch,ppu_vram_revision);
+    }
 
     template<class Archive> void transfer_state(Archive& archive) {
         // Symbol addresses, compatible ROM banks, bus pages and callbacks are
@@ -1037,15 +1055,17 @@ struct Wdc65816::Impl {
             static_cast<std::uint8_t>(value >> 8U);
     }
 
-    void write_cgram_byte(std::uint16_t byte_address, std::uint8_t value) noexcept {
+    bool write_cgram_byte(std::uint16_t byte_address, std::uint8_t value) noexcept {
         byte_address &= 0x1ffU;
         auto& word = ppu.cgram[byte_address >> 1U];
+        const auto previous = word;
         if ((byte_address & 1U) == 0U) {
             word = static_cast<std::uint16_t>((word & 0xff00U) | value);
         } else {
             word = static_cast<std::uint16_t>((word & 0x00ffU)
                 | (static_cast<std::uint16_t>(value) << 8U));
         }
+        return word != previous;
     }
 
     void write_ppu(std::uint16_t address, std::uint8_t value) noexcept {
@@ -1065,7 +1085,12 @@ struct Wdc65816::Impl {
             break;
         case 0x2104U: {
             const auto byte_address = static_cast<std::size_t>(oam_address) * 2U;
-            ppu.oam[(byte_address + (oam_high_byte ? 1U : 0U)) % ppu.oam.size()] = value;
+            auto& destination = ppu.oam[
+                (byte_address + (oam_high_byte ? 1U : 0U)) % ppu.oam.size()];
+            if (destination != value) {
+                destination = value;
+                mark_ppu_memory_changed();
+            }
             if (oam_high_byte) {
                 oam_address = static_cast<std::uint16_t>((oam_address + 1U) & 0x01ffU);
             }
@@ -1131,12 +1156,26 @@ struct Wdc65816::Impl {
                 | (static_cast<std::uint16_t>(value) << 8U));
             break;
         case 0x2118U:
-            ppu.vram[(static_cast<std::uint32_t>(vram_address) * 2U) & 0xffffU] = value;
+            {
+                auto& destination = ppu.vram[
+                    (static_cast<std::uint32_t>(vram_address) * 2U) & 0xffffU];
+                if (destination != value) {
+                    destination = value;
+                    mark_ppu_vram_changed();
+                }
+            }
             if ((ppu_registers[0x15U] & 0x80U) == 0U) ++vram_address;
             break;
         case 0x2119U:
-            ppu.vram[(static_cast<std::uint32_t>(vram_address) * 2U + 1U) & 0xffffU]
-                = value;
+            {
+                auto& destination = ppu.vram[
+                    (static_cast<std::uint32_t>(vram_address) * 2U + 1U)
+                        & 0xffffU];
+                if (destination != value) {
+                    destination = value;
+                    mark_ppu_vram_changed();
+                }
+            }
             if ((ppu_registers[0x15U] & 0x80U) != 0U) ++vram_address;
             break;
         case 0x2121U:
@@ -1146,7 +1185,8 @@ struct Wdc65816::Impl {
         case 0x2122U: {
             const auto byte_address = static_cast<std::uint16_t>(cgram_address) * 2U
                 + (cgram_high_byte ? 1U : 0U);
-            write_cgram_byte(byte_address, value);
+            if (write_cgram_byte(byte_address, value))
+                mark_ppu_memory_changed();
             if (cgram_high_byte) ++cgram_address;
             cgram_high_byte = !cgram_high_byte;
             break;
@@ -2479,18 +2519,28 @@ struct Wdc65816::Impl {
     void copy_superfx_to_vram(
         std::uint16_t source, std::uint16_t destination, std::uint16_t length) noexcept {
         auto output = static_cast<std::uint32_t>(destination) * 2U;
+        bool changed = false;
         for (std::uint32_t index = 0; index < length; ++index) {
-            ppu.vram[(output + index) & 0xffffU] =
-                superfx_ram[static_cast<std::uint16_t>(source + index)];
+            auto& target = ppu.vram[(output + index) & 0xffffU];
+            const auto value = superfx_ram[
+                static_cast<std::uint16_t>(source + index)];
+            if (target != value) {
+                target = value;
+                changed = true;
+            }
         }
+        if (changed) mark_ppu_vram_changed();
     }
 
     void copy_bus_to_cgram(
         std::uint32_t source, std::uint16_t destination, std::uint16_t length) {
+        bool changed = false;
         for (std::uint16_t index = 0; index < length; ++index) {
-            write_cgram_byte(static_cast<std::uint16_t>(destination + index),
-                bus.ReadByte(source + index));
+            changed = write_cgram_byte(
+                static_cast<std::uint16_t>(destination + index),
+                bus.ReadByte(source + index)) || changed;
         }
+        if (changed) mark_ppu_memory_changed();
     }
 
     void service_transfer() {
@@ -2507,10 +2557,16 @@ struct Wdc65816::Impl {
                     read_wram16(static_cast<std::uint16_t>(vmap1)), 21'504U);
             }
             if (spriteblk != 0U) {
+                bool changed = false;
                 for (std::size_t index = 0; index < 300U; ++index) {
-                    ppu.oam[index] = wram[static_cast<std::uint16_t>(
+                    const auto value = wram[static_cast<std::uint16_t>(
                         spriteblk + static_cast<std::uint32_t>(index))];
+                    if (ppu.oam[index] != value) {
+                        ppu.oam[index] = value;
+                        changed = true;
+                    }
                 }
+                if (changed) mark_ppu_memory_changed();
             }
             if (vmap1 != 0U && vmap2 != 0U) {
                 const auto first = read_wram16(static_cast<std::uint16_t>(vmap1));
@@ -2579,10 +2635,16 @@ struct Wdc65816::Impl {
             // releasing FOXYTRANS. Input edges are already written directly
             // by GameSimulation at the same source-frame boundary.
             if (spriteblk != 0U) {
+                bool changed = false;
                 for (std::size_t index = 0; index < 300U; ++index) {
-                    ppu.oam[index] = wram[static_cast<std::uint16_t>(
+                    const auto value = wram[static_cast<std::uint16_t>(
                         spriteblk + static_cast<std::uint32_t>(index))];
+                    if (ppu.oam[index] != value) {
+                        ppu.oam[index] = value;
+                        changed = true;
+                    }
                 }
+                if (changed) mark_ppu_memory_changed();
             }
             if (vmap1 != 0U && vmap2 != 0U) {
                 const auto first = read_wram16(static_cast<std::uint16_t>(vmap1));
@@ -2862,6 +2924,13 @@ const SnesPpuState& Wdc65816::ppu_state() const noexcept {
     return impl_->ppu;
 }
 
+std::uint64_t Wdc65816::ppu_memory_revision() const noexcept {
+    return impl_->ppu_memory_epoch | impl_->ppu_memory_revision;
+}
+std::uint64_t Wdc65816::ppu_vram_revision() const noexcept {
+    return impl_->ppu_vram_epoch | impl_->ppu_vram_revision;
+}
+
 const NativeModelDrawState& Wdc65816::native_model_draw() const noexcept {
     return impl_->native_model_draw;
 }
@@ -2883,28 +2952,48 @@ std::uint64_t Wdc65816::apu_upload_generation() const noexcept {
 void Wdc65816::write_cgram(
     std::uint16_t first_colour,
     std::span<const std::uint16_t> colours) noexcept {
+    const auto start = std::min<std::size_t>(first_colour,
+        impl_->ppu.cgram.size());
     const auto available = std::min<std::size_t>(
-        colours.size(), impl_->ppu.cgram.size() - std::min<std::size_t>(
-            first_colour, impl_->ppu.cgram.size()));
-    std::copy_n(colours.begin(), available,
-        impl_->ppu.cgram.begin() + std::min<std::size_t>(
-            first_colour, impl_->ppu.cgram.size()));
+        colours.size(), impl_->ppu.cgram.size() - start);
+    bool changed = false;
+    for (std::size_t index = 0; index < available; ++index) {
+        auto& destination = impl_->ppu.cgram[start + index];
+        if (destination != colours[index]) {
+            destination = colours[index];
+            changed = true;
+        }
+    }
+    if (changed) impl_->mark_ppu_memory_changed();
 }
 
 void Wdc65816::write_vram(
     std::uint16_t byte_offset,
     std::span<const std::uint8_t> bytes) noexcept {
+    bool changed = false;
     for (std::size_t index = 0; index < bytes.size(); ++index) {
-        impl_->ppu.vram[static_cast<std::uint16_t>(
-            byte_offset + static_cast<std::uint16_t>(index))] = bytes[index];
+        auto& destination = impl_->ppu.vram[static_cast<std::uint16_t>(
+            byte_offset + static_cast<std::uint16_t>(index))];
+        if (destination != bytes[index]) {
+            destination = bytes[index];
+            changed = true;
+        }
     }
+    if (changed) impl_->mark_ppu_vram_changed();
 }
 
 void Wdc65816::upload_oam(std::uint32_t source, std::size_t length) {
     length = std::min(length, impl_->ppu.oam.size());
+    bool changed = false;
     for (std::size_t index = 0; index < length; ++index) {
-        impl_->ppu.oam[index] = impl_->read8(source + static_cast<std::uint32_t>(index));
+        const auto value = impl_->read8(
+            source + static_cast<std::uint32_t>(index));
+        if (impl_->ppu.oam[index] != value) {
+            impl_->ppu.oam[index] = value;
+            changed = true;
+        }
     }
+    if (changed) impl_->mark_ppu_memory_changed();
 }
 
 void Wdc65816::begin_superfx_bitmap_frame() {

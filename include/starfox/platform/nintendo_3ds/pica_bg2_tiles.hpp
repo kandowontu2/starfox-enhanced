@@ -13,6 +13,7 @@ public:
     [[nodiscard]] PpuRasterWork work() const noexcept {return work_;}
     [[nodiscard]] unsigned coverage_guard() const noexcept {return width_>top_width?(width_-top_width)/2:0;}
 private:
+    PicaImageContentOwner content_;
     std::shared_ptr<const simulation::SnesPpuState> source_;
     PpuBatch batch_;
     unsigned width_{},brightness_{},subtract_{};

@@ -197,9 +197,41 @@ void native_row_contract() {
 }
 } // namespace
 
+namespace {
+void reference_priority_split() {
+    BackgroundRenderer renderer;
+    for(unsigned n=0;n<64;++n) {
+        auto ppu=source(n);ppu.background_mode=1;
+        for(bool bg2:{false,true}) for(bool tracked:{false,true}) {
+            Framebuffer low(256,224),high(256,224),expected_low(256,224),expected_high(256,224);
+            for(auto* frame:{&low,&high,&expected_low,&expected_high}) {
+                frame->clear(199);
+                if(tracked) {frame->enable_layer_tags(true);frame->begin_write_coverage();}
+            }
+            if(bg2) {
+                renderer.draw_bg2(ppu,ppu.bg2_scroll_x,ppu.bg2_scroll_y,expected_low,TilePriorityPass::low);
+                renderer.draw_bg2(ppu,ppu.bg2_scroll_x,ppu.bg2_scroll_y,expected_high,TilePriorityPass::high);
+                renderer.draw_bg2_mode1_split(ppu,ppu.bg2_scroll_x,ppu.bg2_scroll_y,low,high);
+            } else {
+                renderer.draw_bg3(ppu,expected_low,TilePriorityPass::low);
+                renderer.draw_bg3(ppu,expected_high,TilePriorityPass::high);
+                renderer.draw_bg3_split(ppu,low,high);
+            }
+            if(low.pixels()!=expected_low.pixels() || high.pixels()!=expected_high.pixels())
+                throw std::runtime_error("Reference priority split differs from exact source planes");
+            if(tracked && (!std::ranges::equal(low.layer_tags(),expected_low.layer_tags())
+                || !std::ranges::equal(high.layer_tags(),expected_high.layer_tags())
+                || !std::ranges::equal(low.write_coverage(),expected_low.write_coverage())
+                || !std::ranges::equal(high.write_coverage(),expected_high.write_coverage())))
+                throw std::runtime_error("Reference priority split loses layer/coverage metadata");
+        }
+    }
+}
+}
 int main(int argc, char** argv) try {
     if (argc == 2 && std::string_view(argv[1]) == "--benchmark") { benchmark(); return 0; }
     native_row_contract();
+    reference_priority_split();
     const auto digest = oracle_trace();
     // Filled from a separate executable built BEFORE changing the renderer:
     // background_renderer.cpp SHA256 450af058b47c38fd096b7416782f1b3ab

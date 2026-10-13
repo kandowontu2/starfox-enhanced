@@ -56,16 +56,19 @@ inline void release_pica_texture_cache(std::vector<std::uint8_t>& cache) noexcep
 class PicaTextureResidency {
 public:
     void release_colour() noexcept {
+        colour_content_={};
         release_pica_texture_cache(pixels_);colour_valid_=false;
         release_pica_texture_cache(indexed_layers_);indexed_=false;
         std::vector<std::uint32_t>().swap(indexed_palette_);
         width_=height_=channels_=0;repeat_=false;
     }
     void release_layers() noexcept {
+        layer_content_={};
         release_pica_texture_cache(layers_);layers_valid_=true;
         layer_width_=layer_height_=classes_=0;layer_repeat_=false;
     }
     bool colour_matches(PicaImage image) const noexcept {
+        if(colour_valid_ && image.content.colour_valid(image) && image.content.same(colour_content_))return true;
         return colour_valid_ && image.width==width_ && image.height==height_
             && image.channels==channels_ && image.repeat==repeat_
             && indexed_matches(image)
@@ -76,12 +79,14 @@ public:
     // callback; a failed flush/released allocation never provides a base.
     std::span<const std::uint8_t> colour_base(PicaImage image) const noexcept {
         if(!colour_valid_ || image.width!=width_ || image.height!=height_
-            || image.channels!=channels_ || image.repeat!=repeat_ || !indexed_matches(image))return {};
+            || image.channels!=channels_ || image.repeat!=repeat_
+            || (!(image.content.colour_valid(image) && image.content.same(colour_content_)) && !indexed_matches(image)))return {};
         return pixels_;
     }
     bool layers_match(PicaImage image) const noexcept {
         if(!layers_valid_)return false;
         if(image.source_layers.empty())return layers_.empty();
+        if(image.content.layers_valid(image) && image.content.same(layer_content_))return true;
         return !layers_.empty() && image.width==layer_width_ && image.height==layer_height_
             && image.repeat==layer_repeat_
             && rows_equal(image.source_layers,image.layer_pitch,image.width,image.height,layers_);
@@ -90,7 +95,7 @@ public:
     bool prepare(PicaImage image,ColourUpload colour_upload,LayerUpload layer_upload) {
         const auto layout=pica_texture_layout(image);
         const bool colour_same=colour_matches(image),layers_same=layers_match(image);
-        if(colour_same && layers_same)return false;
+        if(colour_same && layers_same) {remember_content(image);return false;}
         // A layout change/reserve must not invalidate its own borrowed input.
         for(const auto input:{image.pixels,image.source_layers,image.indexed?image.indexed->layers:std::span<const std::uint8_t>{}})
             for(const auto retained:{std::span<const std::uint8_t>(pixels_),std::span<const std::uint8_t>(layers_),std::span<const std::uint8_t>(indexed_layers_)}) {
@@ -112,7 +117,7 @@ public:
         if(!layers_same && !image.source_layers.empty())
             layers_.reserve(std::size_t(image.width)*image.height);
         if(!colour_same) {
-            colour_valid_=false;colour_upload(image,layout);
+            colour_content_={};colour_valid_=false;colour_upload(image,layout);
             copy_rows(image.pixels,image.pitch,image.width*image.channels,image.height,pixels_);
             if(image.indexed) {
                 copy_rows(image.indexed->layers,image.pitch,image.width,image.height,indexed_layers_);
@@ -131,7 +136,7 @@ public:
             colour_valid_=true;
         }
         if(!layers_same) {
-            layers_valid_=false;layer_upload(image,layout,image.source_layers.empty()?0:classes);
+            layer_content_={};layers_valid_=false;layer_upload(image,layout,image.source_layers.empty()?0:classes);
             if(image.source_layers.empty())release_layers();
             else {
                 copy_rows(image.source_layers,image.layer_pitch,image.width,image.height,layers_);
@@ -139,7 +144,7 @@ public:
                 classes_=classes;layers_valid_=true;
             }
         }
-        return true;
+        remember_content(image);return true;
     }
     std::span<const std::uint8_t> pixels() const noexcept {return pixels_;}
     std::span<const std::uint8_t> layers() const noexcept {return layers_;}
@@ -149,6 +154,11 @@ public:
     std::size_t layer_capacity() const noexcept {return layers_.capacity();}
     unsigned classes() const noexcept {return classes_;}
 private:
+    void remember_content(const PicaImage& image) noexcept {
+        colour_content_=image.content.colour_valid(image)?image.content:PicaImageContent{};
+        layer_content_=image.content.layers_valid(image)?image.content:PicaImageContent{};
+    }
+    PicaImageContent colour_content_,layer_content_;
     bool indexed_matches(PicaImage image) const noexcept {
         return indexed_==bool(image.indexed) && (!indexed_ ||
             (image.indexed->palette.size()==indexed_palette_.size()

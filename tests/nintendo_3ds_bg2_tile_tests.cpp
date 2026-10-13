@@ -1,4 +1,5 @@
 #include "starfox/platform/nintendo_3ds/pica_bg2_tiles.hpp"
+#include "starfox/platform/nintendo_3ds/pica_residency.hpp"
 #include "starfox/platform/nintendo_3ds/game_layers.hpp"
 #include <atomic>
 #include <chrono>
@@ -380,6 +381,49 @@ void indexed_atlas_pipeline() {
             "Indexed palette fade rewrote or replaced the complete tile atlas");
     }
 }
+void atlas_content_certificates() {
+    const auto plan=plan_frame(0,true,ScreenUse::world);
+    for(bool indexed:{false,true}) {
+        auto ppu=fixture(0);PpuBatch batch{{{PpuLayer::bg2}},PicaSpace::scenery,true};
+        PicaBg2Tiles owner;PicaTextureResidency cache;unsigned uploads=0;
+        const auto prepare=[&](unsigned brightness=15) {
+            const auto frame=owner.prepare(ppu,batch,plan,brightness,0,pica_vertex_limit,32,true,indexed);
+            require(frame && !frame->textures.empty(),"Certified atlas fixture unexpectedly declined");
+            return frame->textures.front();
+        };
+        const auto colour=[&](PicaImage source,PicaTextureLayout layout) {
+            ++uploads;std::vector<std::uint8_t> native(layout.bytes);pack_pica_texture(source,native);
+        };
+        const auto layers=[](auto,auto,auto) {};
+        auto image=prepare();const auto first=image.content;
+        require(first.colour_valid(image) && cache.prepare(image,colour,layers),"Atlas omitted its initial complete certificate/upload");
+        ppu=std::make_shared<simulation::SnesPpuState>(*ppu);image=prepare();
+        require(first.same(image.content) && !cache.prepare(image,colour,layers) && uploads==1,
+            "Unchanged immutable atlas repeated the native upload");
+        const auto old=image;image=prepare(8);
+        require(!old.content.colour_valid(old) && image.content.colour_valid(image)
+            && cache.prepare(image,colour,layers),"Atlas fade retained stale certified colours");
+        const auto retained=image;
+        auto bad=batch;bad.passes.clear();
+        require(!owner.prepare(ppu,bad,plan,8,0,pica_vertex_limit),"Invalid tile batch was unexpectedly accepted");
+        require(retained.content.colour_valid(retained),"Declining tile planning retired a borrowed complete atlas");
+        if(indexed) {
+            auto altered=image;std::vector<std::uint32_t> inks(image.indexed->palette.begin(),image.indexed->palette.end());
+            altered.indexed->palette=inks;
+            require(!altered.content.colour_valid(altered) && cache.colour_matches(altered),"Foreign palette forged an atlas proof or lost byte fallback");
+            std::vector<std::uint8_t> cover(image.indexed->layers.begin(),image.indexed->layers.end());
+            altered=image;altered.indexed->layers=cover;
+            require(!altered.content.colour_valid(altered),"Foreign atlas coverage forged a complete colour proof");
+        }
+        PicaBg2Tiles moved=std::move(owner);
+        require(!image.content.colour_valid(image),"Moving an inline atlas palette retained its old address proof");
+        const auto frame=moved.prepare(ppu,batch,plan,8,0,pica_vertex_limit,32,true,indexed);
+        require(frame && frame->textures.front().content.colour_valid(frame->textures.front())
+            && !cache.prepare(frame->textures.front(),colour,layers),"Moved atlas failed to recover exact residency reuse");
+        image=frame->textures.front();moved=PicaBg2Tiles{};
+        require(!image.content.colour_valid(image),"Destroyed atlas left a native cache certificate alive");
+    }
+}
 void palette_benchmark() {
     const auto ppu=fixture(0);PpuBatch batch;batch.passes.push_back({PpuLayer::bg2});
     PicaBg2Tiles owner;const auto plan=plan_frame(0,true,ScreenUse::world);
@@ -427,7 +471,7 @@ int main(int argc,char** argv) try {
         }
         require(ppu->vram==unchanged.vram && ppu->cgram==unchanged.cgram && ppu->oam==unchanged.oam,"Native tile planning mutated cartridge memory");
     }
-    rejection_and_reuse();painter_integration();constant_vertical_offsets();rolled_offsets_and_carry();water_offsets_and_edges();mode1_panorama_atlas();complete_palette_sweep();referenced_character_cache();indexed_atlas_pipeline();
+    rejection_and_reuse();painter_integration();constant_vertical_offsets();rolled_offsets_and_carry();water_offsets_and_edges();mode1_panorama_atlas();complete_palette_sweep();referenced_character_cache();indexed_atlas_pipeline();atlas_content_certificates();
     std::cout<<"Native BG2 tile planner/atlas: "<<checks<<" exact pixel, palette, ownership, HDMA, flips, budget and fallback checks PASS\n";
     return 0;
 } catch(const std::exception& error) {count_allocations=false;std::cerr<<error.what()<<'\n';return 1;}

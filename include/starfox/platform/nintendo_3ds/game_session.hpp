@@ -9,6 +9,7 @@
 #include <type_traits>
 #include <unordered_set>
 
+namespace starfox::platform_3ds {class Frame3ds;}
 namespace starfox::platform::nintendo_3ds {
 struct GameAdvance {
     unsigned video_phases{},logic_ticks{},audio_blocks{};
@@ -62,6 +63,15 @@ public:
     GameSession(assets::RomImage,assets::SymbolMap,PcmSink,
         std::string initial_map="BOOT",std::span<const std::uint8_t> cartridge_ram={},
         const GameSessionOptions& options={});
+    ~GameSession();
+    // Reference mono raster; lazily owned by the stable cartridge session.
+    // Its interpolation snapshots are captured at actual source ticks, not
+    // once per eye or by a separate simulation/audio timeline.
+    platform_3ds::Frame3ds& mono_renderer();
+    [[nodiscard]] bool mono_prepared() const noexcept {return mono_prepared_;}
+    // Bounded reference shape/LOD warmup while the host displays progress and
+    // services APT. Does not tick cartridge logic/audio or change preferences.
+    bool prepare_mono(const std::function<bool(unsigned,unsigned)>& progress);
     GameSession(const GameSession&)=delete;
     GameSession& operator=(const GameSession&)=delete;
     GameSession(GameSession&&)=delete; // Internal source references must stay stable.
@@ -155,5 +165,8 @@ private:
     bool requested_hud_customization_{};
     CockpitLayout hud_layout_;
     audio::StemExecutor* stem_executor_{};
+    // Destroy the borrowed-ROM renderer before game_, symbols_ and rom_.
+    std::unique_ptr<platform_3ds::Frame3ds> mono_renderer_;
+    bool mono_prepared_{};
 };
 } // namespace starfox::platform::nintendo_3ds

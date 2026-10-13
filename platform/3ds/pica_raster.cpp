@@ -358,6 +358,8 @@ PicaFrame PicaRaster::prepare(std::shared_ptr<const simulation::SnesPpuState> so
         const auto layer=batch.passes.front().layer;
         for(unsigned i=0;i<strips;++i) draws_[i].source_layer=layer==PpuLayer::bg1?1:layer==PpuLayer::bg2?2:4;
     }
+    static_assert(pica_raster_max_strips<=4);
+    content_.publish(std::span(images_).first(visible_?strips:0),recolour);
     return {plan,visible_?std::span<const PicaVertex>(vertices_).first(strips*6):std::span<const PicaVertex>{},
         visible_?std::span<const PicaDraw>(draws_).first(strips):std::span<const PicaDraw>{},
         visible_?std::span<const PicaImage>(images_).first(strips):std::span<const PicaImage>{}};

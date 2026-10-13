@@ -6,6 +6,7 @@
 #include "starfox/platform/nintendo_3ds/frame_profile.hpp"
 #include "starfox/platform/nintendo_3ds/startup_trace.hpp"
 #include "starfox/compat/bit_cast.hpp"
+#include "reference/frame_3ds.hpp"
 #include <cctype>
 
 namespace starfox::platform::nintendo_3ds {
@@ -123,6 +124,33 @@ GameSession::GameSession(assets::RomImage rom,assets::SymbolMap symbols,PcmSink 
     }
     start_after_preview_=options.start_after_preview;
     history_.capture();history_.reset_interpolation();publish_raster();
+}
+GameSession::~GameSession()=default;
+platform_3ds::Frame3ds& GameSession::mono_renderer() {
+    if(!mono_renderer_) {
+        auto next=std::make_unique<platform_3ds::Frame3ds>(rom_,symbols_);
+        next->set_top_hud_visible(false);next->capture_after_tick(game_);
+        mono_renderer_=std::move(next);
+    }
+    return *mono_renderer_;
+}
+bool GameSession::prepare_mono(const std::function<bool(unsigned,unsigned)>& progress) {
+    if(frame_work_active_ || deferred_audio_) throw std::logic_error("Finish audio before mono preload");
+    if(mono_prepared_) return true;
+    struct Context {
+        const std::function<bool(unsigned,unsigned)>& progress;
+        bool canceled{};
+    } context{progress};
+    auto& renderer=mono_renderer();
+    static_cast<void>(renderer.preload_catalog(12U*1024U*1024U,[](void* data,unsigned done,unsigned total) {
+        auto& c=*static_cast<Context*>(data);
+        if(c.canceled) return false;
+        c.canceled=c.progress && !c.progress(done,total);
+        return !c.canceled;
+    },&context));
+    if(context.canceled) return false;
+    static_cast<void>(renderer.preload_active_shapes(game_));
+    mono_prepared_=true;return true;
 }
 void GameSession::apply_native_capabilities() noexcept {
     // A GAME archive carries desktop host preferences as well as the source
@@ -337,6 +365,7 @@ GameAdvance GameSession::advance(std::int64_t time,input::ButtonMask held,bool f
                     STARFOX_3DS_FRAME_PHASE(logic);
                     return game_.tick(controls);
                 }();++result.logic_ticks;
+                if(mono_renderer_) mono_renderer_->capture_after_tick(game_);
                 // Let the source own navigation, Start and confirmation/axis
                 // release guards. Replace only an output-rate change it really
                 // applied, not an action guessed from the pre-tick cursor or

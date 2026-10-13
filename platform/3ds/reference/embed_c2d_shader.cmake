@@ -1,0 +1,8 @@
+file(READ "${INPUT}" c2d_hex HEX)
+string(LENGTH "${c2d_hex}" c2d_chars)
+math(EXPR c2d_size "${c2d_chars}/2")
+if(c2d_size LESS 32 OR c2d_size GREATER 65536)
+    message(FATAL_ERROR "Invalid Citro2D shader size")
+endif()
+string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," c2d_bytes "${c2d_hex}")
+file(WRITE "${OUTPUT}" "_Alignas(4) const unsigned char render2d_shbin[] = {${c2d_bytes}};\nconst unsigned int render2d_shbin_size = ${c2d_size};\n")

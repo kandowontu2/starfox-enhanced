@@ -183,6 +183,7 @@ std::optional<PicaFrame> PicaBg2Tiles::prepare(std::shared_ptr<const simulation:
     image_={pixels_,atlas_width,atlas_height,atlas_width*(indexed_upload_?1:4),indexed_upload_?1U:4U};
     if(indexed_upload_) image_.indexed=PicaIndexedPixels{indexed_layers_,indexed_palette_};
     draw_={0,unsigned(vertices_.size()),0,pica_identity,batch.space,false,false,false};draw_.source_layer=2;
+    content_.publish(vertices_.empty()?std::span<PicaImage>{}:std::span(&image_,1),recolour);
     if(vertices_.empty()) return PicaFrame{plan,{},{},{}};
     return PicaFrame{plan,vertices_,std::span(&draw_,1),std::span(&image_,1)};
 }

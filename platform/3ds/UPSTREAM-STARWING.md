@@ -1,5 +1,30 @@
 # Starwing 3DS integration
 
+## Reference mono pipeline (October 13 follow-up)
+
+To establish a meaningful mono baseline, `reference/` adapts Esteban PDN's
+actual `Frame3ds`, native canvas and Citro2D display implementation at
+`01bf4925951515244cdb03d58ad722417919d6ba`. This supersedes the earlier
+tile-planner-only integration **for ordinary mono gameplay**. Slider stereo,
+source window/color effects and host menu previews retain our native PICA
+path. The real pre-game menu, lower-screen HUD, preferences, save transactions,
+VM cadence and accurate SPC audio are not replaced by the reference frontend.
+
+The reference's reusable model scratch, immutable BSP address tables, PPU
+memory-change revisions and one-pass priority background decoder are also
+adapted, with exact-raster/state checks. Presentation RAM reads use non-mutating
+peeks. Cached CPU data is invalidated across state restores. GPU completion
+precedes freeing linear textures/C2D buffers; the two GPU owners are exclusive.
+
+Citro2D v1.7.0 comes from the official devkitPro source archive with a pinned
+SHA-256. Its altered draw hook explicitly flushes used vertex/index ranges and
+split command lists; kernel fallback flushes both buffers or refuses submission.
+Its original notice is retained in `reference/CITRO2D-LICENSE.txt`. This imports
+code only, under the author permission recorded below, not ROMs or game artwork.
+Compilation and emulator checks do not establish sustained hardware 60 FPS.
+
+## Earlier tile-planner integration
+
 The BG2 tile-rectangle planning algorithm is adapted from
 [Esteban PDN's Starwing 3DS](https://github.com/EstebanPdN/starwing-3ds), pinned at
 `753952be5b170059d95068350d37759a966a3bd5` (2026-10-02).
@@ -12,7 +37,7 @@ tile-atlas/HDMA composition in `display_3ds.cpp`. Esteban PDN is credited for
 the 3DS adaptation. Existing third-party notices retain their own scope.
 No ROM, generated game artwork, firmware or private UI resources are imported.
 
-Our integration uses our existing Citro3D owner rather than importing a second
+That earlier integration uses our existing Citro3D owner rather than importing a second
 Citro2D presenter. Tile colour zero is transparent; opaque black stays opaque.
 Palette fades, source BG2 ownership and RGB8 brightness/subtraction are retained.
 It consumes one immutable source mesh for both eyes and does not change game

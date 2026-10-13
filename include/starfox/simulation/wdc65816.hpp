@@ -135,6 +135,8 @@ public:
     void set_apu_output_ports(
         const std::array<std::uint8_t, 4>& ports) noexcept;
     [[nodiscard]] const SnesPpuState& ppu_state() const noexcept;
+    [[nodiscard]] std::uint64_t ppu_memory_revision() const noexcept;
+    [[nodiscard]] std::uint64_t ppu_vram_revision() const noexcept;
     [[nodiscard]] const NativeModelDrawState& native_model_draw() const noexcept;
     void set_native_model_draw(const NativeModelDrawState& state) noexcept;
     [[nodiscard]] const std::vector<std::uint32_t>& unknown_superfx_launches()

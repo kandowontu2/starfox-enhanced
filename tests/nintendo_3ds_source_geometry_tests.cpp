@@ -556,7 +556,27 @@ STARFOX_ALLOCATION_NOINLINE void operator delete[](void* memory) noexcept {std::
 STARFOX_ALLOCATION_NOINLINE void operator delete(void* memory,std::size_t) noexcept {std::free(memory);}
 STARFOX_ALLOCATION_NOINLINE void operator delete[](void* memory,std::size_t) noexcept {std::free(memory);}
 #undef STARFOX_ALLOCATION_NOINLINE
+namespace {
+void reference_scratch_parity() {
+    auto shape=quad();auto p=pose();render::SoftwareRenderer renderer;
+    render::Framebuffer expected(400,240),actual(400,240);
+    render::software_renderer_detail::Scratch scratch;
+    // Reuse across clipped, cleared and uncleared draws; no stale prior face.
+    for(unsigned i=0;i<30;++i) {
+        p.x=double(i)*8-120;p.z=i%2?40:512;p.roll=double(i)*0.09;
+        renderer.draw(shape,p,expected);
+        renderer.draw(shape,p,actual,true,nullptr,nullptr,nullptr,&scratch);
+        require(expected.pixels()==actual.pixels(),"Reference scratch draw preserves exact pixels");
+    }
+    p=pose();renderer.draw(shape,p,actual,true,nullptr,nullptr,nullptr,&scratch);
+    allocations=0;count_allocations=true;
+    for(unsigned i=0;i<50;++i) renderer.draw(shape,p,actual,true,nullptr,nullptr,nullptr,&scratch);
+    count_allocations=false;
+    require(allocations==0,"Warmed ordinary mono faces allocate no per-model/polygon vectors");
+}
+}
 int main() try {
+    reference_scratch_parity();
     native_vertices();source_geometry();materials_and_sprites();effect_windows();painter_projection();scene_windows();rollback_and_budget();warmed_geometry_storage();texture_resources();warmed_texture_storage();texture_storage_bound_and_failure();projected_dither();
     std::cout<<"3DS shared source geometry/material conversion: "<<checks<<" checks passed\n";
 } catch(const std::exception& error) {count_allocations=false;std::cerr<<error.what()<<'\n';return 1;}
