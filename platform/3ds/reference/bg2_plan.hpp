@@ -30,7 +30,9 @@ struct Bg2Rect {
 // (origin_x, origin_y); pixels outside it continue the BG2 tile map while
 // line-specific HDMA uses the nearest source scanline. Returns false, with no
 // partial output, for unsupported mosaic/mode or excessive rectangle count.
-// Colour-zero transparency is applied by the consumer's tile atlas.
+// Colour-zero transparency is applied by the consumer's tile atlas. Opaque
+// uniform characters merge before the capacity check, not only after planning.
+// Disabling compaction retains the unmerged plan as a pixel-parity oracle.
 [[nodiscard]] bool plan_bg2_rects(
     const simulation::SnesPpuState& ppu,
     std::int32_t scroll_x, std::int32_t scroll_y,
@@ -40,6 +42,7 @@ struct Bg2Rect {
     std::uint32_t target_height = 224U,
     std::int32_t origin_x = 0,
     std::int32_t origin_y = 0,
-    bool cache_rolled_ground_samples = true);
+    bool cache_rolled_ground_samples = true,
+    bool compact_uniform_tiles = true);
 
 } // namespace starfox::platform_3ds

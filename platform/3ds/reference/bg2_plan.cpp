@@ -25,7 +25,7 @@ bool plan_bg2_rects(const simulation::SnesPpuState& ppu,
     std::vector<Bg2Rect>& output, std::size_t capacity,
     std::uint32_t target_width, std::uint32_t target_height,
     std::int32_t origin_x, std::int32_t origin_y,
-    bool cache_rolled_ground_samples) {
+    bool cache_rolled_ground_samples, bool compact_uniform_tiles) {
     output.clear();
     if (ppu.background_mode != 2U || (ppu.mosaic & 0x02U) != 0U)
         return false;
@@ -117,6 +117,34 @@ bool plan_bg2_rects(const simulation::SnesPpuState& ppu,
 
     auto& planned = output;
     planned.reserve(std::min<std::size_t>(capacity, 16384U));
+    // Rejecting the raw HDMA strips before merging them forced flat EX
+    // backgrounds through a second, complete CPU raster. Decode each observed
+    // character once, and merge only opaque identical horizontal spans. Zero
+    // stays a textured fragment, retaining the atlas's transparency contract.
+    std::array<std::int8_t, 1024U> uniform_characters;
+    uniform_characters.fill(-2);
+    const auto uniform_character = [&](std::uint16_t character) {
+        auto& cached = uniform_characters[character];
+        if (cached != -2) return cached;
+        const auto base = static_cast<std::uint32_t>(ppu.bg2_character_base)
+            * 2U + static_cast<std::uint32_t>(character) * 32U;
+        unsigned colour = 0U;
+        constexpr std::array<std::uint32_t, 4U> planes{0U, 1U, 16U, 17U};
+        for (unsigned plane = 0U; plane < planes.size(); ++plane) {
+            const auto first = ppu.vram[(base + planes[plane]) & 0xffffU];
+            if (first != 0U && first != 255U) { cached = -1; return cached; }
+            for (unsigned row = 1U; row < 8U; ++row) {
+                if (ppu.vram[(base + planes[plane] + row * 2U) & 0xffffU]
+                    != first) { cached = -1; return cached; }
+            }
+            if (first != 0U) colour |= 1U << plane;
+        }
+        cached = static_cast<std::int8_t>(colour);
+        return cached;
+    };
+    constexpr auto no_run = std::numeric_limits<std::size_t>::max();
+    std::array<std::size_t, 240U> uniform_run_by_y;
+    uniform_run_by_y.fill(no_run);
     for (std::uint32_t band_top = 0U; band_top < target_height;) {
         const auto band_scroll_x = row_scroll_x_values[band_top];
         const auto band_scroll_y = row_scroll_y_values[band_top];
@@ -186,11 +214,7 @@ bool plan_bg2_rects(const simulation::SnesPpuState& ppu,
                         + (sub_x >= 8U ? 1U : 0U)
                         + (sub_y >= 8U ? 16U : 0U)) & 0x03ffU);
                 }
-                if (planned.size() == capacity) {
-                    output.clear();
-                    return false;
-                }
-                planned.push_back({
+                Bg2Rect rectangle{
                     static_cast<std::uint16_t>(x),
                     static_cast<std::uint16_t>(y),
                     static_cast<std::uint16_t>(width),
@@ -201,7 +225,33 @@ bool plan_bg2_rects(const simulation::SnesPpuState& ppu,
                         ? 7U - (source_x & 7U) : (source_x & 7U)),
                     static_cast<std::uint8_t>(reverse_y
                         ? 7U - (source_y & 7U) : (source_y & 7U)),
-                    reverse_x, reverse_y});
+                    reverse_x, reverse_y};
+                if (compact_uniform_tiles) {
+                    const auto uniform = uniform_character(character);
+                    if (uniform > 0) {
+                        rectangle.solid = true;
+                        rectangle.solid_colour = static_cast<std::uint8_t>(
+                            rectangle.palette_bank * 16U + uniform);
+                        auto& last_index = uniform_run_by_y[y];
+                        if (last_index != no_run) {
+                            auto& last = planned[last_index];
+                            if (last.x + last.width == x
+                                && last.height == height
+                                && last.solid_colour == rectangle.solid_colour) {
+                                last.width = static_cast<std::uint16_t>(
+                                    last.width + width);
+                                y += height;
+                                continue;
+                            }
+                        }
+                        if (planned.size() < capacity) last_index = planned.size();
+                    }
+                }
+                if (planned.size() == capacity) {
+                    output.clear();
+                    return false;
+                }
+                planned.push_back(rectangle);
                 y += height;
             }
             x += width;
@@ -226,8 +276,6 @@ bool plan_bg2_rects(const simulation::SnesPpuState& ppu,
         // -2: not decoded; -1: mixed; 0..15: identical texels. Ground and
         // sky characters are often flat even when the camera rolls, so their
         // sample is independent of source coordinates and tile flips.
-        std::array<std::int8_t, 1024U> uniform_characters;
-        uniform_characters.fill(-2);
         // Consecutive pixels in a rolled column often share one map entry.
         std::uint32_t last_tile_entry = 4096U;
         std::uint16_t last_tile_word = 0U;

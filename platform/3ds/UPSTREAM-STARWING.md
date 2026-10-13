@@ -41,6 +41,14 @@ Ordinary Start still opens its own bounded trace, and replacing the cartridge
 resets the first-GPU guard. Repeated damage/wipe transitions must remain free of
 startup I/O once that bounded window expires. Failed SD streams stay disabled.
 
+Our reference planner also merges opaque uniform scanline fragments before
+its capacity check. This avoids rejecting a compact flat EX background solely
+because its unmerged HDMA representation exceeds the draw budget. Transparent
+characters remain textured; mixed tiles, palette banks, source flips and rolled
+lower-edge corrections retain exact indexed-pixel/coverage parity. The fragment
+limit itself is unchanged, and genuine over-budget scenes still use the complete
+fallback. This is an adaptation of the credited planner, not replacement artwork.
+
 ## Earlier tile-planner integration
 
 The BG2 tile-rectangle planning algorithm is adapted from

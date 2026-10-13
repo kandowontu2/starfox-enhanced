@@ -107,8 +107,22 @@ cover all success/busy/rejection pairs, bounded retry, failure propagation and
 retirement order; profiling appends separate `mono_retry` / `mono_fallback` rows.
 In the prior commit's 300%-clock Vulkan profile, the background-3 interval has
 482 mono draws for 337 mono presentations, consistent with 145 extra fallback
-redraws. Those earlier counters cannot identify the rejection reason, and this
-fix is not yet a measured performance improvement or physical-console result.
+redraws. The follow-up source `490c0f0b` in
+[ARM run 38422455437](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38422455437)
+records 145 actual fallback calls and no busy-acquire retries in that same
+background interval. It did not measurably improve this replay's timing.
+
+The next source follow-up merges opaque uniform BG2 runs **before** the
+fragment-budget check. A separate 3,600-phase real EX `LEVEL1_1` host probe
+reproduces 679 raw-plan rejections (maximum 22,500 fragments); compaction
+eliminates those rejections with at most 1,500 fragments in that background.
+Its 728 sampled/previously-rejected frames retain exact indexed pixels and
+coverage. The corresponding Original probe retains exact pixels in 43 sampled
+frames and does not introduce budget failures. Asset-free tests additionally
+cover scanline HDMA, rolled carry, palettes/flips, 16-pixel tiles, character
+address wrapping, transparent ink, exact capacity and cleared failure output.
+These are planner/source-parity results, not measured native FPS. Native ARM
+and accuracy-enabled replay validation of this compaction follow-up is pending.
 
 CI dispatch now accepts `profile_frames=false` for production-style timing.
 `BUILD-INFO.json` records the explicit native profiling setting; older packages
