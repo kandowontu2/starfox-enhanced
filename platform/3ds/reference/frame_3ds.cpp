@@ -7,6 +7,7 @@
 #include "stereo_3ds.hpp"
 
 #include "starfox/render/palette.hpp"
+#include "starfox/compat/bit_cast.hpp"
 
 #include "mono_clock.hpp"
 
@@ -720,7 +721,8 @@ const render::Framebuffer& Frame3ds::draw(
         ram_symbol("PLAYERFLYMODE"));
     const auto depth_colours = read_fx("M_DEPTHSTAB");
     const auto depth_thresholds = read_fx("M_DEPTHTABLE");
-    const auto dots_mode = map.dots_mode();
+    const auto dots_mode = starfox::bit_cast<std::int8_t>(
+        reference_read_byte(map,ram_symbol("DOTSFLAG")));
     const auto dust_count = game.dust_point_count();
     const std::array<std::int32_t, 17U> world_key{
         camera_x, camera_y, camera_z, camera_pitch, camera_yaw, camera_roll,

@@ -46,7 +46,16 @@ bool NativeMono::present(GameSession& session,const GamePresentation& source,Ima
     if(R_FAILED(GSPGPU_FlushDataCache(lower,bottom_width*screen_height*4)))
         throw std::runtime_error("3DS mono dashboard flush failed");
     STARFOX_3DS_FRAME_PHASE(present);
-    return gpu_bg2?impl_->display.present_mode2(ppu,game.map().ppu_vram_revision(),scroll.first,scroll.second,indexed,palette,reuse)
+    const bool presented=gpu_bg2
+        ?impl_->display.present_mode2(ppu,game.map().ppu_vram_revision(),scroll.first,scroll.second,indexed,palette,reuse)
         :impl_->display.present(indexed,palette,reuse);
+    if(!gpu_bg2 || presented) return presented;
+    // Retain the reference renderer's complete-frame fallback. A rejected
+    // tile atlas, exhausted quad buffer, or transient acquire miss must not
+    // leave a foreground-only image on screen. Sync also protects texture
+    // writes if the rejected attempt already submitted a partial GPU frame.
+    C3D_FrameSync();
+    const auto& complete=renderer.draw(game,false,source.interpolation_alpha);
+    return impl_->display.present(complete,palette,false);
 }
 }
