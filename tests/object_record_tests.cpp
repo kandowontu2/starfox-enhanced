@@ -1,5 +1,6 @@
 #include "starfox/simulation/object_pool.hpp"
 #include "starfox/simulation/map_vm.hpp"
+#include "starfox/platform/nintendo_3ds/frame_profile.hpp"
 
 #include <algorithm>
 #include <array>
@@ -97,6 +98,8 @@ using namespace starfox::simulation;
 void require(bool condition, const char* message) {
     if (!condition) throw std::runtime_error{message};
 }
+std::uint64_t bridge_clock_calls{};
+std::uint64_t bridge_clock() noexcept { return ++bridge_clock_calls; }
 template<class F> void rejects(F operation) {
     bool rejected = false;
     try { operation(); } catch (const std::exception&) { rejected = true; }
@@ -193,6 +196,23 @@ void test_bridge(ObjectMemoryLayout layout,bool reuse_imported=false) {
     ObjectPool a{capacity,layout},b{capacity,layout};
     MapVm cached{rom,MapDatabase{rom,0x008000,0x008100},a,&symbols};
     MapVm oracle{rom,MapDatabase{rom,0x008000,0x008100},b,&symbols};
+    using namespace starfox::platform::nintendo_3ds;
+    FrameProfile bridge_profile(bridge_clock, 1000);
+    ScopedFrameProfileActivation bridge_activation(bridge_profile);
+    const auto profiled_bridge = [&](FramePhase phase, auto operation) {
+        const auto before = bridge_profile.totals()[unsigned(phase)];
+        const auto clocks_before = bridge_clock_calls;
+        operation();
+        const auto after = bridge_profile.totals()[unsigned(phase)];
+#if defined(STARFOX_3DS_PROFILE_FRAMES)
+        require(after.calls == before.calls + 1 && after.ticks == before.ticks + 1
+            && after.maximum == 1 && bridge_clock_calls == clocks_before + 2,
+            "Object bridge timing omitted/double-counted a full call or image hit");
+#else
+        require(after == before && bridge_clock_calls == clocks_before,
+            "Disabled object bridge marker read the clock or changed counters");
+#endif
+    };
     unsigned bridge_step{};
     const auto same=[&] {
         ++bridge_step;
@@ -215,8 +235,14 @@ void test_bridge(ObjectMemoryLayout layout,bool reuse_imported=false) {
             throw std::runtime_error{"cached bridge changed CPU memory/open bus"};
         }
     };
-    const auto push=[&] {ObjectBridgeTestAccess::push(cached,true,reuse_imported);ObjectBridgeTestAccess::push(oracle,false);same();};
-    const auto pull=[&] {ObjectBridgeTestAccess::pull(cached,true);ObjectBridgeTestAccess::pull(oracle,false);same();};
+    const auto push=[&] {
+        profiled_bridge(FramePhase::object_export,[&] {ObjectBridgeTestAccess::push(cached,true,reuse_imported);});
+        ObjectBridgeTestAccess::push(oracle,false);same();
+    };
+    const auto pull=[&] {
+        profiled_bridge(FramePhase::object_import,[&] {ObjectBridgeTestAccess::pull(cached,true);});
+        ObjectBridgeTestAccess::pull(oracle,false);same();
+    };
     // Empty/full pools, repeated cache hits and deliberately inconsistent host
     // mirrors: export alone must never qualify a skipped semantic import.
     push();pull();

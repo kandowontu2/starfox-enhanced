@@ -39,6 +39,9 @@ int main() try {
     static_assert(unsigned(FramePhase::bg_colour) == 24);
     static_assert(unsigned(FramePhase::gpu_sync) == 25);
     static_assert(unsigned(FramePhase::terrain_build) == 30);
+    static_assert(unsigned(FramePhase::mono_canvas) == 40);
+    static_assert(unsigned(FramePhase::object_export) == 41);
+    static_assert(unsigned(FramePhase::object_import) == 42);
     static_assert(frame_phase_names.size() == unsigned(FramePhase::count));
     for(unsigned i = 0; i < frame_phase_names.size(); ++i) {
         require(!frame_phase_names[i].empty(), "Empty phase name");
@@ -125,8 +128,10 @@ int main() try {
         { STARFOX_3DS_FRAME_PHASE(mono_fallback); tick += 25; }
         { STARFOX_3DS_FRAME_PHASE(mono_overlay); tick += 26; }
         { STARFOX_3DS_FRAME_PHASE(mono_canvas); tick += 27; }
+        { STARFOX_3DS_FRAME_PHASE(object_export); tick += 28; }
+        { STARFOX_3DS_FRAME_PHASE(object_import); tick += 29; }
 #if defined(STARFOX_3DS_PROFILE_FRAMES)
-        require(clock_calls == before + 54, "Detailed macros lost clock boundaries");
+        require(clock_calls == before + 58, "Detailed macros lost clock boundaries");
         for(unsigned i = unsigned(FramePhase::cpu); i < unsigned(FramePhase::count); ++i) {
             const std::uint64_t duration = i - unsigned(FramePhase::cpu) + 1U;
             require(details.totals()[i] == FramePhaseTotals{1, duration, duration},
@@ -161,9 +166,12 @@ int main() try {
     std::ostream buffered_csv(&destination);
     std::ostringstream reference_csv;
     const auto storage = buffer.storage_bytes();
-    require(storage == 512U * 1024U && !buffer.size(), "Presentation counter grew diagnostic memory budget");
+    require(storage <= FrameProfileBuffer::maximum_storage_bytes && !buffer.size()
+        && FrameProfileBuffer::maximum_windows <= FrameProfile::maximum_windows
+        && FrameProfileBuffer::maximum_windows >= 480,
+        "Diagnostic phases exceeded memory budget or unexpectedly truncated capture");
     const auto before_capture = clock_calls;
-    for(unsigned window = 1; window <= FrameProfile::maximum_windows; ++window) {
+    for(unsigned window = 1; window <= FrameProfileBuffer::maximum_windows; ++window) {
         for(unsigned phase = 0; phase < unsigned(FramePhase::count); ++phase) {
             reference.record(FramePhase(phase), 100, 101 + phase);
             buffered_profile.record(FramePhase(phase), 100, 101 + phase);

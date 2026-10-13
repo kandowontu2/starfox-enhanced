@@ -432,6 +432,16 @@ This does not resolve sustained mono 60 FPS, so IPO stays experimental and OFF
 by default. Source-update bridge costs remain the next investigation, not
 further stereo tuning or another minor hardware request.
 
+The follow-up adds `object_export` and `object_import` timing around the whole
+host-object/65C816 bridge, including canonical-image hits and defensive paths.
+These are child timings inside source logic/strategies, not additional costs
+to sum with their parents. With profiling disabled the markers do not read a
+clock or change simulation work. The existing CSV columns and phase indices
+remain stable; the two names are appended. Adding phases does not increase the
+console's 512-KiB diagnostic storage cap: the in-memory buffer now holds 489
+one-second windows (instead of 512), with shutdown-only serialization and no
+gameplay allocation/SD writes. This instrumentation is not a performance fix.
+
 A separate shutdown-logging replay is excluded: a Qt help window reset the
 clock's explicit-selection flag, so its numeric 300 setting was ignored and
 movie input ordering failed. It is not timing, correctness or clean-exit

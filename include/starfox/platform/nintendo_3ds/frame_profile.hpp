@@ -16,7 +16,8 @@ enum class FramePhase : unsigned {
     gpu_sync, gpu_wait, gpu_upload, gpu_record, gpu_submit,
     terrain_build, terrain_reuse,
     mono_background, mono_prepare, mono_raster, mono_finish, lcd_copy,
-    mono_retry, mono_fallback, mono_overlay, mono_canvas, count
+    mono_retry, mono_fallback, mono_overlay, mono_canvas,
+    object_export, object_import, count
 };
 inline constexpr std::array<std::string_view, unsigned(FramePhase::count)> frame_phase_names{
     "frame", "advance", "video", "logic", "capture", "audio", "raster",
@@ -26,7 +27,8 @@ inline constexpr std::array<std::string_view, unsigned(FramePhase::count)> frame
     "gpu_sync", "gpu_wait", "gpu_upload", "gpu_record", "gpu_submit",
     "terrain_build", "terrain_reuse",
     "mono_background", "mono_prepare", "mono_raster", "mono_finish", "lcd_copy",
-    "mono_retry", "mono_fallback", "mono_overlay", "mono_canvas"
+    "mono_retry", "mono_fallback", "mono_overlay", "mono_canvas",
+    "object_export", "object_import"
 };
 struct FramePhaseTotals {
     std::uint64_t calls{}, ticks{}, maximum{};
@@ -100,8 +102,23 @@ private:
 // flush outside the measured frame and then let that delay enter catch-up.
 // The separate short startup trace still provides receipts for a hard freeze.
 class FrameProfileBuffer {
+    struct Window {
+        std::uint64_t time{}, frequency{};
+        int flow{};
+        // Successful whole-frame presentation returns, NOT source phases,
+        // loops, eyes or GPU retirement. The counter uses alignment padding.
+        unsigned background{}, video_phases{}, logic_ticks{}, audio_blocks{}, presentations{};
+        std::array<FramePhaseTotals, unsigned(FramePhase::count)> totals{};
+    };
 public:
-    FrameProfileBuffer() : windows_(FrameProfile::maximum_windows) {}
+    static constexpr std::size_t maximum_storage_bytes = 512U * 1024U;
+    // New diagnostic phases must not grow the console's allocation. The
+    // bounded capture duration shrinks instead (489 windows with 43 phases).
+    static constexpr unsigned maximum_windows =
+        maximum_storage_bytes / sizeof(Window) < FrameProfile::maximum_windows
+        ? unsigned(maximum_storage_bytes / sizeof(Window)) : FrameProfile::maximum_windows;
+    static_assert(maximum_windows > 0);
+    FrameProfileBuffer() : windows_(maximum_windows) {}
     bool capture(FrameProfile& profile, std::uint64_t time, int flow, unsigned background,
                  unsigned video_phases, unsigned logic_ticks, unsigned audio_blocks,
                  unsigned presentations = 0) noexcept {
@@ -112,7 +129,7 @@ public:
         window = {time, profile.frequency_, flow, background, video_phases, logic_ticks,
             audio_blocks, presentations, profile.totals_};
         profile.totals_ = {}; profile.previous_ = time;
-        if(++profile.windows_ == FrameProfile::maximum_windows) profile.stopped_ = true;
+        if(++profile.windows_ == maximum_windows) profile.stopped_ = true;
         return true;
     }
     // One explicit, idempotent shutdown write; neither capture nor destruction
@@ -142,16 +159,7 @@ public:
     [[nodiscard]] unsigned size() const noexcept { return count_; }
     [[nodiscard]] std::size_t storage_bytes() const noexcept { return windows_.size() * sizeof(Window); }
 private:
-    struct Window {
-        std::uint64_t time{}, frequency{};
-        int flow{};
-        // The extra counter uses the prior alignment padding: the bounded
-        // 512-window buffer remains 512 KiB. It counts successful whole-frame
-        // presentation returns, NOT source phases, loops, eyes or GPU retirement.
-        unsigned background{}, video_phases{}, logic_ticks{}, audio_blocks{}, presentations{};
-        std::array<FramePhaseTotals, unsigned(FramePhase::count)> totals{};
-    };
-    static_assert(sizeof(Window) * FrameProfile::maximum_windows <= 512U * 1024U);
+    static_assert(sizeof(Window) * maximum_windows <= maximum_storage_bytes);
     std::vector<Window> windows_;
     unsigned count_{};
     bool flush_attempted_{}, flush_succeeded_{};

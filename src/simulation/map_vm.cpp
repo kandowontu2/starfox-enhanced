@@ -3,6 +3,7 @@
 #include "starfox/assets/bps.hpp"
 #include "starfox/state/archive.hpp"
 #include "starfox/state/container.hpp"
+#include "starfox/platform/nintendo_3ds/frame_profile.hpp"
 
 #include "starfox/simulation/math.hpp"
 
@@ -735,6 +736,7 @@ void MapVm::invalidate_object_image_write(std::uint32_t address) noexcept {
 }
 
 void MapVm::sync_objects_to_cpu(bool reuse_imported_image) {
+    STARFOX_3DS_FRAME_PHASE(object_export);
     auto& cache=*object_bridge_;
     auto& active=cache.active_work;auto& free=cache.free_work;
     active.clear();free.clear();
@@ -833,6 +835,7 @@ void MapVm::sync_objects_to_cpu(bool reuse_imported_image) {
 }
 
 void MapVm::sync_objects_from_cpu() {
+    STARFOX_3DS_FRAME_PHASE(object_import);
     auto& cache=*object_bridge_;
     cache.imported_image=false;
     const auto read_list = [this](std::uint16_t pointer,std::vector<ObjectHandle>& result) {
