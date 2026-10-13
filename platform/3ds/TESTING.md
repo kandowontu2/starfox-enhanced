@@ -233,7 +233,9 @@ Counts/poses, window-end labels and concurrent unrelated work limit timing
 comparisons. Retain this exact reuse improvement, but sustained mono 60 FPS
 and full native/hardware acceptance remain open gates.
 
-The pending follow-up fuses native world-canvas clearing, coverage reset and
+The subsequently rejected experiment (`b22d1c38`,
+[ARM run 38448334985](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38448334985))
+fuses native world-canvas clearing, coverage reset and
 transparent composition into one pass over the existing allocation. It applies
 only to independent, equal-size 1x canvases without tags, dither metadata or
 recorded commands; rejected cases keep the old compositor. Independent point
@@ -244,7 +246,23 @@ tests retain source cadence and bound each sleep to at most 16,666,667 ns.
 An appended `presentations` CSV counter follows successful whole-frame returns
 (including visible-frame reuse), not loops, source phases, stereo eyes or
 physical GPU retirement. It occupies prior padding, retaining the 512-KiB
-window buffer and shutdown-only SD writes. Native timing remains pending.
+window buffer and shutdown-only SD writes. All 52 CI tests and the
+ARM/shader/stack/package gates pass; eight 240-phase stage probes keep their
+prior image digests and 80 audio blocks. In the same accuracy-enabled
+Vulkan/300%-clock replay, however, canvas work increases to 2.069/2.073 ms
+in backgrounds 3/51 from 1.864/1.693 ms with the previous compositor.
+The fused canvas and its now-unused API are reverted; the source deadline
+wait and presentation counter remain for isolated follow-up validation.
+The combined experiment averages 57.161/55.847 successful presentations per
+second over 16/29 adjacent same-label windows, with minimum one-second-window
+rates of 48.843/48.914. Inclusive loop means of 13.635/13.729 ms are not FPS.
+These successful returns include visible-frame reuse, not physical GPU
+retirement. Legacy CSVs lack this counter, so no directly measured success-rate
+delta is claimed. Planned DSP shutdown/profile flush occur without retry,
+fallback or replay errors; guest GSP retirement remains unverified, and the
+owned emulator was stopped after the flush with CPU configuration restored to
+100%. The rollback restores the three canvas files exactly to their verified
+pre-experiment source. Sustained mono 60 FPS remains open.
 
 The earlier direct-overlay candidate removes the EX BG1 staging image and applies the same
 zero-ink/CGRAM-black transparency directly during decoding. The 57,344-byte
