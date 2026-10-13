@@ -271,28 +271,29 @@ struct NativeGpu::Impl {
 };
 NativeGpu::NativeGpu(std::span<const std::uint8_t> shader):impl_(std::make_unique<Impl>(shader)) {}
 NativeGpu::~NativeGpu()=default;
-void NativeGpu::present(const PicaFrame& frame,ImageView lower) {
+void NativeGpu::present(const PicaFrame& frame,ImageView lower,PicaDisplayPacing pacing) {
     STARFOX_3DS_STARTUP_MARK(gpu_frame_validate);
     validate_pica_frame(frame,lower);
     STARFOX_3DS_STARTUP_MARK(gpu_frame_validate_complete);
-    present_checked(frame,lower);
+    present_checked(frame,lower,pacing);
 }
-void NativeGpu::present(const PicaValidatedFrame& prepared,ImageView lower) {
+void NativeGpu::present(const PicaValidatedFrame& prepared,ImageView lower,PicaDisplayPacing pacing) {
     STARFOX_3DS_STARTUP_MARK(gpu_frame_validate);
     const auto& frame=prepared.checked_frame(lower);
     STARFOX_3DS_STARTUP_MARK(gpu_frame_validate_complete);
-    present_checked(frame,lower);
+    present_checked(frame,lower,pacing);
 }
-void NativeGpu::present_checked(const PicaFrame& frame,ImageView lower) {
+void NativeGpu::present_checked(const PicaFrame& frame,ImageView lower,PicaDisplayPacing pacing) {
     // Keep display pacing separate from queue retirement. If preparation has
     // already crossed BOTH LCD refresh intervals, no extra refresh sleep is
-    // needed. FrameBegin(0) still retires the prior GPU use before any upload.
+    // needed. Source-paced gameplay needs no second display deadline at all.
+    // FrameBegin(0) still retires the prior GPU use before any upload.
     STARFOX_3DS_STARTUP_MARK(gpu_vblank_wait);
     {
         STARFOX_3DS_FRAME_PHASE(gpu_sync);
         impl_->display_sync.synchronize([] {
             return std::array<std::uint32_t,2>{C3D_FrameCounter(0),C3D_FrameCounter(1)};
-        },[] {C3D_FrameSync();});
+        },[] {C3D_FrameSync();},pacing);
     }
     STARFOX_3DS_STARTUP_MARK(gpu_vblank_wait_complete);
     STARFOX_3DS_STARTUP_MARK(gpu_wait);

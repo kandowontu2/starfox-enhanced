@@ -42,6 +42,23 @@ void display_sync() {
     const auto before=waits;
     replacement.synchronize([&] {return counters;},[&] {++waits;++counters[0];++counters[1];});
     require(waits==before+1,"Replacement presenter inherited stale LCD pacing");
+
+    // Completed source phases already own cadence (30/60 Hz, catch-up and
+    // late work). Neither LCD counter progress nor wrap adds a second wait.
+    unsigned reads{};
+    for(unsigned i=0;i<100000;++i) {
+        random^=random<<13;random^=random>>17;random^=random<<5;
+        counters[0]+=random; counters[1]+=random>>16;
+        const auto previous_waits=waits,previous_reads=reads;
+        sync.synchronize([&] {++reads;return counters;},[&] {++waits;},PicaDisplayPacing::source_clock);
+        require(waits==previous_waits && reads==previous_reads,
+            "Source-paced presentation inherited an LCD deadline");
+    }
+    // A paused editor/probe must rearm LCD pacing after source ownership,
+    // even if both counters advanced while gameplay was in charge.
+    counters[0]+=17;counters[1]+=23;
+    run(true);run(true);
+    ++counters[0];++counters[1];run(false);
 }
 void word_texture_store() {
     std::uint32_t random=0x142857abU;

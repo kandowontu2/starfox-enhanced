@@ -596,7 +596,11 @@ int main() {
                     return composite.prepare_validated(source.plan,
                         std::array{artwork.before_models,dot_frame,model_frame,artwork.after_models,math,mask,label,menu_frame},dashboard,artwork.clear);
                 }();
-                { STARFOX_3DS_FRAME_PHASE(present);gpu->present(frame,dashboard); }
+                // PresentationClock admitted this completed source phase.
+                // Do not add an unrelated LCD deadline, including on effects
+                // frames routed away from the reference mono renderer.
+                { STARFOX_3DS_FRAME_PHASE(present);
+                    gpu->present(frame,dashboard,ctr::PicaDisplayPacing::source_clock); }
                 presentation_completed();
                 frame_handled=true;return; // Sole GPU owner: never also swap through NativeDisplay.
 #else

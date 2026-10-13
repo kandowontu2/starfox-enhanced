@@ -19,7 +19,7 @@ changing the one-eye slider-off/New 2DS XL path.
 
 1. The latest source-only candidate is the experimental
    `StarFoxEnhanced-3ds-test.zip` artifact from
-   [ARM run 38444509351](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38444509351).
+   [ARM run 38449713288](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38449713288).
    R376 remains the hardware-tested baseline, not the latest source candidate.
    Extract the ZIP to the SD card's root, keeping its folder structure. When
    updating an earlier build, replace only the `.3dsx` and `.smdh`; preserve the existing
@@ -263,6 +263,29 @@ fallback or replay errors; guest GSP retirement remains unverified, and the
 owned emulator was stopped after the flush with CPU configuration restored to
 100%. The rollback restores the three canvas files exactly to their verified
 pre-experiment source. Sustained mono 60 FPS remains open.
+
+The isolated rollback (`1e80339f`, ARM run 38449713288) passes the 52 host
+checks plus ARM/shader/stack/package gates. The same accuracy-enabled mono
+replay restores canvas means to 1.866/1.694 ms and finish means to
+2.859/2.825 ms in backgrounds 3/51. Successful whole-frame returns average
+57.519/56.076 per second across 16/29 same-label windows, with minima
+48.845/48.753. Source logic overruns and GPU-effects windows remain below
+target; inclusive loop means of 13.602/13.407 ms are not FPS. No fallback,
+retry or replay errors occur. Planned DSP shutdown and buffered profile flush
+occur before the owned emulator is stopped; guest GSP retirement is still
+unverified, CPU configuration is restored to 100%, and no assets/saves are
+copied or erased. The same sensitivity and concurrent-load limitations apply.
+
+The next source-only experiment gives source-clock-admitted GPU frames
+explicit pacing ownership instead of waiting for a second LCD deadline.
+Unclocked probes, quick menus and editors retain LCD pacing. Switching back
+to LCD ownership rearms its lease. The blocking `C3D_FrameBegin(0)` still
+retires every preceding GPU queue before uploads. Citro3D's
+[render queue implementation](https://github.com/devkitPro/citro3d/blob/master/source/renderqueue.c)
+separates these display and retirement waits. Pacing tests cover 100,000
+source-clock counter/wrap cases and ownership handoffs; the three targeted
+PICA/frontend/profile checks pass. Native timing remains pending, with no
+claim of stable 60 FPS or new hardware acceptance.
 
 The earlier direct-overlay candidate removes the EX BG1 staging image and applies the same
 zero-ink/CGRAM-black transparency directly during decoding. The 57,344-byte
