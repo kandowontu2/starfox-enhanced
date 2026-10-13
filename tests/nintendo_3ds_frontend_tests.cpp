@@ -491,6 +491,23 @@ void presentation_clock_tests() {
     require(source_phase_wait_needed(.5,8'333'333) && !source_phase_wait_needed(.5,8'333'334),"Wait ignored source phase debt");
     require(!source_phase_wait_needed(.999,1'000'000),"Wait slept through a phase completed by source work");
     require(source_phase_wait_needed(0,0) && !source_phase_wait_needed(0,std::numeric_limits<std::int64_t>::max()),"Wait mishandled empty work or long uptime");
+    require(source_phase_wait_nanoseconds(0,0)==16'666'667
+        && source_phase_wait_nanoseconds(.5,0)==8'333'334
+        && source_phase_wait_nanoseconds(.75,4'000'000)==166'667,
+        "Source sleep ignored the outstanding partial phase");
+    require(source_phase_wait_nanoseconds(.5,8'333'334)==0
+        && source_phase_wait_nanoseconds(0,std::numeric_limits<std::int64_t>::max())==0,
+        "Completed source work still slept or overflowed");
+    for(unsigned eighth=0;eighth<8;++eighth) for(std::int64_t work=0;work<=20'000'000;work+=97'013) {
+        const auto fraction=double(eighth)/8.0;
+        const auto wait=source_phase_wait_nanoseconds(fraction,work);
+        // Exact integer numerator for binary-eighth source fractions. The
+        // rational deadline must be rounded up, not stretched to LCD VBlank.
+        const auto debt=(8-std::int64_t(eighth))*1'000'000'000-work*480;
+        const auto expected=debt>0?(debt+479)/480:0;
+        require(wait==expected && wait>=0 && wait<=16'666'667,
+            "Source deadline sleep drifted or exceeded one phase");
+    }
     for(double fraction:{-1.0,1.0,std::numeric_limits<double>::quiet_NaN()})
         rejects([&]{static_cast<void>(source_phase_wait_needed(fraction,0));},"Invalid source wait fraction accepted");
     rejects([&]{static_cast<void>(source_phase_wait_needed(0,-1));},"Negative source wait time accepted");

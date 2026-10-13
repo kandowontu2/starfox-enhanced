@@ -402,6 +402,30 @@ public:
         }
     }
 
+    // Equivalent to clear(0), begin_write_coverage(), then an untransformed
+    // transparent-layer copy into an independent native canvas. This narrow
+    // contract fuses the full-screen clear, coverage reset and opaque-run scan
+    // into one pass. Index zero stays uncovered (not an opaque black write).
+    // Metadata/scaled/recorded callers keep the ordinary compositor; rejection
+    // does not change either framebuffer. Reuse the existing coverage storage.
+    [[nodiscard]] bool reset_transparent_native_canvas(const Framebuffer& source) {
+        if (&source == this || commands_ || source.commands_
+            || draw_scale_ != 1U || source.draw_scale_ != 1U
+            || stored_width_ != source.stored_width_ || stored_height_ != source.stored_height_
+            || pixels_.size() != source.pixels_.size()
+            || pixels_.size() != std::size_t(stored_width_) * stored_height_
+            || layer_tags_enabled_ || source.layer_tags_enabled_
+            || !dither_pairs_.empty() || !source.dither_pairs_.empty()) return false;
+        coverage_.resize(pixels_.size());
+        for (std::size_t i = 0; i < pixels_.size(); ++i) {
+            const auto colour = source.pixels_[i];
+            pixels_[i] = colour;
+            coverage_[i] = std::uint8_t(colour != 0U);
+        }
+        track_coverage_ = true;
+        return true;
+    }
+
     [[nodiscard]] std::uint8_t get_stored(
         std::uint32_t x, std::uint32_t y) const noexcept {
         return pixels_[static_cast<std::size_t>(y) * stored_width_ + x];

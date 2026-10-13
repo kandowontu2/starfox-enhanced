@@ -1212,12 +1212,21 @@ const render::Framebuffer& Frame3ds::draw(
     const auto stage_canvas_begin = reference_system_tick();
     if (mode2_gameplay) {
         frame_.end_write_coverage();
-        wide_frame_.clear(0U);
-        if (gpu_bg2) wide_frame_.begin_write_coverage();
+        const bool left_canvas_ready = gpu_bg2
+            && wide_frame_.reset_transparent_native_canvas(world_);
+        if (!left_canvas_ready) {
+            wide_frame_.clear(0U);
+            if (gpu_bg2) wide_frame_.begin_write_coverage();
+        }
+        bool right_canvas_ready = false;
         if (stereo) {
             right_frame_.end_write_coverage();
-            right_frame_.clear(0U);
-            if (gpu_bg2) right_frame_.begin_write_coverage();
+            right_canvas_ready = gpu_bg2
+                && right_frame_.reset_transparent_native_canvas(right_world_);
+            if (!right_canvas_ready) {
+                right_frame_.clear(0U);
+                if (gpu_bg2) right_frame_.begin_write_coverage();
+            }
         }
         if (!gpu_bg2) {
             // The same storage/snapshot is now CPU BG2, not cached EX BG1.
@@ -1255,10 +1264,12 @@ const render::Framebuffer& Frame3ds::draw(
             }
         }
         if (stereo && !gpu_bg2) right_frame_.copy_pixels_from(wide_frame_);
-        render::composite_transparent_layer(world_, wide_frame_, {});
+        if (!left_canvas_ready)
+            render::composite_transparent_layer(world_, wide_frame_, {});
         overlay_source_coverage_on_native(frame_, wide_frame_);
         if (stereo) {
-            render::composite_transparent_layer(right_world_, right_frame_, {});
+            if (!right_canvas_ready)
+                render::composite_transparent_layer(right_world_, right_frame_, {});
             overlay_source_coverage_on_native(frame_, right_frame_);
         }
     } else {

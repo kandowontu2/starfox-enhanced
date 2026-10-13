@@ -74,19 +74,19 @@ class NativeProfileFrame {
 public:
     NativeProfileFrame(ctr::FrameProfile& profile,ctr::FrameProfileBuffer& buffer,
         const std::unique_ptr<ctr::GameSession>& session,const unsigned& background,
-        const unsigned& rasters,const unsigned& logic,const unsigned& blocks) noexcept
+        const unsigned& rasters,const unsigned& logic,const unsigned& blocks,const unsigned& presentations) noexcept
         :profile_(profile),buffer_(buffer),session_(session),background_(background),
-         rasters_(rasters),logic_(logic),blocks_(blocks),begin_(profile.now()) {}
+         rasters_(rasters),logic_(logic),blocks_(blocks),presentations_(presentations),begin_(profile.now()) {}
     ~NativeProfileFrame() noexcept {
         const auto end=profile_.now();
         profile_.record(ctr::FramePhase::frame,begin_,end);
         buffer_.capture(profile_,end,session_?int(session_->game().flow_state()):-1,
-            background_,rasters_,logic_,blocks_);
+            background_,rasters_,logic_,blocks_,presentations_);
     }
 private:
     ctr::FrameProfile& profile_;ctr::FrameProfileBuffer& buffer_;
     const std::unique_ptr<ctr::GameSession>& session_;
-    const unsigned& background_;const unsigned& rasters_;const unsigned& logic_;const unsigned& blocks_;
+    const unsigned& background_;const unsigned& rasters_;const unsigned& logic_;const unsigned& blocks_;const unsigned& presentations_;
     std::uint64_t begin_{};
 };
 #endif
@@ -145,9 +145,16 @@ int main() {
     if(effect_stem_executor.parallel_available()) STARFOX_3DS_STARTUP_MARK(audio_effects_worker_parallel);
     else STARFOX_3DS_STARTUP_MARK(audio_effects_worker_serial);
     unsigned profile_background{};
+    unsigned profile_presentations{};
 #endif
     ctr::PresentationClock render_clock;
     ctr::PresentationRate rendered_rate;
+    const auto presentation_completed=[&] {
+#if defined(STARFOX_3DS_PROFILE_FRAMES)
+        ++profile_presentations;
+#endif
+        rendered_rate.completed(monotonic_time());
+    };
     bool first_load=true;
     std::array<std::vector<std::uint8_t>,2> cartridge_ram;
     std::array<std::uint32_t,2> bank_crc{};
@@ -220,7 +227,7 @@ int main() {
         top.text(24,100,"RENDERING",{240,181,86},2);
         lower.text(12,16,options.preview?"PREPARING REAL CARTRIDGE PREVIEW":"LOADING CARTRIDGE AND SETTINGS",{183,224,240});
         display.present(ctr::plan_frame(0,false,ctr::ScreenUse::setup),top.view(),{},lower.view());
-        if(running) rendered_rate.completed(monotonic_time());
+        if(running) presentation_completed();
         std::ifstream file(companion_path,std::ios::binary);
         STARFOX_3DS_STARTUP_MARK(companion_read);
         auto cartridge=ctr::read_game_cartridge(file,ctr::companion_manifest,experience);
@@ -288,7 +295,7 @@ int main() {
     while(true) {
 #if defined(STARFOX_3DS_PROFILE_FRAMES)
         startup_trace.begin_frame();
-        NativeProfileFrame profile_frame(frame_profile,profile_buffer,session,profile_background,rasters,logic,blocks);
+        NativeProfileFrame profile_frame(frame_profile,profile_buffer,session,profile_background,rasters,logic,blocks,profile_presentations);
 #endif
         STARFOX_3DS_STARTUP_MARK(input_poll);
         const auto controls=display.poll();if(!controls.running) break;
@@ -511,8 +518,9 @@ int main() {
                 // Keep input, source raster and NDSP service at 60 Hz. Only
                 // skip scene preparation/submission; never spin on a 30 Hz gap.
                 if(!render_clock.due(monotonic_time(),session->game().presentation_fps(),advanced.video_phases)) {
-                    if(ctr::source_phase_wait_needed(advanced.raster_fraction,monotonic_time()-source_time))
-                        gspWaitForVBlank();
+                    const auto wait=ctr::source_phase_wait_nanoseconds(
+                        advanced.raster_fraction,monotonic_time()-source_time);
+                    if(wait>0) svcSleepThread(wait);
                     frame_handled=true;return;
                 }
                 const auto source=session->presentation(controls.slider,controls.stereoscopic_hardware,session->stereo_settings());
@@ -554,7 +562,7 @@ int main() {
                     STARFOX_3DS_STARTUP_MARK(menu_lcd_present);
                     { STARFOX_3DS_FRAME_PHASE(present);display.present(source.plan,menu->plain_view(),{},dashboard); }
                     STARFOX_3DS_STARTUP_MARK(menu_lcd_present_complete);
-                    rendered_rate.completed(monotonic_time());frame_handled=true;return;
+                    presentation_completed();frame_handled=true;return;
                 }
                 // Reference mono does not yet own cartridge window/color
                 // effects. Retain the exact native path for those frames.
@@ -563,7 +571,7 @@ int main() {
                 if(!source.plan.stereo && !source_effect && !menu->state().visible && !session->game().runtime_options_open()) {
                     gpu.reset();
                     if(!mono) mono=std::make_unique<ctr::NativeMono>();
-                    if(mono->present(*session,source,dashboard)) rendered_rate.completed(monotonic_time());
+                    if(mono->present(*session,source,dashboard)) presentation_completed();
                     frame_handled=true;return;
                 }
                 ensure_gpu();
@@ -589,12 +597,12 @@ int main() {
                         std::array{artwork.before_models,dot_frame,model_frame,artwork.after_models,math,mask,label,menu_frame},dashboard,artwork.clear);
                 }();
                 { STARFOX_3DS_FRAME_PHASE(present);gpu->present(frame,dashboard); }
-                rendered_rate.completed(monotonic_time());
+                presentation_completed();
                 frame_handled=true;return; // Sole GPU owner: never also swap through NativeDisplay.
 #else
                 if(plain) {
                     display.present(source.plan,menu->plain_view(),{},dashboard);
-                    rendered_rate.completed(monotonic_time());frame_handled=true;return;
+                    presentation_completed();frame_handled=true;return;
                 }
                 static_cast<void>(models->prepare(source));
 #endif
@@ -639,7 +647,8 @@ int main() {
     release_owners();
 #if defined(STARFOX_3DS_PROFILE_FRAMES)
     // No source advancement or live NDSP/PICA owner can be stalled by SD
-    // diagnostics here. Normal exit retains the same CSV format/window cap.
+    // diagnostics here. The counter is appended after the existing CSV
+    // columns; the timing fields/window cap and shutdown-only writes remain.
     profile_buffer.flush(profile_stream);
 #endif
 }

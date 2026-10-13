@@ -66,17 +66,18 @@ public:
     // per window. New phases are appended so existing phase indices stay stable.
     // A failed/full stream is disabled, never allowed to terminate the game.
     bool write_window(std::ostream& stream, std::uint64_t time, int flow, unsigned background,
-                      unsigned video_phases, unsigned logic_ticks, unsigned audio_blocks) noexcept {
+                      unsigned video_phases, unsigned logic_ticks, unsigned audio_blocks,
+                      unsigned presentations = 0) noexcept {
         if(!clock_ || !frequency_ || stopped_ || time - previous_ < frequency_) return false;
         try {
-            if(!windows_) stream << "tick,clock_hz,flow,bg,video_phases,logic_ticks,audio_blocks,phase,calls,total_ticks,max_ticks\n";
+            if(!windows_) stream << "tick,clock_hz,flow,bg,video_phases,logic_ticks,audio_blocks,phase,calls,total_ticks,max_ticks,presentations\n";
             for(unsigned phase = 0; phase < totals_.size(); ++phase) {
                 const auto& value = totals_[phase];
                 if(!value.calls) continue;
                 stream << time << ',' << frequency_ << ',' << flow << ',' << background << ','
                     << video_phases << ',' << logic_ticks << ',' << audio_blocks << ','
                     << frame_phase_names[phase] << ',' << value.calls << ',' << value.ticks << ','
-                    << value.maximum << '\n';
+                    << value.maximum << ',' << presentations << '\n';
             }
             stream.flush();
             if(!stream) { stopped_ = true; return false; }
@@ -102,13 +103,14 @@ class FrameProfileBuffer {
 public:
     FrameProfileBuffer() : windows_(FrameProfile::maximum_windows) {}
     bool capture(FrameProfile& profile, std::uint64_t time, int flow, unsigned background,
-                 unsigned video_phases, unsigned logic_ticks, unsigned audio_blocks) noexcept {
+                 unsigned video_phases, unsigned logic_ticks, unsigned audio_blocks,
+                 unsigned presentations = 0) noexcept {
         if(flush_attempted_ || !profile.clock_ || !profile.frequency_ || profile.stopped_
             || time - profile.previous_ < profile.frequency_
             || count_ == windows_.size()) return false;
         auto& window = windows_[count_++];
         window = {time, profile.frequency_, flow, background, video_phases, logic_ticks,
-            audio_blocks, profile.totals_};
+            audio_blocks, presentations, profile.totals_};
         profile.totals_ = {}; profile.previous_ = time;
         if(++profile.windows_ == FrameProfile::maximum_windows) profile.stopped_ = true;
         return true;
@@ -120,7 +122,7 @@ public:
         flush_attempted_ = true;
         if(!count_) { flush_succeeded_ = true; return true; }
         try {
-            stream << "tick,clock_hz,flow,bg,video_phases,logic_ticks,audio_blocks,phase,calls,total_ticks,max_ticks\n";
+            stream << "tick,clock_hz,flow,bg,video_phases,logic_ticks,audio_blocks,phase,calls,total_ticks,max_ticks,presentations\n";
             for(unsigned i = 0; i < count_; ++i) {
                 const auto& window = windows_[i];
                 for(unsigned phase = 0; phase < window.totals.size(); ++phase) {
@@ -129,7 +131,8 @@ public:
                     stream << window.time << ',' << window.frequency << ',' << window.flow << ','
                         << window.background << ',' << window.video_phases << ',' << window.logic_ticks
                         << ',' << window.audio_blocks << ',' << frame_phase_names[phase] << ','
-                        << value.calls << ',' << value.ticks << ',' << value.maximum << '\n';
+                        << value.calls << ',' << value.ticks << ',' << value.maximum << ','
+                        << window.presentations << '\n';
                 }
             }
             stream.flush(); flush_succeeded_ = bool(stream);
@@ -142,7 +145,10 @@ private:
     struct Window {
         std::uint64_t time{}, frequency{};
         int flow{};
-        unsigned background{}, video_phases{}, logic_ticks{}, audio_blocks{};
+        // The extra counter uses the prior alignment padding: the bounded
+        // 512-window buffer remains 512 KiB. It counts successful whole-frame
+        // presentation returns, NOT source phases, loops, eyes or GPU retirement.
+        unsigned background{}, video_phases{}, logic_ticks{}, audio_blocks{}, presentations{};
         std::array<FramePhaseTotals, unsigned(FramePhase::count)> totals{};
     };
     static_assert(sizeof(Window) * FrameProfile::maximum_windows <= 512U * 1024U);

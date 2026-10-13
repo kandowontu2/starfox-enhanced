@@ -233,6 +233,19 @@ Counts/poses, window-end labels and concurrent unrelated work limit timing
 comparisons. Retain this exact reuse improvement, but sustained mono 60 FPS
 and full native/hardware acceptance remain open gates.
 
+The pending follow-up fuses native world-canvas clearing, coverage reset and
+transparent composition into one pass over the existing allocation. It applies
+only to independent, equal-size 1x canvases without tags, dither metadata or
+recorded commands; rejected cases keep the old compositor. Independent point
+comparisons cover 256 canvas fixtures, dirty repeated reuse and 13 rejected
+contracts. The source-idle wait also sleeps only until the remaining 60-Hz
+source deadline, rather than an unrelated LCD VBlank. Rational partial-phase
+tests retain source cadence and bound each sleep to at most 16,666,667 ns.
+An appended `presentations` CSV counter follows successful whole-frame returns
+(including visible-frame reuse), not loops, source phases, stereo eyes or
+physical GPU retirement. It occupies prior padding, retaining the 512-KiB
+window buffer and shutdown-only SD writes. Native timing remains pending.
+
 The earlier direct-overlay candidate removes the EX BG1 staging image and applies the same
 zero-ink/CGRAM-black transparency directly during decoding. The 57,344-byte
 pixel allocation and full-image rescan are gone. All 384 synthetic comparisons

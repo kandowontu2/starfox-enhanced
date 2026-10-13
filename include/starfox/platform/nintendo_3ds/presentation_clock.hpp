@@ -1,4 +1,5 @@
 #pragma once
+#include <cmath>
 #include <cstdint>
 #include <optional>
 #include <stdexcept>
@@ -26,12 +27,19 @@ private:
     std::uint64_t credit_{};
     unsigned rate_{};
 };
-// Like the reference's phase-debt wait, include work since the source clock
-// sample. Do not sleep through VBlank after that work has made a phase due.
-[[nodiscard]] inline bool source_phase_wait_needed(double fraction,std::int64_t elapsed) {
+// The source clock is not phase-locked to LCD VBlank. Waiting for the next
+// VBlank can pass an earlier source deadline, coalescing ready presentations
+// even when rendering fits its budget. Sleep only the outstanding source debt,
+// including work since its clock sample; never advance/drop source work here.
+[[nodiscard]] inline std::int64_t source_phase_wait_nanoseconds(double fraction,std::int64_t elapsed) {
     if(!(fraction>=0 && fraction<1) || elapsed<0)
         throw std::invalid_argument("Invalid native source wait clock");
-    return fraction+double(elapsed)*(60.0/1'000'000'000.0)<1.0;
+    if(elapsed>=16'666'667) return 0;
+    const double remaining=(1.0-fraction)*(1'000'000'000.0/60.0)-double(elapsed);
+    return remaining>0?static_cast<std::int64_t>(std::ceil(remaining)):0;
+}
+[[nodiscard]] inline bool source_phase_wait_needed(double fraction,std::int64_t elapsed) {
+    return source_phase_wait_nanoseconds(fraction,elapsed)>0;
 }
 // Count completed whole presentations, not requested FPS, source ticks or
 // individual stereo eyes. Loading, suspend and editor time must be reset.

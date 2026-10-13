@@ -48,12 +48,12 @@ int main() try {
     profile.record(FramePhase::audio, 200, 210);
     std::ostringstream stream;
     require(!profile.write_window(stream, 999, 9, 4, 30, 10, 10) && stream.str().empty(), "Sub-second diagnostic wrote data");
-    require(profile.write_window(stream, 1000, 9, 4, 30, 10, 10), "Due diagnostic failed");
+    require(profile.write_window(stream, 1000, 9, 4, 30, 10, 10, 17), "Due diagnostic failed");
     require(stream.str() ==
-        "tick,clock_hz,flow,bg,video_phases,logic_ticks,audio_blocks,phase,calls,total_ticks,max_ticks\n"
-        "1000,1000,9,4,30,10,10,advance,1,90,90\n"
-        "1000,1000,9,4,30,10,10,audio,2,60,50\n"
-        "1000,1000,9,4,30,10,10,models,1,30,30\n", "CSV values, units or counts changed");
+        "tick,clock_hz,flow,bg,video_phases,logic_ticks,audio_blocks,phase,calls,total_ticks,max_ticks,presentations\n"
+        "1000,1000,9,4,30,10,10,advance,1,90,90,17\n"
+        "1000,1000,9,4,30,10,10,audio,2,60,50,17\n"
+        "1000,1000,9,4,30,10,10,models,1,30,30,17\n", "CSV values, units or counts changed");
     require(profile.totals() == std::array<FramePhaseTotals,unsigned(FramePhase::count)>{}, "Accepted window did not reset");
     profile.record(FramePhase::dots, std::numeric_limits<std::uint64_t>::max()-5, 4);
     require(profile.totals()[unsigned(FramePhase::dots)] == FramePhaseTotals{1,10,10}, "Clock rollover lost duration");
@@ -161,7 +161,7 @@ int main() try {
     std::ostream buffered_csv(&destination);
     std::ostringstream reference_csv;
     const auto storage = buffer.storage_bytes();
-    require(storage <= 512U * 1024U && !buffer.size(), "Diagnostic memory budget exceeded");
+    require(storage == 512U * 1024U && !buffer.size(), "Presentation counter grew diagnostic memory budget");
     const auto before_capture = clock_calls;
     for(unsigned window = 1; window <= FrameProfile::maximum_windows; ++window) {
         for(unsigned phase = 0; phase < unsigned(FramePhase::count); ++phase) {
@@ -171,9 +171,9 @@ int main() try {
         const auto time = tick + std::uint64_t(window) * 1000;
         if(window == 1) require(!buffer.capture(buffered_profile,time-1,9,27,60,20,20),
             "Buffered sub-second window consumed totals");
-        require(reference.write_window(reference_csv,time,int(window%10),window,window*3,window,window),
+        require(reference.write_window(reference_csv,time,int(window%10),window,window*3,window,window,window*2),
             "Reference window serialization failed");
-        require(buffer.capture(buffered_profile,time,int(window%10),window,window*3,window,window),
+        require(buffer.capture(buffered_profile,time,int(window%10),window,window*3,window,window,window*2),
             "Buffered window stopped early");
         require(destination.str().empty() && !destination.flushes,
             "Capturing a gameplay window performed stream I/O");
