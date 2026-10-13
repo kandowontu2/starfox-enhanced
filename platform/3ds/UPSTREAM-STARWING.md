@@ -136,3 +136,13 @@ This keeps our exact source acknowledgements, complete PCM blocks, restore
 ownership and failure retirement. No reference ring-buffer packet dropping or
 midpoint sample insertion is adopted, and no console speed gain is claimed
 without a native timing run.
+
+The reference's source-phase presentation and phase-debt VBlank wait are now
+also used by our frontend gate. Completed 60 Hz video phases drive 60/30 Hz
+output directly, rather than a second wall clock sampled after varying source
+work. Catch-up still submits only its latest complete scene, never replayed
+frames. A wait includes the time spent since the source-clock sample so a
+newly due phase is not slept through. The cartridge/audio clock is unchanged.
+Host tests cover 100 seconds of alternating 2/12-ms draw jitter, zero-phase
+retries, 30 Hz cadence, catch-up, reset, clock rewind and long uptime. Native
+speed acceptance remains outstanding.

@@ -137,3 +137,12 @@ guard coverage, resident byte budgets and transactional failure behavior remain.
 the original logic/video/capture/audio timers. Its default complete-state/PCM
 hashing and source-cadence assertions remain intact. This diagnostic is not a
 substitute for physical New-3DS-family performance/audio/slider acceptance.
+
+The presentation gate consumes completed source video phases, not a second
+wall-clock interval sampled after source work. At 60 Hz each new source phase
+permits one complete frame; at 30 Hz two phases do. Catch-up is coalesced into
+one latest-scene attempt. A zero-phase retry cannot publish a duplicate frame.
+The idle VBlank decision includes source work elapsed since that phase sample.
+Profile `frame` counts still include non-presenting retries, so dividing by
+mean loop duration is not completed-display FPS. Use the on-device completed
+presentation counter; do not substitute source phases or two stereo eyes.

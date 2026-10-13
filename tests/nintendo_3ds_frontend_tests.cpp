@@ -417,27 +417,48 @@ void radio_artwork_cache_tests() {
 void presentation_clock_tests() {
     for(unsigned rate:{30U,60U}) {
         PresentationClock clock;PresentationRate measured;
-        require(clock.due(0,rate),"Native clock skipped its first presentation");measured.completed(0);
+        require(clock.due(0,rate,0),"Native clock skipped its first presentation");measured.completed(0);
         unsigned rendered{};
         for(unsigned phase=1;phase<=6000;++phase) {
             const auto time=(std::int64_t(phase)*1'000'000'000+59)/60;
-            const bool due=clock.due(time,rate);
+            const bool due=clock.due(time,rate,1);
             require(due==(rate==60 || phase%2==0),"Native frame gate drifted away from integer 60 Hz source phases");
-            require(!clock.due(time,rate),"Duplicate host time submitted a second eye/frame");
+            require(!clock.due(time,rate,1),"Duplicate host time submitted a second eye/frame");
             if(due) {++rendered;measured.completed(time);}
             if(phase%60==0) require(measured.fps()==rate,"Measured native rate counted source ticks instead of presentations");
         }
         require(rendered==rate*100,"Native presentation count drifted over 100 seconds");
-        require(clock.due(200'000'000'000LL,rate) && !clock.due(200'000'000'000LL,rate),"Long stall produced catch-up presentations");
-        require(clock.due(1,rate) && !clock.due(1,rate),"Rewound clock retained old credit");
-        require(clock.due(1,rate==30?60:30),"Changing native target did not rebase presentation");
-        clock.reset();require(clock.due(1,rate),"Home/editor reset did not restart native presentation");
+        require(clock.due(200'000'000'000LL,rate,15) && !clock.due(200'000'000'000LL,rate,15),"Long stall produced catch-up presentations");
+        require(clock.due(1,rate,0) && !clock.due(1,rate,0),"Rewound clock retained old credit");
+        require(clock.due(1,rate==30?60:30,0),"Changing native target did not rebase presentation");
+        clock.reset();require(clock.due(1,rate,0),"Home/editor reset did not restart native presentation");
         const auto end=std::numeric_limits<std::int64_t>::max();
-        clock.reset();require(clock.due(end-1'000'000'000LL,rate) && clock.due(end,rate),"Long uptime overflowed native clock");
+        clock.reset();require(clock.due(end-1'000'000'000LL,rate,0) && clock.due(end,rate,60),"Long uptime overflowed native clock");
+        // Vary presentation work after each exact source-clock sample. The old
+        // independent gate loses ready frames when a long draw follows a short
+        // draw, even though all 60 source phases were completed on time.
+        clock.reset();require(clock.due(12'000'000,rate,0),"Jitter fixture did not start");
+        unsigned jitter_rendered{};
+        for(unsigned phase=1;phase<=6000;++phase) {
+            const auto source_time=(std::int64_t(phase)*1'000'000'000+59)/60;
+            const auto work=phase%2?2'000'000LL:12'000'000LL;
+            if(clock.due(source_time+work,rate,1)) ++jitter_rendered;
+            require(!clock.due(source_time+work+1,rate,0),"No source phase replayed the preceding image");
+        }
+        require(jitter_rendered==rate*100,"Render jitter discarded ready source presentations");
+        require(clock.due(end,rate,std::numeric_limits<unsigned>::max()),"Bounded catch-up rejected its final frame");
+        require(!clock.due(end,rate,std::numeric_limits<unsigned>::max()),"Catch-up burst submitted more than once");
     }
     PresentationClock clock;
-    for(unsigned invalid:{0U,20U,29U,31U,90U,120U,480U}) rejects([&]{static_cast<void>(clock.due(0,invalid));},"Unsupported native output target accepted");
-    rejects([&]{static_cast<void>(clock.due(-1,60));},"Negative native time accepted");
+    for(unsigned invalid:{0U,20U,29U,31U,90U,120U,480U}) rejects([&]{static_cast<void>(clock.due(0,invalid,0));},"Unsupported native output target accepted");
+    rejects([&]{static_cast<void>(clock.due(-1,60,0));},"Negative native time accepted");
+    require(source_phase_wait_needed(0,16'666'666) && !source_phase_wait_needed(0,16'666'667),"Source wait crossed the rational 60 Hz boundary");
+    require(source_phase_wait_needed(.5,8'333'333) && !source_phase_wait_needed(.5,8'333'334),"Wait ignored source phase debt");
+    require(!source_phase_wait_needed(.999,1'000'000),"Wait slept through a phase completed by source work");
+    require(source_phase_wait_needed(0,0) && !source_phase_wait_needed(0,std::numeric_limits<std::int64_t>::max()),"Wait mishandled empty work or long uptime");
+    for(double fraction:{-1.0,1.0,std::numeric_limits<double>::quiet_NaN()})
+        rejects([&]{static_cast<void>(source_phase_wait_needed(fraction,0));},"Invalid source wait fraction accepted");
+    rejects([&]{static_cast<void>(source_phase_wait_needed(0,-1));},"Negative source wait time accepted");
     PresentationRate measured;
     measured.completed(0);measured.completed(3'000'000'000LL);
     require(measured.fps()==0,"Long loading stall was advertised as a valid measured rate");

@@ -432,7 +432,8 @@ int main() {
                 }
                 const bool runtime_before=session->game().runtime_options_open();
                 STARFOX_3DS_STARTUP_MARK(source_advance);
-                const auto advanced=session->advance(monotonic_time(),controls.held,true,ctr::mapped_buttons(bindings,pad),true);
+                const auto source_time=monotonic_time();
+                const auto advanced=session->advance(source_time,controls.held,true,ctr::mapped_buttons(bindings,pad),true);
                 STARFOX_3DS_STARTUP_MARK(source_advance_complete);
                 if(runtime_before!=session->game().runtime_options_open()) audio->pause(session->game().runtime_options_open());
                 rasters+=advanced.video_phases;logic+=advanced.logic_ticks;blocks+=advanced.audio_blocks;
@@ -509,8 +510,10 @@ int main() {
                 }
                 // Keep input, source raster and NDSP service at 60 Hz. Only
                 // skip scene preparation/submission; never spin on a 30 Hz gap.
-                if(!render_clock.due(monotonic_time(),session->game().presentation_fps())) {
-                    gspWaitForVBlank();frame_handled=true;return;
+                if(!render_clock.due(monotonic_time(),session->game().presentation_fps(),advanced.video_phases)) {
+                    if(ctr::source_phase_wait_needed(advanced.raster_fraction,monotonic_time()-source_time))
+                        gspWaitForVBlank();
+                    frame_handled=true;return;
                 }
                 const auto source=session->presentation(controls.slider,controls.stereoscopic_hardware,session->stereo_settings());
 #if defined(STARFOX_3DS_PROFILE_FRAMES)
