@@ -11,6 +11,7 @@
 #include "starfox/render/software_renderer.hpp"
 #include "starfox/render/sprite_renderer.hpp"
 #include "starfox/simulation/game_simulation.hpp"
+#include "starfox/platform/nintendo_3ds/indexed_overlay_rows.hpp"
 
 #include <cstdint>
 #include <array>
@@ -101,6 +102,12 @@ public:
     [[nodiscard]] std::uint64_t background_cache_misses() const noexcept {
         return background_cache_misses_;
     }
+    [[nodiscard]] std::uint64_t ex_overlay_cache_hits() const noexcept {
+        return ex_overlay_cache_hits_;
+    }
+    [[nodiscard]] std::uint64_t ex_overlay_cache_misses() const noexcept {
+        return ex_overlay_cache_misses_;
+    }
     [[nodiscard]] DrawBreakdown last_draw_breakdown() const noexcept {
         return last_draw_breakdown_;
     }
@@ -179,6 +186,11 @@ private:
     std::uint64_t background_cache_misses_{};
     DrawBreakdown last_draw_breakdown_{};
     render::Framebuffer mode2_background_cache_{400U, 240U};
+    // With PICA BG2 this existing allocation is otherwise unused. Its CPU-BG2
+    // and EX-BG1 roles are mutually exclusive and invalidated at each handoff.
+    platform::nintendo_3ds::IndexedOverlayRows ex_overlay_rows_{};
+    std::uint64_t ex_overlay_cache_hits_{}, ex_overlay_cache_misses_{};
+    bool ex_overlay_valid_{};
     std::array<Mode1BackgroundCache, 2U> mode1_caches_{};
     std::uint8_t mode1_next_victim_{};
     simulation::SnesPpuState mode2_background_ppu_{};

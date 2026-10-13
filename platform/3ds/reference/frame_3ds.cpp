@@ -9,6 +9,7 @@
 #include "starfox/render/palette.hpp"
 #include "starfox/compat/bit_cast.hpp"
 #include "starfox/platform/nintendo_3ds/frame_profile.hpp"
+#include "starfox/platform/nintendo_3ds/bg1_overlay_dependencies.hpp"
 
 #include "mono_clock.hpp"
 
@@ -1069,10 +1070,28 @@ const render::Framebuffer& Frame3ds::draw(
     const auto stage_native_model_end = reference_system_tick();
 
     if (game.experience() == simulation::Experience::starfox_ex) {
-        // Apply the same zero-ink/CGRAM-black transparency while decoding,
-        // without clearing and rescanning a second 256x224 framebuffer.
-        backgrounds_.draw_bg1(ppu, frame_,
-            render::TilePriorityPass::all, 0, false, 16U, true);
+        if (mode2_gameplay && gpu_bg2) {
+            // BG2 lives on PICA, leaving this already allocated CPU scenery
+            // cache available. Reuse BG1 only after exact map/character and
+            // black-transparency checks; RGB still comes from the live palette.
+            if (ex_overlay_valid_
+                && platform::nintendo_3ds::same_bg1_overlay_source(
+                    mode2_background_ppu_, ppu)) ++ex_overlay_cache_hits_;
+            else {
+                ++ex_overlay_cache_misses_;
+                mode2_background_valid_ = false;
+                mode2_background_cache_.clear(0U);
+                backgrounds_.draw_bg1(ppu, mode2_background_cache_,
+                    render::TilePriorityPass::all, 0, false, 16U, true);
+                ex_overlay_rows_.prepare(mode2_background_cache_);
+                mode2_background_ppu_ = ppu;
+                ex_overlay_valid_ = true;
+            }
+            ex_overlay_rows_.apply(mode2_background_cache_, frame_);
+        } else {
+            backgrounds_.draw_bg1(ppu, frame_,
+                render::TilePriorityPass::all, 0, false, 16U, true);
+        }
     }
 
     const auto briefing = game.briefing_state();
@@ -1201,6 +1220,9 @@ const render::Framebuffer& Frame3ds::draw(
             if (gpu_bg2) right_frame_.begin_write_coverage();
         }
         if (!gpu_bg2) {
+            // The same storage/snapshot is now CPU BG2, not cached EX BG1.
+            // Invalidate even on a CPU background hit, before any next GPU draw.
+            ex_overlay_valid_ = false;
             const bool same_background = mode2_background_valid_
                 && mode2_background_scene_revision_ == game.scene_revision()
                 && mode2_background_ppu_vram_revision_

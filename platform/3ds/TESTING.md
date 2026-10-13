@@ -208,7 +208,23 @@ because its extra stack is not justified by the measured result; the stronger
 independent collision fixture is retained. The current renderer remains the
 validated opacity-mask implementation above, not a new 60-FPS result.
 
-The current candidate removes the EX BG1 staging image and applies the same
+The next source-only follow-up checks exact BG1 tilemap/referenced-character
+bytes, scroll/geometry and CGRAM black/nonblack membership between draws.
+Nonblack RGB-only changes keep the indexed overlay and use the live palette.
+The real EX 240-phase host probe finds 197 unchanged-source phases; the
+renderer records 190 cache hits and 50 rebuilds, including handoffs through
+eight complete CPU-background fallback checks. It borrows the existing
+400x240 CPU-background allocation only while BG2 is on PICA; CPU BG2 and EX
+BG1 roles invalidate each other before storage is reused. No extra pixel
+allocation is introduced. A <=904-byte row index transfers only the source
+256x224 rectangle, retaining transparent holes, coverage, tags, dither erasure
+and ordered commands. Independent tests cover 576 dependency mutations,
+64 borrowed-versus-direct rasters and 64 sparse-transfer mode combinations.
+Original/EX retain their prior 240-phase image digests and 80 audio blocks.
+ARM validation and measured native performance are pending; no 60-FPS or
+hardware acceptance is implied by these host results.
+
+The earlier direct-overlay candidate removes the EX BG1 staging image and applies the same
 zero-ink/CGRAM-black transparency directly during decoding. The 57,344-byte
 pixel allocation and full-image rescan are gone. All 384 synthetic comparisons
 match the removed path's pixels, coverage and tags, and both Original/EX

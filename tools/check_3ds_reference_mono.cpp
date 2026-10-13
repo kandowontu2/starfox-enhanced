@@ -1,8 +1,10 @@
 #include "starfox/platform/nintendo_3ds/game_session.hpp"
+#include "starfox/platform/nintendo_3ds/bg1_overlay_dependencies.hpp"
 #include "../platform/3ds/reference/frame_3ds.hpp"
 #include <algorithm>
 #include <chrono>
 #include <iostream>
+#include <memory>
 #include <stdexcept>
 using namespace starfox;
 using namespace platform::nintendo_3ds;
@@ -21,10 +23,23 @@ int main(int argc,char** argv) try {
     double draw_ms=0;
     std::uint64_t native_us=0,overlay_us=0,sprites_us=0,canvas_us=0;
     unsigned bg1_mosaic_off=0,bg1_mosaic_one=0,bg1_mosaic_large=0;
+    unsigned bg1_dependency_hits=0,bg1_dependency_misses=0;
+    std::unique_ptr<simulation::SnesPpuState> previous_bg1;
     for(unsigned frame=1;frame<=240;++frame) {
         session.advance((std::int64_t(frame)*1000000000+59)/60,
             frame>=120 && frame<180?input::ButtonMask(input::y|input::right):0);
         const auto source=session.presentation(0,true);
+        if (session.game().experience() == simulation::Experience::starfox_ex
+            && source.raster->ppu->background_mode == 2U) {
+            const auto& ppu = *source.raster->ppu;
+            if (previous_bg1 && same_bg1_overlay_source(*previous_bg1, ppu))
+                ++bg1_dependency_hits;
+            else {
+                ++bg1_dependency_misses;
+                if (!previous_bg1) previous_bg1 = std::make_unique<simulation::SnesPpuState>();
+                *previous_bg1 = ppu;
+            }
+        }
         const auto mosaic=source.raster->ppu->mosaic;
         if (!(mosaic & 1U)) ++bg1_mosaic_off;
         else if (!(mosaic >> 4U)) ++bg1_mosaic_one;
@@ -77,6 +92,10 @@ int main(int argc,char** argv) try {
         <<" sprites_ms="<<sprites_us/1000.0<<" canvas_ms="<<canvas_us/1000.0
         <<" bg1_mosaic_off="<<bg1_mosaic_off<<" bg1_mosaic_one="<<bg1_mosaic_one
         <<" bg1_mosaic_large="<<bg1_mosaic_large
+        <<" bg1_dependency_hits="<<bg1_dependency_hits
+        <<" bg1_dependency_misses="<<bg1_dependency_misses
+        <<" ex_overlay_cache_hits="<<renderer.ex_overlay_cache_hits()
+        <<" ex_overlay_cache_misses="<<renderer.ex_overlay_cache_misses()
         <<" final_bg="<<session.presentation(0,true).current->background_id
         <<" digest="<<std::hex<<digest<<'\n';
 } catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
