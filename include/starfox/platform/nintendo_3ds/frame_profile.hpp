@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <ostream>
 #include <string_view>
+#include <vector>
 
 namespace starfox::platform::nintendo_3ds {
 // Optional owner-thread diagnostics. Raw native clock ticks, not guessed FPS
@@ -81,11 +82,69 @@ public:
         } catch(...) { stopped_ = true; return false; }
     }
 private:
+    friend class FrameProfileBuffer;
     Clock clock_{};
     std::uint64_t frequency_{}, previous_{};
     std::array<FramePhaseTotals, unsigned(FramePhase::count)> totals_{};
     unsigned windows_{};
     bool stopped_{};
+};
+// SD writes/flushes can block for seconds on a real console. Keep the same
+// bounded timing windows in memory during play, and serialize them only after
+// the game/audio/GPU owners have retired. In particular, do not hide an SD
+// flush outside the measured frame and then let that delay enter catch-up.
+// The separate short startup trace still provides receipts for a hard freeze.
+class FrameProfileBuffer {
+public:
+    FrameProfileBuffer() : windows_(FrameProfile::maximum_windows) {}
+    bool capture(FrameProfile& profile, std::uint64_t time, int flow, unsigned background,
+                 unsigned video_phases, unsigned logic_ticks, unsigned audio_blocks) noexcept {
+        if(flush_attempted_ || !profile.clock_ || !profile.frequency_ || profile.stopped_
+            || time - profile.previous_ < profile.frequency_
+            || count_ == windows_.size()) return false;
+        auto& window = windows_[count_++];
+        window = {time, profile.frequency_, flow, background, video_phases, logic_ticks,
+            audio_blocks, profile.totals_};
+        profile.totals_ = {}; profile.previous_ = time;
+        if(++profile.windows_ == FrameProfile::maximum_windows) profile.stopped_ = true;
+        return true;
+    }
+    // One explicit, idempotent shutdown write; neither capture nor destruction
+    // touches a stream. A failed write is not retried into a partial CSV.
+    bool flush(std::ostream& stream) noexcept {
+        if(flush_attempted_) return flush_succeeded_;
+        flush_attempted_ = true;
+        if(!count_) { flush_succeeded_ = true; return true; }
+        try {
+            stream << "tick,clock_hz,flow,bg,video_phases,logic_ticks,audio_blocks,phase,calls,total_ticks,max_ticks\n";
+            for(unsigned i = 0; i < count_; ++i) {
+                const auto& window = windows_[i];
+                for(unsigned phase = 0; phase < window.totals.size(); ++phase) {
+                    const auto& value = window.totals[phase];
+                    if(!value.calls) continue;
+                    stream << window.time << ',' << window.frequency << ',' << window.flow << ','
+                        << window.background << ',' << window.video_phases << ',' << window.logic_ticks
+                        << ',' << window.audio_blocks << ',' << frame_phase_names[phase] << ','
+                        << value.calls << ',' << value.ticks << ',' << value.maximum << '\n';
+                }
+            }
+            stream.flush(); flush_succeeded_ = bool(stream);
+        } catch(...) { flush_succeeded_ = false; }
+        return flush_succeeded_;
+    }
+    [[nodiscard]] unsigned size() const noexcept { return count_; }
+    [[nodiscard]] std::size_t storage_bytes() const noexcept { return windows_.size() * sizeof(Window); }
+private:
+    struct Window {
+        std::uint64_t time{}, frequency{};
+        int flow{};
+        unsigned background{}, video_phases{}, logic_ticks{}, audio_blocks{};
+        std::array<FramePhaseTotals, unsigned(FramePhase::count)> totals{};
+    };
+    static_assert(sizeof(Window) * FrameProfile::maximum_windows <= 512U * 1024U);
+    std::vector<Window> windows_;
+    unsigned count_{};
+    bool flush_attempted_{}, flush_succeeded_{};
 };
 inline thread_local FrameProfile* active_frame_profile{};
 class ScopedFrameProfileActivation {

@@ -66,19 +66,19 @@ private:
 #if defined(STARFOX_3DS_PROFILE_FRAMES)
 class NativeProfileFrame {
 public:
-    NativeProfileFrame(ctr::FrameProfile& profile,std::ostream& stream,
+    NativeProfileFrame(ctr::FrameProfile& profile,ctr::FrameProfileBuffer& buffer,
         const std::unique_ptr<ctr::GameSession>& session,const unsigned& background,
         const unsigned& rasters,const unsigned& logic,const unsigned& blocks) noexcept
-        :profile_(profile),stream_(stream),session_(session),background_(background),
+        :profile_(profile),buffer_(buffer),session_(session),background_(background),
          rasters_(rasters),logic_(logic),blocks_(blocks),begin_(profile.now()) {}
     ~NativeProfileFrame() noexcept {
         const auto end=profile_.now();
         profile_.record(ctr::FramePhase::frame,begin_,end);
-        profile_.write_window(stream_,end,session_?int(session_->game().flow_state()):-1,
+        buffer_.capture(profile_,end,session_?int(session_->game().flow_state()):-1,
             background_,rasters_,logic_,blocks_);
     }
 private:
-    ctr::FrameProfile& profile_;std::ostream& stream_;
+    ctr::FrameProfile& profile_;ctr::FrameProfileBuffer& buffer_;
     const std::unique_ptr<ctr::GameSession>& session_;
     const unsigned& background_;const unsigned& rasters_;const unsigned& logic_;const unsigned& blocks_;
     std::uint64_t begin_{};
@@ -124,6 +124,7 @@ int main() {
     // Separate opt-in diagnostic file: never replace settings, saves or assets.
     // Window count is bounded; unavailable/full SD output disables logging.
     ctr::FrameProfile frame_profile([]() noexcept -> std::uint64_t {return svcGetSystemTick();},SYSCLOCK_ARM11);
+    ctr::FrameProfileBuffer profile_buffer;
     ctr::ScopedFrameProfileActivation profile_activation(frame_profile);
     std::ofstream profile_stream(std::string("sdmc:/3ds/starfox-enhanced/native-frame-profile-")
         +std::to_string(svcGetSystemTick())+".csv");
@@ -273,7 +274,7 @@ int main() {
     while(true) {
 #if defined(STARFOX_3DS_PROFILE_FRAMES)
         startup_trace.begin_frame();
-        NativeProfileFrame profile_frame(frame_profile,profile_stream,session,profile_background,rasters,logic,blocks);
+        NativeProfileFrame profile_frame(frame_profile,profile_buffer,session,profile_background,rasters,logic,blocks);
 #endif
         STARFOX_3DS_STARTUP_MARK(input_poll);
         const auto controls=display.poll();if(!controls.running) break;
@@ -581,4 +582,9 @@ int main() {
     // Hook, model and session references retire before DSP storage / LCDs.
     checkpoint(true);
     release_owners();
+#if defined(STARFOX_3DS_PROFILE_FRAMES)
+    // No source advancement or live NDSP/PICA owner can be stalled by SD
+    // diagnostics here. Normal exit retains the same CSV format/window cap.
+    profile_buffer.flush(profile_stream);
+#endif
 }

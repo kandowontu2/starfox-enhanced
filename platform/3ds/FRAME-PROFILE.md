@@ -1,9 +1,21 @@
 # Optional native phase timings
 
 `STARFOX_3DS_PROFILE_FRAMES=ON` records bounded owner-thread timings from the
-actual guest clock. The player writes at most 512 one-second windows to its
-separate diagnostic CSV; stream errors disable logging instead of stopping
-gameplay. It does not change source cadence, sound commands or presentation.
+actual guest clock. The player captures at most 512 one-second windows in a
+preallocated buffer smaller than 512 KiB. No profile CSV formatting, SD writes
+or flushes run during gameplay. On normal exit, after retiring the source,
+audio and GPU owners, it writes the separate CSV once. The CSV header, phase
+indices and timing values remain unchanged; stream errors do not stop gameplay.
+Copy the frame profile **after exiting normally**. A hard shutdown can leave
+that file empty; the separately flushed, bounded startup trace remains available
+for locating a freeze. Neither diagnostic contains game assets or save data.
+
+The October 12 hardware file has seven window gaps of approximately 5.6--6.2
+seconds outside measured frame work. The old loop synchronously serialized and
+flushed the profile after its frame timer ended, so its own SD stalls were not
+included in the reported frame duration and fed into the next source catch-up.
+Removing this gameplay I/O addresses that identified stall path, not the
+remaining layer/geometry costs or a claim of stable console 60 FPS.
 
 The original twenty-five phase names and enum indices stay unchanged. The
 source/audio/raster detail phases and five appended GPU phases distinguish

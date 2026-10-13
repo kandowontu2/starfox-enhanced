@@ -11,6 +11,10 @@ std::uint64_t clock_tick() noexcept { ++clock_calls; return tick; }
 void require(bool condition, const char* message) {
     if(!condition) throw std::runtime_error(message);
 }
+struct CountingStreamBuffer : std::stringbuf {
+    unsigned flushes{};
+    int sync() override { ++flushes; return std::stringbuf::sync(); }
+};
 }
 int main() try {
     using namespace starfox::platform::nintendo_3ds;
@@ -138,5 +142,55 @@ int main() try {
             "Detailed CSV omitted a phase");
     require(details.totals() == std::array<FramePhaseTotals,unsigned(FramePhase::count)>{},
         "Detailed window retained counters");
-    std::cout << "3DS native phase totals, nested owners, rollover, unwinding, CSV cadence and failed/bounded logging pass\n";
+    // The native player captures only bounded numeric snapshots during play.
+    // Compare every phase/window byte-for-byte to the original CSV serializer,
+    // including unsigned clock rollover, metadata, nested totals and the cap.
+    tick = std::numeric_limits<std::uint64_t>::max() - 500;
+    FrameProfile reference(clock_tick, 1000), buffered_profile(clock_tick, 1000);
+    FrameProfileBuffer buffer;
+    CountingStreamBuffer destination;
+    std::ostream buffered_csv(&destination);
+    std::ostringstream reference_csv;
+    const auto storage = buffer.storage_bytes();
+    require(storage <= 512U * 1024U && !buffer.size(), "Diagnostic memory budget exceeded");
+    const auto before_capture = clock_calls;
+    for(unsigned window = 1; window <= FrameProfile::maximum_windows; ++window) {
+        for(unsigned phase = 0; phase < unsigned(FramePhase::count); ++phase) {
+            reference.record(FramePhase(phase), 100, 101 + phase);
+            buffered_profile.record(FramePhase(phase), 100, 101 + phase);
+        }
+        const auto time = tick + std::uint64_t(window) * 1000;
+        if(window == 1) require(!buffer.capture(buffered_profile,time-1,9,27,60,20,20),
+            "Buffered sub-second window consumed totals");
+        require(reference.write_window(reference_csv,time,int(window%10),window,window*3,window,window),
+            "Reference window serialization failed");
+        require(buffer.capture(buffered_profile,time,int(window%10),window,window*3,window,window),
+            "Buffered window stopped early");
+        require(destination.str().empty() && !destination.flushes,
+            "Capturing a gameplay window performed stream I/O");
+        require(buffer.size() == window && buffer.storage_bytes() == storage
+            && buffered_profile.totals() == reference.totals(),
+            "Buffered windows grew storage or changed timing/retirement");
+    }
+    require(clock_calls == before_capture && buffered_profile.stopped()
+        && !buffer.capture(buffered_profile,tick+999999,9,27,0,0,0),
+        "Buffered capture read extra clocks or lost its bounded stop");
+    require(buffer.flush(buffered_csv) && destination.flushes == 1
+        && destination.str() == reference_csv.str(),
+        "Shutdown CSV differs from all original diagnostic windows");
+    require(buffer.flush(buffered_csv) && destination.flushes == 1
+        && !buffer.capture(buffered_profile,tick+999999,9,27,0,0,0),
+        "Repeated shutdown duplicated diagnostic output");
+    tick = 0;
+    FrameProfile bad_buffer_profile(clock_tick,1); FrameProfileBuffer bad_buffer;
+    bad_buffer_profile.record(FramePhase::frame,0,1);
+    require(bad_buffer.capture(bad_buffer_profile,1,9,27,0,0,0), "Failed-output fixture lost capture");
+    std::ostringstream bad_buffer_stream; bad_buffer_stream.setstate(std::ios::badbit);
+    try {bad_buffer_stream.exceptions(std::ios::badbit);} catch(const std::ios_base::failure&) {}
+    require(!bad_buffer.flush(bad_buffer_stream) && !bad_buffer.flush(buffered_csv)
+        && destination.flushes == 1, "Failed shutdown logging escaped or retried a partial CSV");
+    FrameProfileBuffer empty_buffer;
+    require(empty_buffer.flush(buffered_csv) && destination.flushes == 1,
+        "Empty diagnostic owner performed shutdown I/O");
+    std::cout << "3DS native phase totals, nested owners, rollover, unwinding, CSV cadence, bounded in-memory capture and shutdown-only logging pass\n";
 } catch(const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
