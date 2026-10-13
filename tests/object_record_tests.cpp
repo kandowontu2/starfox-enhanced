@@ -1,4 +1,5 @@
 #include "starfox/simulation/object_pool.hpp"
+#include "starfox/simulation/map_vm.hpp"
 
 #include <algorithm>
 #include <array>
@@ -7,6 +8,64 @@
 #include <random>
 #include <stdexcept>
 #include <string_view>
+
+namespace starfox::simulation {
+// Independent pre-cache bytewise bridge. Production has no bypass switch;
+// compare complete CPU and pool state, including open bus and generations.
+struct ObjectBridgeTestAccess {
+    static void push(MapVm& map,bool cached) {
+        if(cached) {map.sync_objects_to_cpu();return;}
+        const auto active=map.objects_->active_handles(),free=map.objects_->free_handles();
+        map.cpu_.write16(map.active_list_,active.empty()?0:map.original_object_pointer(active.front()));
+        map.cpu_.write16(map.free_list_,free.empty()?0:map.object_base_+(free.front()-1)*map.object_size_);
+        for(std::size_t n=0;n<active.size();++n) {
+            const auto handle=active[n];const auto base=map.original_object_pointer(handle);
+            const auto extended=map.extended_object_base_+(handle-1)*map.object_size_;
+            map.cpu_.write16(base,n+1<active.size()?map.original_object_pointer(active[n+1]):0);
+            map.cpu_.write16(base+2,n?map.original_object_pointer(active[n-1]):0);
+            for(unsigned i=4;i<map.object_size_;++i)
+                map.cpu_.write8(base+i,map.objects_->read_base_byte(handle,i));
+            const auto& object=map.objects_->at(handle);
+            map.cpu_.write16(base+6,map.original_object_pointer(object.attached));
+            map.cpu_.write16(base+25,map.original_object_pointer(object.immune_object));
+            map.cpu_.write16(base+27,map.original_object_pointer(object.collision_object));
+            for(unsigned i=0;i<map.extended_object_bytes_;++i) map.cpu_.write8(extended+i,object.extended[i]);
+            map.cpu_.write16(extended+19,map.original_object_pointer(object.fire_object));
+        }
+        for(std::size_t n=0;n<free.size();++n) map.cpu_.write16(map.object_base_+(free[n]-1)*map.object_size_,
+            n+1<free.size()?map.object_base_+(free[n+1]-1)*map.object_size_:0);
+    }
+    static void pull(MapVm& map,bool cached) {
+        if(cached) {map.sync_objects_from_cpu();return;}
+        const auto list=[&](std::uint16_t pointer) {
+            std::vector<ObjectHandle> out;std::array<bool,kMaximumObjects+1> seen{};
+            while(pointer) {
+                const auto h=map.native_object_handle(pointer);
+                if(!h || seen[h]) throw std::runtime_error("invalid oracle list");
+                seen[h]=true;out.push_back(h);pointer=map.cpu_.read16(pointer);
+            }
+            return out;
+        };
+        const auto active=list(map.cpu_.read16(map.active_list_)),free=list(map.cpu_.read16(map.free_list_));
+        map.objects_->restore_lists(active,free);
+        for(const auto h:active) {
+            const auto base=map.original_object_pointer(h);
+            const auto extended=map.extended_object_base_+(h-1)*map.object_size_;
+            for(unsigned i=4;i<map.object_size_;++i) map.objects_->write_base_byte(h,i,map.cpu_.read8(base+i));
+            auto& object=map.objects_->at(h);
+            object.attached=map.object_handle(map.cpu_.read16(base+6));
+            object.immune_object=map.object_handle(map.cpu_.read16(base+25));
+            object.collision_object=map.object_handle(map.cpu_.read16(base+27));
+            for(unsigned i=0;i<map.extended_object_bytes_;++i)
+                map.objects_->write_path_byte(h,static_cast<std::uint8_t>(0x80+i),map.cpu_.read8(extended+i));
+            object.fire_object=map.object_handle(map.cpu_.read16(extended+19));
+        }
+    }
+    static auto hits(const MapVm& map) {return map.object_bridge_->push_hits+map.object_bridge_->pull_hits;}
+    static auto cache_bytes() {return sizeof(MapVm::ObjectBridgeCache);}
+    static auto cpu_state(const MapVm& map) {return map.cpu_.save_state();}
+};
+}
 
 namespace {
 using namespace starfox::simulation;
@@ -85,6 +144,9 @@ void test_lists() {
     require(pool.generation(5) == 5 && pool.generation(6) == 6, "activation generation order changed");
     require(pool.at(1).shape == 101 && pool.at(3).shape == 103, "retained objects cleared");
     require(pool.at(5) == GameObject{} && pool.at(6) == GameObject{}, "free objects gained data");
+    require(pool.lists_match(std::array<ObjectHandle,4>{6,3,5,1},std::array<ObjectHandle,4>{8,4,7,2}),"exact lists missed");
+    require(!pool.lists_match(std::array<ObjectHandle,4>{6,5,3,1},std::array<ObjectHandle,4>{8,4,7,2}),"active reorder matched");
+    require(!pool.lists_match(std::array<ObjectHandle,4>{6,3,5,1},std::array<ObjectHandle,4>{8,7,4,2}),"free reorder matched");
     const auto saved = pool.save_state();
     pool.restore_lists({6, 3, 5, 1}, {8, 4, 7, 2});
     require(saved == pool.save_state(), "unchanged lists changed generations/state");
@@ -95,6 +157,112 @@ void test_lists() {
     require(saved == pool.save_state(), "invalid lists mutated pool");
     const auto reused = pool.allocate_after(3);
     require(reused == 8 && pool.generation(reused) == 7, "free reuse/generation changed");
+}
+void test_bridge(ObjectMemoryLayout layout) {
+    const bool ex=layout==ObjectMemoryLayout::starfox_ex;
+    const unsigned capacity=ex?80:70,stride=ex?57:56,extended_size=ex?56:54;
+    const auto symbols=starfox::assets::SymbolMap::parse(ex?
+        "AL_SIZE $000039\nNUMBER_AL $000050\nALLST $001a00\nALFREELST $001a02\n":
+        "AL_SIZE $000038\nNUMBER_AL $000046\nALLST $001a00\nALFREELST $001a02\n");
+    const starfox::assets::RomImage rom{std::vector<std::uint8_t>(32768,0xea)};
+    ObjectPool a{capacity,layout},b{capacity,layout};
+    MapVm cached{rom,MapDatabase{rom,0x008000,0x008100},a,&symbols};
+    MapVm oracle{rom,MapDatabase{rom,0x008000,0x008100},b,&symbols};
+    unsigned bridge_step{};
+    const auto same=[&] {
+        ++bridge_step;
+        require(a.save_state()==b.save_state(),"cached bridge changed pool/semantic mirrors/generations");
+        const auto actual=cached.save_state(),expected=oracle.save_state();
+        require(actual.size()==expected.size(),"cached bridge changed state size");
+        if(actual!=expected) {
+            const auto mismatch=std::mismatch(actual.begin(),actual.end(),expected.begin(),expected.end());
+            std::cerr << (ex?"EX":"Original") << " bridge step " << bridge_step
+                << " state offset " << (mismatch.first-actual.begin())
+                << " actual " << unsigned(*mismatch.first) << " expected " << unsigned(*mismatch.second) << '\n';
+            const auto cpu_actual=ObjectBridgeTestAccess::cpu_state(cached),cpu_expected=ObjectBridgeTestAccess::cpu_state(oracle);
+            unsigned differences{};
+            for(std::size_t i=0;i<cpu_actual.size() && i<cpu_expected.size() && differences<16;++i) {
+                if(cpu_actual[i]!=cpu_expected[i]) {
+                    ++differences;std::cerr << "CPU offset " << i << " actual " << unsigned(cpu_actual[i])
+                        << " expected " << unsigned(cpu_expected[i]) << '\n';
+                }
+            }
+            throw std::runtime_error{"cached bridge changed CPU memory/open bus"};
+        }
+    };
+    const auto push=[&] {ObjectBridgeTestAccess::push(cached,true);ObjectBridgeTestAccess::push(oracle,false);same();};
+    const auto pull=[&] {ObjectBridgeTestAccess::pull(cached,true);ObjectBridgeTestAccess::pull(oracle,false);same();};
+    // Empty/full pools, repeated cache hits and deliberately inconsistent host
+    // mirrors: export alone must never qualify a skipped semantic import.
+    push();pull();
+    for(unsigned n=0;n<capacity;++n) {
+        const auto h=a.allocate_after();require(h==b.allocate_after(),"fixture allocation differs");
+        a.at(h).world_x=b.at(h).world_x=static_cast<std::int16_t>(n*173);
+        a.at(h).sound1=b.at(h).sound1=17;
+    }
+    push();pull();push();pull();push();pull();
+    require(ObjectBridgeTestAccess::hits(cached)>capacity,"bridge did not exercise exact reuse");
+    std::mt19937 random{0x51a65816U};
+    for(unsigned trial=0;trial<256;++trial) {
+        const auto h=a.first_active();
+        if(h) {
+            const auto value=static_cast<std::uint8_t>(random());
+            a.write_base_byte(h,4+trial%(stride-4),value);b.write_base_byte(h,4+trial%(stride-4),value);
+            a.at(h).sound1=b.at(h).sound1=static_cast<std::uint8_t>(value+1); // Mirror divergence.
+            a.at(h).extended[55]=b.at(h).extended[55]=value; // Original's unexported tail.
+        }
+        if(trial%13==0 && h) {require(a.remove(h)==b.remove(h),"fixture removal differs");}
+        if(trial%17==0) {require(a.allocate_after()==b.allocate_after(),"fixture reuse differs");}
+        if(trial%19==0) {
+            auto active=a.active_handles(),free=a.free_handles();
+            std::reverse(active.begin(),active.end());std::reverse(free.begin(),free.end());
+            a.restore_lists(active,free);b.restore_lists(active,free);
+        }
+        push();
+        if(const auto active=a.first_active()) {
+            const auto address=trial%2?0x0338U+(active-1)*stride+4+trial%(stride-4):
+                0x7e2000U+(active-1)*stride+trial%extended_size;
+            cached.write_native_byte(address,static_cast<std::uint8_t>(trial*91));
+            oracle.write_native_byte(address,static_cast<std::uint8_t>(trial*91));
+        }
+        pull();push();pull();
+        if(trial%31==0) {
+            const auto state=cached.save_state();cached.load_state(state);oracle.load_state(state);
+            push();pull(); // Fresh caches after restored CPU state.
+        }
+    }
+    // Corrupt a native list, without letting a stale cache turn it into a hit.
+    push();const auto first=a.first_active();const auto pointer=static_cast<std::uint16_t>(0x0338+(first-1)*stride);
+    cached.write_native_word(pointer,pointer);oracle.write_native_word(pointer,pointer);
+    const auto before=a.save_state();
+    rejects([&]{ObjectBridgeTestAccess::pull(cached,true);});
+    rejects([&]{ObjectBridgeTestAccess::pull(oracle,false);});
+    require(before==a.save_state() && a.save_state()==b.save_state(),"invalid native list mutated cached pool");
+    require(ObjectBridgeTestAccess::cache_bytes()<32768,"object bridge scratch exceeded bounded heap budget");
+}
+void test_bridge_io(ObjectMemoryLayout layout) {
+    // Unsupported/custom I/O record locations must retain ordered callbacks;
+    // the WRAM-only cache must not add, remove or reorder those accesses.
+    const auto symbols=starfox::assets::SymbolMap::parse(layout==ObjectMemoryLayout::starfox_ex?
+        "AL_SIZE $000039\nNUMBER_AL $000002\nXALBLKS $002100\n":
+        "AL_SIZE $000038\nNUMBER_AL $000002\nXALBLKS $002100\n");
+    const starfox::assets::RomImage rom{std::vector<std::uint8_t>(32768,0xea)};
+    ObjectPool a{2,layout},b{2,layout};
+    MapVm cached{rom,MapDatabase{rom,0x008000,0x008100},a,&symbols};
+    MapVm oracle{rom,MapDatabase{rom,0x008000,0x008100},b,&symbols};
+    for(unsigned n=0;n<2;++n) {
+        const auto h=a.allocate_after();require(h==b.allocate_after(),"I/O allocation differs");
+        for(unsigned i=0;i<kExtendedObjectBytes;++i)
+            a.at(h).extended[i]=b.at(h).extended[i]=static_cast<std::uint8_t>(i*17+n);
+    }
+    for(unsigned n=0;n<8;++n) {
+        ObjectBridgeTestAccess::push(cached,true);ObjectBridgeTestAccess::push(oracle,false);
+        require(cached.save_state()==oracle.save_state(),"I/O export changed callbacks/open bus");
+        ObjectBridgeTestAccess::pull(cached,true);ObjectBridgeTestAccess::pull(oracle,false);
+        require(a.save_state()==b.save_state(),"I/O import changed objects");
+        require(cached.save_state()==oracle.save_state(),"I/O import changed callbacks/open bus");
+    }
+    require(ObjectBridgeTestAccess::hits(cached)==0,"I/O records entered WRAM cache");
 }
 void benchmark() {
     ObjectPool pool{1, ObjectMemoryLayout::starfox_ex};
@@ -126,7 +294,12 @@ int main(int argc, char** argv) try {
     test_records(ObjectMemoryLayout::original);
     test_records(ObjectMemoryLayout::starfox_ex);
     test_lists();
+    test_bridge(ObjectMemoryLayout::original);
+    test_bridge(ObjectMemoryLayout::starfox_ex);
+    test_bridge_io(ObjectMemoryLayout::original);
+    test_bridge_io(ObjectMemoryLayout::starfox_ex);
     if (argc == 2 && std::string_view{argv[1]} == "--benchmark") benchmark();
-    std::cout << "PASS original/EX native object records and list generations\n";
+    std::cout << "PASS original/EX native object records, exact bridge reuse, I/O ordering and list generations; cache_bytes="
+        << ObjectBridgeTestAccess::cache_bytes() << '\n';
     return 0;
 } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }

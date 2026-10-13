@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <span>
 #include <unordered_map>
@@ -39,6 +40,7 @@ private:
 
 class MapVm {
     friend class GameSimulation;
+    friend struct ObjectBridgeTestAccess;
 public:
     using ConditionHandler = std::function<bool(MapVm&)>;
     MapVm(
@@ -318,6 +320,26 @@ private:
     std::uint32_t map_addresses_address_{0x0017d0U};
     std::uint32_t number_map_loops_address_{0x0017d8U};
     std::uint32_t map_bank_address_{0x001af7U};
+    // Exact host + WRAM snapshots, adapted from EstebanPdN/starwing-3ds
+    // 01bf4925951515244cdb03d58ad722417919d6ba. No sync-skipping flags or
+    // dirty-generation assumptions: every bridge still validates live bytes.
+    // Keep this bounded scratch off load_state's native thread stack.
+    struct ObjectBridgeSnapshot {
+        GameObject host{};
+        std::array<std::uint8_t,57> base{};
+        std::array<std::uint8_t,kExtendedObjectBytes> extended{};
+        bool valid{},imported{},exportable{};
+    };
+    struct ObjectBridgeCache {
+        std::array<ObjectBridgeSnapshot,kMaximumObjects+1> records{};
+        std::vector<ObjectHandle> active, active_work, free_work;
+        std::uint64_t push_hits{},pull_hits{};
+        ObjectBridgeCache() {
+            active.reserve(kMaximumObjects);active_work.reserve(kMaximumObjects);
+            free_work.reserve(kMaximumObjects);
+        }
+    };
+    std::unique_ptr<ObjectBridgeCache> object_bridge_{std::make_unique<ObjectBridgeCache>()};
     Wdc65816 cpu_;
 };
 

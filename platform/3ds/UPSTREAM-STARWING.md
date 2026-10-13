@@ -171,3 +171,31 @@ newly due phase is not slept through. The cartridge/audio clock is unchanged.
 Host tests cover 100 seconds of alternating 2/12-ms draw jitter, zero-phase
 retries, 30 Hz cadence, catch-up, reset, clock rewind and long uptime. Native
 speed acceptance remains outstanding.
+
+## Object-bridge follow-up
+
+The same reference at `01bf4925951515244cdb03d58ad722417919d6ba`
+(`src/simulation/map_vm.cpp` and `object_pool.cpp`) caches host/native object
+records and reuses exact active/free lists. Our adaptation keeps every routine
+bridge, compares both complete host objects and the live WRAM payload, and
+retains native-pointer fixups. It does not adopt the reference's caller-provided
+skip-synchronization flags or assume that a dirty generation identifies every
+host/native write. Reserved scratch lists avoid repeated allocations; unchanged
+lists do not rebuild pool topology. Record scratch is bounded and heap-owned,
+not placed on `load_state`'s native stack or included in saved states.
+
+Two fidelity guards are additional to the reference idea: the first import
+after export must normalize semantic/extended mirrors, and imported pointer
+words must match a canonical export before that export can be reused. Active
+membership/order changes invalidate snapshots, as do slot reuse and VM restore.
+Only plain WRAM records may be reused. I/O records retain their original access
+order, and every reused record retains the old final open-bus byte.
+
+An independent bytewise bridge checks complete Original/EX pool and CPU states
+through 256 mutation sequences per layout, full/empty pools, list reordering,
+native writes, pointer normalization, inconsistent mirrors, slot reuse, restores
+and malformed lists. Separate I/O fixtures prove that those records never enter
+the cache. Eight real stage probes retain their prior 240-phase pixel digests,
+80 complete audio blocks and source-purity checks. These are correctness checks,
+not a physical-console FPS claim; native timing and sustained mono acceptance
+remain required.

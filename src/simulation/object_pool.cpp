@@ -159,6 +159,27 @@ ObjectHandle ObjectPool::next_active(ObjectHandle handle) const noexcept {
     return is_active(handle) ? slots_[handle].next : 0;
 }
 
+ObjectHandle ObjectPool::next_free(ObjectHandle handle) const noexcept {
+    return valid_handle(handle) ? free_next_[handle] : 0;
+}
+
+bool ObjectPool::lists_match(std::span<const ObjectHandle> active,
+    std::span<const ObjectHandle> free) const noexcept {
+    if (active.size() != active_count_ || free.size() != capacity_ - active_count_) return false;
+    auto handle = first_active_;
+    for (const auto expected : active) {
+        if (!valid_handle(handle) || handle != expected) return false;
+        handle = slots_[handle].next;
+    }
+    if (handle) return false;
+    handle = first_free_;
+    for (const auto expected : free) {
+        if (!valid_handle(handle) || handle != expected) return false;
+        handle = free_next_[handle];
+    }
+    return !handle;
+}
+
 GameObject& ObjectPool::at(ObjectHandle handle) {
     if (!is_active(handle)) {
         throw std::out_of_range{"inactive object handle " + std::to_string(handle)};

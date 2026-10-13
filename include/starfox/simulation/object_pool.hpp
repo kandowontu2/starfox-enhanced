@@ -89,6 +89,10 @@ public:
         const std::vector<ObjectHandle>& free);
     [[nodiscard]] ObjectHandle first_active() const noexcept { return first_active_; }
     [[nodiscard]] ObjectHandle next_active(ObjectHandle handle) const noexcept;
+    [[nodiscard]] ObjectHandle first_free() const noexcept { return first_free_; }
+    [[nodiscard]] ObjectHandle next_free(ObjectHandle handle) const noexcept;
+    [[nodiscard]] bool lists_match(std::span<const ObjectHandle> active,
+        std::span<const ObjectHandle> free) const noexcept;
     [[nodiscard]] std::size_t active_count() const noexcept { return active_count_; }
     [[nodiscard]] std::size_t capacity() const noexcept { return capacity_; }
     // Literal AL_/ALX_ records for the CPU bridge, without per-byte semantic
