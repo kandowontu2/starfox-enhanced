@@ -66,8 +66,8 @@ still required.
 ## Current build and validation
 
 The current frame-pipeline candidate is source
-`0c07c35f0c0b8b4042e0677bcbd832ba4b9cc90d`, from
-[ARM run 38429600664](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38429600664).
+`5256cc508171510680421d7ef7d3eebf520693af`, from
+[ARM run 38431847227](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38431847227).
 It uses the imported Starwing mono renderer for ordinary mono scenes, retains
 the exact native path for cartridge window/colour effects, and removes gameplay
 profile SD writes. The final SPC block overlaps presentation and independent
@@ -138,6 +138,24 @@ sustained 60 FPS or native New-model CPU/cache performance. Input replay has no
 movie errors and reaches planned DSP shutdown/profile flush; complete guest GSP
 retirement remains unverified, so the owned emulator was stopped afterward.
 No incremental hardware test or release is implied.
+
+The model-span follow-up replaces point-by-point opaque/two-ink polygon writes
+with clipped indexed rows. Absolute screen dithering parity, opaque black,
+coverage, layer ownership and recorded/scaled fallbacks are preserved.
+47,571,416 framebuffer comparisons and the existing 4,608-frame polygon oracle
+pass. Original/EX 240-phase checks keep their previous frame digests and
+80 audio blocks. All 51 asset-free host CI tests and the native ARM, shader,
+stack and packaging gates pass.
+
+In the same accuracy-enabled Vulkan/300%-clock sensitivity replay, EX
+background-3 model rasterization decreases from 5.807 to 3.133 ms/call;
+background-51 decreases from 2.896 to 1.755 ms/call. Finishing is broadly
+unchanged (5.499 and 5.160 ms/call). Inclusive loop means are 19.431 and
+17.688 ms, respectively; they are not completed-presentation FPS. Counts,
+poses and window-end labels differ, and unrelated concurrent work remains.
+There are no replay errors, fallback or retry calls. Planned DSP shutdown
+and profile flush occur; guest GSP retirement remains unverified and the owned
+emulator was stopped afterward. Stable mono 60 FPS is still an open gate.
 
 The current candidate removes the EX BG1 staging image and applies the same
 zero-ink/CGRAM-black transparency directly during decoding. The 57,344-byte
