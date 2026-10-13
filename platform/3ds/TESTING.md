@@ -17,9 +17,11 @@ values are preserved. The Stereoscopic 3D menu still controls both. The new
 default increases distant-background depth without moving HUD/menu text or
 changing the one-eye slider-off/New 2DS XL path.
 
-1. The latest source-only candidate is the experimental
+1. The baseline source-only candidate is the experimental
    `StarFoxEnhanced-3ds-test.zip` artifact from
    [ARM run 38468745995](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38468745995).
+   The separate IPO experiment in ARM run 38472933253 is described below;
+   it does not establish the mono 60-FPS target or change the default build.
    R376 remains the hardware-tested baseline, not the latest source candidate.
    Extract the ZIP to the SD card's root, keeping its folder structure. When
    updating an earlier build, replace only the `.3dsx` and `.smdh`; preserve the existing
@@ -407,6 +409,34 @@ alongside their LTO representation; the player still links with IPO. All
 existing instruction/source/size assertions remain unchanged. These component
 object checks do not prove the final LTO-linked player's runtime arithmetic or
 speed, so exact native replay and timing remain required after CI succeeds.
+
+The fat-object follow-up, source `f67451b0` in
+[ARM run 38472933253](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38472933253),
+passes all 52 CI tests (128.72 seconds) and every unchanged native arithmetic,
+shader, stack and packaging gate. Its actual compiler settings retain LTO for
+the CPU/session and append fat-object emission for the SPC/arithmetic probes;
+no Ofast or fast-math is enabled. The verified native image is 2,711,856 bytes.
+It replaces only the existing emulator image, preserving assets and saves.
+
+A nearby repeat of the earlier image measures 58.259/58.571 successful
+whole-frame returns per second in backgrounds 3/51. The IPO image measures
+58.836/58.584, with minimum adjacent same-label windows of 49.092/52.361.
+Logic means are 9.009/10.718 ms versus 9.121/10.982 for the paired baseline;
+audio means are 6.194/6.592 ms in the IPO run. Both valid replays retain the
+accuracy-enabled Vulkan/300%-clock sensitivity settings, have no movie input
+errors or renderer retry/fallback rows, and reach planned DSP shutdown/profile
+flush. The owned hosts are stopped afterward and CPU configuration returns to
+explicit 100%. The unrelated-load, differing-count/window, unimplemented
+New-model CPU/cache, physical-output and guest-GSP limits above still apply.
+This does not resolve sustained mono 60 FPS, so IPO stays experimental and OFF
+by default. Source-update bridge costs remain the next investigation, not
+further stereo tuning or another minor hardware request.
+
+A separate shutdown-logging replay is excluded: a Qt help window reset the
+clock's explicit-selection flag, so its numeric 300 setting was ignored and
+movie input ordering failed. It is not timing, correctness or clean-exit
+evidence. The validation launcher now fails closed unless the requested
+comparison clock is explicitly selected as well as numerically configured.
 
 The earlier direct-overlay candidate removes the EX BG1 staging image and applies the same
 zero-ink/CGRAM-black transparency directly during decoding. The 57,344-byte
