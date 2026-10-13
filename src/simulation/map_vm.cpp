@@ -778,23 +778,21 @@ void MapVm::sync_objects_to_cpu(bool reuse_imported_image) {
             ? original_object_pointer(active[index + 1U]) : 0U);
         cpu_.write16(base + 2U, index != 0
             ? original_object_pointer(active[index - 1U]) : 0U);
-        std::array<std::uint8_t, 57> record{};
-        const auto bytes = std::span{record}.first(object_size_);
-        std::array<std::uint8_t,kExtendedObjectBytes> extended{};
-        const auto extended_bytes=std::span{extended}.first(extended_object_bytes_);
         auto& snapshot=cache.records[handle];
         const auto& object=objects_->at(handle);
         const bool mapped=plain_wram(base+4U,object_size_-4U) && plain_wram(extended_base,extended_object_bytes_);
-        if(mapped && snapshot.valid && snapshot.exportable && snapshot.host==object) {
-            cpu_.read_bytes(base+4U,bytes.subspan(4));
-            cpu_.read_bytes(extended_base,extended_bytes);
-            if(std::equal(bytes.begin()+4,bytes.end(),snapshot.base.begin()+4)
-                && std::equal(extended_bytes.begin(),extended_bytes.end(),snapshot.extended.begin())) {
-                // Reproduce the last byte of the omitted fire-pointer write.
-                (void)cpu_.read8(extended_base+20U);
-                ++cache.push_hits;continue;
-            }
+        if(mapped && snapshot.valid && snapshot.exportable && snapshot.host==object
+            && cpu_.peek_wram_matches(base+4U,
+                std::span{snapshot.base}.first(object_size_).subspan(4)) == true
+            && cpu_.peek_wram_matches(extended_base,
+                std::span{snapshot.extended}.first(extended_object_bytes_)) == true) {
+            // Compare live plain RAM without intermediate stack copies, then
+            // reproduce the last byte of the omitted fire-pointer write.
+            (void)cpu_.read8(extended_base+20U);
+            ++cache.push_hits;continue;
         }
+        std::array<std::uint8_t, 57> record{};
+        const auto bytes = std::span{record}.first(object_size_);
         objects_->read_base_record(handle, bytes);
         // Preserve sequential bus effects and the later reference fixups.
         // Ordinary mapped pages need only one adapter/page lookup per record.
@@ -877,20 +875,25 @@ void MapVm::sync_objects_from_cpu() {
         const auto base = static_cast<std::uint32_t>(original_object_pointer(handle));
         const auto extended_base = extended_object_base_
             + static_cast<std::uint32_t>(handle - 1U) * object_size_;
+        auto& snapshot=cache.records[handle];
+        const bool mapped=plain_wram(base+4U,object_size_-4U) && plain_wram(extended_base,extended_object_bytes_);
+        if(mapped && snapshot.valid && snapshot.imported && snapshot.host==objects_->at(handle)
+            && cpu_.peek_wram_matches(base+4U,
+                std::span{snapshot.base}.first(object_size_).subspan(4)) == true
+            && cpu_.peek_wram_matches(extended_base,
+                std::span{snapshot.extended}.first(extended_object_bytes_)) == true) {
+            // Only immutable, byte-identical plain WRAM may skip the two
+            // stack copies. Reproduce the bytewise import's final bus access;
+            // changed records and I/O retain the complete ordered read path.
+            (void)cpu_.read8(extended_base+20U);
+            ++cache.pull_hits;continue;
+        }
         std::array<std::uint8_t, 57> record{};
         const auto bytes = std::span{record}.first(object_size_);
         cpu_.read_bytes(base + 4U, bytes.subspan(4));
         std::array<std::uint8_t,kExtendedObjectBytes> extended{};
         const auto extended_bytes=std::span{extended}.first(extended_object_bytes_);
-        auto& snapshot=cache.records[handle];
-        const bool mapped=plain_wram(base+4U,object_size_-4U) && plain_wram(extended_base,extended_object_bytes_);
         if(mapped) cpu_.read_bytes(extended_base,extended_bytes);
-        if(mapped && snapshot.valid && snapshot.imported && snapshot.host==objects_->at(handle)
-            && std::equal(bytes.begin()+4,bytes.end(),snapshot.base.begin()+4)
-            && std::equal(extended_bytes.begin(),extended_bytes.end(),snapshot.extended.begin())) {
-            (void)cpu_.read8(extended_base+20U);
-            ++cache.pull_hits;continue;
-        }
         objects_->write_base_record(handle, bytes);
         auto& object = objects_->at(handle);
         object.attached = object_handle(cpu_.read16(base + 6U));

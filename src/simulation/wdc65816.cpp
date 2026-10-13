@@ -2878,6 +2878,19 @@ std::optional<std::uint16_t> Wdc65816::peek_ram16(std::uint32_t address) const n
     return static_cast<uint16_t>(*low | (static_cast<uint16_t>(*high)<<8U));
 }
 
+std::optional<bool> Wdc65816::peek_wram_matches(
+    std::uint32_t address, std::span<const std::uint8_t> expected) const noexcept {
+    if(expected.empty()) return std::nullopt;
+    if(address >= 0x7e0000U && address < 0x800000U
+        && expected.size() <= 0x800000U - address)
+        return std::equal(expected.begin(), expected.end(), impl_->wram.begin() + (address - 0x7e0000U));
+    const auto bank = address >> 16U, offset = address & 0xffffU;
+    if((bank < 0x40U || (bank >= 0x80U && bank < 0xc0U))
+        && offset < 0x2000U && expected.size() <= 0x2000U - offset)
+        return std::equal(expected.begin(), expected.end(), impl_->wram.begin() + offset);
+    return std::nullopt;
+}
+
 void Wdc65816::write8(std::uint32_t address, std::uint8_t value) {
     impl_->write8(address, value);
 }

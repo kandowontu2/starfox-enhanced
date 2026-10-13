@@ -434,13 +434,36 @@ further stereo tuning or another minor hardware request.
 
 The follow-up adds `object_export` and `object_import` timing around the whole
 host-object/65C816 bridge, including canonical-image hits and defensive paths.
-These are child timings inside source logic/strategies, not additional costs
+These are child timings within source advancement, including logic/strategies, not additional costs
 to sum with their parents. With profiling disabled the markers do not read a
 clock or change simulation work. The existing CSV columns and phase indices
 remain stable; the two names are appended. Adding phases does not increase the
 console's 512-KiB diagnostic storage cap: the in-memory buffer now holds 489
 one-second windows (instead of 512), with shutdown-only serialization and no
 gameplay allocation/SD writes. This instrumentation is not a performance fix.
+
+The exact native timing image from source `76aea9b9` passes all 53 CI tests
+(107.19 seconds), including enabled/disabled timing and complete Original/EX
+object-state parity. All mandatory native arithmetic, shader, stack and package
+gates pass. Its accuracy-enabled Vulkan/explicit-300%-clock sensitivity replay
+has no movie errors or renderer retry/fallback and reaches planned DSP shutdown
+and buffered profile flush. The owned host is stopped afterward; guest GSP
+retirement and physical New-model CPU/cache timing remain unverified.
+Successful whole-frame return rates remain 58.258/58.400 in backgrounds 3/51,
+with minimum adjacent same-label windows 49.053/52.566. This is not mono 60 FPS
+acceptance. In the ordinary slow background-51 window, export/import occupy
+24.966/54.390 ms across 619 calls each; logic totals 161.957 ms across 13 ticks.
+These parent/child durations must not be added together.
+
+The next source change compares unchanged cached records directly with current
+plain WRAM, avoiding the sequential read/copy into two temporary records before
+comparison. The narrow peek rejects I/O, ROM, other RAM and mapping boundaries;
+it returns no borrowed memory and changes no bus state. A hit still reproduces
+the original final bus byte. Changed records, list validation/repair, host
+mutation, canonicalization, restore and I/O ordering retain their existing paths.
+Independent adapter checks cover mirrors, mismatches, writes, restore, boundary
+rejection and complete CPU/I/O state. Performance improvement must be measured
+on the newly compiled native image, not inferred from this implementation.
 
 A separate shutdown-logging replay is excluded: a Qt help window reset the
 clock's explicit-selection flag, so its numeric 300 setting was ignored and

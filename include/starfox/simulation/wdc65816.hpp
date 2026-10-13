@@ -124,6 +124,11 @@ public:
     // Unsupported/ROM/I/O addresses return nullopt rather than reading them.
     [[nodiscard]] std::optional<std::uint8_t> peek_ram8(std::uint32_t address) const noexcept;
     [[nodiscard]] std::optional<std::uint16_t> peek_ram16(std::uint32_t address) const noexcept;
+    // Compare a nonempty contiguous plain-WRAM record without copying it or
+    // touching the bus. nullopt rejects I/O/ROM/other RAM and mapping boundaries.
+    // Callers eliding bus reads must still reproduce their final open-bus byte.
+    [[nodiscard]] std::optional<bool> peek_wram_matches(
+        std::uint32_t address, std::span<const std::uint8_t> expected) const noexcept;
     void write8(std::uint32_t address, std::uint8_t value);
     void write16(std::uint32_t address, std::uint16_t value);
     [[nodiscard]] bool load_cartridge_ram(

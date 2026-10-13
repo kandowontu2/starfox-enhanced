@@ -127,6 +127,44 @@ void adapter_oracle() {
         for (unsigned length : {0U, 1U, 57U, 130U}) transfer(address, length);
     for (auto address : {0x2110U, 0x213aU, 0x2140U, 0x802140U, 0x4300U}) transfer(address, 6);
 }
+void wram_match_oracle() {
+    const starfox::assets::RomImage rom(std::vector<std::uint8_t>(0x20000, 0xea));
+    Wdc65816 cpu(rom);
+    std::array<std::uint8_t, 130> bytes{};
+    for(unsigned i=0;i<bytes.size();++i) bytes[i]=std::uint8_t(i*73U+19U);
+    for(auto address : {0x00338U,0x001ffeU,0x3f0338U,0x800000U,0x800338U,0xbf0338U,
+            0x7e0338U,0x7efffdU,0x7fffffU}) {
+        const auto length=address==0x001ffeU?2U:address==0x7fffffU?1U:130U;
+        const auto expected=std::span{bytes}.first(length);
+        cpu.write_bytes(address,expected);
+        // Match peeks must preserve an unrelated open-bus value, not merely
+        // leave the expected record's last byte on the bus.
+        cpu.write8(0x7e0200U,0xa7U);
+        const auto before=cpu.save_state();
+        require(cpu.peek_wram_matches(address,expected)==true, "Plain WRAM/mirror match missed");
+        require(cpu.save_state()==before, "WRAM match changed CPU/bus state");
+        bytes[length-1]^=0x80;
+        require(cpu.peek_wram_matches(address,expected)==false, "WRAM mismatch accepted");
+        require(cpu.save_state()==before, "WRAM mismatch changed CPU/bus state");
+        cpu.write8(address+length-1,bytes[length-1]);
+        require(cpu.peek_wram_matches(address,expected)==true, "Live WRAM write was not observed");
+        cpu.load_state(before);
+        require(cpu.peek_wram_matches(address,expected)==false, "WRAM peek retained a stale restored pointer");
+        bytes[length-1]^=0x80;
+        require(cpu.peek_wram_matches(address,expected)==true, "Restored WRAM match missed");
+    }
+    const auto before=cpu.save_state();
+    for(auto address : {0x002000U,0x002140U,0x402140U,0x802140U,0x008000U,
+            0x700000U,0x710000U,0x806000U,0xc00000U,0x1000000U,0xffffffffU})
+        require(!cpu.peek_wram_matches(address,std::span{bytes}.first(1)).has_value(),
+            "WRAM-only peek accepted I/O/ROM/other RAM or an invalid bank");
+    for(auto address : {0x001fffU,0x801fffU,0xbf1fffU,0x7fffffU})
+        require(!cpu.peek_wram_matches(address,std::span{bytes}.first(2)).has_value(),
+            "WRAM-only peek crossed an unmapped boundary");
+    require(!cpu.peek_wram_matches(0x7e0338U,{}).has_value(), "Empty comparison bypassed WRAM validation");
+    require(cpu.save_state()==before && cpu.take_apu_port_writes().empty()
+        && cpu.take_msu_register_writes().empty(), "Rejected WRAM peeks changed state or I/O queues");
+}
 void benchmark() {
     std::array<std::uint8_t, 57> bytes{}; for (unsigned i = 0; i < bytes.size(); ++i) bytes[i] = i;
     for (bool bulk : {false, true, true, false}) {
@@ -149,7 +187,7 @@ void benchmark() {
 } // namespace
 int main(int argc, char** argv) try {
     if (argc == 2 && std::string_view(argv[1]) == "--benchmark") { benchmark(); return 0; }
-    byte_oracle(); adapter_oracle();
+    byte_oracle(); adapter_oracle(); wram_match_oracle();
     std::cout << "PASS " << checks << " pinned-bus byte/page/IO/alias/wrap/complete-adapter-state checks\n";
     return 0;
 } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
