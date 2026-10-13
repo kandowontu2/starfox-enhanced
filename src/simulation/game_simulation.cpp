@@ -4400,6 +4400,12 @@ void GameSimulation::begin_planet_selection_sequence() {
     pepper_brightness_ = 0U;
 }
 
+bool GameSimulation::video_phase_independent_of_apu() const noexcept {
+    return (flow_state_ == GameFlowState::gameplay || flow_state_ == GameFlowState::training)
+        && frontend_phase_ == FrontendPhase::none && !menu_preview_
+        && !runtime_options_open_ && !deferred_msu_track_;
+}
+
 void GameSimulation::present_frame() {
     if (!runtime_options_open_ && briefing_voice_frames_ != 0U) --briefing_voice_frames_;
     if (menu_preview_) {

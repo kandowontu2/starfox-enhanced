@@ -219,6 +219,92 @@ void audio_render_overlap(const assets::RomImage& rom,const assets::SymbolMap& s
         "Three-way overlap parity never dispatched the distinct effects worker");
 #endif
 }
+void audio_video_pipeline(const assets::RomImage& rom,const assets::SymbolMap& symbols) {
+    // Hold the packet until finish(), so a fast host worker cannot hide an
+    // accidental raster wait. Real parallel execution has a separate oracle.
+    struct HeldPacketExecutor final : audio::StemExecutor {
+        audio::StemTask packet{};
+        audio::StemExecutor* delegate{};
+        unsigned started{},finished{};
+        void execute(audio::StemTask foreground,audio::StemTask background) override {
+            if(packet.run) throw std::logic_error("Joined work overlapped a held packet");
+            if(delegate) delegate->execute(foreground,background);
+            else {foreground.run(foreground.context);background.run(background.context);}
+        }
+        bool begin(audio::StemTask task) override {
+            if(packet.run) throw std::logic_error("Second packet borrowed the first packet's writes");
+            if(delegate && !delegate->begin(task)) throw std::runtime_error("Parallel pipeline lost its native worker");
+            packet=task;++started;return true;
+        }
+        void finish() override {
+            if(!packet.run) return;
+            const auto work=packet;packet={};++finished;
+            if(delegate) delegate->finish();else work.run(work.context);
+        }
+    };
+    for(auto timing:{simulation::TimingMode::original_speed,simulation::TimingMode::unlocked_20_fps}) {
+        HeldPacketExecutor worker;
+        GameSessionOptions options;options.preferences=GamePreferences{};
+        options.preferences->timing=timing;
+        std::vector<std::int16_t> expected_pcm,actual_pcm;
+        GameSession reference(rom,symbols,[&](auto pcm){expected_pcm.insert(expected_pcm.end(),pcm.begin(),pcm.end());},"LEVEL1_1",{},options);
+#if defined(STARFOX_3DS_CHECK_PARALLEL_AUDIO)
+        worker.delegate=checked_stem_executor;
+        options.frame_audio_stem_executor=checked_frame_audio_stem_executor;
+#endif
+        options.stem_executor=&worker;
+        GameSession pipelined(rom,symbols,[&](auto pcm){actual_pcm.insert(actual_pcm.end(),pcm.begin(),pcm.end());},"LEVEL1_1",{},options);
+        unsigned unjoined_rasters{};
+        for(unsigned frame=0;frame<72;++frame) {
+            const auto held=frame%17<3?input::ButtonMask(input::a):input::ButtonMask{};
+            const bool borrowed=worker.packet.run;
+            const bool safe=pipelined.game().video_phase_independent_of_apu();
+            const auto completed=worker.finished;
+            const auto expected=reference.advance(timestamp(frame),held);
+            const auto actual=pipelined.advance(timestamp(frame),held,true,{},true);
+            require(actual.video_phases==expected.video_phases && actual.logic_ticks==expected.logic_ticks
+                && actual.audio_blocks==expected.audio_blocks,"Video pipeline changed source/SPC cadence");
+            pipelined.run_frame_work([] {},false);
+            const auto expected_view=reference.presentation(0,false);
+            const auto actual_view=pipelined.presentation(0,false);
+            require(*expected_view.raster->ppu==*actual_view.raster->ppu
+                && expected_view.current->flow==actual_view.current->flow
+                && expected_view.interpolation_alpha==actual_view.interpolation_alpha,
+                "Unacknowledged SPC packet changed presented source raster");
+            if(borrowed && safe && actual.video_phases && !actual.logic_ticks && !actual.audio_blocks) {
+                require(worker.finished==completed && worker.packet.run,
+                    "SPC-independent raster waited for the held audio packet");
+                ++unjoined_rasters;
+            }
+            if(worker.packet.run) require(!pipelined.state_available(),"Borrowed audio packet exposed a save timeline");
+            // Alternate explicit completion after two rasters with packets
+            // left borrowed until the next source-logic/new-packet barrier.
+            if(frame%6==5) {
+                pipelined.run_frame_work([] {});
+                require(expected_pcm==actual_pcm && reference.save_state()==pipelined.save_state(),
+                    "Cross-raster pipeline changed PCM, VM/SPC state or acknowledgements");
+            }
+        }
+        require(unjoined_rasters>=12 && worker.started>=23 && worker.finished==worker.started,
+            "Video pipeline fixture did not exercise sustained held-packet ownership");
+        std::int64_t time=timestamp(71);
+        for(unsigned barrier=0;barrier<4;++barrier) {
+            for(unsigned phase=0;phase<6 && !worker.packet.run;++phase) {
+                time+=16'666'667;reference.advance(time,0);
+                pipelined.advance(time,0,true,{},true);pipelined.run_frame_work([] {},false);
+            }
+            require(worker.packet.run,"Barrier fixture failed to retain a complete packet");
+            if(barrier==0) {reference.advance(time,0);pipelined.advance(time,0,true,{},true);}
+            if(barrier==1) {reference.advance(time,0,false);pipelined.advance(time,0,false,{},true);}
+            if(barrier==2) {--time;reference.advance(time,0);pipelined.advance(time,0,true,{},true);}
+            if(barrier==3) {require(reference.toggle_runtime_options()==pipelined.toggle_runtime_options(),"Pipeline options action diverged");}
+            require(!worker.packet.run && expected_pcm==actual_pcm && reference.game().save_state()==pipelined.game().save_state()
+                && reference.audio().save_state()==pipelined.audio().save_state(),"Host handoff failed to retire/acknowledge the borrowed packet");
+            if(barrier==1 || barrier==2) {reference.advance(time,0);pipelined.advance(time,0,true,{},true);}
+        }
+    }
+    std::cout<<"  Held SPC packet: nonblocking gameplay rasters, source/packet barriers, original/unlocked timing, PCM/state equality and host handoffs checked\n";
+}
 void native_depth_preferences(const assets::RomImage& rom,const assets::SymbolMap& symbols) {
     for(const auto map:{"BOOT","LEVEL1_1"}) {
         CheckedSession fresh(rom,symbols,[](auto){},map);
@@ -1663,6 +1749,7 @@ int main(int argc,char** argv) {
 #endif
         const bool states_only=argc==4 && std::string_view(argv[3])=="--states-only";
         const bool overlap_only=argc==4 && std::string_view(argv[3])=="--audio-render-overlap";
+        const bool pipeline_only=argc==4 && std::string_view(argv[3])=="--audio-video-pipeline";
         const bool capabilities_only=argc==4 && std::string_view(argv[3])=="--capabilities-only";
         const bool depth_only=argc==4 && std::string_view(argv[3])=="--native-depth-only";
         const bool sweep=argc==4 && std::string_view(argv[3])=="--stage-sweep";
@@ -1675,9 +1762,13 @@ int main(int argc,char** argv) {
         const bool death_route=argc==4 && std::string_view(argv[3])=="--death-source-route";
         const bool continue_yes=argc==4 && std::string_view(argv[3])=="--continue-yes-source-route";
         const bool continue_no=argc==4 && std::string_view(argv[3])=="--continue-no-source-route";
-        if(argc!=3 && !states_only && !overlap_only && !capabilities_only && !depth_only && !sweep && !fortuna_route && !corneria_route && !carrier_route && !runtime_editors && !editor_chords && !fps_chords && !death_route && !continue_yes && !continue_no && !(argc==5 && std::string_view(argv[3])=="--capture"))
-            throw std::invalid_argument("Usage: game_session_check ROM SYMBOLS [--capture DIRECTORY | --states-only | --audio-render-overlap | --capabilities-only | --native-depth-only | --stage-sweep | --fortuna-source-route | --corneria-source-route | --attack-carrier-source-route | --runtime-editor-parity | --editor-chords | --fps-chords | --death-source-route | --continue-yes-source-route | --continue-no-source-route]");
+        if(argc!=3 && !states_only && !overlap_only && !pipeline_only && !capabilities_only && !depth_only && !sweep && !fortuna_route && !corneria_route && !carrier_route && !runtime_editors && !editor_chords && !fps_chords && !death_route && !continue_yes && !continue_no && !(argc==5 && std::string_view(argv[3])=="--capture"))
+            throw std::invalid_argument("Usage: game_session_check ROM SYMBOLS [--capture DIRECTORY | --states-only | --audio-render-overlap | --audio-video-pipeline | --capabilities-only | --native-depth-only | --stage-sweep | --fortuna-source-route | --corneria-source-route | --attack-carrier-source-route | --runtime-editor-parity | --editor-chords | --fps-chords | --death-source-route | --continue-yes-source-route | --continue-no-source-route]");
         const auto rom=assets::RomImage::load(argv[1]);const auto symbols=assets::SymbolMap::load(argv[2]);
+        if(pipeline_only) {
+            audio_video_pipeline(rom,symbols);
+            std::cout<<"3DS cross-raster audio pipeline: "<<checks<<" checks passed; scheduling/source parity, not console FPS\n";return 0;
+        }
         if(depth_only) {
             native_depth_preferences(rom,symbols);
             std::cout<<"3DS native depth preferences: "<<checks<<" checks passed; host source/state parity, not physical stereo acceptance\n";return 0;

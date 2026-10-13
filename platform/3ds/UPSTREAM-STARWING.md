@@ -122,14 +122,28 @@ persistent executor runs the complete, unchanged SPC block in its background
 task and presentation on the owner thread, then joins both before submitting
 PCM or acknowledging the source ports. The original joined mode remains the
 default host API. Native presentation now permits that same complete block to
-continue across the LCD idle interval; the next `advance()` joins it before
-any video phase, including duplicate/focus-loss calls. It cannot overlap a
-later source phase, state save or session replacement. Earlier audio blocks
+continue across the LCD idle interval and ordinary gameplay/training raster
+updates that do not consume SPC acknowledgements. The source tick and the
+next SPC packet remain barriers, as do frontend/native handoffs, duplicate or
+rewound timestamps, focus loss and runtime-options entry. It cannot overlap a
+later source logic tick, state save or session replacement. Earlier audio blocks
 in a source catch-up batch retain their synchronous acknowledgements. Denied
 core-2 allocation retains a serial fallback, and the default host session path
 is unchanged. Original and EX parity checks compare every PCM sample and the
 complete VM/SPC timeline against that synchronous path. This is not a measured
 console performance claim or permission to drop sound commands.
+
+The cross-raster follow-up uses the later reference's
+`game_3ds.cpp` at `f357f9369cc1ab674fb3a87066434fd61c34bbf1`, which waits
+before a source tick or new audio packet rather than every intervening display
+phase. Our conservative simulation predicate enables this only in ordinary
+gameplay/training with no frontend, preview, runtime-options or deferred-MSU
+handoff. The `--audio-video-pipeline` oracle deliberately holds packets until
+owner completion to prove raster calls do not wait, then compares every PCM
+sample and full VM/SPC state with the synchronous owner at explicit barriers.
+The parallel variant exercises the actual executor and its distinct effects
+worker. Both Original and EX and both timing modes remain test targets; no
+source/PCM cadence is traded for output rate.
 
 The reference's APT-budgeted core-1 stem also motivates an optional, distinct
 effects worker within our joined frame-audio task. Core 2 renders music, that

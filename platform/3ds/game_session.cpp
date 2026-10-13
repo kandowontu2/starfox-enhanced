@@ -301,9 +301,12 @@ GameAdvance GameSession::advance(std::int64_t time,input::ButtonMask held,bool f
     if(failed_) throw std::runtime_error("Reconstruct 3DS game after a failed source/audio tick");
     if(frame_work_active_) throw std::logic_error("Cannot advance source during overlapping frame work");
     if(time<0) throw std::invalid_argument("Invalid 3DS monotonic frame time");
-    // Callers that skip presentation still finish a previously deferred block
-    // before any new source phase can read the SPC output ports.
-    if(deferred_audio_) run_frame_work([] {});
+    // A complete packet may remain on the worker through gameplay's two
+    // intervening raster phases. Those phases read WRAM/PPU, not SPC ports.
+    // Explicit barriers (including duplicate/rewind calls) still drain it.
+    if(deferred_audio_ && (!overlap_frame_audio || !focused
+        || !game_.video_phase_independent_of_apu() || !previous_time_ || time<=*previous_time_))
+        finish_frame_audio();
     GameAdvance result;result.requested_experience=requested_experience_;
     result.requested_preview=requested_preview_;result.start_after_preview=start_after_preview_;
     result.requested_settings_reset=requested_settings_reset_;
@@ -354,11 +357,15 @@ GameAdvance GameSession::advance(std::int64_t time,input::ButtonMask held,bool f
     fraction_=result.raster_fraction=batch.interpolation_alpha;
     try {
         for(unsigned phase=0;phase<batch.simulation_steps;++phase) {
+            if(deferred_audio_ && !game_.video_phase_independent_of_apu()) finish_frame_audio();
             {
                 STARFOX_3DS_FRAME_PHASE(video);
                 prepare_pace_shapes();game_.present_frame();++result.video_phases;
             }
             if(game_.logic_tick_ready()) {
+                // No source tick may observe stale SMP acknowledgements, nor
+                // append to the vector still borrowed by the previous packet.
+                if(deferred_audio_) finish_frame_audio();
                 const bool runtime=game_.runtime_options_open(),paused=game_.paused();
                 auto controls=GameMenu::filter(game_,input_.consume());
                 const auto previous_output_rate=game_.presentation_fps();
@@ -432,6 +439,10 @@ GameAdvance GameSession::advance(std::int64_t time,input::ButtonMask held,bool f
                 }
             }
             if(!game_.runtime_options_open() && ++audio_phase_==3) {
+                // Original FX pacing can make logic less frequent than SPC.
+                // Retire the previous packet before producing another even
+                // when this phase did not have a source tick.
+                if(deferred_audio_) finish_frame_audio();
                 // Only the final phase can overlap rendering. Earlier blocks
                 // in a catch-up batch acknowledge ports before the next video
                 // phase, exactly as in the ordinary synchronous source path.

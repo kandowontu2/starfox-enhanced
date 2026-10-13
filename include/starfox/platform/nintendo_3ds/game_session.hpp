@@ -89,8 +89,10 @@ public:
     // must not advance/replace the session or inspect the mutable SPC owner.
     // By default PCM/ports finish before returning. Native presentation can
     // leave audio running across the idle interval with complete_audio=false;
-    // advance() joins it before *any* next source phase. Saves remain disabled
-    // while pending, and destruction joins before retiring borrowed storage.
+    // Gameplay/training's SPC-independent raster phases may also overlap it;
+    // advance() joins before a source tick, next packet or frontend handoff.
+    // Duplicate/rewind/focus-loss calls drain it, saves remain disabled while
+    // pending, and destruction joins before retiring borrowed storage.
     void run_frame_work(audio::StemTask work,bool complete_audio=true);
     template<class Work> requires std::is_invocable_v<Work&>
     void run_frame_work(Work&& work,bool complete_audio=true) {
