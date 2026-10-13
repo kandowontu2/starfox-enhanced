@@ -320,6 +320,13 @@ void pass_memory_dependencies() {
         const unsigned depth=layer==PpuLayer::bg3?2U:layer==PpuLayer::bg1 && mode==3?8U:4U;
         const unsigned character_bytes=1024U*depth*8U;
         const unsigned map_bytes=2048U*((size&1U)?2U:1U)*((size&2U)?2U:1U);
+        // Both character-bank endpoints below must actually be referenced;
+        // unused characters are deliberately not layer dependencies anymore.
+        for(const auto [entry,character]:std::array<std::array<unsigned,2>,2>{{{0,0},{map_bytes/2-1,1023}}}) {
+            const unsigned at=(map*2+entry*2)&65535U;
+            ppu->vram[at]=std::uint8_t(character);
+            ppu->vram[(at+1)&65535U]=std::uint8_t((ppu->vram[(at+1)&65535U]&0xfcU)|(character>>8));
+        }
         const auto contains=[](unsigned address,unsigned first,unsigned count) {
             return ((address-first)&65535U)<count;
         };
@@ -397,6 +404,57 @@ void pass_memory_dependencies() {
     changed=std::make_shared<simulation::SnesPpuState>(*changed);changed->tunnel_scene=true;check(owner,changed,batch);
     changed=std::make_shared<simulation::SnesPpuState>(*changed);changed->mosaic=0x32;check(owner,changed,batch);
     changed=std::make_shared<simulation::SnesPpuState>(*changed);changed->bg2_scroll_x=-511;check(owner,changed,batch);
+}
+void referenced_character_cache() {
+    const auto plan=plan_frame(1,true,ScreenUse::world);
+    for(const auto layer:{PpuLayer::bg1,PpuLayer::bg2,PpuLayer::bg3})
+    for(unsigned size=0;size<4;++size) for(bool large:{false,true}) for(bool wrap:{false,true}) {
+        auto ppu=std::make_shared<simulation::SnesPpuState>();
+        const unsigned depth=layer==PpuLayer::bg3?2:layer==PpuLayer::bg1?8:4;
+        const unsigned characters=wrap?0x7ff0:0x4000,map=0x2000;
+        ppu->background_mode=depth==8?3:1;
+        ppu->main_screen=layer==PpuLayer::bg1?1:layer==PpuLayer::bg2?2:4;
+        if(layer==PpuLayer::bg1) {
+            ppu->bg1_character_base=characters;ppu->bg1_screen_base=map;
+            ppu->bg1_screen_size=size;ppu->bg1_tile_size_16=large;
+        } else if(layer==PpuLayer::bg2) {
+            ppu->bg2_character_base=characters;ppu->bg2_screen_base=map;
+            ppu->bg2_screen_size=size;ppu->bg2_tile_size_16=large;
+        } else {
+            ppu->bg3_character_base=characters;ppu->bg3_screen_base=map;
+            ppu->bg3_screen_size=size;ppu->bg3_tile_size_16=large;
+        }
+        for(unsigned i=0;i<256;++i) ppu->cgram[i]=std::uint16_t((i*131)&32767);
+        for(const unsigned character:{1023U,0U,15U,16U}) tile(*ppu,characters,character,1,depth);
+        const unsigned entries=1024U*((size&1)?2:1)*((size&2)?2:1);
+        for(unsigned i=0;i<entries;++i) {
+            const unsigned at=map*2+i*2;
+            ppu->vram[at]=255;ppu->vram[at+1]=std::uint8_t(3|((i%4)<<6));
+        }
+        PpuBatch batch{{{layer}},PicaSpace::screen,true};PicaRaster owner;
+        owner.prepare(ppu,batch,plan);
+        auto changed=std::make_shared<simulation::SnesPpuState>(*ppu);
+        changed->vram[(characters*2+400*depth*8)&65535]^=255;
+        const auto before=owner.work();
+        const auto cached=owner.prepare(changed,batch,plan);PicaRaster fresh;
+        same_raster(cached,fresh.prepare(changed,batch,plan));
+        require(owner.work().decodes==before.decodes && owner.work().colour_updates==before.colour_updates,
+            "Unused in-bank character rebuilt background pixels");
+        ppu=changed;
+        for(const unsigned character:large?std::vector<unsigned>{1023,0,15,16}:std::vector<unsigned>{1023}) {
+            changed=std::make_shared<simulation::SnesPpuState>(*ppu);
+            changed->vram[(characters*2+(character+1)*depth*8-1)&65535]^=255;
+            const auto work=owner.work();PicaRaster oracle;
+            same_raster(owner.prepare(changed,batch,plan),oracle.prepare(changed,batch,plan));
+            require(owner.work().decodes==work.decodes+1,"Referenced character/subtile wrap left stale raster ink");
+            ppu=changed;
+        }
+        changed=std::make_shared<simulation::SnesPpuState>(*ppu);
+        changed->vram[map*2+(entries-1)*2]^=128;
+        const auto work=owner.work();PicaRaster oracle;
+        same_raster(owner.prepare(changed,batch,plan),oracle.prepare(changed,batch,plan));
+        require(owner.work().decodes==work.decodes+1,"Offscreen map-page change escaped dependency checking");
+    }
 }
 void optical_coverage() {
     auto ppu=source();const auto untouched=*ppu;Canvas lower;PicaRaster renderer;
@@ -830,5 +888,5 @@ void window_masks() {
     rejected([&]{pica_screen_scissor({0,0,0,240});},"Empty effect scissor accepted");
 }
 }
-int main() try {game_effect_flow();raster();pass_memory_dependencies();optical_coverage();disjoint_scenery_coverage();transparent_priority_crop();unique_sky_halves();composition();corridor_batch_contract();compact_strip_contract();screen_sprite_crop();window_masks();colour_effects();std::cout<<checks<<" 3DS native PPU/cache/composition checks passed; NOT full game/hardware acceptance\n";}
+int main() try {game_effect_flow();raster();pass_memory_dependencies();referenced_character_cache();optical_coverage();disjoint_scenery_coverage();transparent_priority_crop();unique_sky_halves();composition();corridor_batch_contract();compact_strip_contract();screen_sprite_crop();window_masks();colour_effects();std::cout<<checks<<" 3DS native PPU/cache/composition checks passed; NOT full game/hardware acceptance\n";}
 catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}

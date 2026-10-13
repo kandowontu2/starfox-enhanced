@@ -27,6 +27,19 @@ durations are not additive either. Source catch-up blocks before the final
 phase remain synchronous. A host parity test establishes unchanged samples
 and source state, not physical-console frame rate.
 
+Background cache dependencies now include the complete configured tilemap and
+every character it references, rather than all 1024 characters in its bank.
+All map pages, tile priorities and offscreen entries are conservative
+dependencies; 16x16 tiles also retain the +1/+16/+17 subcharacters with 10-bit
+wrap. HDMA tables, palette/subtraction, source scroll, ownership and renderer
+policy checks are unchanged. An unchanged bank keeps its fast full-range byte
+comparison; a changed bank uses bounded, allocation-free dependency scratch.
+Changes to unrelated in-bank model/HUD artwork do not force a background
+traversal, recolour or texture replacement. Independent pixel/ownership tests
+exercise 2/4/8-bpp banks, all map sizes, address wrapping and uniform-merging
+invalidation. This does not establish how often a real stage benefits or its
+console frame rate.
+
 The original twenty-five phase names and enum indices stay unchanged. The
 source/audio/raster detail phases and five appended GPU phases distinguish
 the following work:

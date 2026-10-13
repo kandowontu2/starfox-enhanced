@@ -1,14 +1,16 @@
 // Tile atlas/HDMA quad integration inspired by Esteban PDN's starwing-3ds.
 // Adapted for our exact RGB8, source-layer stencil and shared-eye PICA owner.
 #include "starfox/platform/nintendo_3ds/pica_bg2_tiles.hpp"
+#include "starfox/platform/nintendo_3ds/ppu_tile_dependencies.hpp"
 #include <cstring>
 
 namespace starfox::platform::nintendo_3ds {
 namespace {
 bool same_range(const simulation::SnesPpuState& a,const simulation::SnesPpuState& b,unsigned first,unsigned count) {
-    first&=65535;const unsigned head=std::min(count,65536-first);
-    return std::memcmp(a.vram.data()+first,b.vram.data()+first,head)==0
-        && std::memcmp(a.vram.data(),b.vram.data(),count-head)==0;
+    return same_ppu_vram_range(a,b,first,count);
+}
+bool same_characters(const simulation::SnesPpuState& a,const simulation::SnesPpuState& b) {
+    return same_background_tiles(a,b,a.bg2_character_base,a.bg2_screen_base,a.bg2_screen_size,4,a.bg2_tile_size_16);
 }
 bool same_geometry(const simulation::SnesPpuState& a,const simulation::SnesPpuState& b) {
     const unsigned pages=((a.bg2_screen_size&1)?2:1)*((a.bg2_screen_size&2)?2:1);
@@ -22,7 +24,7 @@ bool same_geometry(const simulation::SnesPpuState& a,const simulation::SnesPpuSt
         && (!a.bg2_scanline_scroll_enabled || a.bg2_scanline_scroll_y==b.bg2_scanline_scroll_y)
         && (!a.bg2_vertical_offsets_enabled || (same_range(a,b,0x5f40,64)
             && a.bg2_character_base==b.bg2_character_base
-            && same_range(a,b,a.bg2_character_base*2,32768)))
+            && same_characters(a,b)))
         && same_range(a,b,a.bg2_screen_base*2,pages*2048);
 }
 }
@@ -53,7 +55,7 @@ std::optional<PicaFrame> PicaBg2Tiles::prepare(std::shared_ptr<const simulation:
     const auto scroll=pass.scroll.value_or(std::array{source->bg2_scroll_x,source->bg2_scroll_y});
     bool decode=!source_ || batch!=batch_ || complete_roll_!=complete_plan
         || !same_geometry(*source_,*source) || (complete_plan && (source_->bg2_character_base!=source->bg2_character_base
-            || !same_range(*source_,*source,source->bg2_character_base*2,32768)));
+            || !same_characters(*source_,*source)));
     // Slider-only presentations may need less guard than an already decoded
     // frame. Retain sufficient coverage, as PicaRaster does, rather than
     // alternating source traversals while the game's PPU remains unchanged.
@@ -83,7 +85,7 @@ std::optional<PicaFrame> PicaBg2Tiles::prepare(std::shared_ptr<const simulation:
     const bool rekey=decode && keys!=keys_;
     const bool recolour=!source_ || rekey || brightness_!=brightness || subtract_!=subtract
         || source_->cgram!=source->cgram || source_->bg2_character_base!=source->bg2_character_base
-        || !same_range(*source_,*source,source->bg2_character_base*2,32768);
+        || !same_characters(*source_,*source);
     std::vector<std::uint8_t> pixels;
     if(recolour) {
         pixels.assign(std::size_t(atlas_width)*atlas_height*4,0);

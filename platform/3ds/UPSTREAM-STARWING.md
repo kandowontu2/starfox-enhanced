@@ -72,7 +72,7 @@ accurate SPC stems remain unchanged until a streaming adapter is accepted.
 ## Frame-pipeline follow-up
 
 The later reference at `01bf4925951515244cdb03d58ad722417919d6ba`
-(`game_3ds.cpp`, 2026-10-16) overlaps a complete audio update with rendering.
+(`game_3ds.cpp`) overlaps a complete audio update with rendering.
 That scheduling idea motivates our optional `GameSession::run_frame_work`
 path; no additional reference implementation or assets are copied. Our
 persistent executor runs the complete, unchanged SPC block in its background

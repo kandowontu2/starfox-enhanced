@@ -314,6 +314,38 @@ void complete_palette_sweep() {
     require(owner.work().decodes==1 && owner.work().colour_updates==512,
         "Complete palette sweep reran tile geometry or missed a source fade");
 }
+void referenced_character_cache() {
+    for(bool mode1:{false,true}) for(bool large:{false,true}) for(bool wrap:{false,true}) {
+        auto ppu=std::make_shared<simulation::SnesPpuState>();
+        ppu->background_mode=mode1?1:2;ppu->main_screen=2;
+        ppu->bg2_screen_base=0x2000;ppu->bg2_character_base=wrap?0x7ff0:0x4000;
+        ppu->bg2_screen_size=3;ppu->bg2_tile_size_16=large;
+        for(unsigned i=0;i<256;++i) ppu->cgram[i]=std::uint16_t((i*131)&32767);
+        for(const unsigned character:{1023U,0U,15U,16U}) for(unsigned y=0;y<8;++y)
+            ppu->vram[(ppu->bg2_character_base*2+character*32+y*2)&65535]=255;
+        for(unsigned i=0;i<4096;++i) {
+            ppu->vram[0x4000+i*2]=255;ppu->vram[0x4001+i*2]=std::uint8_t(3|((i%4)<<6));
+        }
+        PpuBatch batch;batch.space=PicaSpace::scenery;batch.expand_horizontal=true;
+        batch.passes.push_back({PpuLayer::bg2});
+        const auto plan=plan_frame(1,true,ScreenUse::world);PicaBg2Tiles owner;
+        parity(ppu,batch,plan,15,0,owner,true);
+        auto changed=std::make_shared<simulation::SnesPpuState>(*ppu);
+        changed->vram[(ppu->bg2_character_base*2+400*32)&65535]^=255;
+        const auto before=owner.work();parity(changed,batch,plan,15,0,owner,true);
+        require(owner.work().decodes==before.decodes && owner.work().colour_updates==before.colour_updates,
+            "Unused in-bank character rebuilt complete BG2 geometry/atlas");
+        ppu=changed;
+        for(const unsigned character:large?std::vector<unsigned>{1023,0,15,16}:std::vector<unsigned>{1023}) {
+            changed=std::make_shared<simulation::SnesPpuState>(*ppu);
+            changed->vram[(ppu->bg2_character_base*2+character*32)&65535]^=255;
+            const auto work=owner.work();parity(changed,batch,plan,15,0,owner,true);
+            require(owner.work().decodes==work.decodes+1 && owner.work().colour_updates==work.colour_updates+1,
+                "Referenced subtile changed uniform merging without rebuilding complete atlas");
+            ppu=changed;
+        }
+    }
+}
 void palette_benchmark() {
     const auto ppu=fixture(0);PpuBatch batch;batch.passes.push_back({PpuLayer::bg2});
     PicaBg2Tiles owner;const auto plan=plan_frame(0,true,ScreenUse::world);
@@ -360,7 +392,7 @@ int main(int argc,char** argv) try {
         }
         require(ppu->vram==unchanged.vram && ppu->cgram==unchanged.cgram && ppu->oam==unchanged.oam,"Native tile planning mutated cartridge memory");
     }
-    rejection_and_reuse();painter_integration();constant_vertical_offsets();rolled_offsets_and_carry();water_offsets_and_edges();mode1_panorama_atlas();complete_palette_sweep();
+    rejection_and_reuse();painter_integration();constant_vertical_offsets();rolled_offsets_and_carry();water_offsets_and_edges();mode1_panorama_atlas();complete_palette_sweep();referenced_character_cache();
     std::cout<<"Native BG2 tile planner/atlas: "<<checks<<" exact pixel, palette, ownership, HDMA, flips, budget and fallback checks PASS\n";
     return 0;
 } catch(const std::exception& error) {count_allocations=false;std::cerr<<error.what()<<'\n';return 1;}
