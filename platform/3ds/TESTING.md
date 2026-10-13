@@ -19,7 +19,7 @@ changing the one-eye slider-off/New 2DS XL path.
 
 1. The latest source-only candidate is the experimental
    `StarFoxEnhanced-3ds-test.zip` artifact from
-   [ARM run 38464851895](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38464851895).
+   [ARM run 38468745995](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38468745995).
    R376 remains the hardware-tested baseline, not the latest source candidate.
    Extract the ZIP to the SD card's root, keeping its folder structure. When
    updating an earlier build, replace only the `.3dsx` and `.smdh`; preserve the existing
@@ -65,7 +65,7 @@ still required.
 
 ## Current build and validation
 
-The current frame-pipeline candidate is source
+The earlier frame-pipeline baseline is source
 `f635c0d1d85dd0f2973651bb18725abe865d8260`, from
 [ARM run 38444509351](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38444509351).
 It uses the imported Starwing mono renderer for ordinary mono scenes, retains
@@ -366,6 +366,36 @@ No retry/fallback/replay errors occur. Planned DSP shutdown/profile flush
 precede the verified forced owned-host stop; guest GSP retirement is still
 unverified. CPU configuration returns to 100%. This does not request an
 incremental hardware test or claim completed mono acceptance.
+
+### Packet-boundary dispatch follow-up
+
+Source `954fe805fa` starts complete SPC packets inside the source-phase loop,
+including catch-up batches, before raster snapshot preparation. Source logic,
+APU-dependent rasters, new packets and host handoffs still join the worker.
+The host default stays synchronous and denied dispatch retains its joined
+fallback. Follow-up `d7afe35d` isolates the synchronous test oracle from the
+tested worker; it changes no native player code. Eleven actual Original/EX
+state, complete-PCM serial/parallel overlap, catch-up pipeline and state-codec
+checks pass (507.24 seconds with two test jobs). ARM run 38468745995 passes
+all 52 CI tests, native/shader/stack checks and the asset-free package gate.
+
+The exact image's accuracy-enabled Vulkan/300%-clock sensitivity replay still
+averages 58.259/58.672 successful whole-frame returns per second in backgrounds
+3/51, with minimum adjacent same-label windows of 49.058/52.320. The previous
+image measured 58.260/58.502. Poses, counts and windows differ; unrelated
+compiler jobs remain running. This is not a meaningful resolution of the mono
+60 FPS deficit. The ordinary slow background-51 window still reaches 21.125 ms
+in source advancement. Parent timings include children, not additive costs.
+No retry/fallback or replay error is recorded. Planned DSP shutdown and profile
+flush precede the verified forced owned-host stop; guest GSP retirement remains
+unverified. CPU configuration is restored to 100%.
+
+The next source-only experiment exposes the existing strict IPO/LTO build
+option through `enable_ipo` in the native workflow. It remains OFF by default.
+Both host/native builds use the explicit selection, and the package records
+it in `BUILD-INFO.json`; stack, shader and arithmetic gates remain mandatory.
+A successful compile alone is not grounds to enable it in a production build.
+Native timing and source correctness must still be checked.
 
 The earlier direct-overlay candidate removes the EX BG1 staging image and applies the same
 zero-ink/CGRAM-black transparency directly during decoding. The 57,344-byte

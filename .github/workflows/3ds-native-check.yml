@@ -10,6 +10,10 @@ on:
         description: 'Test fused indexed mono uploads; experimental and disabled by default'
         type: boolean
         default: false
+      enable_ipo:
+        description: 'Experiment with strict native link-time optimization; disabled by default'
+        type: boolean
+        default: false
   push:
     branches: [codex/3ds-native-bringup]
     paths:
@@ -83,6 +87,7 @@ jobs:
       CTR_IMAGE: devkitpro/devkitarm@sha256:116afba8df8453961de2936ffab20dd441edf4d682856c1ec8b0e53d7ed0bbf5
       CTR_PROFILE_FRAMES: ${{ (github.event_name != 'workflow_dispatch' || inputs.profile_frames) && 'ON' || 'OFF' }}
       CTR_INDEXED_MONO: ${{ github.event_name == 'workflow_dispatch' && inputs.indexed_mono && 'ON' || 'OFF' }}
+      CTR_ENABLE_IPO: ${{ github.event_name == 'workflow_dispatch' && inputs.enable_ipo && 'ON' || 'OFF' }}
     steps:
       - uses: actions/checkout@v4
       - name: Verify texture packing and independent stereo projections
@@ -124,7 +129,7 @@ jobs:
           cmake -S platform/3ds -B "$RUNNER_TEMP/starfox-3ds-core-host" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release -DSTARFOX_3DS_BUILD_GAME_CORE=ON \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-            -DSTARFOX_3DS_PROFILE_FRAMES=ON -DSTARFOX_3DS_ENABLE_IPO=OFF
+            -DSTARFOX_3DS_PROFILE_FRAMES=ON -DSTARFOX_3DS_ENABLE_IPO="$CTR_ENABLE_IPO"
           cmake --build "$RUNNER_TEMP/starfox-3ds-core-host" --parallel 2
           ctest --test-dir "$RUNNER_TEMP/starfox-3ds-core-host" --output-on-failure
           python3 tools/check_3ds_spc_ram.py "$RUNNER_TEMP/starfox-3ds-core-host"
@@ -139,7 +144,7 @@ jobs:
             -e STARFOX_3DS_TEST_PLAYER=ON \
             -e STARFOX_3DS_PROFILE_FRAMES="$CTR_PROFILE_FRAMES" \
             -e STARFOX_3DS_INDEXED_MONO="$CTR_INDEXED_MONO" \
-            -e STARFOX_3DS_ENABLE_IPO=OFF \
+            -e STARFOX_3DS_ENABLE_IPO="$CTR_ENABLE_IPO" \
             -v "$GITHUB_WORKSPACE:/src" -w /src "$CTR_IMAGE" \
             bash tools/build_3ds_frontend.sh . build/3ds-native
           for target in starfox_3ds_frontend_check starfox_3ds_spc_saturation_check starfox_3ds_spc_counters_check starfox_3ds_spc_output_check starfox_3ds_gpu_check starfox_3ds_game_core_check starfox_3ds_test_player; do
@@ -186,6 +191,7 @@ jobs:
             --source-commit "$GITHUB_SHA" \
             --frame-profiling "$CTR_PROFILE_FRAMES" \
             --indexed-mono "$CTR_INDEXED_MONO" \
+            --enable-ipo "$CTR_ENABLE_IPO" \
             --output StarFoxEnhanced-3ds-test.zip
           unzip -t StarFoxEnhanced-3ds-test.zip
       - name: Upload experimental player for hardware testing, not a verified release

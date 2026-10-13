@@ -176,6 +176,25 @@ class PackageTests(unittest.TestCase):
         cmake = (ROOT / "platform/3ds/CMakeLists.txt").read_text(encoding="utf-8")
         self.assertIn('option(STARFOX_3DS_INDEXED_MONO "Experiment with fused indexed mono background uploads (performance unverified)" OFF)', cmake)
 
+    def test_explicit_native_ipo_setting(self):
+        for setting in ("ON", "OFF"):
+            with self.subTest(setting=setting):
+                output = self.root / ("ipo-" + setting + ".zip")
+                info = MODULE.package(self.elf, self.dsx, self.smdh, COMMIT, output,
+                                      enable_ipo=setting)
+                self.assertEqual(info["interprocedural_optimization"], setting == "ON")
+                with zipfile.ZipFile(output) as archive:
+                    self.assertEqual(json.loads(archive.read("BUILD-INFO.json"))["interprocedural_optimization"], setting == "ON")
+        self.assertNotIn("interprocedural_optimization", self.pack())
+        for setting in (True, False, "unknown", "on"):
+            with self.assertRaises(ValueError):
+                MODULE.package(self.elf, self.dsx, self.smdh, COMMIT,
+                               self.root / "invalid.zip", enable_ipo=setting)
+        workflow = (ROOT / ".github/workflows/3ds-native-check.yml").read_text(encoding="utf-8")
+        self.assertIn('STARFOX_3DS_ENABLE_IPO="$CTR_ENABLE_IPO"', workflow)
+        self.assertIn('--enable-ipo "$CTR_ENABLE_IPO"', workflow)
+        self.assertIn('-DSTARFOX_3DS_ENABLE_IPO="$CTR_ENABLE_IPO"', workflow)
+
 
 if __name__ == "__main__":
     unittest.main()
