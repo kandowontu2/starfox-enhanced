@@ -141,6 +141,7 @@ private:
     void prepare_pace_shapes();
     void publish_raster();
     bool start_frame_audio();
+    void join_frame_audio();
     void finish_frame_audio();
     struct FrameAudioWork;
     assets::RomImage rom_;

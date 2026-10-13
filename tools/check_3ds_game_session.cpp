@@ -14,6 +14,7 @@
 #include "starfox/platform/nintendo_3ds/game_effects.hpp"
 #include "starfox/platform/nintendo_3ds/pica_composite.hpp"
 #include "starfox/platform/nintendo_3ds/presentation_clock.hpp"
+#include "starfox/platform/nintendo_3ds/frame_profile.hpp"
 #include "fortuna_route_inputs.hpp"
 #include "corneria_route_inputs.hpp"
 #include "attack_carrier_route_inputs.hpp"
@@ -21,6 +22,7 @@
 #include "native_stem_executor.hpp"
 #endif
 #include <bit>
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -30,6 +32,8 @@ namespace {
 using namespace starfox;
 using namespace platform::nintendo_3ds;
 unsigned checks{};
+std::atomic<std::uint64_t> audio_join_tick{};
+std::uint64_t audio_join_clock() noexcept {return audio_join_tick.load(std::memory_order_relaxed);}
 void require(bool value,const char* message) {++checks;if(!value) throw std::runtime_error(message);}
 #if defined(STARFOX_3DS_CHECK_PARALLEL_AUDIO)
 struct CountingStemExecutor final : audio::StemExecutor {
@@ -230,6 +234,7 @@ void audio_video_pipeline(const assets::RomImage& rom,const assets::SymbolMap& s
         audio::StemTask packet{};
         audio::StemExecutor* delegate{};
         unsigned started{},finished{};
+        bool fail_finish{};
         void execute(audio::StemTask foreground,audio::StemTask background) override {
             if(packet.run) throw std::logic_error("Joined work overlapped a held packet");
             if(delegate) delegate->execute(foreground,background);
@@ -244,6 +249,8 @@ void audio_video_pipeline(const assets::RomImage& rom,const assets::SymbolMap& s
             if(!packet.run) return;
             const auto work=packet;packet={};++finished;
             if(delegate) delegate->finish();else work.run(work.context);
+            audio_join_tick.fetch_add(37,std::memory_order_relaxed);
+            if(fail_finish) throw std::runtime_error("Retired audio worker failed");
         }
     };
     for(auto timing:{simulation::TimingMode::original_speed,simulation::TimingMode::unlocked_20_fps}) {
@@ -257,7 +264,22 @@ void audio_video_pipeline(const assets::RomImage& rom,const assets::SymbolMap& s
         options.frame_audio_stem_executor=checked_frame_audio_stem_executor;
 #endif
         options.stem_executor=&worker;
-        GameSession pipelined(rom,symbols,[&](auto pcm){actual_pcm.insert(actual_pcm.end(),pcm.begin(),pcm.end());},"LEVEL1_1",{},options);
+        GameSession pipelined(rom,symbols,[&](auto pcm){
+            actual_pcm.insert(actual_pcm.end(),pcm.begin(),pcm.end());
+            audio_join_tick.fetch_add(101,std::memory_order_relaxed);
+        },"LEVEL1_1",{},options);
+        FrameProfile join_profile(audio_join_clock,1000);
+        ScopedFrameProfileActivation profile_activation(join_profile);
+        const auto check_joins=[&] {
+            const auto& joins=join_profile.totals()[unsigned(FramePhase::audio_join)];
+#if defined(STARFOX_3DS_PROFILE_FRAMES)
+            require(joins==FramePhaseTotals{worker.finished,std::uint64_t(worker.finished)*37,
+                worker.finished?37U:0U},
+                "Audio join timing included PCM/rendering or missed an actual worker barrier");
+#else
+            require(joins==FramePhaseTotals{},"Disabled audio join marker changed runtime counters");
+#endif
+        };
         unsigned unjoined_rasters{};
         for(unsigned frame=0;frame<72;++frame) {
             const auto held=frame%17<3?input::ButtonMask(input::a):input::ButtonMask{};
@@ -268,7 +290,8 @@ void audio_video_pipeline(const assets::RomImage& rom,const assets::SymbolMap& s
             const auto actual=pipelined.advance(timestamp(frame),held,true,{},true);
             require(actual.video_phases==expected.video_phases && actual.logic_ticks==expected.logic_ticks
                 && actual.audio_blocks==expected.audio_blocks,"Video pipeline changed source/SPC cadence");
-            pipelined.run_frame_work([] {},false);
+            pipelined.run_frame_work([] {audio_join_tick.fetch_add(59,std::memory_order_relaxed);},false);
+            check_joins();
             const auto expected_view=reference.presentation(0,false);
             const auto actual_view=pipelined.presentation(0,false);
             require(*expected_view.raster->ppu==*actual_view.raster->ppu
@@ -285,6 +308,7 @@ void audio_video_pipeline(const assets::RomImage& rom,const assets::SymbolMap& s
             // left borrowed until the next source-logic/new-packet barrier.
             if(frame%6==5) {
                 pipelined.run_frame_work([] {});
+                check_joins();
                 require(expected_pcm==actual_pcm && reference.save_state()==pipelined.save_state(),
                     "Cross-raster pipeline changed PCM, VM/SPC state or acknowledgements");
             }
@@ -319,6 +343,7 @@ void audio_video_pipeline(const assets::RomImage& rom,const assets::SymbolMap& s
                 && expected_view.interpolation_alpha==actual_view.interpolation_alpha,
                 "Catch-up audio ownership changed the source raster");
             pipelined.run_frame_work([] {});
+            check_joins();
             require(expected_pcm==actual_pcm && reference.save_state()==pipelined.save_state(),
                 "Catch-up dispatch changed complete PCM, VM/SPC state or acknowledgements");
         }
@@ -335,12 +360,53 @@ void audio_video_pipeline(const assets::RomImage& rom,const assets::SymbolMap& s
             if(barrier==1) {reference.advance(time,0,false);pipelined.advance(time,0,false,{},true);}
             if(barrier==2) {--time;reference.advance(time,0);pipelined.advance(time,0,true,{},true);}
             if(barrier==3) {require(reference.toggle_runtime_options()==pipelined.toggle_runtime_options(),"Pipeline options action diverged");}
+            check_joins();
             require(!worker.packet.run && expected_pcm==actual_pcm && reference.game().save_state()==pipelined.game().save_state()
                 && reference.audio().save_state()==pipelined.audio().save_state(),"Host handoff failed to retire/acknowledge the borrowed packet");
             if(barrier==1 || barrier==2) {reference.advance(time,0);pipelined.advance(time,0,true,{},true);}
         }
     }
-    std::cout<<"  Held SPC packet: nonblocking gameplay rasters, source/packet barriers, original/unlocked timing, PCM/state equality and host handoffs checked\n";
+    // Render, worker and PCM failures must retire the same borrowed job once.
+    // The marker must stop before profile merging/PCM acknowledgement, even
+    // during unwinding. Refused dispatches have no join to time at all.
+    for(unsigned failure=0;failure<4;++failure) {
+        HeldPacketExecutor worker;
+        struct RefusedExecutor final : audio::StemExecutor {
+            void execute(audio::StemTask foreground,audio::StemTask background) override {
+                foreground.run(foreground.context);background.run(background.context);
+            }
+        } refused;
+        GameSessionOptions options;options.stem_executor=failure==3?
+            static_cast<audio::StemExecutor*>(&refused):static_cast<audio::StemExecutor*>(&worker);
+        GameSession session(rom,symbols,[&](auto) {
+            audio_join_tick.fetch_add(101,std::memory_order_relaxed);
+            if(failure==2) throw std::runtime_error("PCM delivery failed");
+        },"BOOT",{},options);
+        FrameProfile profile(audio_join_clock,1000);
+        ScopedFrameProfileActivation activation(profile);
+        session.advance(0,0);session.advance(50'000'000,0,true,{},true);
+        if(failure<3) require(worker.packet.run,"Failure fixture never borrowed its audio packet");
+        worker.fail_finish=failure==1;
+        const auto render=[&] {
+            audio_join_tick.fetch_add(59,std::memory_order_relaxed);
+            if(failure==0) throw std::runtime_error("Foreground rendering failed");
+        };
+        if(failure<3) rejects([&]{session.run_frame_work(render);},"Audio/render/PCM failure was lost");
+        else session.run_frame_work(render);
+        const auto expected=failure<3?FramePhaseTotals{1,37,37}:FramePhaseTotals{};
+#if defined(STARFOX_3DS_PROFILE_FRAMES)
+        require(profile.totals()[unsigned(FramePhase::audio_join)]==expected,
+            "Unwinding/refused dispatch lost the exact owner-thread audio join boundary");
+#else
+        static_cast<void>(expected);
+        require(profile.totals()[unsigned(FramePhase::audio_join)]==FramePhaseTotals{},
+            "Disabled unwind marker recorded an audio join");
+#endif
+        require(!worker.packet.run && worker.finished==(failure<3?1U:0U),
+            "Failure/refused dispatch retained or joined a second audio packet");
+        if(failure<3) require(!session.state_available(),"Failed audio owner exposed a savable timeline");
+    }
+    std::cout<<"  Held SPC packet: nonblocking gameplay rasters, source/packet barriers, exact join timing, original/unlocked timing, PCM/state equality and host handoffs checked\n";
 }
 void native_depth_preferences(const assets::RomImage& rom,const assets::SymbolMap& symbols) {
     for(const auto map:{"BOOT","LEVEL1_1"}) {

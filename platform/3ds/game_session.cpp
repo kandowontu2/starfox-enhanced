@@ -494,13 +494,20 @@ bool GameSession::start_frame_audio() {
     if(!background.running) background.profile.reset();
     return background.running;
 }
+void GameSession::join_frame_audio() {
+    // Owner-thread blocking only: do not include rendering, background SPC,
+    // profile merging, PCM delivery or source port acknowledgement. Refused
+    // dispatches have no borrowed worker and never pass through this marker.
+    STARFOX_3DS_FRAME_PHASE(audio_join);
+    stem_executor_->finish();
+}
 void GameSession::finish_frame_audio() {
     if(!deferred_audio_) return;
     if(!frame_audio_work_ || !frame_audio_work_->running) {
         run_frame_work([] {});return;
     }
     auto& background=*frame_audio_work_;
-    try {stem_executor_->finish();}
+    try {join_frame_audio();}
     catch(...) {background.running=false;background.merge_profile();failed_=true;throw;}
     background.running=false;background.merge_profile();
     sink_(mixed_);game_.synchronize_apu_output_ports(audio_.output_ports());
@@ -533,7 +540,7 @@ void GameSession::run_frame_work(audio::StemTask work,bool complete_audio) {
         // Join even if foreground rendering failed. Preserve the original
         // exception, and never free/retry a still-borrowed SPC job.
         if(frame_audio_work_) {
-            if(frame_audio_work_->running) try {stem_executor_->finish();} catch(...) {}
+            if(frame_audio_work_->running) try {join_frame_audio();} catch(...) {}
             frame_audio_work_->running=false;frame_audio_work_->merge_profile();
         }
         frame_work_active_=false;failed_=true;throw;

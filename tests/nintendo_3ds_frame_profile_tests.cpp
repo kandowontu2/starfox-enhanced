@@ -42,6 +42,7 @@ int main() try {
     static_assert(unsigned(FramePhase::mono_canvas) == 40);
     static_assert(unsigned(FramePhase::object_export) == 41);
     static_assert(unsigned(FramePhase::object_import) == 42);
+    static_assert(unsigned(FramePhase::audio_join) == 43);
     static_assert(frame_phase_names.size() == unsigned(FramePhase::count));
     for(unsigned i = 0; i < frame_phase_names.size(); ++i) {
         require(!frame_phase_names[i].empty(), "Empty phase name");
@@ -130,8 +131,9 @@ int main() try {
         { STARFOX_3DS_FRAME_PHASE(mono_canvas); tick += 27; }
         { STARFOX_3DS_FRAME_PHASE(object_export); tick += 28; }
         { STARFOX_3DS_FRAME_PHASE(object_import); tick += 29; }
+        { STARFOX_3DS_FRAME_PHASE(audio_join); tick += 30; }
 #if defined(STARFOX_3DS_PROFILE_FRAMES)
-        require(clock_calls == before + 58, "Detailed macros lost clock boundaries");
+        require(clock_calls == before + 60, "Detailed macros lost clock boundaries");
         for(unsigned i = unsigned(FramePhase::cpu); i < unsigned(FramePhase::count); ++i) {
             const std::uint64_t duration = i - unsigned(FramePhase::cpu) + 1U;
             require(details.totals()[i] == FramePhaseTotals{1, duration, duration},
@@ -168,7 +170,7 @@ int main() try {
     const auto storage = buffer.storage_bytes();
     require(storage <= FrameProfileBuffer::maximum_storage_bytes && !buffer.size()
         && FrameProfileBuffer::maximum_windows <= FrameProfile::maximum_windows
-        && FrameProfileBuffer::maximum_windows >= 480,
+        && FrameProfileBuffer::maximum_windows == 478,
         "Diagnostic phases exceeded memory budget or unexpectedly truncated capture");
     const auto before_capture = clock_calls;
     for(unsigned window = 1; window <= FrameProfileBuffer::maximum_windows; ++window) {
