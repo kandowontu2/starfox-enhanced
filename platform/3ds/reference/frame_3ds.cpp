@@ -8,6 +8,7 @@
 
 #include "starfox/render/palette.hpp"
 #include "starfox/compat/bit_cast.hpp"
+#include "starfox/platform/nintendo_3ds/frame_profile.hpp"
 
 #include "mono_clock.hpp"
 
@@ -1285,6 +1286,15 @@ const render::Framebuffer& Frame3ds::draw(
     last_interpolation_alpha_ = interpolation_alpha;
     last_draw_valid_ = true;
     const auto stage_finish = reference_system_tick();
+#if defined(STARFOX_3DS_PROFILE_FRAMES)
+    if (auto* profile = platform::nintendo_3ds::active_frame_profile) {
+        using platform::nintendo_3ds::FramePhase;
+        profile->record(FramePhase::mono_background, stage_begin, stage_background);
+        profile->record(FramePhase::mono_prepare, stage_background, stage_world_prepare_end);
+        profile->record(FramePhase::mono_raster, stage_world_prepare_end, stage_world);
+        profile->record(FramePhase::mono_finish, stage_world, stage_finish);
+    }
+#endif
     constexpr auto tick_to_ms = 1000.0 / reference_clock_frequency;
     constexpr auto tick_to_us = 1'000'000.0 / reference_clock_frequency;
     last_draw_breakdown_ = {

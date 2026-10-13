@@ -2,6 +2,7 @@
 #include "reference/frame_3ds.hpp"
 #include "reference/display_3ds.hpp"
 #include "starfox/platform/nintendo_3ds/frame_profile.hpp"
+#include "starfox/platform/nintendo_3ds/lcd_rgba.hpp"
 namespace starfox::platform::nintendo_3ds {
 namespace {
 void restore_formats() noexcept {
@@ -10,6 +11,7 @@ void restore_formats() noexcept {
 }
 struct NativeMono::Impl {
     platform_3ds::Display3ds display;
+    RgbaLcdCache dashboard;
     Impl() {
         if(!display.open()) {display.close();restore_formats();throw std::runtime_error("Reference 3DS mono display initialization failed");}
         // Physical slider stereo remains on our separate native-eye path.
@@ -36,15 +38,17 @@ bool NativeMono::present(GameSession& session,const GamePresentation& source,Ima
     }();
     const auto palette=render::apply_snes_brightness(render::decode_bgr555_palette(ppu.cgram),game.map().display_brightness());
     // Preserve our native lower HUD/layout, not the reference options UI.
-    auto* lower=gfxGetFramebuffer(GFX_BOTTOM,GFX_LEFT,nullptr,nullptr);
-    if(!lower)throw std::runtime_error("3DS mono dashboard allocation failed");
-    for(unsigned x=0;x<bottom_width;++x) for(unsigned y=0;y<screen_height;++y) {
-        const auto* pixel=dashboard.pixels.data()+std::size_t(y)*dashboard.pitch+x*3;
-        auto* out=lower+(std::size_t(x)*screen_height+screen_height-1-y)*4;
-        out[0]=255;out[1]=pixel[2];out[2]=pixel[1];out[3]=pixel[0];
+    {
+        STARFOX_3DS_FRAME_PHASE(lcd_copy);
+        auto* lower=gfxGetFramebuffer(GFX_BOTTOM,GFX_LEFT,nullptr,nullptr);
+        if(!lower)throw std::runtime_error("3DS mono dashboard allocation failed");
+        const std::span<std::uint8_t> output{lower,bottom_width*screen_height*4};
+        if(impl_->dashboard.prepare(dashboard,output)) {
+            if(R_FAILED(GSPGPU_FlushDataCache(lower,output.size())))
+                throw std::runtime_error("3DS mono dashboard flush failed");
+            impl_->dashboard.commit(output);
+        }
     }
-    if(R_FAILED(GSPGPU_FlushDataCache(lower,bottom_width*screen_height*4)))
-        throw std::runtime_error("3DS mono dashboard flush failed");
     STARFOX_3DS_FRAME_PHASE(present);
     const bool presented=gpu_bg2
         ?impl_->display.present_mode2(ppu,game.map().ppu_vram_revision(),scroll.first,scroll.second,indexed,palette,reuse)

@@ -63,6 +63,11 @@ the following work:
 | `gpu_submit` | CPU-side FrameEnd command flush/submission |
 | `terrain_build` | Landscape-atlas clipping/unprojection/publication, including declined attempts |
 | `terrain_reuse` | Reuse of the identical validated landscape mesh with current borrowed artwork |
+| `mono_background` | Reference indexed background preparation/composition before models |
+| `mono_prepare` | Reference interpolated poses and world-cache validation |
+| `mono_raster` | Reference indexed model/particle/dot rasterization |
+| `mono_finish` | Reference world composition, native draw and final LCD canvas |
+| `lcd_copy` | Exact lower RGB comparison, changed-buffer transpose and SDK cache flush |
 
 Parents include children. In particular, `cpu` also occurs inside strategies,
 view/cull/audio IRQ and video work; the two stem rows contain their SPC rows.
@@ -110,7 +115,7 @@ the earlier helper-only-fast candidate actually regressed full composition and
 was corrected before publication. These host measurements are not ARM timings,
 whole-game speed gains or New-console FPS. Other project compilers keep running.
 
-The same CSV header is retained; consumers must allow all thirty-two phase
+The same CSV header is retained; consumers must allow all thirty-seven phase
 names and reject unknown names rather than silently ignoring malformed data.
 The terrain rows are children of `layers`; a cache-hit count is not a console
 FPS claim. The first thirty enum indices remain unchanged. Finite vertices

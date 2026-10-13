@@ -27,6 +27,14 @@ Its original notice is retained in `reference/CITRO2D-LICENSE.txt`. This imports
 code only, under the author permission recorded below, not ROMs or game artwork.
 Compilation and emulator checks do not establish sustained hardware 60 FPS.
 
+The mono lower LCD uses a bounded two-buffer residency cache, validated against
+actual RGB bytes and committed only after a successful SDK cache flush. Changed
+HUD pixels invalidate both physical buffers. A 16-pixel tiled transpose replaces
+the strided full-screen conversion; LCD cache ownership ends with the presenter.
+The native profile records mono background, preparation, raster, finishing and
+LCD-copy costs separately, without SD writes during gameplay. The reference
+display target also receives the same Release `-O3` policy as the source core.
+
 ## Earlier tile-planner integration
 
 The BG2 tile-rectangle planning algorithm is adapted from

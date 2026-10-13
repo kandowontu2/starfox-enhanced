@@ -207,7 +207,7 @@ if(STARFOX_3DS_BUILD_NATIVE)
             starfox_3ds_native_audio starfox_3ds_frontend_check starfox_3ds_spc_saturation_check starfox_3ds_spc_counters_check
             starfox_3ds_spc_output_check
             starfox_3ds_cartridge_core starfox_3ds_spc starfox_3ds_cpu
-            starfox_3ds_native_gpu starfox_3ds_gpu_check
+            starfox_3ds_native_gpu starfox_3ds_reference_display starfox_3ds_gpu_check
             starfox_3ds_game_core_check starfox_3ds_test_player)
         if(TARGET ${target})
             target_compile_options(${target} PRIVATE -fstack-usage)

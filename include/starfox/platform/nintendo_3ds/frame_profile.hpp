@@ -14,7 +14,8 @@ enum class FramePhase : unsigned {
     cpu, strategies, view, cull, audio_irq, music, effects, spc_emulate,
     spc_filter, bg_decode, bg_colour,
     gpu_sync, gpu_wait, gpu_upload, gpu_record, gpu_submit,
-    terrain_build, terrain_reuse, count
+    terrain_build, terrain_reuse,
+    mono_background, mono_prepare, mono_raster, mono_finish, lcd_copy, count
 };
 inline constexpr std::array<std::string_view, unsigned(FramePhase::count)> frame_phase_names{
     "frame", "advance", "video", "logic", "capture", "audio", "raster",
@@ -22,7 +23,8 @@ inline constexpr std::array<std::string_view, unsigned(FramePhase::count)> frame
     "cpu", "strategies", "view", "cull", "audio_irq", "music", "effects",
     "spc_emulate", "spc_filter", "bg_decode", "bg_colour",
     "gpu_sync", "gpu_wait", "gpu_upload", "gpu_record", "gpu_submit",
-    "terrain_build", "terrain_reuse"
+    "terrain_build", "terrain_reuse",
+    "mono_background", "mono_prepare", "mono_raster", "mono_finish", "lcd_copy"
 };
 struct FramePhaseTotals {
     std::uint64_t calls{}, ticks{}, maximum{};

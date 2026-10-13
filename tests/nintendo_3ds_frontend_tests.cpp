@@ -2,6 +2,7 @@
 #include "starfox/platform/nintendo_3ds/pica_projection.hpp"
 #include "starfox/platform/nintendo_3ds/presentation_clock.hpp"
 #include "starfox/platform/nintendo_3ds/hardware_profile.hpp"
+#include "starfox/platform/nintendo_3ds/lcd_rgba.hpp"
 #include <algorithm>
 #include <climits>
 #include <filesystem>
@@ -252,6 +253,57 @@ void lcd_tests() {
     require(!valid_image({},0,0),"Empty image accepted");
     require(!valid_image({},UINT_MAX,UINT_MAX),"Overflowing image extent accepted");
 }
+void rgba_lcd_tests() {
+    constexpr auto row_bytes=bottom_width*3;
+    constexpr auto output_bytes=bottom_width*screen_height*4;
+    const unsigned pitch=row_bytes+13;
+    std::vector<std::uint8_t> pixels(pitch*screen_height,0xD3);
+    for(unsigned y=0;y<screen_height;++y) for(unsigned x=0;x<bottom_width;++x) {
+        auto* p=pixels.data()+std::size_t(y)*pitch+x*3;
+        p[0]=std::uint8_t(x*7);p[1]=std::uint8_t(y*13);p[2]=std::uint8_t(x+y);
+    }
+    ImageView source{pixels,bottom_width,screen_height,pitch};
+    std::vector<std::uint8_t> first(output_bytes+2,0xA5),second(output_bytes,0x5A);
+    const std::span<std::uint8_t> a{first.data()+1,output_bytes},b{second};
+    const auto verify=[&](std::span<const std::uint8_t> out) {
+        for(unsigned y=0;y<screen_height;++y) for(unsigned x=0;x<bottom_width;++x) {
+            const auto* p=pixels.data()+std::size_t(y)*pitch+x*3;
+            const auto at=(std::size_t(x)*screen_height+screen_height-1-y)*4;
+            require(out[at]==255 && out[at+1]==p[2] && out[at+2]==p[1] && out[at+3]==p[0],
+                "Tiled RGBA LCD conversion differs from the independent pixel oracle");
+        }
+    };
+    RgbaLcdCache cache;
+    require(cache.prepare(source,a),"Fresh lower framebuffer was assumed resident");verify(a);
+    require(cache.prepare(source,a),"Unflushed lower framebuffer was certified");cache.commit(a);
+    require(!cache.prepare(source,a),"Unchanged certified lower framebuffer was copied");
+    require(cache.prepare(source,b),"Second physical lower framebuffer was assumed resident");cache.commit(b);verify(b);
+    require(!cache.prepare(source,a) && !cache.prepare(source,b),"Double-buffer residency was lost");
+    // Same input address with different actual content must invalidate BOTH LCDs.
+    pixels[(screen_height-1)*pitch+(bottom_width-1)*3]^=0xFF;
+    require(cache.prepare(source,a),"Mutable RGB pointer reused stale lower content");cache.commit(a);verify(a);
+    require(cache.prepare(source,b),"Changed HUD failed to invalidate the other LCD");cache.commit(b);verify(b);
+    // Source row padding is not a displayed pixel dependency.
+    pixels[row_bytes]^=0xFF;
+    require(!cache.prepare(source,a),"Unused input row padding invalidated the LCD");
+    std::vector<std::uint8_t> packed(row_bytes*screen_height);
+    for(unsigned y=0;y<screen_height;++y)
+        std::copy_n(pixels.data()+std::size_t(y)*pitch,row_bytes,packed.data()+std::size_t(y)*row_bytes);
+    const ImageView contiguous{packed,bottom_width,screen_height,row_bytes};
+    require(!cache.prepare(contiguous,b),"Equivalent packed RGB content lost residency");
+    RgbaLcdCache next_owner;
+    require(next_owner.prepare(source,a),"A different display owner inherited old LCD residency");
+    const auto before=first;
+    auto invalid=source;invalid.height=screen_height-1;
+    rejects([&]{copy_rgba_lcd(invalid,a);},"Invalid RGBA source accepted");
+    rejects([&]{copy_rgba_lcd(source,a.first(output_bytes-1));},"Short RGBA destination accepted");
+    std::vector<std::uint8_t> shared(output_bytes);
+    rejects([&]{copy_rgba_lcd({shared,bottom_width,screen_height,row_bytes},shared);},"Overlapping RGBA storage accepted");
+    require(first==before && first.front()==0xA5 && first.back()==0xA5,"RGBA bounds rejection changed output or guards");
+    bool rejected{};
+    try {cache.commit(a);} catch(const std::logic_error&) {rejected=true;}
+    require(rejected,"LCD cache accepted a commit without a pending transfer");
+}
 void hud_tests() {
     rejects([]{Canvas canvas(UINT_MAX);},"Unbounded canvas allocation allowed");
     Canvas canvas;canvas.clear({1,2,3});
@@ -423,7 +475,7 @@ void captures(const std::filesystem::path& directory) {
 int main(int argc,char** argv) {
     try {
         hardware_profile_tests();stereo_tests();pica_projection_tests();stereo_culling_and_clipping_tests();
-        routing_and_input_tests();lcd_tests();hud_tests();dashboard_cache_tests();radio_artwork_cache_tests();presentation_clock_tests();
+        routing_and_input_tests();lcd_tests();rgba_lcd_tests();hud_tests();dashboard_cache_tests();radio_artwork_cache_tests();presentation_clock_tests();
         if(argc==3 && std::string_view(argv[1])=="--capture") captures(argv[2]);
         else if(argc!=1) throw std::invalid_argument("Usage: frontend_tests [--capture directory]");
         std::cout<<"3DS frontend: "<<checks<<" checks passed\n";
