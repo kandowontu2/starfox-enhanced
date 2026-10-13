@@ -19,7 +19,7 @@ changing the one-eye slider-off/New 2DS XL path.
 
 1. The latest source-only candidate is the experimental
    `StarFoxEnhanced-3ds-test.zip` artifact from
-   [ARM run 38449713288](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38449713288).
+   [ARM run 38452274142](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38452274142).
    R376 remains the hardware-tested baseline, not the latest source candidate.
    Extract the ZIP to the SD card's root, keeping its folder structure. When
    updating an earlier build, replace only the `.3dsx` and `.smdh`; preserve the existing
@@ -284,8 +284,19 @@ retires every preceding GPU queue before uploads. Citro3D's
 [render queue implementation](https://github.com/devkitPro/citro3d/blob/master/source/renderqueue.c)
 separates these display and retirement waits. Pacing tests cover 100,000
 source-clock counter/wrap cases and ownership handoffs; the three targeted
-PICA/frontend/profile checks pass. Native timing remains pending, with no
-claim of stable 60 FPS or new hardware acceptance.
+PICA/frontend/profile checks pass. The source (`5cda2750`, ARM run
+38452274142) also passes all 52 CI checks and native gates. In the same
+accuracy-enabled mono replay, GPU pacing work drops from 3.833/2.146 ms
+to below 0.001 ms in backgrounds 3/51; blocking acquisition remains at
+0.001 ms. Successful presentation averages are 57.514/57.065 per second,
+with minimum same-label window rates of 48.982/50.813, not stable 60.
+The first segment is essentially unchanged; the second was 56.076 in the
+isolated rollback. Canvas/overlay/raster costs remain unchanged. No retry,
+fallback or replay errors occur, and planned DSP shutdown/profile flush
+precede the owned emulator stop. CPU configuration returns to 100%; guest
+GSP retirement and physical New-model performance remain unverified. The
+next investigation is the upstream runtime's exact object-bridge snapshots
+and list reuse, which are absent from our routine-by-routine bridge.
 
 The earlier direct-overlay candidate removes the EX BG1 staging image and applies the same
 zero-ink/CGRAM-black transparency directly during decoding. The 57,344-byte
