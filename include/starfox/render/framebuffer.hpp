@@ -305,7 +305,7 @@ public:
     }
 
     // A repeated opaque indexed write, including index zero. Unlike tile ink,
-    // zero here closes the tunnel wall and must mark coverage and clear dither.
+    // zero here is explicit foreground ink and must mark coverage/clear dither.
     // Recording/scaled callers keep the exact sequence of ordinary point writes.
     void set_solid_indexed_row(std::int32_t x, std::int32_t y,
         std::uint32_t count, std::uint8_t colour) noexcept {
@@ -324,6 +324,45 @@ public:
             return;
         }
         for (std::size_t i = 0; i < length; ++i) set(begin_x + std::int32_t(i), y, colour);
+    }
+
+    // Opaque two-ink model span, anchored to logical screen parity rather than
+    // the clipped span's first pixel. Native rasters without dither provenance
+    // can write pairs directly and mark ownership once per span. Recording,
+    // scaled and annotated callers retain the exact ordered point writes.
+    void set_dithered_indexed_row(std::int32_t x, std::int32_t y,
+        std::uint32_t count, std::uint8_t even, std::uint8_t odd) noexcept {
+        if (even == odd) {
+            set_solid_indexed_row(x, y, count, even);
+            return;
+        }
+        if (y < 0 || std::uint32_t(y) >= height() || !count) return;
+        const auto first = std::max<std::int64_t>(0, -std::int64_t(x));
+        const auto last = std::min<std::int64_t>(count, std::int64_t(width()) - x);
+        if (first >= last) return;
+        const auto begin_x = std::int32_t(std::int64_t(x) + first);
+        const auto length = std::size_t(last - first);
+        if (!commands_ && draw_scale_ == 1U && dither_pairs_.empty()) {
+            const auto offset = std::size_t(y) * stored_width_ + unsigned(begin_x);
+            auto* destination = pixels_.data() + offset;
+            const bool swapped = ((begin_x ^ y) & 1) != 0;
+            const auto a = swapped ? odd : even;
+            const auto b = swapped ? even : odd;
+            for (std::size_t i = 0; i + 1U < length; i += 2U) {
+                destination[i] = a;
+                destination[i + 1U] = b;
+            }
+            if (length & 1U) destination[length - 1U] = a;
+            mark_written(offset, length);
+            if (layer_tags_enabled_)
+                std::fill_n(tags_.begin() + offset, length, write_tag(PixelLayer::two_d));
+            return;
+        }
+        for (std::size_t i = 0; i < length; ++i) {
+            const auto column = begin_x + std::int32_t(i);
+            set(column, y, ((column ^ y) & 1) ? odd : even);
+            annotate_dither(column, y, even, odd);
+        }
     }
 
     // Stored writes come from layer compositing, where the tag belongs to the

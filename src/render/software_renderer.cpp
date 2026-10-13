@@ -749,6 +749,15 @@ void fill_source_polygon(
         pose.cel_mode,pose.wave_mode,winding_independent,pose.wave_offset,pose.animation_frame};
     source_polygon_spans(points,target.width(),modes,[&](SourcePolygonSpan span) {
         if(record_span(target,span.left,span.right,span.y,colour,colour_index_base,surfaces,surface)) return;
+        if (!surfaces) {
+            const auto count = std::uint32_t(std::int64_t(span.right) - span.left + 1);
+            const auto even = std::uint8_t(colour_index_base + colour.even);
+            if (colour.dither)
+                target.set_dithered_indexed_row(span.left, span.y, count, even,
+                    std::uint8_t(colour_index_base + colour.odd));
+            else target.set_solid_indexed_row(span.left, span.y, count, even);
+            return;
+        }
         for(auto x=span.left;x<=span.right;++x) {
             const auto index=std::uint8_t(colour_index_base
                 +(colour.dither && ((x^span.y)&1)?colour.odd:colour.even));
