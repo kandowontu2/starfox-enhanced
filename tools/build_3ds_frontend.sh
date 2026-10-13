@@ -8,6 +8,7 @@ source_root="${1:-$(pwd)}"
 build_root="${2:-${source_root}/build/3ds-frontend}"
 test_player="${STARFOX_3DS_TEST_PLAYER:-OFF}"
 profile_frames="${STARFOX_3DS_PROFILE_FRAMES:-OFF}"
+indexed_mono="${STARFOX_3DS_INDEXED_MONO:-OFF}"
 enable_ipo="${STARFOX_3DS_ENABLE_IPO:-OFF}"
 if [[ "$test_player" != ON && "$test_player" != OFF ]]; then
     printf '%s\n' 'STARFOX_3DS_TEST_PLAYER must be ON or OFF.' >&2
@@ -19,6 +20,10 @@ if [[ "$profile_frames" != ON && "$profile_frames" != OFF ]]; then
 fi
 if [[ "$enable_ipo" != ON && "$enable_ipo" != OFF ]]; then
     printf '%s\n' 'STARFOX_3DS_ENABLE_IPO must be ON or OFF.' >&2
+    exit 1
+fi
+if [[ "$indexed_mono" != ON && "$indexed_mono" != OFF ]]; then
+    printf '%s\n' 'STARFOX_3DS_INDEXED_MONO must be ON or OFF.' >&2
     exit 1
 fi
 toolchain="${DEVKITPRO}/cmake/3DS.cmake"
@@ -34,6 +39,7 @@ cmake -S "${source_root}/platform/3ds" -B "${build_root}" -G Ninja \
     -DSTARFOX_3DS_BUILD_NATIVE=ON \
     -DSTARFOX_3DS_BUILD_TEST_PLAYER="$test_player" \
     -DSTARFOX_3DS_PROFILE_FRAMES="$profile_frames" \
+    -DSTARFOX_3DS_INDEXED_MONO="$indexed_mono" \
     -DSTARFOX_3DS_ENABLE_IPO="$enable_ipo" \
     -DSTARFOX_3DS_BUILD_HOST_TESTS=OFF
 # Report all independent native compilation failures in one pass. Ninja still

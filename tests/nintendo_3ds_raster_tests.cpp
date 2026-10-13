@@ -3,6 +3,10 @@
 #include "starfox/platform/nintendo_3ds/pica_window.hpp"
 #include "starfox/platform/nintendo_3ds/pica_colour.hpp"
 #include "starfox/platform/nintendo_3ds/game_effects.hpp"
+#include "starfox/platform/nintendo_3ds/pica_residency.hpp"
+#include "starfox/platform/nintendo_3ds/pica_texture_update.hpp"
+#include <atomic>
+#include <chrono>
 #include <iostream>
 
 namespace {
@@ -279,6 +283,108 @@ void same_raster(const PicaFrame& cached,const PicaFrame& fresh) {
             && std::equal(a.source_layers.begin(),a.source_layers.end(),b.source_layers.begin()),
             "Cache retained stale source coverage/ownership against a fresh decode");
     }
+}
+void indexed_raster_pipeline() {
+    for(unsigned mode:{1U,2U,3U}) for(bool scenery:{false,true}) {
+        auto ppu=source();ppu->background_mode=std::uint8_t(mode);
+        PpuBatch batch;batch.expand_horizontal=true;batch.space=scenery?PicaSpace::scenery:PicaSpace::screen;
+        batch.passes.push_back({PpuLayer::bg2,-1});
+        if(!scenery) {batch.passes.push_back({PpuLayer::objects,0});batch.passes.push_back({PpuLayer::bg3,-1});}
+        PicaRaster reference,compact;
+        for(unsigned phase=0;phase<8;++phase) {
+            ppu=std::make_shared<simulation::SnesPpuState>(*ppu);
+            if(phase==1) ppu->cgram[17]=0x7fff;
+            if(phase==2) ppu->cgram[129]=0;
+            if(phase==3) ppu->bg2_scroll_x=17;
+            if(phase==4) ppu->vram[0x8000+2]^=0xf0;
+            if(phase==5) ppu->oam[0]=31;
+            const unsigned brightness=phase==2?0:phase==6?7:15,subtract=phase%3;
+            const auto plan=plan_frame(phase==6?.5F:0.F,true,ScreenUse::world);
+            const auto a=reference.prepare(ppu,batch,plan,brightness,subtract,pica_raster_base_guard,true);
+            const auto b=compact.prepare(ppu,batch,plan,brightness,subtract,pica_raster_base_guard,true,true);
+            require(a.vertices.size()==b.vertices.size() && a.draws.size()==b.draws.size()
+                && a.textures.size()==b.textures.size() && std::equal(a.vertices.begin(),a.vertices.end(),b.vertices.begin()),
+                "Indexed raster changed painter geometry, crop or source coverage");
+            for(unsigned i=0;i<a.textures.size();++i) {
+                require(b.textures[i].channels==(plan.stereo?4U:1U),"Indexed mono/stereo format transition failed");
+                const auto la=pica_texture_layout(a.textures[i]),lb=pica_texture_layout(b.textures[i]);
+                require(la.width==lb.width && la.height==lb.height,"Indexed raster changed resident allocation");
+                std::vector<std::uint8_t> pa(la.bytes),pb(lb.bytes),ma(la.width*la.height),mb(lb.width*lb.height);
+                pack_pica_texture(a.textures[i],pa);pack_pica_texture(b.textures[i],pb);
+                pack_pica_layers(a.textures[i],ma);pack_pica_layers(b.textures[i],mb);
+                require(pa==pb && ma==mb,"Indexed raster changed expanded RGBA or A8 ownership bytes");
+            }
+            const auto work=compact.work();
+            compact.prepare(ppu,batch,plan,brightness,subtract,pica_raster_base_guard,true,true);
+            require(compact.work().decodes==work.decodes && compact.work().colour_updates==work.colour_updates,
+                "Held indexed raster defeated source caching");
+        }
+    }
+    auto ppu=source();ppu->background_mode=2;
+    PpuBatch batch;batch.expand_horizontal=true;batch.passes.push_back({PpuLayer::bg2,-1});
+    PicaRaster compact;const auto plan=plan_frame(0,true,ScreenUse::world);
+    const auto first=compact.prepare(ppu,batch,plan,15,0,pica_raster_base_guard,false,true);
+    const auto* inks=first.textures[0].pixels.data();const auto before=compact.work();
+    const std::vector<std::uint8_t> preserved(first.textures[0].pixels.begin(),first.textures[0].pixels.end());
+    ppu=std::make_shared<simulation::SnesPpuState>(*ppu);ppu->cgram[17]=0x1234;
+    const auto fade=compact.prepare(ppu,batch,plan,8,3,pica_raster_base_guard,false,true);
+    require(fade.textures[0].pixels.data()==inks && std::equal(preserved.begin(),preserved.end(),fade.textures[0].pixels.begin())
+        && compact.work().decodes==before.decodes && compact.work().colour_updates==before.colour_updates+1,
+        "Indexed palette fade rebuilt or rewrote the complete source image");
+}
+void indexed_pipeline_benchmark() {
+    using Clock=std::chrono::steady_clock;
+    const auto plan=plan_frame(0,true,ScreenUse::world);
+    for(unsigned scenario=0;scenario<3;++scenario) {
+        auto ppu=source();ppu->background_mode=2;
+        tile(*ppu,0x4000,1,2);tile(*ppu,0x4000,2,3);
+        ppu->cgram[17]=31<<5;ppu->cgram[18]=31<<10;ppu->cgram[19]=31;
+        for(unsigned row=0;row<32;++row) for(unsigned column=0;column<32;++column)
+            ppu->vram[0xc000+(row*32+column)*2]=std::uint8_t((row+column)%3);
+        PpuBatch batch;batch.expand_horizontal=true;batch.passes.push_back({PpuLayer::bg2});
+        if(scenario==2)batch.passes.push_back({PpuLayer::objects,1});
+        std::array<std::shared_ptr<const simulation::SnesPpuState>,32> inputs;
+        for(unsigned f=0;f<inputs.size();++f) {
+            auto next=std::make_shared<simulation::SnesPpuState>(*ppu);
+            if(scenario==1)next->bg2_scroll_x=std::int16_t(f*3);
+            if(scenario==2)next->oam[0]=std::uint8_t(f*3);
+            inputs[f]=std::move(next);
+        }
+        const auto run=[&](bool indexed) {
+            PicaRaster owner;
+            std::array<PicaTextureResidency,pica_raster_max_strips> caches;
+            std::array<PicaTexturePacker,pica_raster_max_strips> packers;
+            std::array<std::vector<std::uint8_t>,pica_raster_max_strips> colours,masks;
+            std::uint64_t elapsed{},digest{};
+            for(unsigned f=0;f<128;++f) {
+                std::atomic_signal_fence(std::memory_order_seq_cst);const auto begin=Clock::now();
+                const auto frame=owner.prepare(inputs[f%inputs.size()],batch,plan,scenario==0?f%16:15,
+                    scenario==0?(f/16)%4:0,pica_raster_base_guard,false,indexed);
+                for(unsigned i=0;i<frame.textures.size();++i) {
+                    caches[i].prepare(frame.textures[i],[&](PicaImage image,PicaTextureLayout layout) {
+                        colours[i].resize(layout.bytes);
+                        packers[i].pack(image,caches[i].colour_base(image),colours[i]);
+                    },[&](PicaImage image,PicaTextureLayout layout,unsigned) {
+                        masks[i].resize(layout.width*layout.height);pack_pica_layers(image,masks[i]);
+                    });
+                }
+                const auto end=Clock::now();std::atomic_signal_fence(std::memory_order_seq_cst);
+                if(f>=32)elapsed+=std::chrono::duration_cast<std::chrono::nanoseconds>(end-begin).count();
+                // Exact complete native colour/ownership digest, outside timing.
+                for(unsigned i=0;i<frame.textures.size();++i) for(const auto& plane:{&colours[i],&masks[i]})
+                    for(auto byte:*plane) digest=(digest^byte)*1099511628211ULL;
+            }
+            return std::pair{elapsed,digest};
+        };
+        for(unsigned pair=0;pair<4;++pair) {
+            std::pair<std::uint64_t,std::uint64_t> old,next;
+            if(pair&1) {next=run(true);old=run(false);} else {old=run(false);next=run(true);}
+            require(old.second==next.second,"Indexed complete pipeline benchmark changed native colour/ownership");
+            std::cout<<"INDEXED_PIPELINE scenario="<<scenario<<" pair="<<pair<<" frames=96 rgba_ns="<<old.first
+                <<" indexed_ns="<<next.first<<" ratio="<<double(old.first)/next.first<<" digest="<<old.second<<'\n';
+        }
+    }
+    std::cout<<"PASS: complete preparation/residency/native-pack host comparison; not ARM/GPU or console FPS\n";
 }
 void pass_memory_dependencies() {
     const auto plan=plan_frame(1,true,ScreenUse::world);
@@ -888,5 +994,8 @@ void window_masks() {
     rejected([&]{pica_screen_scissor({0,0,0,240});},"Empty effect scissor accepted");
 }
 }
-int main() try {game_effect_flow();raster();pass_memory_dependencies();referenced_character_cache();optical_coverage();disjoint_scenery_coverage();transparent_priority_crop();unique_sky_halves();composition();corridor_batch_contract();compact_strip_contract();screen_sprite_crop();window_masks();colour_effects();std::cout<<checks<<" 3DS native PPU/cache/composition checks passed; NOT full game/hardware acceptance\n";}
+int main(int argc,char** argv) try {
+    if(argc==2 && std::string_view(argv[1])=="--indexed-benchmark") {indexed_pipeline_benchmark();return 0;}
+    require(argc==1,"Use no arguments for contracts or --indexed-benchmark");
+    game_effect_flow();raster();indexed_raster_pipeline();pass_memory_dependencies();referenced_character_cache();optical_coverage();disjoint_scenery_coverage();transparent_priority_crop();unique_sky_halves();composition();corridor_batch_contract();compact_strip_contract();screen_sprite_crop();window_masks();colour_effects();std::cout<<checks<<" 3DS native PPU/cache/composition checks passed; NOT full game/hardware acceptance\n";}
 catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}

@@ -156,6 +156,26 @@ class PackageTests(unittest.TestCase):
         self.assertNotIn("original models mono", cmake)
         self.assertNotIn("ORIGINAL 3DS TEST BUILD", player)
 
+    def test_explicit_indexed_mono_setting(self):
+        for setting in ("ON", "OFF"):
+            with self.subTest(setting=setting):
+                output = self.root / ("indexed-" + setting + ".zip")
+                info = MODULE.package(self.elf, self.dsx, self.smdh, COMMIT, output,
+                                      indexed_mono=setting)
+                self.assertEqual(info["indexed_mono"], setting == "ON")
+                with zipfile.ZipFile(output) as archive:
+                    self.assertEqual(json.loads(archive.read("BUILD-INFO.json"))["indexed_mono"], setting == "ON")
+        self.assertNotIn("indexed_mono", self.pack())
+        for setting in (True, False, "unknown", "on"):
+            with self.assertRaises(ValueError):
+                MODULE.package(self.elf, self.dsx, self.smdh, COMMIT,
+                               self.root / "invalid.zip", indexed_mono=setting)
+        workflow = (ROOT / ".github/workflows/3ds-native-check.yml").read_text(encoding="utf-8")
+        self.assertIn('STARFOX_3DS_INDEXED_MONO="$CTR_INDEXED_MONO"', workflow)
+        self.assertIn('--indexed-mono "$CTR_INDEXED_MONO"', workflow)
+        cmake = (ROOT / "platform/3ds/CMakeLists.txt").read_text(encoding="utf-8")
+        self.assertIn('option(STARFOX_3DS_INDEXED_MONO "Experiment with fused indexed mono background uploads (performance unverified)" OFF)', cmake)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -34,18 +34,23 @@ std::vector<Pixel> sample(const PicaFrame& frame,unsigned width,int left) {
                 const double v=a.uv[1]+(c.uv[1]-double(a.uv[1]))*(y+.5-y0)/(y1-y0);
                 const unsigned sx=unsigned(std::clamp(u*image.width,0.,double(image.width-1)));
                 const unsigned sy=unsigned(std::clamp(v*image.height,0.,double(image.height-1)));
-                const auto offset=std::size_t(sy)*image.pitch+sx*4;
-                if(!image.pixels[offset+3]) continue;
-                result[std::size_t(y)*width+unsigned(x-left)]={image.pixels[offset],image.pixels[offset+1],
-                    image.pixels[offset+2],image.pixels[offset+3],2};
+                const auto offset=std::size_t(sy)*image.pitch+sx*image.channels;
+                std::array<std::uint8_t,4> rgba{};
+                if(image.indexed) {
+                    if(image.indexed->layers[offset]) rgba=std::bit_cast<std::array<std::uint8_t,4>>(
+                        image.indexed->palette[256+image.pixels[offset]]);
+                } else std::copy_n(image.pixels.begin()+offset,4,rgba.begin());
+                if(!rgba[3]) continue;
+                result[std::size_t(y)*width+unsigned(x-left)]={rgba[0],rgba[1],rgba[2],rgba[3],2};
             }
         }
     }
     return result;
 }
 void parity(std::shared_ptr<const simulation::SnesPpuState> ppu,const PpuBatch& batch,
-    const FramePlan& plan,unsigned brightness,unsigned subtract,PicaBg2Tiles& owner,bool complete_roll=false,unsigned guard=32) {
-    const auto prepared=owner.prepare(ppu,batch,plan,brightness,subtract,pica_vertex_limit,guard,complete_roll);
+    const FramePlan& plan,unsigned brightness,unsigned subtract,PicaBg2Tiles& owner,bool complete_roll=false,unsigned guard=32,
+    bool indexed_upload=false) {
+    const auto prepared=owner.prepare(ppu,batch,plan,brightness,subtract,pica_vertex_limit,guard,complete_roll,indexed_upload);
     require(bool(prepared),"Supported ordinary tile fixture fell back");
     const unsigned width=batch.expand_horizontal?400+2*std::max(guard,batch.space==PicaSpace::scenery?pica_scenery_guard(plan):32):256;
     const int left=(400-int(width))/2,origin=(int(width)-256)/2;
@@ -346,6 +351,35 @@ void referenced_character_cache() {
         }
     }
 }
+void indexed_atlas_pipeline() {
+    auto ppu=fixture(0);PpuBatch batch;batch.expand_horizontal=true;batch.space=PicaSpace::scenery;
+    batch.passes.push_back({PpuLayer::bg2});
+    PicaBg2Tiles reference,compact;
+    const std::uint8_t* inks{};std::vector<std::uint8_t> preserved;
+    for(unsigned phase=0;phase<8;++phase) {
+        ppu=std::make_shared<simulation::SnesPpuState>(*ppu);
+        if(phase==1) ppu->cgram[17]^=0x7fff;
+        if(phase==3) ppu->vram[ppu->bg2_character_base*2]^=0x80;
+        if(phase==4) ppu->bg2_scroll_x+=7;
+        const auto plan=plan_frame(phase==6?.5F:0.F,true,ScreenUse::world);
+        const auto a=reference.prepare(ppu,batch,plan,phase%16,phase%3,pica_vertex_limit,32,true);
+        const auto b=compact.prepare(ppu,batch,plan,phase%16,phase%3,pica_vertex_limit,32,true,true);
+        require(a && b && a->vertices.size()==b->vertices.size()
+            && std::equal(a->vertices.begin(),a->vertices.end(),b->vertices.begin()),
+            "Indexed atlas changed HDMA quads or fell back from an accepted source");
+        require(b->textures[0].channels==(plan.stereo?4U:1U),"Indexed atlas failed mono/stereo transition");
+        const auto layout=pica_texture_layout(a->textures[0]);
+        std::vector<std::uint8_t> pa(layout.bytes),pb(layout.bytes);
+        pack_pica_texture(a->textures[0],pa);pack_pica_texture(b->textures[0],pb);
+        require(pa==pb,"Indexed atlas changed exact native Morton/RGBA bytes");
+        if(phase==0) {
+            inks=b->textures[0].pixels.data();preserved.assign(b->textures[0].pixels.begin(),b->textures[0].pixels.end());
+        }
+        if(phase==1 || phase==2) require(b->textures[0].pixels.data()==inks
+            && std::equal(preserved.begin(),preserved.end(),b->textures[0].pixels.begin()),
+            "Indexed palette fade rewrote or replaced the complete tile atlas");
+    }
+}
 void palette_benchmark() {
     const auto ppu=fixture(0);PpuBatch batch;batch.passes.push_back({PpuLayer::bg2});
     PicaBg2Tiles owner;const auto plan=plan_frame(0,true,ScreenUse::world);
@@ -385,6 +419,7 @@ int main(int argc,char** argv) try {
         PpuBatch batch;batch.expand_horizontal=(number&1)!=0;batch.passes.push_back({PpuLayer::bg2,int(number%3)-1});
         if(number&2) batch.passes[0].scroll=std::array<std::int16_t,2>{-511,257};
         PicaBg2Tiles owner;parity(ppu,batch,plan_frame((number&1)?1.F:0.F,true,ScreenUse::world),number%16,number%5,owner);
+        PicaBg2Tiles indexed_owner;parity(ppu,batch,plan_frame(0,true,ScreenUse::world),number%16,number%5,indexed_owner,false,32,true);
         if(number%4==0) {
             batch.space=PicaSpace::scenery;batch.expand_horizontal=true;batch.visible_scenery_only=true;
             PicaBg2Tiles infinity;
@@ -392,7 +427,7 @@ int main(int argc,char** argv) try {
         }
         require(ppu->vram==unchanged.vram && ppu->cgram==unchanged.cgram && ppu->oam==unchanged.oam,"Native tile planning mutated cartridge memory");
     }
-    rejection_and_reuse();painter_integration();constant_vertical_offsets();rolled_offsets_and_carry();water_offsets_and_edges();mode1_panorama_atlas();complete_palette_sweep();referenced_character_cache();
+    rejection_and_reuse();painter_integration();constant_vertical_offsets();rolled_offsets_and_carry();water_offsets_and_edges();mode1_panorama_atlas();complete_palette_sweep();referenced_character_cache();indexed_atlas_pipeline();
     std::cout<<"Native BG2 tile planner/atlas: "<<checks<<" exact pixel, palette, ownership, HDMA, flips, budget and fallback checks PASS\n";
     return 0;
 } catch(const std::exception& error) {count_allocations=false;std::cerr<<error.what()<<'\n';return 1;}

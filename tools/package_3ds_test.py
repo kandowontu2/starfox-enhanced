@@ -48,13 +48,15 @@ def validate_native(elf: Path, three_dsx: Path, smdh: Path) -> dict:
 
 
 def package(elf: Path, three_dsx: Path, smdh: Path, source_commit: str, output: Path,
-            frame_profiling: str | None = None) -> dict:
+            frame_profiling: str | None = None, indexed_mono: str | None = None) -> dict:
     if not re.fullmatch(r"[0-9a-f]{40}", source_commit):
         raise ValueError("Source commit must be a full lowercase Git SHA-1")
     if output.suffix.lower() != ".zip" or output.exists():
         raise ValueError("Output must be a new .zip file; existing packages are never overwritten")
     if frame_profiling not in (None, "ON", "OFF"):
         raise ValueError("Frame profiling must be explicitly ON or OFF, or unknown")
+    if indexed_mono not in (None, "ON", "OFF"):
+        raise ValueError("Indexed mono must be explicitly ON or OFF, or unknown")
     info = validate_native(elf, three_dsx, smdh)
     info.update(source_commit=source_commit, experimental=True, hardware_accepted=False,
                 target="New Nintendo 3DS / New 3DS XL stereo; New Nintendo 2DS XL mono",
@@ -66,6 +68,8 @@ def package(elf: Path, three_dsx: Path, smdh: Path, source_commit: str, output: 
                 private_assets_included=False)
     if frame_profiling is not None:
         info["frame_profiling"] = frame_profiling == "ON"
+    if indexed_mono is not None:
+        info["indexed_mono"] = indexed_mono == "ON"
     instructions = Path(__file__).resolve().parents[1] / "platform/3ds/TESTING.md"
     attribution = instructions.with_name("UPSTREAM-STARWING.md")
     payload = {
@@ -105,9 +109,12 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--frame-profiling", choices=("ON", "OFF"),
                         help="Record the actual native compile setting, not an inferred default")
+    parser.add_argument("--indexed-mono", choices=("ON", "OFF"),
+                        help="Record the experimental indexed mono upload setting")
     args = parser.parse_args()
     try:
-        info = package(args.elf, args.three_dsx, args.smdh, args.source_commit, args.output, args.frame_profiling)
+        info = package(args.elf, args.three_dsx, args.smdh, args.source_commit, args.output,
+                       args.frame_profiling, args.indexed_mono)
     except (OSError, ValueError, zipfile.BadZipFile) as error:
         parser.exit(1, f"3DS package rejected: {error}\n")
     print(f"Validated experimental 3DS package: {args.output}")

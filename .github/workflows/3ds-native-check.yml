@@ -6,6 +6,10 @@ on:
         description: 'Include frame/startup diagnostics (disable for production-style performance checks)'
         type: boolean
         default: true
+      indexed_mono:
+        description: 'Test fused indexed mono uploads; experimental and disabled by default'
+        type: boolean
+        default: false
   push:
     branches: [codex/3ds-native-bringup]
     paths:
@@ -78,6 +82,7 @@ jobs:
       # Official devkitPro/devkitARM image, pinned rather than floating latest.
       CTR_IMAGE: devkitpro/devkitarm@sha256:116afba8df8453961de2936ffab20dd441edf4d682856c1ec8b0e53d7ed0bbf5
       CTR_PROFILE_FRAMES: ${{ (github.event_name != 'workflow_dispatch' || inputs.profile_frames) && 'ON' || 'OFF' }}
+      CTR_INDEXED_MONO: ${{ github.event_name == 'workflow_dispatch' && inputs.indexed_mono && 'ON' || 'OFF' }}
     steps:
       - uses: actions/checkout@v4
       - name: Verify texture packing and independent stereo projections
@@ -133,6 +138,7 @@ jobs:
           docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
             -e STARFOX_3DS_TEST_PLAYER=ON \
             -e STARFOX_3DS_PROFILE_FRAMES="$CTR_PROFILE_FRAMES" \
+            -e STARFOX_3DS_INDEXED_MONO="$CTR_INDEXED_MONO" \
             -e STARFOX_3DS_ENABLE_IPO=OFF \
             -v "$GITHUB_WORKSPACE:/src" -w /src "$CTR_IMAGE" \
             bash tools/build_3ds_frontend.sh . build/3ds-native
@@ -179,6 +185,7 @@ jobs:
             --smdh build/3ds-native/test-player.smdh \
             --source-commit "$GITHUB_SHA" \
             --frame-profiling "$CTR_PROFILE_FRAMES" \
+            --indexed-mono "$CTR_INDEXED_MONO" \
             --output StarFoxEnhanced-3ds-test.zip
           unzip -t StarFoxEnhanced-3ds-test.zip
       - name: Upload experimental player for hardware testing, not a verified release

@@ -122,6 +122,47 @@ void map_single_occurrence() {
             "Map restriction suppressed travel's world surround");
     }
 }
+void indexed_mono_pipeline() {
+    using enum simulation::GameFlowState;
+    for(auto flow:{intro,title,controls_type,controls_choice,planet_select,planet_travel,
+        gameplay,training,stage_results,game_over,continue_choice,ex_pregame_menu,finished,credits})
+        for(unsigned mode:{1U,2U,3U}) for(unsigned budget:{0U,pica_vertex_limit}) {
+            auto frame=source(flow,mode);
+            auto scene=std::make_shared<vr::GameSceneSnapshot>(*frame.current);
+            scene->background_landscape=mode==2 && (flow==gameplay || flow==training || flow==stage_results);
+            frame.current=frame.previous=scene;
+            GameLayers reference,compact(true);Canvas lower;
+            const auto a=reference.prepare(frame,budget),b=compact.prepare(frame,budget);
+            require(a.clear==b.clear,"Indexed mono changed the backdrop/frontend margins");
+            for(const auto pair:{std::pair{&a.before_models,&b.before_models},std::pair{&a.after_models,&b.after_models}}) {
+                const auto& x=*pair.first;const auto& y=*pair.second;
+                require(x.vertices.size()==y.vertices.size() && x.draws.size()==y.draws.size()
+                    && x.textures.size()==y.textures.size() && std::equal(x.vertices.begin(),x.vertices.end(),y.vertices.begin()),
+                    "Indexed native policy changed the source painter geometry");
+                validate_pica_frame(y,lower.view());
+                for(unsigned i=0;i<x.draws.size();++i) {
+                    const auto& dx=x.draws[i];const auto& dy=y.draws[i];
+                    require(dx.first==dy.first && dx.count==dy.count && dx.texture==dy.texture
+                        && dx.space==dy.space && dx.source_layer==dy.source_layer && dx.depth_test==dy.depth_test
+                        && dx.depth_write==dy.depth_write && dx.clip==dy.clip,
+                        "Indexed native policy changed painter order, stencil or model depth");
+                }
+                for(unsigned i=0;i<x.textures.size();++i) {
+                    const auto lx=pica_texture_layout(x.textures[i]),ly=pica_texture_layout(y.textures[i]);
+                    require(lx.bytes==ly.bytes && x.textures[i].source_layers.empty()==y.textures[i].source_layers.empty(),
+                        "Indexed native policy changed texture layout or source stencil ownership");
+                    std::vector<std::uint8_t> px(lx.bytes),py(ly.bytes);
+                    pack_pica_texture(x.textures[i],px);pack_pica_texture(y.textures[i],py);
+                    require(px==py,"Indexed native policy changed complete native artwork bytes");
+                    if(!x.textures[i].source_layers.empty()) {
+                        std::vector<std::uint8_t> mx(lx.bytes/4),my(ly.bytes/4);
+                        pack_pica_layers(x.textures[i],mx);pack_pica_layers(y.textures[i],my);
+                        require(mx==my,"Indexed native policy changed colour-math ownership bytes");
+                    }
+                }
+            }
+        }
+}
 void priority_pixels() {
     using enum simulation::GameFlowState;
     for(unsigned mode:{1U,2U,3U}) {
@@ -1669,7 +1710,7 @@ STARFOX_SCENERY_NOINLINE void operator delete[](void* memory,std::size_t) noexce
 #undef STARFOX_SCENERY_NOINLINE
 int main(int argc,char** argv) try {
     if(argc==2 && std::string_view(argv[1])=="--scenery-only") {warmed_scenery_storage();return 0;}
-    priority_pixels();map_single_occurrence();policy_contracts();margins_and_cache();landscape_depth();mono_landscape_pixels();atlas_landscape_depth();landscape_bg1_priority();unique_landscape_policy();results_landscape_priorities();atlas_water_depth();water_depth();water_priority_pixels();water_eye_coverage();corridor_source_symbols();corridor_depth();corridor_eye_coverage();corridor_eye_coverage(true);corridor_eye_coverage(false,true);corridor_eye_coverage(true,true);corridor_eye_coverage(false,true,true);corridor_eye_coverage(true,true,true);colony_depth();panorama_depth();panorama_atlas_priority_pixels();offscreen_landscape_receiver();ex_menu_panorama_depth();receiver_eye_coverage();
+    indexed_mono_pipeline();priority_pixels();map_single_occurrence();policy_contracts();margins_and_cache();landscape_depth();mono_landscape_pixels();atlas_landscape_depth();landscape_bg1_priority();unique_landscape_policy();results_landscape_priorities();atlas_water_depth();water_depth();water_priority_pixels();water_eye_coverage();corridor_source_symbols();corridor_depth();corridor_eye_coverage();corridor_eye_coverage(true);corridor_eye_coverage(false,true);corridor_eye_coverage(true,true);corridor_eye_coverage(false,true,true);corridor_eye_coverage(true,true,true);colony_depth();panorama_depth();panorama_atlas_priority_pixels();offscreen_landscape_receiver();ex_menu_panorama_depth();receiver_eye_coverage();
     warmed_scenery_storage();
     std::cout<<checks<<" 3DS actual source painter-policy checks passed; not full terrain/menu/hardware acceptance\n";
 } catch(const std::exception& error) {count_scenery_allocations=false;std::cerr<<scenario<<error.what()<<'\n';return 1;}

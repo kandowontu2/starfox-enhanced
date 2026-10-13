@@ -433,6 +433,83 @@ void reusable_texture_cache() {
     require(!cache.colour_matches(image) && cache.pixels().empty() && cache.layers().empty()
         && !cache.colour_capacity() && !cache.layer_capacity(),"Inactive texture cache retained allocations");
 }
+void indexed_texture_upload() {
+    std::array<std::uint32_t,512> palette{};
+    for(unsigned i=0;i<palette.size();++i) palette[i]=std::bit_cast<std::uint32_t>(
+        std::array<std::uint8_t,4>{std::uint8_t(i*13),std::uint8_t(i*37+i/256),std::uint8_t(i*61),255});
+    // Opaque index zero, opaque black and transparent nonzero inks are distinct.
+    palette[0]=palette[256]=std::bit_cast<std::uint32_t>(std::array<std::uint8_t,4>{0,0,0,255});
+    constexpr unsigned spread[]{0,1,4,5,16,17,20,21};
+    for(const auto size:std::array<std::array<unsigned,2>,5>{{{1,1},{13,9},{32,16},{400,240},{1023,17}}}) {
+        const auto width=size[0],height=size[1],pitch=width+11;
+        std::vector<std::uint8_t> inks(std::size_t(pitch)*(height-1)+width),layers(inks.size());
+        for(unsigned y=0;y<height;++y) for(unsigned x=0;x<width;++x) {
+            inks[y*pitch+x]=std::uint8_t(x*17+y*19);
+            layers[y*pitch+x]=(x+y)%7?std::uint8_t(1U<<((x+y*3)%6)):0;
+        }
+        PicaImage image{inks,width,height,pitch,1,false,layers,pitch,PicaIndexedPixels{layers,palette}};
+        for(bool repeat:{false,true}) {
+            if(repeat && (!std::has_single_bit(width) || !std::has_single_bit(height)))continue;
+            image.repeat=repeat;
+            const auto layout=pica_texture_layout(image);
+            std::vector<std::uint8_t> packed(layout.bytes+2,0xCA),mask(layout.width*layout.height);
+            pack_pica_texture(image,std::span(packed).subspan(1,layout.bytes));
+            pack_pica_layers(image,mask);
+            for(unsigned y=0;y<layout.height;++y) for(unsigned x=0;x<layout.width;++x) {
+                const auto sx=repeat?x%width:std::min(x,width-1),sy=repeat?y%height:std::min(y,height-1);
+                const auto from=sy*pitch+sx,layer=unsigned(layers[from]);
+                const auto rgba=layer?std::bit_cast<std::array<std::uint8_t,4>>(palette[(layer==2?256:0)+inks[from]])
+                    :std::array<std::uint8_t,4>{};
+                const unsigned to=((y/8)*(layout.width/8)+x/8)*64+spread[x%8]+2*spread[y%8];
+                for(unsigned c=0;c<4;++c) require(packed[1+to*4+3-c]==rgba[c],
+                    "Indexed upload changed exact ink, BG2 subtraction, opacity, crop, padding or Morton bytes");
+                require(mask[to]==layer,"Indexed A8 ownership diverged from expanded colour");
+            }
+            require(packed.front()==0xCA && packed.back()==0xCA,"Indexed upload crossed native allocation guards");
+        }
+    }
+    std::array<std::uint8_t,64> inks{},layers{};layers.fill(1);
+    PicaImage image{inks,8,8,8,1,false,{},0,PicaIndexedPixels{layers,palette}};
+    PicaTextureResidency cache;PicaTexturePacker packer;
+    std::vector<std::uint8_t> packed(pica_texture_layout(image).bytes);
+    unsigned uploads{};bool fail{};
+    const auto upload=[&](PicaImage source,PicaTextureLayout) {
+        ++uploads;packer.pack(source,cache.colour_base(source),packed);
+        if(fail)throw std::runtime_error("Injected indexed native flush failure");
+    };
+    const auto mask=[](PicaImage,PicaTextureLayout,unsigned) {};
+    cache.prepare(image,upload,mask);
+    require(!cache.prepare(image,upload,mask) && uploads==1,"Held indexed source unnecessarily uploaded");
+    palette[42]^=0x00010101U;
+    require(!cache.prepare(image,upload,mask) && uploads==1,
+        "Unused indexed palette entry forced a complete native upload");
+    require(cache.pixels().size()==64 && cache.colour_capacity()<64*2+4096,
+        "Indexed comparison retained an expanded complete-image cache");
+    inks[0]=17;require(!cache.colour_base(image).empty(),"An ink-only edit lost a compatible residency base");
+    cache.prepare(image,upload,mask);
+    palette[17]^=0x00010101U;
+    require(cache.colour_base(image).empty(),"Palette edit reused stale indexed colour equality");
+    cache.prepare(image,upload,mask);
+    layers[0]=2;
+    require(cache.colour_base(image).empty(),"BG2/normal recolouring reused a stale indexed base");
+    cache.prepare(image,upload,mask);
+    layers[0]=0;cache.prepare(image,upload,mask);
+    require(packed[0]==0 && packed[1]==0 && packed[2]==0 && packed[3]==0,
+        "Indexed opacity edit left the previous opaque texel resident");
+    const auto old_palette=palette;palette[inks[1]]^=0x00010101U;fail=true;
+    bool failed=false;try{cache.prepare(image,upload,mask);}catch(const std::runtime_error&){failed=true;}
+    require(failed && !cache.colour_matches(image),"Failed indexed upload retained successful CPU equality");
+    palette=old_palette;fail=false;cache.prepare(image,upload,mask);
+    require(cache.colour_matches(image),"Indexed retry did not repair the previous native allocation");
+    auto bad=image;bad.indexed.reset();rejects([&]{pica_texture_layout(bad);},"Unclassified one-byte image accepted");
+    bad=image;bad.indexed->palette=std::span(palette).first(256);
+    rejects([&]{pica_texture_layout(bad);},"Incomplete indexed ink banks accepted");
+    bad=image;bad.indexed->layers=std::span(layers).first(63);
+    rejects([&]{pica_texture_layout(bad);},"Incomplete indexed opacity accepted");
+    layers[0]=3;rejects([&]{pack_pica_texture(image,packed);},"Ambiguous indexed source layer accepted");layers[0]=0;
+    palette[0]=0;rejects([&]{pica_texture_layout(image);},"Palette alpha replaced explicit source coverage");
+    cache.release_colour();require(!cache.colour_capacity(),"Indexed release retained its image/coverage/palette cache");
+}
 void full_size_texture_upload() {
     // LCD/dashboard sizes, padded edge tiles, thin maximum-width/height images
     // and the largest accepted allocation. The oracle deliberately retains
@@ -884,6 +961,7 @@ int main() try {
     display_sync();
     source_layer_predicate();
     word_texture_store();
+    indexed_texture_upload();
     validated_composition_handoff();
     vertex_validation_bits();vertex_validation_draw_policy();texture_upload();full_size_texture_upload();changed_tile_upload();texture_residency();reusable_texture_cache();vertex_residency();projection_and_draws();layer_upload();sampled_texture_orientation();
     require(pica_uv_mode(false,false)==std::array<float,4>{1,0,0,0},"Ordinary texture projection changed");

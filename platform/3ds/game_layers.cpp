@@ -210,7 +210,8 @@ PicaFrame GameLayers::prepare_groups(const GamePresentation& frame,std::span<con
                 :batches[later].landscape_receiver && frame.plan.stereo?18:6);
         const unsigned budget=!corridors && tile_vertex_budget>reserve?tile_vertex_budget-reserve:0;
         const auto tiles=budget?owner.tiles.prepare(frame.raster->ppu,batch,frame.plan,frame.raster->brightness,
-            frame.current->background_colour_subtract,budget,guard,batch.water_receiver || batch.landscape_receiver):std::optional<PicaFrame>{};
+            frame.current->background_colour_subtract,budget,guard,batch.water_receiver || batch.landscape_receiver,
+            indexed_mono_):std::optional<PicaFrame>{};
         const auto ready=tiles && batch.water_receiver?owner.receiver.prepare_water_tiles(frame,*tiles,owner.tiles.coverage_guard(),budget)
             :tiles && finite_landscape?owner.receiver.prepare_tiles(frame,*tiles,owner.tiles.coverage_guard(),budget):tiles;
         PicaFrame prepared;
@@ -218,7 +219,7 @@ PicaFrame GameLayers::prepare_groups(const GamePresentation& frame,std::span<con
             const auto work=owner.raster.work();retired.decodes+=work.decodes;retired.colour_updates+=work.colour_updates;
             owner.raster=PicaRaster{};prepared=*ready;
         } else prepared=owner.raster.prepare(frame.raster->ppu,batch,frame.plan,frame.raster->brightness,
-            frame.current->background_colour_subtract,guard,true);
+            frame.current->background_colour_subtract,guard,true,indexed_mono_);
         tile_vertex_budget=prepared.vertices.size()<tile_vertex_budget?tile_vertex_budget-unsigned(prepared.vertices.size()):0;
         if(finite_landscape && !ready) prepared=owner.receiver.prepare(frame,prepared,owner.raster.coverage_guard());
         else if(batch.water_receiver && !ready) prepared=owner.receiver.prepare_water(frame,prepared,owner.raster.coverage_guard());
@@ -244,7 +245,8 @@ GameLayerFrames GameLayers::prepare(const GamePresentation& frame,unsigned tile_
     if(policy.after_model_groups.empty()) {
         for(const auto& group:foreground_groups_) retire_after(group->raster.work());
         foreground_groups_.clear();
-        after=after_.prepare(frame.raster->ppu,policy.after_models,frame.plan,brightness,frame.current->background_colour_subtract);
+        after=after_.prepare(frame.raster->ppu,policy.after_models,frame.plan,brightness,frame.current->background_colour_subtract,
+            pica_raster_base_guard,false,indexed_mono_ && !policy.solid_frontend_margins);
     } else {
         retire_after(after_.work());after_=PicaRaster{};
         after=prepare_groups(frame,policy.after_model_groups,foreground_groups_,working_foreground_,foreground_,retired_after_work_);
@@ -262,7 +264,7 @@ GameLayerFrames GameLayers::prepare(const GamePresentation& frame,unsigned tile_
         const unsigned budget=after.vertices.size()<tile_vertex_budget
             ?tile_vertex_budget-unsigned(after.vertices.size()):0;
         const auto tiles=budget?before_tiles_.prepare(frame.raster->ppu,policy.before_models,frame.plan,brightness,
-            frame.current->background_colour_subtract,budget,guard,landscape):std::optional<PicaFrame>{};
+            frame.current->background_colour_subtract,budget,guard,landscape,indexed_mono_):std::optional<PicaFrame>{};
         auto ready=tiles;
         if(tiles && finite_landscape) {
             ready=scenery_.prepare_tiles(frame,*tiles,before_tiles_.coverage_guard(),budget);
@@ -270,7 +272,7 @@ GameLayerFrames GameLayers::prepare(const GamePresentation& frame,unsigned tile_
         }
         if(ready) {retire(before_.work());before_=PicaRaster{};before=*ready;}
         else before=before_.prepare(frame.raster->ppu,policy.before_models,frame.plan,brightness,
-            frame.current->background_colour_subtract,guard);
+            frame.current->background_colour_subtract,guard,false,indexed_mono_ && !policy.solid_frontend_margins);
     } else {
         retire(before_.work());before_=PicaRaster{};
         const unsigned budget=after.vertices.size()<tile_vertex_budget?tile_vertex_budget-unsigned(after.vertices.size()):0;

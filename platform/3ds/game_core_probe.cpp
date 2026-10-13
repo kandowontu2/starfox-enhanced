@@ -31,6 +31,11 @@
 namespace {
 namespace ctr=starfox::platform::nintendo_3ds;
 constexpr auto companion_path="sdmc:/3ds/starfox-enhanced/Starfox-Assets.BIN";
+#if defined(STARFOX_3DS_INDEXED_MONO)
+constexpr bool indexed_mono_upload=true;
+#else
+constexpr bool indexed_mono_upload=false;
+#endif
 std::int64_t monotonic_time() {
     const auto ticks=svcGetSystemTick();
     // Split before multiplication: uptime must not overflow nanosecond math.
@@ -240,7 +245,7 @@ int main() {
         },[&]{return remap || hud_editor || quick || session->game().runtime_options_open();});
         states=std::make_unique<ctr::GameStateStorage>("sdmc:/3ds/starfox-enhanced",ctr::companion_manifest,cartridge_crc);
 #if defined(STARFOX_3DS_CORE_PICA)
-        layers=std::make_unique<ctr::GameLayers>();
+        layers=std::make_unique<ctr::GameLayers>(indexed_mono_upload);
         dots=std::make_unique<ctr::GameDots>(session->rom(),session->symbols());
         // Preview OFF is a host menu, not a PICA world. Initialize the native
         // GPU only when a real preview/game/editor needs it.
@@ -383,7 +388,7 @@ int main() {
                                 checkpoint(true);
                             },[&]{return remap || hud_editor || quick || session->game().runtime_options_open();});
 #if defined(STARFOX_3DS_CORE_PICA)
-                            next_layers=std::make_unique<ctr::GameLayers>();
+                            next_layers=std::make_unique<ctr::GameLayers>(indexed_mono_upload);
                             next_dots=std::make_unique<ctr::GameDots>(next->rom(),next->symbols());
 #endif
                         } catch(const std::exception& failure) {

@@ -54,7 +54,8 @@ public:
     // normal 32px guard; oversized artwork is borrowed as native GPU strips.
     PicaFrame prepare(std::shared_ptr<const simulation::SnesPpuState>,const PpuBatch&,
         const FramePlan&,unsigned brightness=15,unsigned bg2_subtract=0,
-        unsigned receiver_guard=pica_raster_base_guard,bool trim_transparent=false);
+        unsigned receiver_guard=pica_raster_base_guard,bool trim_transparent=false,
+        bool indexed_upload=false);
     [[nodiscard]] PpuRasterWork work() const noexcept {return work_;}
     [[nodiscard]] unsigned coverage_guard() const noexcept {
         return indexed_ && indexed_->width()>top_width?unsigned(indexed_->width()-top_width)/2:0;
@@ -66,6 +67,8 @@ private:
     // Naturally aligned, typed word writes; public images borrow its exact
     // byte representation. Never cast a byte vector to an aliased word array.
     std::vector<std::uint32_t> rgba_;
+    std::vector<std::uint8_t> upload_indices_;
+    std::array<std::uint32_t,512> upload_palette_{};
     std::vector<std::uint8_t> layers_;
     std::array<PicaVertex,pica_raster_max_strips*6> vertices_{};
     std::array<PicaDraw,pica_raster_max_strips> draws_{};
@@ -73,7 +76,7 @@ private:
     std::array<std::array<unsigned,4>,pica_raster_max_strips> occupied_{};
     std::array<std::uint16_t,256> palette_{};
     unsigned brightness_{},subtract_{};
-    bool visible_{};
+    bool visible_{},indexed_upload_{};
     PpuRasterWork work_;
 };
 } // namespace starfox::platform::nintendo_3ds

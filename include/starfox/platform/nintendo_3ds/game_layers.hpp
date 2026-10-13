@@ -23,12 +23,16 @@ struct GameLayerPlan {
 struct GameLayerFrames {PicaFrame before_models,after_models;Rgb clear;};
 class GameLayers {
 public:
+    // Native mono can retain indexed artwork until the final GPU pack. The
+    // RGBA reference remains available for pixel oracles and finite receivers.
+    explicit GameLayers(bool indexed_mono=false):indexed_mono_(indexed_mono) {}
     // Borrowed views remain valid until the next prepare on this owner.
     // The caller supplies the remaining complete-scene vertex budget. Zero
     // keeps the reference raster path; budget failure never drops source tiles.
     GameLayerFrames prepare(const GamePresentation&,unsigned tile_vertex_budget=0);
     [[nodiscard]] std::array<PpuRasterWork,2> work() const noexcept;
 private:
+    bool indexed_mono_{};
     PicaRaster before_,after_;
     PicaBg2Tiles before_tiles_;
     GameScenery scenery_;
