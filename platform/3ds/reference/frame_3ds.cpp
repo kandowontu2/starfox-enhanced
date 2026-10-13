@@ -1069,17 +1069,10 @@ const render::Framebuffer& Frame3ds::draw(
     const auto stage_native_model_end = reference_system_tick();
 
     if (game.experience() == simulation::Experience::starfox_ex) {
-        ex_overlay_.clear(0U);
-        backgrounds_.draw_bg1(ppu, ex_overlay_,
-            render::TilePriorityPass::all, 0, false, 16U);
-        for (std::uint32_t y = 0U; y < ex_overlay_.height(); ++y) {
-            for (std::uint32_t x = 0U; x < ex_overlay_.width(); ++x) {
-                const auto pixel = ex_overlay_.get(x, y);
-                if (pixel != 0U && (ppu.cgram[pixel] & 0x7fffU) != 0U)
-                    frame_.set(static_cast<std::int32_t>(x),
-                        static_cast<std::int32_t>(y), pixel);
-            }
-        }
+        // Apply the same zero-ink/CGRAM-black transparency while decoding,
+        // without clearing and rescanning a second 256x224 framebuffer.
+        backgrounds_.draw_bg1(ppu, frame_,
+            render::TilePriorityPass::all, 0, false, 16U, true);
     }
 
     const auto briefing = game.briefing_state();

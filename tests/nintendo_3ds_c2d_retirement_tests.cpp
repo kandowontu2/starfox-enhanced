@@ -1,6 +1,9 @@
+#include <algorithm>
 #include <iostream>
 #include <set>
 #include <stdexcept>
+#include <vector>
+#include "../platform/3ds/reference/display_retirement.hpp"
 
 struct DVLB_s {unsigned id;};
 struct Shader {DVLB_s* library;};
@@ -36,7 +39,48 @@ struct Owner {
     }
     void free() {shaderProgramFree(&program);DVLB_Free(library);library=nullptr;}
 };
+static void display_queue_retirement() {
+    struct Target { bool linked; };
+    // Cold close, C3D-only, C2D partial construction, one/two allocated
+    // targets, linked left output, and paired output; idle and busy queues.
+    for (unsigned cycle = 0; cycle < 100; ++cycle) for (unsigned stage = 0; stage < 7; ++stage) {
+        bool c3d_ready = stage >= 1, c2d_ready = stage >= 2;
+        Target first{stage >= 5}, second{stage >= 6};
+        Target* left = stage >= 3 ? &first : nullptr;
+        Target* right = stage >= 4 ? &second : nullptr;
+        bool queue_pending = stage >= 5 && cycle % 2;
+        unsigned detached = 0, freed_2d = 0, freed_3d = 0;
+        std::vector<unsigned> order;
+        const auto detach = [&](Target* target) {
+            require(c3d_ready && target && target->linked, "Detached a dead or unlinked output");
+            queue_pending = false; target->linked = false;
+            ++detached; order.push_back(1);
+        };
+        const auto retire_2d = [&] {
+            require(!queue_pending && c3d_ready && c2d_ready,
+                "C2D freed borrowed buffers before GPU join or shader park lost its context");
+            ++freed_2d; order.push_back(2);
+        };
+        const auto retire_3d = [&] {
+            require(!queue_pending && !c2d_ready && c3d_ready,
+                "C3D retired before C2D shader parking");
+            ++freed_3d; order.push_back(3);
+        };
+        starfox::platform_3ds::retire_display_context(c3d_ready, c2d_ready,
+            left, right, detach, retire_2d, retire_3d);
+        require(!c3d_ready && !c2d_ready && !left && !right, "Retired display ownership survived close");
+        require(detached == unsigned(stage >= 5) + unsigned(stage >= 6)
+            && freed_2d == unsigned(stage >= 2) && freed_3d == unsigned(stage >= 1),
+            "Partial construction freed an absent resource");
+        require(std::is_sorted(order.begin(), order.end()), "Display shutdown order changed");
+        const auto before = order;
+        starfox::platform_3ds::retire_display_context(c3d_ready, c2d_ready,
+            left, right, detach, retire_2d, retire_3d);
+        require(order == before, "Repeated close freed resources twice");
+    }
+}
 int main() try {
+    display_queue_retirement();
     for(unsigned frame=0;frame<100;++frame) {
         Owner c2d(frame*2);
         C3D_BindProgram(&c2d.program);

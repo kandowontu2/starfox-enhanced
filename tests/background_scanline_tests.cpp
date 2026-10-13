@@ -228,10 +228,50 @@ void reference_priority_split() {
     }
 }
 }
+namespace {
+void reference_ex_direct_overlay() {
+    const BackgroundRenderer renderer;
+    // The removed path is the oracle: decode into a cleared source image,
+    // then copy only nonzero ink whose CGRAM RGB is not black.
+    for (unsigned n = 0; n < 192; ++n) {
+        auto ppu = source(n);
+        if (n % 17U == 0) ppu.background_mode = 0;
+        for (unsigned ink = 0; ink < ppu.cgram.size(); ++ink) {
+            if (ink % 7U == 0) ppu.cgram[ink] = 0;
+            else if (ink % 11U == 0) ppu.cgram[ink] = 0x8000U;
+            else if (ink % 13U == 0) ppu.cgram[ink] |= 0x8000U;
+        }
+        for (bool tracked : {false, true}) {
+            Framebuffer staged(256, 224), expected(256, 224), direct(256, 224);
+            for (auto* frame : {&expected, &direct}) {
+                frame->enable_layer_tags(tracked);
+                frame->clear(199);
+                for (std::size_t i = 0; i < frame->pixels().size(); ++i)
+                    frame->pixels()[i] = std::uint8_t(i * 19U + n);
+                if (tracked) frame->begin_write_coverage();
+            }
+            renderer.draw_bg1(ppu, staged, TilePriorityPass::all, 0, false, 16U);
+            for (unsigned y = 0; y < 224; ++y) for (unsigned x = 0; x < 256; ++x) {
+                const auto ink = staged.get(x, y);
+                if (ink != 0 && (ppu.cgram[ink] & 0x7fffU) != 0)
+                    expected.set(x, y, ink);
+            }
+            renderer.draw_bg1(ppu, direct, TilePriorityPass::all, 0, false, 16U, true);
+            if (expected.pixels() != direct.pixels()
+                || expected.layer_tags() != direct.layer_tags()
+                || !std::equal(expected.write_coverage().begin(),
+                    expected.write_coverage().end(), direct.write_coverage().begin()))
+                throw std::runtime_error("Direct EX BG1 overlay changed pixels, coverage or tags");
+        }
+    }
+}
+} // namespace
+
 int main(int argc, char** argv) try {
     if (argc == 2 && std::string_view(argv[1]) == "--benchmark") { benchmark(); return 0; }
     native_row_contract();
     reference_priority_split();
+    reference_ex_direct_overlay();
     const auto digest = oracle_trace();
     // Filled from a separate executable built BEFORE changing the renderer:
     // background_renderer.cpp SHA256 450af058b47c38fd096b7416782f1b3ab

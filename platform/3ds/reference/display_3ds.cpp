@@ -1,6 +1,7 @@
 // Adapted from Esteban PDN / starwing-3ds, 01bf4925951515244cdb03d58ad722417919d6ba.
 // Imported with the author's permission recorded in ../UPSTREAM-STARWING.md.
 #include "display_3ds.hpp"
+#include "display_retirement.hpp"
 #include "stereo_3ds.hpp"
 
 #include <algorithm>
@@ -282,16 +283,9 @@ void Display3ds::close() noexcept {
         bg2_plan_worker_ = nullptr;
     }
     gpu_active_ = false;
-    // Drain before C2D frees VBOs, and park its borrowed shader while C3D
-    // remains active. The next renderer's bind releases just that shader.
-    if (c3d_ready_) C3D_FrameSync();
-    if (c2d_ready_) C2D_Fini();
-    c2d_ready_ = false;
-    if (c3d_ready_) C3D_Fini();
-    c3d_ready_ = false;
-    // C3D_Fini owns render-target deletion.
-    top_ = nullptr;
-    top_right_ = nullptr;
+    retire_display_context(c3d_ready_, c2d_ready_, top_, top_right_,
+        [](C3D_RenderTarget* target) { C3D_RenderTargetDetachOutput(target); },
+        [] { C2D_Fini(); }, [] { C3D_Fini(); });
     if (texture_.data != nullptr) C3D_TexDelete(&texture_);
     texture_ = {};
     if (overlay_texture_.data != nullptr) C3D_TexDelete(&overlay_texture_);

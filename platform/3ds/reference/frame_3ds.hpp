@@ -175,7 +175,6 @@ private:
     std::uint64_t background_cache_hits_{};
     std::uint64_t background_cache_misses_{};
     DrawBreakdown last_draw_breakdown_{};
-    render::Framebuffer ex_overlay_{256U, 224U};
     render::Framebuffer mode2_background_cache_{400U, 240U};
     std::array<Mode1BackgroundCache, 2U> mode1_caches_{};
     std::uint8_t mode1_next_victim_{};
