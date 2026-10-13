@@ -414,7 +414,7 @@ int main() {
                 }
                 const bool runtime_before=session->game().runtime_options_open();
                 STARFOX_3DS_STARTUP_MARK(source_advance);
-                const auto advanced=session->advance(monotonic_time(),controls.held,true,ctr::mapped_buttons(bindings,pad));
+                const auto advanced=session->advance(monotonic_time(),controls.held,true,ctr::mapped_buttons(bindings,pad),true);
                 STARFOX_3DS_STARTUP_MARK(source_advance_complete);
                 if(runtime_before!=session->game().runtime_options_open()) audio->pause(session->game().runtime_options_open());
                 rasters+=advanced.video_phases;logic+=advanced.logic_ticks;blocks+=advanced.audio_blocks;
@@ -462,6 +462,8 @@ int main() {
                     load(options.preview?"LEVEL1_1":"BOOT",options);
                     continue;
                 }
+                bool frame_handled=false;
+                session->run_frame_work([&] {
                 checkpoint(false);
                 if(advanced.logic_ticks || menu->state().visible!=session->game().in_setup_menu()) {
                     STARFOX_3DS_FRAME_PHASE(menu);
@@ -470,7 +472,7 @@ int main() {
                 // Keep input, source raster and NDSP service at 60 Hz. Only
                 // skip scene preparation/submission; never spin on a 30 Hz gap.
                 if(!render_clock.due(monotonic_time(),session->game().presentation_fps())) {
-                    gspWaitForVBlank();continue;
+                    gspWaitForVBlank();frame_handled=true;return;
                 }
                 const auto source=session->presentation(controls.slider,controls.stereoscopic_hardware,session->stereo_settings());
 #if defined(STARFOX_3DS_PROFILE_FRAMES)
@@ -511,7 +513,7 @@ int main() {
                     STARFOX_3DS_STARTUP_MARK(menu_lcd_present);
                     { STARFOX_3DS_FRAME_PHASE(present);display.present(source.plan,menu->plain_view(),{},dashboard); }
                     STARFOX_3DS_STARTUP_MARK(menu_lcd_present_complete);
-                    rendered_rate.completed(monotonic_time());continue;
+                    rendered_rate.completed(monotonic_time());frame_handled=true;return;
                 }
                 ensure_gpu();
                 const auto model_frame=[&] { STARFOX_3DS_FRAME_PHASE(models);return models->prepare(source); }();
@@ -537,17 +539,19 @@ int main() {
                 }();
                 { STARFOX_3DS_FRAME_PHASE(present);gpu->present(frame,dashboard); }
                 rendered_rate.completed(monotonic_time());
-                continue; // Sole GPU owner: never also swap through NativeDisplay.
+                frame_handled=true;return; // Sole GPU owner: never also swap through NativeDisplay.
 #else
                 if(plain) {
                     display.present(source.plan,menu->plain_view(),{},dashboard);
-                    rendered_rate.completed(monotonic_time());continue;
+                    rendered_rate.completed(monotonic_time());frame_handled=true;return;
                 }
                 static_cast<void>(models->prepare(source));
 #endif
                 if(dashboard.pixels.data()!=lower.view().pixels.data()) {
                     lower.clear({0,0,0});lower.image(0,0,dashboard);
                 }
+                });
+                if(frame_handled) continue;
             }
         } catch(const std::exception& failure) {
             error=failure.what();running=false;

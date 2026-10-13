@@ -239,10 +239,14 @@ void GameSession::finish_hud_customization(std::optional<CockpitLayout> applied)
     suppress_held_=true;reset_hold_.cancel();history_.reset_interpolation();
 }
 GameAdvance GameSession::advance(std::int64_t time,input::ButtonMask held,bool focused,
-    std::optional<input::ButtonMask> mapped_gameplay) {
+    std::optional<input::ButtonMask> mapped_gameplay,bool overlap_frame_audio) {
     STARFOX_3DS_FRAME_PHASE(advance);
     if(failed_) throw std::runtime_error("Reconstruct 3DS game after a failed source/audio tick");
+    if(frame_work_active_) throw std::logic_error("Cannot advance source during overlapping frame work");
     if(time<0) throw std::invalid_argument("Invalid 3DS monotonic frame time");
+    // Callers that skip presentation still finish a previously deferred block
+    // before any new source phase can read the SPC output ports.
+    if(deferred_audio_) run_frame_work([] {});
     GameAdvance result;result.requested_experience=requested_experience_;
     result.requested_preview=requested_preview_;result.start_after_preview=start_after_preview_;
     result.requested_settings_reset=requested_settings_reset_;
@@ -370,12 +374,20 @@ GameAdvance GameSession::advance(std::int64_t time,input::ButtonMask held,bool f
                 }
             }
             if(!game_.runtime_options_open() && ++audio_phase_==3) {
-                STARFOX_3DS_FRAME_PHASE(audio);
-                audio_.render_stems_logic_tick(pending_audio_,stem_executor_);
-                audio::mix_stems(audio_.last_music_samples(),audio_.last_effect_samples(),
-                    game_.music_volume(),game_.sfx_volume(),mixed_);
-                sink_(mixed_);game_.synchronize_apu_output_ports(audio_.output_ports());
-                pending_audio_.clear();audio_phase_=0;++result.audio_blocks;
+                // Only the final phase can overlap rendering. Earlier blocks
+                // in a catch-up batch acknowledge ports before the next video
+                // phase, exactly as in the ordinary synchronous source path.
+                deferred_audio_=overlap_frame_audio && stem_executor_ && phase+1==batch.simulation_steps
+                    && !requested_controller_remap_ && !requested_hud_customization_;
+                if(!deferred_audio_) {
+                    STARFOX_3DS_FRAME_PHASE(audio);
+                    audio_.render_stems_logic_tick(pending_audio_,stem_executor_);
+                    audio::mix_stems(audio_.last_music_samples(),audio_.last_effect_samples(),
+                        game_.music_volume(),game_.sfx_volume(),mixed_);
+                    sink_(mixed_);game_.synchronize_apu_output_ports(audio_.output_ports());
+                    pending_audio_.clear();
+                }
+                audio_phase_=0;++result.audio_blocks;
             }
             if(requested_controller_remap_ || requested_hud_customization_) {
                 clock_.reset();fraction_=result.raster_fraction=0;
@@ -391,6 +403,45 @@ GameAdvance GameSession::advance(std::int64_t time,input::ButtonMask held,bool f
         }
     } catch(...) {failed_=true;throw;}
     return result;
+}
+void GameSession::run_frame_work(audio::StemTask work) {
+    if(!work.run) throw std::invalid_argument("Missing 3DS presentation work");
+    if(failed_) throw std::runtime_error("Cannot render a failed 3DS game session");
+    if(frame_work_active_) throw std::logic_error("Overlapping 3DS frame work call");
+    struct AudioWork {
+        GameSession& session;
+        unsigned music,sfx;
+        std::optional<FrameProfile> profile;
+    } background{*this,game_.music_volume(),game_.sfx_volume(),{}};
+    auto* parent=active_frame_profile;
+    if(deferred_audio_ && parent) background.profile.emplace(parent->fork());
+    const auto merge_profile=[&] {
+        if(background.profile) {parent->merge_completed(*background.profile);background.profile.reset();}
+    };
+    frame_work_active_=true;
+    try {
+        if(deferred_audio_) {
+            stem_executor_->execute(work,{&background,[](void* context) {
+                auto& task=*static_cast<AudioWork*>(context);
+                std::optional<ScopedFrameProfileActivation> activation;
+                if(task.profile) activation.emplace(*task.profile);
+                STARFOX_3DS_FRAME_PHASE(audio);
+                // This is the executor's one background task, not another
+                // nested dispatch to that same core-2 worker.
+                task.session.audio_.render_stems_logic_tick(task.session.pending_audio_);
+                audio::mix_stems(task.session.audio_.last_music_samples(),task.session.audio_.last_effect_samples(),
+                    task.music,task.sfx,task.session.mixed_);
+            }});
+            merge_profile();
+            // NDSP/VM ownership stays on the main thread. The executor has
+            // joined both tasks, including if presentation threw an exception.
+            sink_(mixed_);game_.synchronize_apu_output_ports(audio_.output_ports());
+            pending_audio_.clear();deferred_audio_=false;
+        } else work.run(work.context);
+        frame_work_active_=false;
+    } catch(...) {
+        merge_profile();frame_work_active_=false;failed_=true;throw;
+    }
 }
 GamePresentation GameSession::presentation(float slider,bool hardware,const StereoSettings& settings) const {
     if(failed_) throw std::runtime_error("Cannot present a failed 3DS game session");

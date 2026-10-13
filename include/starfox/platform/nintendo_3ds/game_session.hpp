@@ -6,6 +6,7 @@
 #include "starfox/platform/nintendo_3ds/settings_reset.hpp"
 #include "starfox/vr/game_scene.hpp"
 #include <functional>
+#include <type_traits>
 #include <unordered_set>
 
 namespace starfox::platform::nintendo_3ds {
@@ -69,7 +70,19 @@ public:
     // Monotonic nanoseconds from the platform clock, sampled ONCE per host
     // frame. Source raster is 60 Hz; SPC is 20 Hz even at original FX pacing.
     GameAdvance advance(std::int64_t nanoseconds,input::ButtonMask held,bool focused=true,
-        std::optional<input::ButtonMask> mapped_gameplay={});
+        std::optional<input::ButtonMask> mapped_gameplay={},bool overlap_frame_audio=false);
+    // Optional presentation-only work can run on the owner thread while the
+    // last source phase's complete SPC block runs on the joined worker. Work
+    // must not advance/replace the session or inspect the mutable SPC owner.
+    // All PCM/port acknowledgements finish before this method returns; no task
+    // escapes into a later source phase, save, suspension or owner destruction.
+    void run_frame_work(audio::StemTask work);
+    template<class Work> requires std::is_invocable_v<Work&>
+    void run_frame_work(Work&& work) {
+        run_frame_work(audio::StemTask{const_cast<void*>(static_cast<const void*>(std::addressof(work))),[](void* context) {
+            (*static_cast<std::remove_reference_t<Work>*>(context))();
+        }});
+    }
     // Explicitly acknowledge the host editor; source cursor/state and partial
     // SPC cadence survive. Suppress held input before returning to Options.
     void finish_controller_remap();
@@ -132,7 +145,7 @@ private:
     std::vector<std::int16_t> mixed_;
     unsigned audio_phase_{};
     double fraction_{};
-    bool failed_{},suppress_held_{};
+    bool failed_{},suppress_held_{},deferred_audio_{},frame_work_active_{};
     std::optional<simulation::Experience> requested_experience_;
     std::optional<bool> requested_preview_;
     bool start_after_preview_{};

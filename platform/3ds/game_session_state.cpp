@@ -4,7 +4,7 @@
 
 namespace starfox::platform::nintendo_3ds {
 bool GameSession::state_available() const noexcept {
-    return !failed_ && !game_.runtime_options_open() && !requested_experience_ && !requested_preview_
+    return !failed_ && !deferred_audio_ && !frame_work_active_ && !game_.runtime_options_open() && !requested_experience_ && !requested_preview_
         && !requested_settings_reset_ && !requested_controller_remap_ && !requested_hud_customization_ && !start_after_preview_;
 }
 std::vector<std::uint8_t> GameSession::save_state() const {

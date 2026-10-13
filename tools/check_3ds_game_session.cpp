@@ -113,6 +113,72 @@ struct SourceOracle {
         }
     }
 };
+void audio_render_overlap(const assets::RomImage& rom,const assets::SymbolMap& symbols) {
+    struct SerialExecutor final : audio::StemExecutor {
+        void execute(audio::StemTask foreground,audio::StemTask background) override {
+            foreground.run(foreground.context);background.run(background.context);
+        }
+    } fallback;
+    auto options=checked_options();
+    if(!options.stem_executor) options.stem_executor=&fallback;
+    for(const auto* map:{"BOOT","LEVEL1_1"}) {
+        std::vector<std::int16_t> reference_pcm,overlapped_pcm;
+        CheckedSession reference(rom,symbols,[&](auto pcm) {reference_pcm.insert(reference_pcm.end(),pcm.begin(),pcm.end());},map);
+        CheckedSession overlapped(rom,symbols,[&](auto pcm) {overlapped_pcm.insert(overlapped_pcm.end(),pcm.begin(),pcm.end());},map,{},options);
+        unsigned deferred{},work_calls{};
+        for(unsigned frame=0;frame<180;++frame) {
+            const auto held=std::string_view(map)!="BOOT" && frame%17<3?input::ButtonMask(input::a):input::ButtonMask{};
+            const auto expected=reference.advance(timestamp(frame),held);
+            const auto actual=overlapped.advance(timestamp(frame),held,true,{},true);
+            require(actual.video_phases==expected.video_phases && actual.logic_ticks==expected.logic_ticks
+                && actual.audio_blocks==expected.audio_blocks,"Overlap changed video, logic or audio cadence");
+            const auto emitted=overlapped_pcm.size();
+            const auto view=overlapped.presentation(1,true);
+            if(actual.audio_blocks) {
+                ++deferred;
+                require(!overlapped.state_available(),"Incomplete SPC block was advertised as a savable timeline");
+            }
+            overlapped.run_frame_work([&] {
+                ++work_calls;
+                const auto current=overlapped.presentation(1,true);
+                require(current.current==view.current && current.previous==view.previous && current.raster==view.raster
+                    && current.interpolation_alpha==view.interpolation_alpha,
+                    "Audio worker changed borrowed rendering snapshots");
+                require(overlapped_pcm.size()==emitted,"SPC worker submitted PCM off the presentation owner thread");
+            });
+            require(reference_pcm==overlapped_pcm,"Overlap changed a PCM sample or packet order");
+            try {
+                require(reference.save_state()==overlapped.save_state(),
+                    "Overlap changed VM/SPC, port acknowledgements, partial cadence or interpolation state");
+            } catch(const std::exception& error) {
+                throw std::runtime_error(std::string(map)+" frame "+std::to_string(frame)+": "+error.what());
+            }
+            if(frame%31==0) {
+                const auto duplicate_reference=reference.advance(timestamp(frame),held);
+                const auto duplicate_overlap=overlapped.advance(timestamp(frame),held,true,{},true);
+                overlapped.run_frame_work([] {});
+                require(duplicate_reference.duplicate && duplicate_overlap.duplicate
+                    && reference.save_state()==overlapped.save_state(),"Duplicate frame changed overlap source state");
+            }
+        }
+        require(deferred>=59 && work_calls==180,"Overlap fixture did not exercise complete SPC blocks");
+        // A caller can skip drawing: the next advance still joins/emits the
+        // block before any source video phase reads its acknowledged ports.
+        for(unsigned frame=180;frame<=183;++frame) {
+            reference.advance(timestamp(frame),0);
+            overlapped.advance(timestamp(frame),0,true,{},true);
+        }
+        overlapped.run_frame_work([] {});
+        require(reference_pcm==overlapped_pcm && reference.save_state()==overlapped.save_state(),
+            "Skipping frame work lost a sound block or source acknowledgement");
+    }
+    CheckedSession failure(rom,symbols,[](auto){},"BOOT",{},options);
+    failure.advance(0,0);failure.advance(50'000'000,0,true,{},true);
+    rejects([&] {failure.run_frame_work([] {throw std::runtime_error("presentation failed");});},
+        "Presentation failure escaped overlap failure handling");
+    rejects([&] {failure.advance(100'000'000,0);},"Failed overlapped source was retried");
+    require(!failure.state_available(),"Failed overlap retained state-save availability");
+}
 void native_depth_preferences(const assets::RomImage& rom,const assets::SymbolMap& symbols) {
     for(const auto map:{"BOOT","LEVEL1_1"}) {
         CheckedSession fresh(rom,symbols,[](auto){},map);
@@ -1554,6 +1620,7 @@ int main(int argc,char** argv) {
         checked_stem_executor=&parallel_executor;
 #endif
         const bool states_only=argc==4 && std::string_view(argv[3])=="--states-only";
+        const bool overlap_only=argc==4 && std::string_view(argv[3])=="--audio-render-overlap";
         const bool capabilities_only=argc==4 && std::string_view(argv[3])=="--capabilities-only";
         const bool depth_only=argc==4 && std::string_view(argv[3])=="--native-depth-only";
         const bool sweep=argc==4 && std::string_view(argv[3])=="--stage-sweep";
@@ -1566,8 +1633,8 @@ int main(int argc,char** argv) {
         const bool death_route=argc==4 && std::string_view(argv[3])=="--death-source-route";
         const bool continue_yes=argc==4 && std::string_view(argv[3])=="--continue-yes-source-route";
         const bool continue_no=argc==4 && std::string_view(argv[3])=="--continue-no-source-route";
-        if(argc!=3 && !states_only && !capabilities_only && !depth_only && !sweep && !fortuna_route && !corneria_route && !carrier_route && !runtime_editors && !editor_chords && !fps_chords && !death_route && !continue_yes && !continue_no && !(argc==5 && std::string_view(argv[3])=="--capture"))
-            throw std::invalid_argument("Usage: game_session_check ROM SYMBOLS [--capture DIRECTORY | --states-only | --capabilities-only | --native-depth-only | --stage-sweep | --fortuna-source-route | --corneria-source-route | --attack-carrier-source-route | --runtime-editor-parity | --editor-chords | --fps-chords | --death-source-route | --continue-yes-source-route | --continue-no-source-route]");
+        if(argc!=3 && !states_only && !overlap_only && !capabilities_only && !depth_only && !sweep && !fortuna_route && !corneria_route && !carrier_route && !runtime_editors && !editor_chords && !fps_chords && !death_route && !continue_yes && !continue_no && !(argc==5 && std::string_view(argv[3])=="--capture"))
+            throw std::invalid_argument("Usage: game_session_check ROM SYMBOLS [--capture DIRECTORY | --states-only | --audio-render-overlap | --capabilities-only | --native-depth-only | --stage-sweep | --fortuna-source-route | --corneria-source-route | --attack-carrier-source-route | --runtime-editor-parity | --editor-chords | --fps-chords | --death-source-route | --continue-yes-source-route | --continue-no-source-route]");
         const auto rom=assets::RomImage::load(argv[1]);const auto symbols=assets::SymbolMap::load(argv[2]);
         if(depth_only) {
             native_depth_preferences(rom,symbols);
@@ -1607,6 +1674,10 @@ int main(int argc,char** argv) {
         if(states_only) {
             full_state_parity(rom,symbols);
             std::cout<<"3DS actual full states: "<<checks<<" checks passed; host source parity, not console acceptance\n";return 0;
+        }
+        if(overlap_only) {
+            audio_render_overlap(rom,symbols);
+            std::cout<<"3DS overlapped audio/render source parity: "<<checks<<" checks passed\n";return 0;
         }
         native_depth_preferences(rom,symbols);
         parity(rom,symbols,"BOOT");parity(rom,symbols,"LEVEL1_1");handoff(rom,symbols);

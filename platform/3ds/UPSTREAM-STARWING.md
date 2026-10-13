@@ -68,3 +68,19 @@ fails identically. Esteban PDN is credited for identifying this compatibility
 path. We do not copy its estimated looping-ring cursor, midpoint frame insertion,
 dropped-packet policy or SPC worker scheduling. The gameplay sink and both
 accurate SPC stems remain unchanged until a streaming adapter is accepted.
+
+## Frame-pipeline follow-up
+
+The later reference at `01bf4925951515244cdb03d58ad722417919d6ba`
+(`game_3ds.cpp`, 2026-10-16) overlaps a complete audio update with rendering.
+That scheduling idea motivates our optional `GameSession::run_frame_work`
+path; no additional reference implementation or assets are copied. Our
+persistent executor runs the complete, unchanged SPC block in its background
+task and presentation on the owner thread, then joins both before submitting
+PCM or acknowledging the source ports. No task survives that frame or overlaps
+a later source phase, state save or session replacement. Earlier audio blocks
+in a source catch-up batch retain their synchronous acknowledgements. Denied
+core-2 allocation retains a serial fallback, and the default host session path
+is unchanged. Original and EX parity checks compare every PCM sample and the
+complete VM/SPC timeline against that synchronous path. This is not a measured
+console performance claim or permission to drop sound commands.

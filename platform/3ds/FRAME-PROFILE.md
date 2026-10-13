@@ -17,6 +17,16 @@ included in the reported frame duration and fed into the next source catch-up.
 Removing this gameplay I/O addresses that identified stall path, not the
 remaining layer/geometry costs or a claim of stable console 60 FPS.
 
+With frame-audio overlap enabled, the final complete SPC block runs on the
+joined core-2 task while the owner prepares/presents the immutable source
+snapshot. Its timing counters are captured in a separate profile and merged
+only after the join; there are no concurrent writes to the owner's counters.
+PCM submission and source-port acknowledgement stay on the owner thread.
+The `audio` phase can overlap `layers`, `composite` and `present`, so those
+durations are not additive either. Source catch-up blocks before the final
+phase remain synchronous. A host parity test establishes unchanged samples
+and source state, not physical-console frame rate.
+
 The original twenty-five phase names and enum indices stay unchanged. The
 source/audio/raster detail phases and five appended GPU phases distinguish
 the following work:
