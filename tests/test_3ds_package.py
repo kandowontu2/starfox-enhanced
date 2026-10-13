@@ -131,6 +131,22 @@ class PackageTests(unittest.TestCase):
         self.pack()
         self.assertEqual(self.output.read_bytes(), first)
 
+    def test_explicit_native_profiling_setting(self):
+        for setting in ("ON", "OFF"):
+            with self.subTest(setting=setting):
+                output = self.root / (setting + ".zip")
+                info = MODULE.package(self.elf, self.dsx, self.smdh, COMMIT, output, setting)
+                self.assertEqual(info["frame_profiling"], setting == "ON")
+                with zipfile.ZipFile(output) as archive:
+                    self.assertEqual(json.loads(archive.read("BUILD-INFO.json"))["frame_profiling"], setting == "ON")
+        self.assertNotIn("frame_profiling", self.pack())
+        for setting in (True, False, "unknown", "on"):
+            with self.assertRaises(ValueError):
+                MODULE.package(self.elf, self.dsx, self.smdh, COMMIT, self.root / "invalid.zip", setting)
+        workflow = (ROOT / ".github/workflows/3ds-native-check.yml").read_text(encoding="utf-8")
+        self.assertIn('STARFOX_3DS_PROFILE_FRAMES="$CTR_PROFILE_FRAMES"', workflow)
+        self.assertIn('--frame-profiling "$CTR_PROFILE_FRAMES"', workflow)
+
     def test_new_family_native_labels(self):
         cmake = (ROOT / "platform/3ds/CMakeLists.txt").read_text(encoding="utf-8")
         player = (ROOT / "platform/3ds/game_core_probe.cpp").read_text(encoding="utf-8")

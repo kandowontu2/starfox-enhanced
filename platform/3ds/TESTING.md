@@ -8,6 +8,10 @@ request further old-model performance tests. Legacy mono code and historical
 results below are retained, but no longer describe the supported target.
 For now, development/regression testing remains emulator-led rather than
 requesting a hardware test for each incremental candidate.
+The current priority is sustained **60 FPS in mono**, with the slider fully
+down. Do not request stereo tuning/acceptance tests until that baseline is
+stable. The existing slider functionality is retained, not treated as evidence
+that the mono performance target is already met.
 Fresh settings use stereo separation 16 and convergence 512; existing saved
 values are preserved. The Stereoscopic 3D menu still controls both. The new
 default increases distant-background depth without moving HUD/menu text or
@@ -15,7 +19,7 @@ changing the one-eye slider-off/New 2DS XL path.
 
 1. The latest source-only candidate is the experimental
    `StarFoxEnhanced-3ds-test.zip` artifact from
-   [ARM run 38206689640](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38206689640).
+   [ARM run 38334872817](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38334872817).
    R376 remains the hardware-tested baseline, not the latest source candidate.
    Extract the ZIP to the SD card's root, keeping its folder structure. When
    updating an earlier build, replace only the `.3dsx` and `.smdh`; preserve the existing
@@ -30,11 +34,11 @@ changing the one-eye slider-off/New 2DS XL path.
 5. R376 is confirmed running on New 3DS XL with sound, slider and HOME/exit.
    Its remaining reported problems are ground hiding lights/model bottoms and
    low presentation FPS. Start with Preview OFF and the slider down, then
-   compare slider off/halfway and enable the FPS counter. Preserve the newest
+   keep the slider down and enable the FPS counter. Preserve the newest
    `native-frame-profile-*.csv` for performance investigation. If a hard freeze
    recurs, stop repeating it and send the newest startup/frame CSVs.
-6. Once ordinary Start is stable, try Training and Corneria. On New 3DS/XL, start with the slider low, then
-   compare slider off and halfway. New 2DS XL uses mono with the same faster
+6. Once ordinary Start is stable, try Training, Original and EX gameplay with
+   the slider fully down. New 2DS XL uses mono with the same faster
    CPU/cache profile. Check sound, pause/resume, and Select + Start to exit.
 
 Back up existing `/3ds/starfox-enhanced/` saves/settings first. If boot fails,
@@ -61,7 +65,29 @@ still required.
 
 ## Current build and validation
 
-The current source candidate (R412) is commit
+The frame-pipeline candidate is source
+`5c1e91c55e19ee2fc482f6b0e931d4784fee0918`, from
+[ARM run 38334872817](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38334872817).
+It moves periodic frame-profile SD formatting/flushes to normal shutdown,
+overlaps the final complete SPC block with joined owner-thread presentation,
+and retains background caches when only unused in-bank characters change.
+The native ARM, shader and stack gates pass; all 48 asset-free local tests and
+four Original/EX serial/threaded PCM + complete-state parity cases pass.
+No source audio command or simulation phase is dropped. The save codec also
+retains legitimate full-bank SPC transfers in partial-phase states within its
+unchanged 4-MiB whole-file cap and wire schema.
+
+CI dispatch now accepts `profile_frames=false` for production-style timing.
+`BUILD-INFO.json` records the explicit native profiling setting; older packages
+without that field have an unspecified setting. With profiling disabled,
+there is no frame/startup CSV instrumentation, not an empty performance result.
+With it enabled, exit normally before copying the buffered frame-profile CSV.
+The mono performance gate is still open. Emulator speed is not physical New
+3DS speed; no incremental tester request is implied by these source changes.
+
+### Earlier R412 source candidate
+
+The earlier source candidate (R412) is commit
 `e98788bef9dbfbca46cfbe0506b02a356b6a3388`, from
 [ARM run 38206689640](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38206689640).
 The asset-free ZIP is 1,133,475 bytes, SHA256
