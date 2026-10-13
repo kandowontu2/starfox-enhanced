@@ -82,6 +82,16 @@ CI dispatch now accepts `profile_frames=false` for production-style timing.
 without that field have an unspecified setting. With profiling disabled,
 there is no frame/startup CSV instrumentation, not an empty performance result.
 With it enabled, exit normally before copying the buffered frame-profile CSV.
+The diagnostics-free mono baseline is source
+`6974f23f8d7a37e6122932f453c84b3457764227`, from
+[ARM run 38336169249](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38336169249).
+Its package explicitly records `frame_profiling: false`. The accuracy-enabled
+Azahar run, with both stereo settings at zero, reaches the real pre-game menu,
+Original intro/title/Controls and Training without an out-of-bounds exception.
+The completed-frame overlay remains below 60 FPS; this is not performance
+acceptance. Azahar also reports the New 3DS CPU configuration service as
+unimplemented, so its timing is not a physical New 3DS clock measurement.
+No further incremental hardware test is requested for this baseline.
 The mono performance gate is still open. Emulator speed is not physical New
 3DS speed; no incremental tester request is implied by these source changes.
 
