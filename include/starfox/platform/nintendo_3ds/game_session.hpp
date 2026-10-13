@@ -82,10 +82,12 @@ public:
 
     // Monotonic nanoseconds from the platform clock, sampled ONCE per host
     // frame. Source raster is 60 Hz; SPC is 20 Hz even at original FX pacing.
+    // With overlap enabled, dispatch a complete packet as soon as its source
+    // phase produces it; later independent rasters can run even in this batch.
     GameAdvance advance(std::int64_t nanoseconds,input::ButtonMask held,bool focused=true,
         std::optional<input::ButtonMask> mapped_gameplay={},bool overlap_frame_audio=false);
     // Optional presentation-only work can run on the owner thread while the
-    // last source phase's complete SPC block runs on the joined worker. Work
+    // most recent complete SPC block runs on the joined worker. Work
     // must not advance/replace the session or inspect the mutable SPC owner.
     // By default PCM/ports finish before returning. Native presentation can
     // leave audio running across the idle interval with complete_audio=false;
@@ -138,6 +140,7 @@ private:
     void apply_native_capabilities() noexcept;
     void prepare_pace_shapes();
     void publish_raster();
+    bool start_frame_audio();
     void finish_frame_audio();
     struct FrameAudioWork;
     assets::RomImage rom_;

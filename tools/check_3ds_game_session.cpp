@@ -287,7 +287,40 @@ void audio_video_pipeline(const assets::RomImage& rom,const assets::SymbolMap& s
         }
         require(unjoined_rasters>=12 && worker.started>=23 && worker.finished==worker.started,
             "Video pipeline fixture did not exercise sustained held-packet ownership");
-        std::int64_t time=timestamp(71);
+        // Missed LCD deadlines admit several source phases at once. Every
+        // packet must start inside advance(), not wait until frame work or be
+        // forced synchronous just because a later raster remains in the batch.
+        // The held executor makes early ownership visible even on fast hosts.
+        unsigned catchup_packets{},catchup_unjoined{};
+        std::int64_t catchup_time=timestamp(71);
+        constexpr std::array catchup_steps{2U,2U,5U,1U,3U,6U,4U,2U};
+        for(unsigned batch=0;batch<24;++batch) {
+            catchup_time+=std::int64_t(catchup_steps[batch%catchup_steps.size()])*16'666'667;
+            const auto held=batch%5==0?input::ButtonMask(input::a):input::ButtonMask{};
+            const auto before=worker.started;
+            const auto expected=reference.advance(catchup_time,held);
+            const auto actual=pipelined.advance(catchup_time,held,true,{},true);
+            require(actual.video_phases==expected.video_phases && actual.logic_ticks==expected.logic_ticks
+                && actual.audio_blocks==expected.audio_blocks,"Catch-up dispatch changed source/SPC cadence");
+            require(worker.started-before==actual.audio_blocks,
+                "Catch-up packet was serialized or dispatched after source advancement");
+            catchup_packets+=actual.audio_blocks;
+            if(worker.packet.run) {
+                ++catchup_unjoined;
+                require(!pipelined.state_available(),"Catch-up packet exposed an incomplete save timeline");
+            }
+            const auto expected_view=reference.presentation(0,false),actual_view=pipelined.presentation(0,false);
+            require(*expected_view.raster->ppu==*actual_view.raster->ppu
+                && expected_view.current->flow==actual_view.current->flow
+                && expected_view.interpolation_alpha==actual_view.interpolation_alpha,
+                "Catch-up audio ownership changed the source raster");
+            pipelined.run_frame_work([] {});
+            require(expected_pcm==actual_pcm && reference.save_state()==pipelined.save_state(),
+                "Catch-up dispatch changed complete PCM, VM/SPC state or acknowledgements");
+        }
+        require(catchup_packets>=24 && catchup_unjoined>=8 && worker.started==worker.finished,
+            "Catch-up fixture did not retain and retire enough packets");
+        std::int64_t time=catchup_time;
         for(unsigned barrier=0;barrier<4;++barrier) {
             for(unsigned phase=0;phase<6 && !worker.packet.run;++phase) {
                 time+=16'666'667;reference.advance(time,0);

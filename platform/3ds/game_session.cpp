@@ -443,12 +443,20 @@ GameAdvance GameSession::advance(std::int64_t time,input::ButtonMask held,bool f
                 // Retire the previous packet before producing another even
                 // when this phase did not have a source tick.
                 if(deferred_audio_) finish_frame_audio();
-                // Only the final phase can overlap rendering. Earlier blocks
-                // in a catch-up batch acknowledge ports before the next video
-                // phase, exactly as in the ordinary synchronous source path.
-                deferred_audio_=overlap_frame_audio && stem_executor_ && phase+1==batch.simulation_steps
+                // Dispatch at the packet boundary, before snapshot/render
+                // preparation and any later independent raster in this batch.
+                // A source tick, APU-dependent phase or new packet still joins
+                // above. Deferring dispatch until frame work made catch-up
+                // batches serialize SPC even when their next raster was safe.
+                deferred_audio_=overlap_frame_audio && stem_executor_
                     && !requested_controller_remap_ && !requested_hud_customization_;
-                if(!deferred_audio_) {
+                if(deferred_audio_) {
+                    // Executors without begin() keep the old joined path for
+                    // intermediate packets and the render overlap fallback
+                    // for the last packet. No borrowed writes are overwritten.
+                    if(!start_frame_audio() && phase+1!=batch.simulation_steps)
+                        finish_frame_audio();
+                } else {
                     STARFOX_3DS_FRAME_PHASE(audio);
                     audio_.render_stems_logic_tick(pending_audio_,stem_executor_);
                     audio::mix_stems(audio_.last_music_samples(),audio_.last_effect_samples(),
@@ -472,6 +480,19 @@ GameAdvance GameSession::advance(std::int64_t time,input::ButtonMask held,bool f
         }
     } catch(...) {failed_=true;throw;}
     return result;
+}
+bool GameSession::start_frame_audio() {
+    if(!deferred_audio_) return false;
+    if(!frame_audio_work_) frame_audio_work_=std::make_unique<FrameAudioWork>(*this);
+    auto& background=*frame_audio_work_;
+    if(background.running) return true;
+    background.music=game_.music_volume();background.sfx=game_.sfx_volume();
+    if(active_frame_profile) background.profile.emplace(active_frame_profile->fork());
+    background.running=stem_executor_->begin({&background,FrameAudioWork::run});
+    // A refused dispatch has no job or completed profile to merge. Joined
+    // fallback work below captures its own profiling parent when it runs.
+    if(!background.running) background.profile.reset();
+    return background.running;
 }
 void GameSession::finish_frame_audio() {
     if(!deferred_audio_) return;

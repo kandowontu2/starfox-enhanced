@@ -134,9 +134,11 @@ continue across the LCD idle interval and ordinary gameplay/training raster
 updates that do not consume SPC acknowledgements. The source tick and the
 next SPC packet remain barriers, as do frontend/native handoffs, duplicate or
 rewound timestamps, focus loss and runtime-options entry. It cannot overlap a
-later source logic tick, state save or session replacement. Earlier audio blocks
-in a source catch-up batch retain their synchronous acknowledgements. Denied
-core-2 allocation retains a serial fallback, and the default host session path
+later source logic tick, state save or session replacement. Packets now start
+at their producing source phase, including inside a catch-up batch; the same
+APU-independence predicate and source/new-packet barriers guard later phases.
+Executors that refuse asynchronous dispatch retain joined intermediate packets.
+Denied core-2 allocation retains a serial fallback, and the default host session path
 is unchanged. Original and EX parity checks compare every PCM sample and the
 complete VM/SPC timeline against that synchronous path. This is not a measured
 console performance claim or permission to drop sound commands.
@@ -152,6 +154,15 @@ sample and full VM/SPC state with the synchronous owner at explicit barriers.
 The parallel variant exercises the actual executor and its distinct effects
 worker. Both Original and EX and both timing modes remain test targets; no
 source/PCM cadence is traded for output rate.
+
+The packet-boundary dispatch follow-up also uses `game_3ds.cpp` at
+`01bf4925951515244cdb03d58ad722417919d6ba`: its audio worker starts inside
+the source-phase loop, rather than after snapshot/render preparation. Our
+implementation keeps both accurate stems, captures volumes at that packet's
+boundary and submits PCM only on the owner thread after joining. The held-packet
+and real-parallel oracles now exercise multi-phase catch-up batches in Original
+and EX, under both timing modes, comparing complete PCM and saved VM/SPC state
+at the explicit completion barriers. This does not establish physical 60 FPS.
 
 The reference's APT-budgeted core-1 stem also motivates an optional, distinct
 effects worker within our joined frame-audio task. Core 2 renders music, that
