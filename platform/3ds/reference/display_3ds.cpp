@@ -282,8 +282,11 @@ void Display3ds::close() noexcept {
         bg2_plan_worker_ = nullptr;
     }
     gpu_active_ = false;
-    // Retire submitted transfers/draws while C2D's frame hook and linear
-    // buffers still exist. Never free a texture which PICA may be reading.
+    // Drain before C2D frees VBOs, and park its borrowed shader while C3D
+    // remains active. The next renderer's bind releases just that shader.
+    if (c3d_ready_) C3D_FrameSync();
+    if (c2d_ready_) C2D_Fini();
+    c2d_ready_ = false;
     if (c3d_ready_) C3D_Fini();
     c3d_ready_ = false;
     // C3D_Fini owns render-target deletion.
@@ -312,7 +315,6 @@ void Display3ds::close() noexcept {
     cpu_frame_valid_ = false;
     overlay_texture_valid_ = false;
     right_texture_valid_ = right_overlay_valid_ = false;
-    if (c2d_ready_) C2D_Fini();
     c2d_ready_ = c3d_ready_ = false;
     gfxSet3D(false);
 }

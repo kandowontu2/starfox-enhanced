@@ -19,6 +19,8 @@ extern "C" {
 #include <3ds/gpu/gx.h>
 }
 #include <citro3d.h>
+// Optional reference presenter: standalone GPU probes do not link Citro2D.
+extern "C" void starfox_c2d_release_retired_program(void) __attribute__((weak));
 
 namespace starfox::platform::nintendo_3ds {
 namespace {
@@ -203,6 +205,7 @@ struct NativeGpu::Impl {
     }
     void configure() {
         program_binding.bind(*shader_program,[](NativeShaderProgram& next) {C3D_BindProgram(&next.program);});
+        if(starfox_c2d_release_retired_program) starfox_c2d_release_retired_program();
         auto* attrs=C3D_GetAttrInfo();AttrInfo_Init(attrs);
         AttrInfo_AddLoader(attrs,0,GPU_FLOAT,3);AttrInfo_AddLoader(attrs,1,GPU_FLOAT,4);AttrInfo_AddLoader(attrs,2,GPU_FLOAT,2);
         auto* buffers=C3D_GetBufInfo();BufInfo_Init(buffers);

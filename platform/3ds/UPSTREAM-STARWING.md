@@ -19,6 +19,10 @@ precedes freeing linear textures/C2D buffers; the two GPU owners are exclusive.
 Citro2D v1.7.0 comes from the official devkitPro source archive with a pinned
 SHA-256. Its altered draw hook explicitly flushes used vertex/index ranges and
 split command lists; kernel fallback flushes both buffers or refuses submission.
+The accuracy-enabled emulator caught a stale shader borrow when an authored
+effect switched back to our native presenter. The patched C2D owner now parks
+one CPU shader until the next valid program bind; it retains no render targets,
+textures or vertex buffers. Queue completion precedes either owner's teardown.
 Its original notice is retained in `reference/CITRO2D-LICENSE.txt`. This imports
 code only, under the author permission recorded below, not ROMs or game artwork.
 Compilation and emulator checks do not establish sustained hardware 60 FPS.
