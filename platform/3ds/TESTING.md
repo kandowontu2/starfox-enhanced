@@ -19,7 +19,7 @@ changing the one-eye slider-off/New 2DS XL path.
 
 1. The latest source-only candidate is the experimental
    `StarFoxEnhanced-3ds-test.zip` artifact from
-   [ARM run 38457573595](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38457573595).
+   [ARM run 38461773934](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38461773934).
    R376 remains the hardware-tested baseline, not the latest source candidate.
    Extract the ZIP to the SD card's root, keeping its folder structure. When
    updating an earlier build, replace only the `.3dsx` and `.smdh`; preserve the existing
@@ -314,6 +314,28 @@ cache-free bridge, not stable mono 60 or physical-console results. Planned DSP
 shutdown and profile flush occur before the owned host is stopped; guest GPU
 retirement remains unverified and CPU configuration returns to 100%. The
 next investigation is the reference's consecutive strategy-call batching.
+
+The consecutive-call follow-up (`6188962393`, ARM run 38461773934) reuses
+only canonical, complete imports inside the strategy scheduler. Native writes,
+host/list changes, pointer/link repair, failures, I/O and restore retain the
+defensive bridge. The bytewise oracle and 128 actual interpreter calls per
+layout pass. In 64 sampled real strategy ticks across eight Original/EX stages,
+964 imported-image reuses retain complete CPU/VM/pool states, source instruction
+counts and run/removal counts versus forced full synchronization. All prior
+240-phase image digests and 80 audio blocks match. Seven real state/audio checks,
+all 52 CI tests and the ARM/shader/stack/package gates pass.
+
+The same accuracy-enabled Vulkan/300%-clock replay records strategy means of
+2.705/3.174 ms in backgrounds 3/51, versus 3.565/3.954 for the previous cache.
+Logic means are 9.740/11.453 ms. Successful whole-frame return averages are
+58.027/58.119 per second, with minimum same-label window rates of 49.024/52.539.
+Counts/poses and windows differ; unrelated concurrent work is retained. These
+are sensitivity results, not sustained physical New-model 60 FPS. No retry,
+fallback or replay errors occur. Planned DSP shutdown/profile flush precede
+the verified owned-host stop; guest GSP retirement remains unverified and CPU
+configuration returns to 100%. The next measured work is the repeated palette,
+sprite and related general-routine synchronization. No incremental hardware
+request or release is implied.
 
 The earlier direct-overlay candidate removes the EX BG1 staging image and applies the same
 zero-ink/CGRAM-black transparency directly during decoding. The 57,344-byte
