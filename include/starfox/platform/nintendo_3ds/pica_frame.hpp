@@ -361,7 +361,7 @@ inline void validate_pica_group(const PicaFrame& frame,unsigned reserved_texture
     if(frame.plan.eye_count!=(frame.plan.stereo?2U:1U))
         throw std::invalid_argument("Incomplete 3DS eye plan");
     unsigned bytes=reserved_texture_bytes;
-    for(auto texture:frame.textures) {
+    for(const auto& texture:frame.textures) {
         const auto size=pica_resident_texture_bytes(texture);
         if(size>pica_texture_budget-bytes) throw std::invalid_argument("3DS GPU texture budget exceeded: "
             +std::to_string(bytes)+" + "+std::to_string(size)+" > "+std::to_string(pica_texture_budget));

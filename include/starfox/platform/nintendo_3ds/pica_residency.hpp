@@ -204,7 +204,7 @@ void update_pica_texture_residency(std::span<const PicaImage> images,PicaImage d
         throw std::invalid_argument("Invalid 3DS resident texture slots");
     auto bytes=pica_resident_texture_bytes(dashboard);
     if(bytes>pica_texture_budget) throw std::invalid_argument("3DS resident dashboard budget exceeded");
-    for(const auto image:images) {
+    for(const auto& image:images) {
         const auto size=pica_resident_texture_bytes(image);
         if(size>pica_texture_budget-bytes) throw std::invalid_argument("3DS resident texture budget exceeded");
         bytes+=size;
