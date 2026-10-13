@@ -19,7 +19,7 @@ changing the one-eye slider-off/New 2DS XL path.
 
 1. The latest source-only candidate is the experimental
    `StarFoxEnhanced-3ds-test.zip` artifact from
-   [ARM run 38334872817](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38334872817).
+   [ARM run 38397754454](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38397754454).
    R376 remains the hardware-tested baseline, not the latest source candidate.
    Extract the ZIP to the SD card's root, keeping its folder structure. When
    updating an earlier build, replace only the `.3dsx` and `.smdh`; preserve the existing
@@ -65,17 +65,32 @@ still required.
 
 ## Current build and validation
 
-The frame-pipeline candidate is source
-`5c1e91c55e19ee2fc482f6b0e931d4784fee0918`, from
-[ARM run 38334872817](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38334872817).
-It moves periodic frame-profile SD formatting/flushes to normal shutdown,
-overlaps the final complete SPC block with joined owner-thread presentation,
-and retains background caches when only unused in-bank characters change.
-The native ARM, shader and stack gates pass; all 48 asset-free local tests and
-four Original/EX serial/threaded PCM + complete-state parity cases pass.
+The current frame-pipeline candidate is source
+`bd779f0b1be92c428e1a1f234dbbb5dfd900533b`, from
+[ARM run 38397754454](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38397754454).
+It uses the imported Starwing mono renderer for ordinary mono scenes, retains
+the exact native path for cartridge window/colour effects, and removes gameplay
+profile SD writes. The final SPC block overlaps presentation; a distinct,
+APT-budgeted effects worker can split that complete block on supported models.
+Warm GPU handoffs no longer restart startup-trace SD writes. Presentation now
+consumes completed source phases instead of independently gating those frames
+with a second wall clock. The native ARM, shader and stack gates pass. The 50
+asset-free local checks and full Original/EX game-session suites pass; each full
+suite makes 22,173 checks, including exact PCM/VM state, menu/editor handoffs,
+disk settings/SRAM reopen, restores and 30/60 output cadence. The separate
+Original/EX restored-session parallel audio checks also pass.
 No source audio command or simulation phase is dropped. The save codec also
 retains legitimate full-bank SPC transfers in partial-phase states within its
 unchanged 4-MiB whole-file cap and wire schema.
+
+Both accuracy-enabled emulator runs of this image exited normally with code
+zero. The normal 100% CPU run remains far below the mono target. A separate
+300% CPU sensitivity run reaches higher completed-frame readings, but the
+emulator itself falls below real-time speed and does not establish stable
+console 60 FPS. The emulator's unimplemented New-model CPU/cache service makes
+that sensitivity run distinct from physical New 3DS validation. The original
+100% setting is restored after the run. No incremental tester request or
+release is implied by these results.
 
 CI dispatch now accepts `profile_frames=false` for production-style timing.
 `BUILD-INFO.json` records the explicit native profiling setting; older packages
