@@ -35,6 +35,9 @@ public:
         std::uint32_t world_composite_us{};
         std::uint32_t native_model_us{};
         std::uint32_t finalize_us{};
+        std::uint32_t overlay_us{};
+        std::uint32_t sprites_us{};
+        std::uint32_t canvas_us{};
     };
 
     Frame3ds(const assets::RomImage& rom, const assets::SymbolMap& symbols);

@@ -19,6 +19,7 @@ int main(int argc,char** argv) try {
     std::uint64_t digest=14695981039346656037ULL;unsigned submitted=0,reused=0,world_frames=0,ink_frames=0,fallback_checks=0;
     const auto start=std::chrono::steady_clock::now();
     double draw_ms=0;
+    std::uint64_t native_us=0,overlay_us=0,sprites_us=0,canvas_us=0;
     for(unsigned frame=1;frame<=240;++frame) {
         session.advance((std::int64_t(frame)*1000000000+59)/60,
             frame>=120 && frame<180?input::ButtonMask(input::y|input::right):0);
@@ -31,7 +32,15 @@ int main(int argc,char** argv) try {
         const bool reuse=renderer.can_reuse_presentation(session.game(),gpu_bg2,source.interpolation_alpha);
         const auto& indexed=reuse?renderer.last_frame():renderer.draw(session.game(),gpu_bg2,source.interpolation_alpha);
         draw_ms+=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-render_begin).count();
-        if(reuse)++reused;else++submitted;
+        if(reuse)++reused;
+        else {
+            ++submitted;
+            const auto timing=renderer.last_draw_breakdown();
+            native_us+=timing.native_model_us;
+            overlay_us+=timing.overlay_us;
+            sprites_us+=timing.sprites_us;
+            canvas_us+=timing.canvas_us;
+        }
         if(!before.empty()) {
             const auto after=session.game().save_state();
             if(before!=after) {
@@ -59,6 +68,8 @@ int main(int argc,char** argv) try {
         <<" draw_ms="<<draw_ms<<" rendered="<<submitted<<" reused="<<reused<<" audio_blocks="<<blocks
         <<" world_frames="<<world_frames<<" ink_frames="<<ink_frames<<" final_flow="<<unsigned(session.game().flow_state())
         <<" fallback_checks="<<fallback_checks
+        <<" native_ms="<<native_us/1000.0<<" overlay_ms="<<overlay_us/1000.0
+        <<" sprites_ms="<<sprites_us/1000.0<<" canvas_ms="<<canvas_us/1000.0
         <<" final_bg="<<session.presentation(0,true).current->background_id
         <<" digest="<<std::hex<<digest<<'\n';
 } catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}

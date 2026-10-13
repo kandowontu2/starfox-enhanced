@@ -327,6 +327,13 @@ elseif(STARFOX_3DS_BUILD_HOST_TESTS)
     target_include_directories(starfox_framebuffer_extents_tests PRIVATE ../../include)
     target_compile_features(starfox_framebuffer_extents_tests PRIVATE cxx_std_20)
     add_test(NAME starfox_framebuffer_extents_tests COMMAND starfox_framebuffer_extents_tests)
+    add_executable(starfox_layer_composite_tests ../../tests/layer_composite_tests.cpp
+        ../../src/render/framebuffer.cpp ../../src/render/palette.cpp
+        ../../src/render/row_workers.cpp)
+    target_include_directories(starfox_layer_composite_tests PRIVATE ../../include)
+    target_compile_features(starfox_layer_composite_tests PRIVATE cxx_std_20)
+    target_link_libraries(starfox_layer_composite_tests PRIVATE Threads::Threads)
+    add_test(NAME starfox_layer_composite_tests COMMAND starfox_layer_composite_tests)
     add_executable(starfox_3ds_frame_profile_tests ../../tests/nintendo_3ds_frame_profile_tests.cpp)
     target_include_directories(starfox_3ds_frame_profile_tests PRIVATE ../../include)
     target_compile_features(starfox_3ds_frame_profile_tests PRIVATE cxx_std_20)

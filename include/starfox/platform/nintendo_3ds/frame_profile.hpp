@@ -16,7 +16,7 @@ enum class FramePhase : unsigned {
     gpu_sync, gpu_wait, gpu_upload, gpu_record, gpu_submit,
     terrain_build, terrain_reuse,
     mono_background, mono_prepare, mono_raster, mono_finish, lcd_copy,
-    mono_retry, mono_fallback, count
+    mono_retry, mono_fallback, mono_overlay, mono_canvas, count
 };
 inline constexpr std::array<std::string_view, unsigned(FramePhase::count)> frame_phase_names{
     "frame", "advance", "video", "logic", "capture", "audio", "raster",
@@ -26,7 +26,7 @@ inline constexpr std::array<std::string_view, unsigned(FramePhase::count)> frame
     "gpu_sync", "gpu_wait", "gpu_upload", "gpu_record", "gpu_submit",
     "terrain_build", "terrain_reuse",
     "mono_background", "mono_prepare", "mono_raster", "mono_finish", "lcd_copy",
-    "mono_retry", "mono_fallback"
+    "mono_retry", "mono_fallback", "mono_overlay", "mono_canvas"
 };
 struct FramePhaseTotals {
     std::uint64_t calls{}, ticks{}, maximum{};

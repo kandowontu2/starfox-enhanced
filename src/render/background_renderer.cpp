@@ -279,6 +279,38 @@ std::array<std::uint8_t, 16> decoded_tile_row(
     return result;
 }
 
+// A draw-local cache: no VRAM/CGRAM revision can leak into the next draw, and
+// full keys disambiguate direct-map collisions, palette and flip variants.
+// Repeated blank/text tiles are common in the EX foreground overlay. Keep
+// this bounded (648 bytes), rather than allocating a 64-KiB character image.
+struct TileRowCache {
+    std::array<std::uint32_t, 32> keys{};
+    std::array<std::array<std::uint8_t, 16>, 32> rows{};
+    std::uint32_t valid{};
+
+    template<unsigned bits>
+    const std::array<std::uint8_t, 16>& get(
+        const simulation::SnesPpuState& ppu, std::uint16_t character_base,
+        std::uint16_t tile, int source_y, bool large,
+        bool transparent_black) noexcept {
+        const auto key = (std::uint32_t(tile) << 4U)
+            | (unsigned(source_y) & 15U) | (bits << 20U)
+            | (unsigned(large) << 24U);
+        const auto slot = (key ^ (key >> 8U) ^ (key >> 14U)) & 31U;
+        const auto mask = 1U << slot;
+        if (!(valid & mask) || keys[slot] != key) {
+            auto& row = rows[slot];
+            row = decoded_tile_row<bits>(ppu, character_base, tile, source_y, large);
+            if (transparent_black) for (auto& ink : row)
+                if ((ppu.cgram[ink] & 32767U) == 0U) ink = 0;
+            keys[slot] = key;
+            valid |= mask;
+        }
+        return rows[slot];
+    }
+};
+static_assert(sizeof(TileRowCache) <= 648U);
+
 // Ordinary rows keep one tilemap word, priority, palette and set of bitplanes
 // for all 8/16 texels. Mosaic, unique artwork, rolled offsets and tunnel edge
 // clamping retain their existing coordinate-aware path below.
@@ -287,7 +319,7 @@ void draw_tile_scanline(const simulation::SnesPpuState& ppu, Framebuffer& target
     TilePriorityPass priority, std::uint16_t screen_base, std::uint16_t character_base,
     unsigned pages_wide, bool large, int width_pixels, int source_y, int scroll_x,
     int origin, unsigned first_x, unsigned final_x, unsigned screen_y,
-    bool transparent_black = false) noexcept {
+    bool transparent_black = false, TileRowCache* cache = nullptr) noexcept {
     const unsigned shift = large ? 4U : 3U, edge = 1U << shift;
     const unsigned tile_y = unsigned(source_y) >> shift;
     for (unsigned x = first_x; x < final_x;) {
@@ -299,10 +331,16 @@ void draw_tile_scanline(const simulation::SnesPpuState& ppu, Framebuffer& target
         const unsigned count = std::min(edge - inset, final_x - x);
         const auto tile = vram_word(ppu, unsigned(screen_base) + entry);
         if (selected_priority(tile, priority)) {
-            auto row = decoded_tile_row<bits>(ppu, character_base, tile, source_y, large);
-            if (transparent_black) for (auto& ink : row)
-                if ((ppu.cgram[ink] & 32767U) == 0U) ink = 0;
-            target.set_indexed_row(int(x), int(screen_y), std::span(row).subspan(inset, count));
+            if (cache) {
+                const auto& row = cache->get<bits>(ppu, character_base, tile,
+                    source_y, large, transparent_black);
+                target.set_indexed_row(int(x), int(screen_y), std::span(row).subspan(inset, count));
+            } else {
+                auto row = decoded_tile_row<bits>(ppu, character_base, tile, source_y, large);
+                if (transparent_black) for (auto& ink : row)
+                    if ((ppu.cgram[ink] & 32767U) == 0U) ink = 0;
+                target.set_indexed_row(int(x), int(screen_y), std::span(row).subspan(inset, count));
+            }
         }
         x += count;
     }
@@ -360,6 +398,7 @@ void BackgroundRenderer::draw_bg1(
     const auto tile_edge = 1U << tile_shift;
     const auto width_pixels = static_cast<std::int32_t>(width_tiles * tile_edge);
     const auto height_pixels = static_cast<std::int32_t>(height_tiles * tile_edge);
+    TileRowCache row_cache;
     const auto outline_sample=[&](int x,int y) {
         if(y<0 || y>=int(target.height()) || x+horizontal_origin<0
             || x+horizontal_origin>=int(target.width())) return false;
@@ -410,10 +449,10 @@ void BackgroundRenderer::draw_bg1(
             if (ppu.background_mode == 3U)
                 draw_tile_scanline<8>(ppu, target, priority, ppu.bg1_screen_base, ppu.bg1_character_base,
                     pages_wide, ppu.bg1_tile_size_16, width_pixels, source_y, ppu.bg1_scroll_x,
-                    horizontal_origin, first, final, screen_y, transparent_cgram_black);
+                    horizontal_origin, first, final, screen_y, transparent_cgram_black, &row_cache);
             else draw_tile_scanline<4>(ppu, target, priority, ppu.bg1_screen_base, ppu.bg1_character_base,
                 pages_wide, ppu.bg1_tile_size_16, width_pixels, source_y, ppu.bg1_scroll_x,
-                horizontal_origin, first, final, screen_y, transparent_cgram_black);
+                horizontal_origin, first, final, screen_y, transparent_cgram_black, &row_cache);
             continue;
         }
         for (auto screen_x = first_x; screen_x < final_x; ++screen_x) {

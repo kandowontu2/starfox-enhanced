@@ -123,8 +123,10 @@ int main() try {
         { STARFOX_3DS_FRAME_PHASE(lcd_copy); tick += 23; }
         { STARFOX_3DS_FRAME_PHASE(mono_retry); tick += 24; }
         { STARFOX_3DS_FRAME_PHASE(mono_fallback); tick += 25; }
+        { STARFOX_3DS_FRAME_PHASE(mono_overlay); tick += 26; }
+        { STARFOX_3DS_FRAME_PHASE(mono_canvas); tick += 27; }
 #if defined(STARFOX_3DS_PROFILE_FRAMES)
-        require(clock_calls == before + 50, "Detailed macros lost clock boundaries");
+        require(clock_calls == before + 54, "Detailed macros lost clock boundaries");
         for(unsigned i = unsigned(FramePhase::cpu); i < unsigned(FramePhase::count); ++i) {
             const std::uint64_t duration = i - unsigned(FramePhase::cpu) + 1U;
             require(details.totals()[i] == FramePhaseTotals{1, duration, duration},

@@ -1082,6 +1082,7 @@ const render::Framebuffer& Frame3ds::draw(
             frame_, base, 13U, 216,
             briefing.visible_message_characters);
     }
+    const auto stage_overlay_end = reference_system_tick();
 
     if (ppu.background_mode == 1U) {
         draw_source_sprites(2U);
@@ -1189,6 +1190,7 @@ const render::Framebuffer& Frame3ds::draw(
         mode1_bg1_builds = mode1_bg2_builds = mode1_bg3_builds = 0U;
     }
 #endif
+    const auto stage_canvas_begin = reference_system_tick();
     if (mode2_gameplay) {
         frame_.end_write_coverage();
         wide_frame_.clear(0U);
@@ -1286,6 +1288,10 @@ const render::Framebuffer& Frame3ds::draw(
         profile->record(FramePhase::mono_prepare, stage_background, stage_world_prepare_end);
         profile->record(FramePhase::mono_raster, stage_world_prepare_end, stage_world);
         profile->record(FramePhase::mono_finish, stage_world, stage_finish);
+        // These are children of mono_finish, not extra frame work. Appending
+        // just these two phases keeps the fixed 512-window buffer at 512 KiB.
+        profile->record(FramePhase::mono_overlay, stage_native_model_end, stage_overlay_end);
+        profile->record(FramePhase::mono_canvas, stage_canvas_begin, stage_finish);
     }
 #endif
     constexpr auto tick_to_ms = 1000.0 / reference_clock_frequency;
@@ -1303,7 +1309,13 @@ const render::Framebuffer& Frame3ds::draw(
         static_cast<std::uint32_t>(
             (stage_native_model_end - stage_native_model_begin) * tick_to_us),
         static_cast<std::uint32_t>(
-            (stage_finish - stage_native_model_end) * tick_to_us)};
+            (stage_finish - stage_native_model_end) * tick_to_us),
+        static_cast<std::uint32_t>(
+            (stage_overlay_end - stage_native_model_end) * tick_to_us),
+        static_cast<std::uint32_t>(
+            (stage_canvas_begin - stage_overlay_end) * tick_to_us),
+        static_cast<std::uint32_t>(
+            (stage_finish - stage_canvas_begin) * tick_to_us)};
     return wide_frame_;
 }
 

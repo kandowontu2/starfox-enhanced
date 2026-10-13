@@ -265,6 +265,41 @@ void reference_ex_direct_overlay() {
         }
     }
 }
+void bg1_cached_rows() {
+    const BackgroundRenderer renderer;
+    for (unsigned n = 0; n < 48; ++n) for (unsigned scale : {1U, 2U})
+        for (bool tagged : {false, true}) {
+            auto ppu = source(n);
+            ppu.main_screen = 1;
+            ppu.background_mode = n & 1U ? 3U : 2U;
+            ppu.mosaic = 0;
+            // Repeated rows, palette/flip variants and direct-map collisions.
+            // The next invocation changes VRAM/CGRAM but reuses tile IDs.
+            if (n % 3U == 0) {
+                ppu.bg1_screen_base = 0x6000;
+                for (unsigned entry = 0; entry < 4096; ++entry)
+                    word(ppu, 0x6000U + entry, std::uint16_t((entry % 11U) * 32U
+                        | ((entry % 8U) << 10U) | ((entry % 4U) << 14U)));
+            }
+            Framebuffer actual(400, 224, scale), expected(400, 224, scale);
+            for (auto* frame : {&actual, &expected}) {
+                frame->enable_layer_tags(tagged);
+                frame->enable_dither_pairs(true);
+                frame->clear(199); frame->begin_write_coverage();
+            }
+            const auto priority = static_cast<TilePriorityPass>(n % 3U);
+            renderer.draw_bg1(ppu, actual, priority, 72, n % 4U != 0, 16, n & 2U);
+            // Mosaic size one preserves coordinates but selects the original
+            // independent per-pixel/bitplane decoder instead of cached rows.
+            ppu.mosaic = 1;
+            renderer.draw_bg1(ppu, expected, priority, 72, n % 4U != 0, 16, n & 2U);
+            if (actual.pixels() != expected.pixels()
+                || actual.layer_tags() != expected.layer_tags()
+                || !std::ranges::equal(actual.write_coverage(), expected.write_coverage())
+                || !std::ranges::equal(actual.dither_pairs(), expected.dither_pairs()))
+                throw std::runtime_error("Draw-local BG1 cache differs from original point decoder");
+        }
+}
 } // namespace
 
 int main(int argc, char** argv) try {
@@ -272,6 +307,7 @@ int main(int argc, char** argv) try {
     native_row_contract();
     reference_priority_split();
     reference_ex_direct_overlay();
+    bg1_cached_rows();
     const auto digest = oracle_trace();
     // Filled from a separate executable built BEFORE changing the renderer:
     // background_renderer.cpp SHA256 450af058b47c38fd096b7416782f1b3ab
