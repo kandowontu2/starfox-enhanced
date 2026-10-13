@@ -35,6 +35,12 @@ The native profile records mono background, preparation, raster, finishing and
 LCD-copy costs separately, without SD writes during gameplay. The reference
 display target also receives the same Release `-O3` policy as the source core.
 
+Diagnostic renderer handoffs no longer rearm startup SD writes: only the first
+native GPU initialization per cartridge owner can open that receipt window.
+Ordinary Start still opens its own bounded trace, and replacing the cartridge
+resets the first-GPU guard. Repeated damage/wipe transitions must remain free of
+startup I/O once that bounded window expires. Failed SD streams stay disabled.
+
 ## Earlier tile-planner integration
 
 The BG2 tile-rectangle planning algorithm is adapted from

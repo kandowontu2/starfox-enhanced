@@ -207,7 +207,7 @@ int main() {
     };
     const auto load=[&](const char* map,ctr::GameSessionOptions options={}) {
 #if defined(STARFOX_3DS_PROFILE_FRAMES)
-        startup_trace.restart_window();
+        startup_trace.restart_source_window();
 #endif
         STARFOX_3DS_STARTUP_MARK(load_begin);
         STARFOX_3DS_STARTUP_MARK(owner_retirement);
@@ -264,7 +264,9 @@ int main() {
     const auto ensure_gpu=[&] {
         mono.reset();
         if(!gpu) {
-            STARFOX_3DS_STARTUP_RESTART(first_gpu_frame);
+            // Damage/wipe effects switch GPU owners repeatedly. Preserve the
+            // first-init freeze receipt without rearming SD flushes each time.
+            STARFOX_3DS_STARTUP_FIRST_GPU();
             STARFOX_3DS_STARTUP_MARK(gpu_initialize);
             gpu=std::make_unique<ctr::NativeGpu>(ctr::pica_scene_shader);
             STARFOX_3DS_STARTUP_MARK(gpu_initialize_complete);
