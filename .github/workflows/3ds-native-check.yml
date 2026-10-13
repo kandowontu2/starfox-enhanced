@@ -24,6 +24,7 @@ on:
       - 'tests/3ds_audio_stubs/**'
       - 'tests/3ds_stem_stubs/**'
       - 'tests/3ds_display_stubs/**'
+      - 'tests/3ds_context_stubs/**'
       - 'tools/check_3ds*.cpp'
       - '.github/workflows/3ds-native-check.yml'
       - 'tests/nintendo_3ds_pica_tests.cpp'

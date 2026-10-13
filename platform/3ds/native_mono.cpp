@@ -48,8 +48,8 @@ bool NativeMono::present(GameSession& session,const GamePresentation& source,Ima
         }
     }
     STARFOX_3DS_FRAME_PHASE(present);
-    if(!gpu_bg2) return impl_->display.present(indexed,palette,reuse,nullptr,true);
-    return present_mono_tiles_or_complete([&](bool retry) {
+    const bool presented=!gpu_bg2?impl_->display.present(indexed,palette,reuse,nullptr,true)
+        :present_mono_tiles_or_complete([&](bool retry) {
         const auto attempt=[&] {
             if(impl_->display.present_mode2(ppu,game.map().ppu_vram_revision(),
                 scroll.first,scroll.second,indexed,palette,reuse,nullptr,retry))
@@ -67,5 +67,11 @@ bool NativeMono::present(GameSession& session,const GamePresentation& source,Ima
         const auto& complete=renderer.draw(game,false,source.interpolation_alpha);
         return impl_->display.present(complete,palette,false,nullptr,true);
     });
+    // The reference GPU links only the upper LCD. Citro3D's queue callback
+    // therefore never swaps the lower screen we wrote directly above. Publish
+    // its flushed back buffer once per completed frame, including upper-image
+    // reuse, without also swapping the GPU-owned top screen.
+    if(presented) gfxScreenSwapBuffers(GFX_BOTTOM,false);
+    return presented;
 }
 }

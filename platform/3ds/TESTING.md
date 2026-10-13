@@ -554,6 +554,13 @@ remain unchanged. The two-resident-owner bound is covered by 2,000 host handoffs
 including pending queues, failed init, duplicate/unknown owners, partial close,
 reopen and final retirement. This is an unmeasured native candidate until ARM
 compilation and an accuracy-enabled replay complete; it is not 60-FPS acceptance.
+An independent test also compiles the actual native context adapter against
+SDK stubs and exercises 2,000 switches, failed initialization, inactive/double
+close, final queue/SDK retirement and CPU-menu format restoration. Review of
+the mono lower-LCD path additionally found that its flushed back buffer was
+not published by the upper-only Citro3D output callback. The candidate now
+swaps only the lower screen after a successful mono frame, including upper
+image reuse; it never manually swaps the GPU-owned top screen.
 
 The earlier direct-overlay candidate removes the EX BG1 staging image and applies the same
 zero-ink/CGRAM-black transparency directly during decoding. The 57,344-byte

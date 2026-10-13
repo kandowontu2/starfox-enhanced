@@ -14,7 +14,10 @@ The reference's reusable model scratch, immutable BSP address tables, PPU
 memory-change revisions and one-pass priority background decoder are also
 adapted, with exact-raster/state checks. Presentation RAM reads use non-mutating
 peeks. Cached CPU data is invalidated across state restores. GPU completion
-precedes freeing linear textures/C2D buffers; the two GPU owners are exclusive.
+precedes freeing linear textures/C2D buffers. The two presenters now retain
+their resources in one bounded context, with only one active GPU owner.
+Switches drain/detach the previous outputs and restore formats, shader/draw
+state and lower-LCD certificates. Only the final lease retires Citro3D.
 
 Citro2D v1.7.0 comes from the official devkitPro source archive with a pinned
 SHA-256. Its altered draw hook explicitly flushes used vertex/index ranges and
@@ -30,7 +33,10 @@ Compilation and emulator checks do not establish sustained hardware 60 FPS.
 The mono lower LCD uses a bounded two-buffer residency cache, validated against
 actual RGB bytes and committed only after a successful SDK cache flush. Changed
 HUD pixels invalidate both physical buffers. A 16-pixel tiled transpose replaces
-the strided full-screen conversion; LCD cache ownership ends with the presenter.
+the strided full-screen conversion; handoffs invalidate LCD certificates, and
+cache ownership ends with the presenter. A successful mono presentation now
+explicitly swaps the flushed lower buffer: Citro3D links only the upper outputs
+on this path and cannot publish the CPU-written lower HUD by itself.
 The native profile records mono background, preparation, raster, finishing and
 LCD-copy costs separately, without SD writes during gameplay. The reference
 display target also receives the same Release `-O3` policy as the source core.
