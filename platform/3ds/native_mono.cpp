@@ -3,6 +3,7 @@
 #include "reference/display_3ds.hpp"
 #include "starfox/platform/nintendo_3ds/frame_profile.hpp"
 #include "starfox/platform/nintendo_3ds/lcd_rgba.hpp"
+#include "starfox/platform/nintendo_3ds/mono_presentation.hpp"
 namespace starfox::platform::nintendo_3ds {
 namespace {
 void restore_formats() noexcept {
@@ -50,16 +51,24 @@ bool NativeMono::present(GameSession& session,const GamePresentation& source,Ima
         }
     }
     STARFOX_3DS_FRAME_PHASE(present);
-    const bool presented=gpu_bg2
-        ?impl_->display.present_mode2(ppu,game.map().ppu_vram_revision(),scroll.first,scroll.second,indexed,palette,reuse)
-        :impl_->display.present(indexed,palette,reuse);
-    if(!gpu_bg2 || presented) return presented;
-    // Retain the reference renderer's complete-frame fallback. A rejected
-    // tile atlas, exhausted quad buffer, or transient acquire miss must not
-    // leave a foreground-only image on screen. Sync also protects texture
-    // writes if the rejected attempt already submitted a partial GPU frame.
-    C3D_FrameSync();
-    const auto& complete=renderer.draw(game,false,source.interpolation_alpha);
-    return impl_->display.present(complete,palette,false);
+    if(!gpu_bg2) return impl_->display.present(indexed,palette,reuse,nullptr,true);
+    return present_mono_tiles_or_complete([&](bool retry) {
+        const auto attempt=[&] {
+            if(impl_->display.present_mode2(ppu,game.map().ppu_vram_revision(),
+                scroll.first,scroll.second,indexed,palette,reuse,nullptr,retry))
+                return MonoTileResult::presented;
+            return impl_->display.last_frame_timing().gpu_begin_failed
+                ?MonoTileResult::busy:MonoTileResult::rejected;
+        };
+        if(retry) { STARFOX_3DS_FRAME_PHASE(mono_retry);return attempt(); }
+        return attempt();
+    },[] { C3D_FrameSync(); },[&] {
+        // Rejected atlas/quad draws still require a complete, covered scene.
+        // The blocking SDK acquire joins any partial submission before texture
+        // writes, without advancing simulation, audio or interpolation.
+        STARFOX_3DS_FRAME_PHASE(mono_fallback);
+        const auto& complete=renderer.draw(game,false,source.interpolation_alpha);
+        return impl_->display.present(complete,palette,false,nullptr,true);
+    });
 }
 }

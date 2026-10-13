@@ -3,6 +3,7 @@
 #include "starfox/platform/nintendo_3ds/presentation_clock.hpp"
 #include "starfox/platform/nintendo_3ds/hardware_profile.hpp"
 #include "starfox/platform/nintendo_3ds/lcd_rgba.hpp"
+#include "starfox/platform/nintendo_3ds/mono_presentation.hpp"
 #include <algorithm>
 #include <climits>
 #include <filesystem>
@@ -24,6 +25,40 @@ template<class F> void rejects(F operation,const char* message) {
 }
 bool close(float a,float b) {return std::abs(a-b)<.0001F;}
 bool near(double a,double b,double tolerance=1.e-5) {return std::abs(a-b)<tolerance;}
+void mono_presentation_tests() {
+    using R=MonoTileResult;
+    for(auto first:{R::presented,R::busy,R::rejected})
+        for(auto second:{R::presented,R::busy,R::rejected})
+            for(bool complete_ok:{false,true}) {
+                std::string events;unsigned attempts{};
+                const bool result=present_mono_tiles_or_complete([&](bool retry) {
+                    require(retry==(attempts!=0),"Retry flag did not match its attempt");
+                    events+=retry?'R':'T';return attempts++?second:first;
+                },[&]{events+='S';},[&]{events+='F';return complete_ok;});
+                const bool expected=first==R::presented
+                    || (first==R::busy && second==R::presented) || complete_ok;
+                const auto order=first==R::presented?"T":first==R::rejected?"TSF"
+                    :second==R::presented?"TR":"TRSF";
+                require(result==expected,"Mono presentation lost the actual submission result");
+                require(events==order,"Mono presentation rerasterized a busy frame, skipped retirement or retried a rejected scene");
+                require(attempts<=2,"Busy GPU retry was not bounded");
+            }
+    // Do not swallow a draw failure, submit a fabricated success, or fall
+    // through into another owner after an exception.
+    for(unsigned fail_at:{0U,1U,2U}) {
+        std::string events;bool caught{};
+        try {
+            static_cast<void>(present_mono_tiles_or_complete([&](bool retry) {
+                events+=retry?'R':'T';
+                if(fail_at==0) throw std::runtime_error("tile failure");
+                return R::rejected;
+            },[&] {events+='S';if(fail_at==1) throw std::runtime_error("sync failure");},
+            [&]() -> bool {events+='F';throw std::runtime_error("fallback failure");}));
+        } catch(const std::runtime_error&) {caught=true;}
+        require(caught && events==(fail_at==0?"T":fail_at==1?"TS":"TSF"),
+            "Mono failure escaped its owner or falsely submitted a frame");
+    }
+}
 Rgb pixel(ImageView view,unsigned x,unsigned y) {
     const auto at=std::size_t(y)*view.pitch+x*3;
     return {view.pixels[at],view.pixels[at+1],view.pixels[at+2]};
@@ -495,7 +530,7 @@ void captures(const std::filesystem::path& directory) {
 } // namespace
 int main(int argc,char** argv) {
     try {
-        hardware_profile_tests();stereo_tests();pica_projection_tests();stereo_culling_and_clipping_tests();
+        hardware_profile_tests();mono_presentation_tests();stereo_tests();pica_projection_tests();stereo_culling_and_clipping_tests();
         routing_and_input_tests();lcd_tests();rgba_lcd_tests();hud_tests();dashboard_cache_tests();radio_artwork_cache_tests();presentation_clock_tests();
         if(argc==3 && std::string_view(argv[1])=="--capture") captures(argv[2]);
         else if(argc!=1) throw std::invalid_argument("Usage: frontend_tests [--capture directory]");

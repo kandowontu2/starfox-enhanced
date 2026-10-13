@@ -444,7 +444,7 @@ void Display3ds::upload_right(const render::Framebuffer& frame,
 
 bool Display3ds::present(const render::Framebuffer& indexed,
     const render::Palette256& palette, bool reuse_source,
-    const render::Framebuffer* right) {
+    const render::Framebuffer* right, bool wait_for_gpu) {
     frame_timing_ = {};
     if (!gpu_active_) {
         return present_cpu(indexed, palette, reuse_source);
@@ -468,7 +468,7 @@ bool Display3ds::present(const render::Framebuffer& indexed,
         return true;
     }
     auto stage_begin = svcGetSystemTick();
-    const bool frame_acquired = C3D_FrameBegin(C3D_FRAME_NONBLOCK);
+    const bool frame_acquired = C3D_FrameBegin(wait_for_gpu ? 0 : C3D_FRAME_NONBLOCK);
     frame_timing_.acquire_us = ticks_to_microseconds(
         svcGetSystemTick() - stage_begin);
     if (!frame_acquired) {
@@ -742,7 +742,7 @@ bool Display3ds::present_mode2(
     std::int32_t scroll_x, std::int32_t scroll_y,
     const render::Framebuffer& foreground,
     const render::Palette256& palette, bool reuse_source,
-    const render::Framebuffer* right) {
+    const render::Framebuffer* right, bool wait_for_gpu) {
     frame_timing_ = {};
     if (!eligible_mode2(ppu) || foreground.width() != 400U
         || foreground.height() != 240U || foreground.draw_scale() != 1U) {
@@ -791,7 +791,10 @@ bool Display3ds::present_mode2(
     }
 
     auto stage_begin = svcGetSystemTick();
-    const bool frame_acquired = C3D_FrameBegin(C3D_FRAME_NONBLOCK);
+    // A mono retry must wait for queue completion, not a whole extra VBlank.
+    // FrameBegin(0) joins the command queue before atlas/texture writes below;
+    // C3D_FrameSync alone only waits for display cadence, not GPU retirement.
+    const bool frame_acquired = C3D_FrameBegin(wait_for_gpu ? 0 : C3D_FRAME_NONBLOCK);
     frame_timing_.acquire_us = ticks_to_microseconds(
         svcGetSystemTick() - stage_begin);
     if (!frame_acquired) {

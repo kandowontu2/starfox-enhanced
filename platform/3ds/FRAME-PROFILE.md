@@ -78,6 +78,14 @@ the following work:
 | `mono_raster` | Reference indexed model/particle/dot rasterization |
 | `mono_finish` | Reference world composition, native draw and final LCD canvas |
 | `lcd_copy` | Exact lower RGB comparison, changed-buffer transpose and SDK cache flush |
+| `mono_retry` | One same-source tile presentation retry after a busy GPU acquire |
+| `mono_fallback` | Complete software redraw/presentation after tile rejection or an unsuccessful bounded retry |
+
+The mono retry uses blocking `C3D_FrameBegin(0)` to retire the previous command
+queue before atlas/texture writes. `C3D_FrameSync()` only waits for VBlank
+cadence; it is not a GPU queue join. See the
+[Citro3D render queue implementation](https://github.com/devkitPro/citro3d/blob/master/source/renderqueue.c).
+Other callers keep the reference nonblocking acquire by default.
 
 Parents include children. In particular, `cpu` also occurs inside strategies,
 view/cull/audio IRQ and video work; the two stem rows contain their SPC rows.

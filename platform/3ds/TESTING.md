@@ -19,7 +19,7 @@ changing the one-eye slider-off/New 2DS XL path.
 
 1. The latest source-only candidate is the experimental
    `StarFoxEnhanced-3ds-test.zip` artifact from
-   [ARM run 38397754454](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38397754454).
+   [ARM run 38415838379](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38415838379).
    R376 remains the hardware-tested baseline, not the latest source candidate.
    Extract the ZIP to the SD card's root, keeping its folder structure. When
    updating an earlier build, replace only the `.3dsx` and `.smdh`; preserve the existing
@@ -66,31 +66,49 @@ still required.
 ## Current build and validation
 
 The current frame-pipeline candidate is source
-`bd779f0b1be92c428e1a1f234dbbb5dfd900533b`, from
-[ARM run 38397754454](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38397754454).
+`2780dcaaf1aaf6d460b76ae7fe327457f853c9c8`, from
+[ARM run 38415838379](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38415838379).
 It uses the imported Starwing mono renderer for ordinary mono scenes, retains
 the exact native path for cartridge window/colour effects, and removes gameplay
-profile SD writes. The final SPC block overlaps presentation; a distinct,
+profile SD writes. The final SPC block overlaps presentation and independent
+gameplay raster phases, joining before source logic or the next packet; a distinct,
 APT-budgeted effects worker can split that complete block on supported models.
 Warm GPU handoffs no longer restart startup-trace SD writes. Presentation now
 consumes completed source phases instead of independently gating those frames
-with a second wall clock. The native ARM, shader and stack gates pass. The 50
-asset-free local checks and full Original/EX game-session suites pass; each full
-suite makes 22,173 checks, including exact PCM/VM state, menu/editor handoffs,
-disk settings/SRAM reopen, restores and 30/60 output cadence. The separate
-Original/EX restored-session parallel audio checks also pass.
+with a second wall clock. The native ARM, shader and stack gates pass. Eight
+latest-source Original/EX serial/parallel audio tests pass, including deliberately
+held packets across intervening rasters and exact PCM/VM state at barriers.
+Earlier full-suite baselines each made 22,173 checks, including menu/editor
+handoffs, disk settings/SRAM reopen, restores and 30/60 output cadence; those
+historical full-suite runs are not a new full-suite result for this commit.
 No source audio command or simulation phase is dropped. The save codec also
 retains legitimate full-bank SPC transfers in partial-phase states within its
 unchanged 4-MiB whole-file cap and wire schema.
 
-Both accuracy-enabled emulator runs of this image exited normally with code
-zero. The normal 100% CPU run remains far below the mono target. A separate
-300% CPU sensitivity run reaches higher completed-frame readings, but the
-emulator itself falls below real-time speed and does not establish stable
-console 60 FPS. The emulator's unimplemented New-model CPU/cache service makes
-that sensitivity run distinct from physical New 3DS validation. The original
-100% setting is restored after the run. No incremental tester request or
-release is implied by these results.
+Accuracy-enabled OpenGL and explicitly selected Vulkan input replays of this
+image reach planned DSP shutdown without movie errors. The OpenGL visual samples
+retain white ground dots and foreground models. Complete guest GSP retirement
+and clean emulator shutdown are not established by every run; stopping the owned
+emulator after a bounded replay is not a clean-exit result. The recorded 100%
+CPU samples remain far below the mono target. A separately repaired 300% CPU
+replay shows sampled completed-presentation HUD readings of 49/56/50 FPS, not
+sustained console 60 FPS. Its input ordering was probed and validated separately;
+the original 100% movie desynchronizes at that clock and is excluded. The
+emulator's unimplemented New-model CPU/cache service makes this sensitivity
+experiment distinct from physical New 3DS validation. No incremental tester
+request or release is implied by these results.
+
+The follow-up mono queue fix distinguishes a busy acquire from tile rejection:
+it retries the same immutable foreground once with a blocking GPU acquire, instead of
+immediately rerasterizing the complete scene. Actual atlas/quad rejection still
+uses the complete fallback with a blocking acquire before rewriting textures.
+The SDK's VBlank sync is not a GPU queue join. Host tests
+cover all success/busy/rejection pairs, bounded retry, failure propagation and
+retirement order; profiling appends separate `mono_retry` / `mono_fallback` rows.
+In the prior commit's 300%-clock Vulkan profile, the background-3 interval has
+482 mono draws for 337 mono presentations, consistent with 145 extra fallback
+redraws. Those earlier counters cannot identify the rejection reason, and this
+fix is not yet a measured performance improvement or physical-console result.
 
 CI dispatch now accepts `profile_frames=false` for production-style timing.
 `BUILD-INFO.json` records the explicit native profiling setting; older packages

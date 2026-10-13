@@ -52,9 +52,11 @@ public:
     void close() noexcept;
     // False means that no frame was submitted (the GPU is busy, or the
     // direct-framebuffer fallback is unavailable).
+    // wait_for_gpu joins the prior command queue at acquire, before changing
+    // borrowed texture storage; false retains the reference nonblocking mode.
     [[nodiscard]] bool present(const render::Framebuffer& indexed,
         const render::Palette256& palette, bool reuse_source = false,
-        const render::Framebuffer* right = nullptr);
+        const render::Framebuffer* right = nullptr, bool wait_for_gpu = false);
     [[nodiscard]] bool present_black();
     // BG2 tile geometry and palette expansion run on PICA200. The foreground
     // framebuffer must contain only the world, HUD and text; write coverage
@@ -64,7 +66,7 @@ public:
         std::int32_t scroll_x, std::int32_t scroll_y,
         const render::Framebuffer& foreground,
         const render::Palette256& palette, bool reuse_source = false,
-        const render::Framebuffer* right = nullptr);
+        const render::Framebuffer* right = nullptr, bool wait_for_gpu = false);
     // Start the New 3DS geometry job before software rendering. The caller
     // must not advance the PPU until present_mode2() has consumed the job.
     void prepare_mode2_plan(const simulation::SnesPpuState& ppu,
