@@ -119,10 +119,13 @@ struct Overlap {
     Executor* executor{};
     Work* work{};
     bool rejected{};
+    bool finish_rejected{};
     static void run(void* context) {
         auto& self = *static_cast<Overlap*>(context);
         try { self.executor->execute(self.work->task(), self.work->task()); }
         catch (const std::logic_error&) { self.rejected = true; }
+        try { self.executor->finish(); }
+        catch (const std::logic_error&) { self.finish_rejected = true; }
     }
 };
 void overlap_case() {
@@ -130,10 +133,12 @@ void overlap_case() {
     Work work;
     Overlap nested{&executor, &work};
     executor.execute({&nested, Overlap::run}, work.task());
-    require(nested.rejected && work.calls == 1, "Reentrant foreground call overwrote a borrowed job");
-    nested.rejected = false;
+    require(nested.rejected && nested.finish_rejected && work.calls == 1,
+        "Reentrant foreground call overwrote/joined a borrowed synchronous job");
+    nested.rejected = nested.finish_rejected = false;
     executor.execute(work.task(), {&nested, Overlap::run});
-    require(nested.rejected && work.calls == 2, "Reentrant worker call deadlocked or overwrote the job");
+    require(nested.rejected && nested.finish_rejected && work.calls == 2,
+        "Reentrant worker call deadlocked or overwrote the job");
 }
 void deferred_cases() {
     new_model=true;

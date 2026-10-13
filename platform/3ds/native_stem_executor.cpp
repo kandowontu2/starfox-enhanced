@@ -16,7 +16,7 @@ struct NativeStemExecutor::Impl {
     Thread worker{};
     audio::StemTask task{};
     std::exception_ptr failure;
-    bool stopping{}, busy{};
+    bool stopping{}, busy{}, deferred{};
     u32 previous_budget{};
     bool budget_changed{};
 
@@ -93,7 +93,7 @@ struct NativeStemExecutor::Impl {
             throw std::logic_error("Overlapping SPC stem executor call");
         }
         if(!worker) {LightLock_Unlock(&lock);return false;}
-        busy=true;task=background;failure={};
+        busy=true;deferred=true;task=background;failure={};
         LightLock_Unlock(&lock);
         STARFOX_3DS_STARTUP_DETAIL_MARK(audio_worker_dispatch);
         LightEvent_Signal(&ready);
@@ -102,13 +102,17 @@ struct NativeStemExecutor::Impl {
     void finish() {
         LightLock_Lock(&lock);
         const bool pending=busy;
+        if(pending && !deferred) {
+            LightLock_Unlock(&lock);
+            throw std::logic_error("Cannot finish a synchronous SPC executor call");
+        }
         LightLock_Unlock(&lock);
         if(!pending) return;
         STARFOX_3DS_STARTUP_DETAIL_MARK(audio_worker_wait);
         LightEvent_Wait(&done);
         STARFOX_3DS_STARTUP_DETAIL_MARK(audio_worker_complete);
         LightLock_Lock(&lock);
-        const auto error=failure;failure={};busy=false;
+        const auto error=failure;failure={};busy=false;deferred=false;
         LightLock_Unlock(&lock);
         if(error) std::rethrow_exception(error);
     }
