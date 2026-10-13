@@ -51,6 +51,9 @@ struct GameSessionOptions {
     // Borrowed synchronous executor: complete both stems before source port
     // acknowledgement/state handoff. Platform owner must outlive the session.
     audio::StemExecutor* stem_executor{};
+    // Distinct borrowed owner for splitting the audio block already running
+    // on the frame worker. Never recursively dispatch to stem_executor.
+    audio::StemExecutor* frame_audio_stem_executor{};
 };
 // Graphics/SDK-independent native game owner. This is the actual simulation,
 // SPC driver and cartridge HUD, not the asset-free frontend diagnostic. Native
@@ -165,6 +168,7 @@ private:
     bool requested_hud_customization_{};
     CockpitLayout hud_layout_;
     audio::StemExecutor* stem_executor_{};
+    audio::StemExecutor* frame_audio_stem_executor_{};
     // Destroy the borrowed-ROM renderer before game_, symbols_ and rom_.
     std::unique_ptr<platform_3ds::Frame3ds> mono_renderer_;
     bool mono_prepared_{};

@@ -32,8 +32,10 @@ GameSession::GameSession(assets::RomImage rom,assets::SymbolMap symbols,PcmSink 
          ?simulation::Experience::original:simulation::Experience::starfox_ex),
      decoder_(rom_,symbols_),game_(rom_,symbols_,initial_map,cartridge_ram,true),
      sink_(std::move(sink)),hud_(rom_,symbols_),history_(game_,rom_,symbols_,vr::SceneCameraPolicy::source),
-     stem_executor_(options.stem_executor) {
+     stem_executor_(options.stem_executor),frame_audio_stem_executor_(options.frame_audio_stem_executor) {
     if(!sink_) throw std::invalid_argument("3DS game requires a PCM consumer");
+    if(stem_executor_ && stem_executor_==frame_audio_stem_executor_)
+        throw std::invalid_argument("3DS overlapped audio requires a distinct stem executor");
     constexpr std::array native_names{"M_BIGZ","M_DEPTHSTAB","M_DEPTHTABLE",
         "M_WIREMODE","M_WOBBLEMODE","M_WABBLEMODE","M_CELMODE",
         "M_SINEOFFSET","M_COLORWARP","M_PROJPNTS"};
@@ -455,9 +457,11 @@ void GameSession::run_frame_work(audio::StemTask work) {
                 std::optional<ScopedFrameProfileActivation> activation;
                 if(task.profile) activation.emplace(*task.profile);
                 STARFOX_3DS_FRAME_PHASE(audio);
-                // This is the executor's one background task, not another
-                // nested dispatch to that same core-2 worker.
-                task.session.audio_.render_stems_logic_tick(task.session.pending_audio_);
+                // The optional inner executor is a distinct, joined owner:
+                // core 2 runs music while its budgeted worker runs effects.
+                // A denied inner worker executes both stems serially here.
+                task.session.audio_.render_stems_logic_tick(task.session.pending_audio_,
+                    task.session.frame_audio_stem_executor_);
                 audio::mix_stems(task.session.audio_.last_music_samples(),task.session.audio_.last_effect_samples(),
                     task.music,task.sfx,task.session.mixed_);
             }});

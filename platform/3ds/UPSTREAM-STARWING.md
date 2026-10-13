@@ -127,3 +127,12 @@ core-2 allocation retains a serial fallback, and the default host session path
 is unchanged. Original and EX parity checks compare every PCM sample and the
 complete VM/SPC timeline against that synchronous path. This is not a measured
 console performance claim or permission to drop sound commands.
+
+The reference's APT-budgeted core-1 stem also motivates an optional, distinct
+effects worker within our joined frame-audio task. Core 2 renders music, that
+worker renders effects and the owner renders the scene. Budget/allocation
+denial retains serial stems; the previous APT budget is restored after join.
+This keeps our exact source acknowledgements, complete PCM blocks, restore
+ownership and failure retirement. No reference ring-buffer packet dropping or
+midpoint sample insertion is adopted, and no console speed gain is claimed
+without a native timing run.

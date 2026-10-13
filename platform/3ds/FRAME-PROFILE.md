@@ -27,6 +27,16 @@ durations are not additive either. Source catch-up blocks before the final
 phase remain synchronous. A host parity test establishes unchanged samples
 and source state, not physical-console frame rate.
 
+On supported New models, a distinct optional effects worker requests only an
+APT-granted core-1 time budget. During frame overlap, music runs on core 2,
+effects on that worker and presentation on the owner. The inner worker joins
+before the outer worker publishes the complete block. Denied budget/allocation
+keeps both stems serial on core 2. Existing granted budgets are respected;
+newly borrowed budgets are restored after worker retirement. State restores
+inherit both executor owners. No samples, voices, commands or VM acknowledgements
+are omitted. Worker timings can overlap one another as well as rendering, so
+their sum is not the frame duration or proof of sustained console 60 FPS.
+
 Background cache dependencies now include the complete configured tilemap and
 every character it references, rather than all 1024 characters in its bank.
 All map pages, tile priorities and offscreen entries are conservative

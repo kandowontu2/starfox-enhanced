@@ -35,15 +35,19 @@ void require(bool value,const char* message) {++checks;if(!value) throw std::run
 struct CountingStemExecutor final : audio::StemExecutor {
     NativeStemExecutor worker;
     std::uint64_t completed{};
-    CountingStemExecutor() {require(worker.parallel_available(),"Parallel session oracle accidentally used serial fallback");}
+    explicit CountingStemExecutor(NativeStemExecutor::Role role=NativeStemExecutor::Role::application):worker(role) {
+        require(worker.parallel_available(),"Parallel session oracle accidentally used serial fallback");
+    }
     void execute(audio::StemTask foreground,audio::StemTask background) override {
         worker.execute(foreground,background);++completed;
     }
 };
 CountingStemExecutor* checked_stem_executor{};
+CountingStemExecutor* checked_frame_audio_stem_executor{};
 GameSessionOptions checked_options(const GameSessionOptions& source={}) {
     require(checked_stem_executor,"Parallel session executor lifetime missing");
-    auto result=source;result.stem_executor=checked_stem_executor;return result;
+    auto result=source;result.stem_executor=checked_stem_executor;
+    result.frame_audio_stem_executor=checked_frame_audio_stem_executor;return result;
 }
 // Stack-only wrapper; owners returned by restored_state remain ordinary
 // GameSession objects and inherit their executor through the production path.
@@ -121,6 +125,12 @@ void audio_render_overlap(const assets::RomImage& rom,const assets::SymbolMap& s
     } fallback;
     auto options=checked_options();
     if(!options.stem_executor) options.stem_executor=&fallback;
+    auto recursive=options;recursive.frame_audio_stem_executor=recursive.stem_executor;
+    rejects([&] {GameSession invalid(rom,symbols,[](auto){},"BOOT",{},recursive);},
+        "Same frame/stem worker was accepted for a recursively dispatched block");
+#if defined(STARFOX_3DS_CHECK_PARALLEL_AUDIO)
+    const auto inner_before=checked_frame_audio_stem_executor->completed;
+#endif
     for(const auto* map:{"BOOT","LEVEL1_1"}) {
         std::vector<std::int16_t> reference_pcm,overlapped_pcm;
         CheckedSession reference(rom,symbols,[&](auto pcm) {reference_pcm.insert(reference_pcm.end(),pcm.begin(),pcm.end());},map);
@@ -171,6 +181,22 @@ void audio_render_overlap(const assets::RomImage& rom,const assets::SymbolMap& s
         overlapped.run_frame_work([] {});
         require(reference_pcm==overlapped_pcm && reference.save_state()==overlapped.save_state(),
             "Skipping frame work lost a sound block or source acknowledgement");
+        auto reference_next=reference.restored_state(reference.save_state());
+        auto overlapped_next=overlapped.restored_state(overlapped.save_state());
+#if defined(STARFOX_3DS_CHECK_PARALLEL_AUDIO)
+        const auto restored_inner_before=checked_frame_audio_stem_executor->completed;
+#endif
+        for(unsigned frame=0;frame<12;++frame) {
+            reference_next->advance(timestamp(frame),0);
+            overlapped_next->advance(timestamp(frame),0,true,{},true);
+            overlapped_next->run_frame_work([] {});
+            require(reference_pcm==overlapped_pcm && reference_next->save_state()==overlapped_next->save_state(),
+                "Restored overlap owner changed PCM/source state");
+        }
+#if defined(STARFOX_3DS_CHECK_PARALLEL_AUDIO)
+        require(checked_frame_audio_stem_executor->completed>restored_inner_before,
+            "Restored session lost the distinct inner audio executor");
+#endif
     }
     CheckedSession failure(rom,symbols,[](auto){},"BOOT",{},options);
     failure.advance(0,0);failure.advance(50'000'000,0,true,{},true);
@@ -178,6 +204,10 @@ void audio_render_overlap(const assets::RomImage& rom,const assets::SymbolMap& s
         "Presentation failure escaped overlap failure handling");
     rejects([&] {failure.advance(100'000'000,0);},"Failed overlapped source was retried");
     require(!failure.state_available(),"Failed overlap retained state-save availability");
+#if defined(STARFOX_3DS_CHECK_PARALLEL_AUDIO)
+    require(checked_frame_audio_stem_executor->completed>inner_before,
+        "Three-way overlap parity never dispatched the distinct effects worker");
+#endif
 }
 void native_depth_preferences(const assets::RomImage& rom,const assets::SymbolMap& symbols) {
     for(const auto map:{"BOOT","LEVEL1_1"}) {
@@ -1617,7 +1647,9 @@ int main(int argc,char** argv) {
     try {
 #if defined(STARFOX_3DS_CHECK_PARALLEL_AUDIO)
         CountingStemExecutor parallel_executor;
+        CountingStemExecutor inner_executor(NativeStemExecutor::Role::budgeted_effects);
         checked_stem_executor=&parallel_executor;
+        checked_frame_audio_stem_executor=&inner_executor;
 #endif
         const bool states_only=argc==4 && std::string_view(argv[3])=="--states-only";
         const bool overlap_only=argc==4 && std::string_view(argv[3])=="--audio-render-overlap";

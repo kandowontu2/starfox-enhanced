@@ -17,19 +17,39 @@ struct NativeStemExecutor::Impl {
     audio::StemTask task{};
     std::exception_ptr failure;
     bool stopping{}, busy{};
+    u32 previous_budget{};
+    bool budget_changed{};
 
-    Impl() {
+    explicit Impl(Role role) {
         LightLock_Init(&lock);
         LightEvent_Init(&ready, RESET_ONESHOT);
         LightEvent_Init(&done, RESET_ONESHOT);
         bool new_model{};
         if (R_FAILED(APT_CheckNew3DS(&new_model)) || !new_model) return;
+        const bool effects=role==Role::budgeted_effects;
+        if(effects) {
+            // Core 1 is shared with system services, not an unrestricted extra
+            // application core. Refuse it when APT cannot grant a budget.
+            if(R_FAILED(APT_GetAppCpuTimeLimit(&previous_budget))) return;
+            if(previous_budget<50) {
+                if(R_FAILED(APT_SetAppCpuTimeLimit(70))
+                    && R_FAILED(APT_SetAppCpuTimeLimit(50))) return;
+                budget_changed=true;
+            }
+        }
         s32 priority = 0x30;
         if (R_FAILED(svcGetThreadPriority(&priority, CUR_THREAD_HANDLE))) priority = 0x30;
         priority = std::clamp<s32>(priority, 0x18, 0x3f);
         // Core 2 is permission-dependent even on New 3DS. threadCreate returns
         // nullptr on failure, which leaves the serial implementation intact.
-        worker = threadCreate(entry, this, worker_stack_bytes, priority, 2, false);
+        worker = threadCreate(entry, this, worker_stack_bytes, priority, effects?1:2, false);
+        if(!worker) restore_budget();
+    }
+    void restore_budget() noexcept {
+        if(budget_changed) {
+            static_cast<void>(APT_SetAppCpuTimeLimit(previous_budget));
+            budget_changed=false;
+        }
     }
     ~Impl() {
         if (!worker) return;
@@ -41,6 +61,7 @@ struct NativeStemExecutor::Impl {
         if (R_FAILED(threadJoin(worker, std::numeric_limits<u64>::max())))
             std::terminate();
         threadFree(worker);
+        restore_budget();
     }
     static void entry(void* context) noexcept {
         auto& self = *static_cast<Impl*>(context);
@@ -99,7 +120,7 @@ struct NativeStemExecutor::Impl {
         if (background_failure) std::rethrow_exception(background_failure);
     }
 };
-NativeStemExecutor::NativeStemExecutor() : impl_(std::make_unique<Impl>()) {}
+NativeStemExecutor::NativeStemExecutor(Role role) : impl_(std::make_unique<Impl>(role)) {}
 NativeStemExecutor::~NativeStemExecutor() = default;
 bool NativeStemExecutor::parallel_available() const noexcept { return impl_->worker != nullptr; }
 void NativeStemExecutor::execute(audio::StemTask foreground, audio::StemTask background) {

@@ -98,6 +98,7 @@ int main() {
     // APT is initialized by the display. The joined worker outlives every
     // source owner, including preview/experience/reset/state replacements.
     ctr::NativeStemExecutor stem_executor;
+    ctr::NativeStemExecutor effect_stem_executor(ctr::NativeStemExecutor::Role::budgeted_effects);
     ctr::Canvas top(ctr::top_width),lower;
     std::unique_ptr<ctr::NativeAudio> audio;
     std::unique_ptr<ctr::GameSession> session;
@@ -141,6 +142,8 @@ int main() {
     ctr::ScopedStartupTraceActivation startup_activation(startup_trace);
     if(stem_executor.parallel_available()) STARFOX_3DS_STARTUP_MARK(audio_worker_parallel);
     else STARFOX_3DS_STARTUP_MARK(audio_worker_serial);
+    if(effect_stem_executor.parallel_available()) STARFOX_3DS_STARTUP_MARK(audio_effects_worker_parallel);
+    else STARFOX_3DS_STARTUP_MARK(audio_effects_worker_serial);
     unsigned profile_background{};
 #endif
     ctr::PresentationClock render_clock;
@@ -233,6 +236,7 @@ int main() {
         audio=std::make_unique<ctr::NativeAudio>();
         options.preview_progress=[&](unsigned) {return display.poll().running;};
         options.stem_executor=&stem_executor;
+        options.frame_audio_stem_executor=&effect_stem_executor;
         STARFOX_3DS_STARTUP_MARK(session_initialize);
         session=std::make_unique<ctr::GameSession>(std::move(cartridge.rom),std::move(cartridge.symbols),
             [&](auto pcm){audio->submit(pcm);},map,cartridge_ram[unsigned(experience)],options);

@@ -7,6 +7,7 @@
 #include <thread>
 
 using s32 = std::int32_t;
+using u32 = std::uint32_t;
 using u64 = std::uint64_t;
 using Result = std::int32_t;
 using Handle = std::uint32_t;
@@ -25,6 +26,8 @@ using Thread = Thread_tag*;
 using ThreadFunc = void (*)(void*);
 
 Result APT_CheckNew3DS(bool*);
+Result APT_GetAppCpuTimeLimit(u32*);
+Result APT_SetAppCpuTimeLimit(u32);
 Result svcGetThreadPriority(s32*, Handle);
 Thread threadCreate(ThreadFunc, void*, std::size_t, int, int, bool);
 Result threadJoin(Thread, u64);
