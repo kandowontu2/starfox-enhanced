@@ -63,7 +63,10 @@ inline std::array<unsigned,4> pica_screen_scissor(const PicaClip& clip) {
 // SNES CGADSUB layer bits: BG1..4, OBJ, backdrop. Zero protects host UI
 // and black window masks. A native Super FX model belongs to BG1, not OBJ.
 inline constexpr bool pica_source_layer(unsigned layer) noexcept {
-    return layer==0 || (layer<=32 && std::has_single_bit(layer));
+    // This runs for every covered PPU texel during upload validation. ARM11
+    // has no scalar population-count instruction; keep the one-hot test as
+    // ordinary integer operations, including the deliberately valid zero.
+    return layer<=32 && (layer&(layer-1U))==0;
 }
 struct PicaColourOp {
     bool subtract{},half{};

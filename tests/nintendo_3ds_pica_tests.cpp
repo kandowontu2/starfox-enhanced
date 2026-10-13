@@ -71,6 +71,30 @@ template<class F> void rejects(F action,const char* message) {
     bool rejected=false;try {action();} catch(const std::invalid_argument&) {rejected=true;}
     require(rejected,message);
 }
+void source_layer_predicate() {
+    const auto expected=[](unsigned layer) {
+        switch(layer) {
+            case 0:case 1:case 2:case 4:case 8:case 16:case 32:return true;
+            default:return false;
+        }
+    };
+    for(unsigned layer=0;layer<65536;++layer)
+        require(pica_source_layer(layer)==expected(layer),"Layer mask test changed accepted source ownership");
+    for(unsigned bit=6;bit<std::numeric_limits<unsigned>::digits;++bit)
+        require(!pica_source_layer(1U<<bit),"High one-hot ownership bit accepted");
+    require(!pica_source_layer(std::numeric_limits<unsigned>::max()),"Unsigned wrap accepted invalid ownership");
+    // Exercise the actual validator, not just the mathematical predicate.
+    // Exactly transparent/unclassified and opaque/one-hot pixels are valid.
+    std::array<std::uint8_t,4> pixel{};
+    std::array<std::uint8_t,1> ownership{};
+    const PicaImage image{pixel,1,1,4,4,false,ownership,1};
+    for(unsigned layer=0;layer<256;++layer) for(unsigned alpha=0;alpha<256;++alpha) {
+        ownership[0]=std::uint8_t(layer);pixel[3]=std::uint8_t(alpha);
+        const bool accepted=expected(layer) && alpha==(layer?255U:0U);
+        if(accepted) require(validate_pica_layers(image)==layer,"Valid source class changed");
+        else rejects([&]{static_cast<void>(validate_pica_layers(image));},"Invalid layer/alpha pair accepted");
+    }
+}
 void validated_composition_handoff() {
     static_assert(!std::is_default_constructible_v<PicaValidatedFrame>);
     static_assert(!std::is_constructible_v<PicaValidatedFrame,PicaFrame>);
@@ -858,6 +882,7 @@ STARFOX_TEXTURE_NOINLINE void operator delete[](void* memory,std::size_t) noexce
 #undef STARFOX_TEXTURE_NOINLINE
 int main() try {
     display_sync();
+    source_layer_predicate();
     word_texture_store();
     validated_composition_handoff();
     vertex_validation_bits();vertex_validation_draw_policy();texture_upload();full_size_texture_upload();changed_tile_upload();texture_residency();reusable_texture_cache();vertex_residency();projection_and_draws();layer_upload();sampled_texture_orientation();
