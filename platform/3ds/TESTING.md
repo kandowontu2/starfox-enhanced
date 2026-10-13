@@ -19,7 +19,7 @@ changing the one-eye slider-off/New 2DS XL path.
 
 1. The latest source-only candidate is the experimental
    `StarFoxEnhanced-3ds-test.zip` artifact from
-   [ARM run 38438777544](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38438777544).
+   [ARM run 38444509351](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38444509351).
    R376 remains the hardware-tested baseline, not the latest source candidate.
    Extract the ZIP to the SD card's root, keeping its folder structure. When
    updating an earlier build, replace only the `.3dsx` and `.smdh`; preserve the existing
@@ -66,8 +66,8 @@ still required.
 ## Current build and validation
 
 The current frame-pipeline candidate is source
-`35c3a4138424a31d1aa21c7b507f44ceba5c3edd`, from
-[ARM run 38438777544](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38438777544).
+`f635c0d1d85dd0f2973651bb18725abe865d8260`, from
+[ARM run 38444509351](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38444509351).
 It uses the imported Starwing mono renderer for ordinary mono scenes, retains
 the exact native path for cartridge window/colour effects, and removes gameplay
 profile SD writes. The final SPC block overlaps presentation and independent
@@ -221,8 +221,17 @@ allocation is introduced. A <=904-byte row index transfers only the source
 and ordered commands. Independent tests cover 576 dependency mutations,
 64 borrowed-versus-direct rasters and 64 sparse-transfer mode combinations.
 Original/EX retain their prior 240-phase image digests and 80 audio blocks.
-ARM validation and measured native performance are pending; no 60-FPS or
-hardware acceptance is implied by these host results.
+All 52 CI tests and ARM/shader/stack/package gates pass. The same
+accuracy-enabled Vulkan/300%-clock sensitivity replay records overlay means
+of 0.963/1.146 ms in backgrounds 3/51, versus 3.182/3.190 for the earlier
+opacity-mask source. Finishing drops to 2.890/2.888 ms/call; inclusive loop
+means are 15.744/15.762 ms. These are not completed-presentation FPS.
+There are no fallback, retry or replay errors. Planned DSP shutdown/profile
+flush occur; guest GSP retirement remains unverified, and the owned emulator
+was stopped after the flush with CPU configuration restored to 100%.
+Counts/poses, window-end labels and concurrent unrelated work limit timing
+comparisons. Retain this exact reuse improvement, but sustained mono 60 FPS
+and full native/hardware acceptance remain open gates.
 
 The earlier direct-overlay candidate removes the EX BG1 staging image and applies the same
 zero-ink/CGRAM-black transparency directly during decoding. The 57,344-byte
