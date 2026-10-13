@@ -20,10 +20,15 @@ int main(int argc,char** argv) try {
     const auto start=std::chrono::steady_clock::now();
     double draw_ms=0;
     std::uint64_t native_us=0,overlay_us=0,sprites_us=0,canvas_us=0;
+    unsigned bg1_mosaic_off=0,bg1_mosaic_one=0,bg1_mosaic_large=0;
     for(unsigned frame=1;frame<=240;++frame) {
         session.advance((std::int64_t(frame)*1000000000+59)/60,
             frame>=120 && frame<180?input::ButtonMask(input::y|input::right):0);
         const auto source=session.presentation(0,true);
+        const auto mosaic=source.raster->ppu->mosaic;
+        if (!(mosaic & 1U)) ++bg1_mosaic_off;
+        else if (!(mosaic >> 4U)) ++bg1_mosaic_one;
+        else ++bg1_mosaic_large;
         if(!session.game().draw_order().empty()) ++world_frames;
         renderer.set_sprite_selection(source.sprites);
         const bool gpu_bg2=source.raster->ppu->background_mode==2;
@@ -70,6 +75,8 @@ int main(int argc,char** argv) try {
         <<" fallback_checks="<<fallback_checks
         <<" native_ms="<<native_us/1000.0<<" overlay_ms="<<overlay_us/1000.0
         <<" sprites_ms="<<sprites_us/1000.0<<" canvas_ms="<<canvas_us/1000.0
+        <<" bg1_mosaic_off="<<bg1_mosaic_off<<" bg1_mosaic_one="<<bg1_mosaic_one
+        <<" bg1_mosaic_large="<<bg1_mosaic_large
         <<" final_bg="<<session.presentation(0,true).current->background_id
         <<" digest="<<std::hex<<digest<<'\n';
 } catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
