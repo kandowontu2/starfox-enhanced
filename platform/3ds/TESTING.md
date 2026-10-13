@@ -187,6 +187,16 @@ The sensitivity, window/count/concurrent-load and unverified guest-exit
 limitations above still apply. No incremental hardware request, release or
 60-FPS acceptance is implied.
 
+The next source-only experiment keeps all lazily decoded vertical rows for
+each of 32 tile keys, instead of evicting an earlier row when the scanline
+changes. Its draw-local payload is bounded to 9,408 bytes, does not survive a
+draw, and initializes a row before its validity bit permits any read. The
+independent mosaic-size-one decoder comparisons now include deliberate
+tile-key collisions. Local background/extents/composition tests and both
+240-phase Original/EX image digests pass with 80 audio blocks unchanged.
+ARM stack/build and measured native performance are pending; this is not a
+validated replacement for the opacity-mask candidate above.
+
 The current candidate removes the EX BG1 staging image and applies the same
 zero-ink/CGRAM-black transparency directly during decoding. The 57,344-byte
 pixel allocation and full-image rescan are gone. All 384 synthetic comparisons

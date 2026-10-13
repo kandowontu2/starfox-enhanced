@@ -273,12 +273,14 @@ void bg1_cached_rows() {
             ppu.main_screen = 1;
             ppu.background_mode = n & 1U ? 3U : 2U;
             ppu.mosaic = 0;
-            // Repeated rows, palette/flip variants and direct-map collisions.
+            // Repeated vertical rows, palette/flip variants and direct-map
+            // collisions. Tile IDs 33*n share the new tile-key hash bucket
+            // before palette/flip folding; row-valid bits must reset on reuse.
             // The next invocation changes VRAM/CGRAM but reuses tile IDs.
             if (n % 3U == 0) {
                 ppu.bg1_screen_base = 0x6000;
                 for (unsigned entry = 0; entry < 4096; ++entry)
-                    word(ppu, 0x6000U + entry, std::uint16_t((entry % 11U) * 32U
+                    word(ppu, 0x6000U + entry, std::uint16_t((entry % 31U) * 33U
                         | ((entry % 8U) << 10U) | ((entry % 4U) << 14U)));
             }
             Framebuffer actual(400, 224, scale), expected(400, 224, scale);
