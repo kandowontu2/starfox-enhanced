@@ -17,7 +17,7 @@ enum class FramePhase : unsigned {
     terrain_build, terrain_reuse,
     mono_background, mono_prepare, mono_raster, mono_finish, lcd_copy,
     mono_retry, mono_fallback, mono_overlay, mono_canvas,
-    object_export, object_import, audio_join, count
+    object_export, object_import, audio_join, hud_prepare, count
 };
 inline constexpr std::array<std::string_view, unsigned(FramePhase::count)> frame_phase_names{
     "frame", "advance", "video", "logic", "capture", "audio", "raster",
@@ -28,7 +28,7 @@ inline constexpr std::array<std::string_view, unsigned(FramePhase::count)> frame
     "terrain_build", "terrain_reuse",
     "mono_background", "mono_prepare", "mono_raster", "mono_finish", "lcd_copy",
     "mono_retry", "mono_fallback", "mono_overlay", "mono_canvas",
-    "object_export", "object_import", "audio_join"
+    "object_export", "object_import", "audio_join", "hud_prepare"
 };
 struct FramePhaseTotals {
     std::uint64_t calls{}, ticks{}, maximum{};
@@ -113,7 +113,7 @@ class FrameProfileBuffer {
 public:
     static constexpr std::size_t maximum_storage_bytes = 512U * 1024U;
     // New diagnostic phases must not grow the console's allocation. The
-    // bounded capture duration shrinks instead (478 windows with 44 phases).
+    // bounded capture duration shrinks instead (468 windows with 45 phases).
     static constexpr unsigned maximum_windows =
         maximum_storage_bytes / sizeof(Window) < FrameProfile::maximum_windows
         ? unsigned(maximum_storage_bytes / sizeof(Window)) : FrameProfile::maximum_windows;

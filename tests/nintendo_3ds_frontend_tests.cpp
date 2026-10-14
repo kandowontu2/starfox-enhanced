@@ -372,6 +372,49 @@ void hud_tests() {
     rejects([&]{draw_cockpit(canvas,state);},"Oversized radio portrait accepted");
     Canvas top(top_width);rejects([&]{draw_cockpit(top,{});},"Lower-screen HUD drawn onto upper screen");
 }
+void canvas_rectangle_oracle_tests() {
+    std::uint32_t seed=0x68bf1234U;
+    const auto next=[&] {seed=seed*1664525U+1013904223U;return seed;};
+    for(const auto size:std::array<std::array<unsigned,2>,5>{{{320,240},{400,240},{74,74},{1,1},{13,7}}}) {
+        Canvas canvas(size[0],size[1]);
+        std::vector<std::uint8_t> pixels(std::size_t(size[0])*size[1]*3,0),coverage(std::size_t(size[0])*size[1],0);
+        bool covered=false;
+        for(unsigned step=0;step<320;++step) {
+            // Beginning coverage does not clear artwork, and later fills must
+            // preserve old ownership outside their actual clipped rectangle.
+            if(step==80 || step==210) {canvas.begin_artwork();std::fill(coverage.begin(),coverage.end(),0);covered=true;}
+            int x=int(next()%1200)-400,y=int(next()%800)-300;
+            int width=int(next()%800)-40,height=int(next()%500)-30;
+            switch(step%32) {
+            case 0:x=0;y=0;width=int(size[0]);height=int(size[1]);break;
+            case 1:x=INT_MIN;y=INT_MIN;width=INT_MAX;height=INT_MAX;break;
+            case 2:x=INT_MAX;y=INT_MAX;width=INT_MAX;height=INT_MAX;break;
+            case 3:x=-2;y=-2;width=3;height=3;break;
+            case 4:x=int(size[0])-1;y=int(size[1])-1;width=INT_MAX;height=INT_MAX;break;
+            case 5:x=0;y=0;width=INT_MIN;height=INT_MIN;break;
+            case 6:x=0;y=0;width=int(size[0]);height=1;break;
+            case 7:x=0;y=0;width=1;height=int(size[1]);break;
+            default:break;
+            }
+            const Rgb colour{std::uint8_t(next()),std::uint8_t(next()),std::uint8_t(next())};
+            const auto before=covered?std::span<const std::uint8_t>(coverage):std::span<const std::uint8_t>{};
+            require(canvas.coverage().size()==before.size(),"Canvas coverage allocation changed unexpectedly");
+            canvas.rectangle(x,y,width,height,colour);
+            // Independent old painter: inspect every destination coordinate,
+            // not the optimized clip/span/copy implementation.
+            if(width>0 && height>0) for(unsigned row=0;row<size[1];++row)
+                for(unsigned column=0;column<size[0];++column)
+                    if(std::int64_t(column)>=x && std::int64_t(column)<std::int64_t(x)+width
+                        && std::int64_t(row)>=y && std::int64_t(row)<std::int64_t(y)+height) {
+                        const auto pixel=std::size_t(row)*size[0]+column,at=pixel*3;
+                        pixels[at]=colour.r;pixels[at+1]=colour.g;pixels[at+2]=colour.b;
+                        if(covered) coverage[pixel]=1;
+                    }
+            require(std::equal(pixels.begin(),pixels.end(),canvas.view().pixels.begin()),"Clipped RGB span differs from pixel painter");
+            if(covered) require(std::equal(coverage.begin(),coverage.end(),canvas.coverage().begin()),"Clipped span changed artwork coverage");
+        }
+    }
+}
 void dashboard_cache_tests() {
     CockpitDashboard dashboard;HudState state;
     std::string message="ALL SHIPS CHECK IN";state.radio_message=message;
@@ -556,7 +599,7 @@ void captures(const std::filesystem::path& directory) {
 int main(int argc,char** argv) {
     try {
         hardware_profile_tests();mono_presentation_tests();stereo_tests();pica_projection_tests();stereo_culling_and_clipping_tests();
-        routing_and_input_tests();lcd_tests();rgba_lcd_tests();hud_tests();dashboard_cache_tests();radio_artwork_cache_tests();presentation_clock_tests();
+        routing_and_input_tests();lcd_tests();rgba_lcd_tests();hud_tests();canvas_rectangle_oracle_tests();dashboard_cache_tests();radio_artwork_cache_tests();presentation_clock_tests();
         if(argc==3 && std::string_view(argv[1])=="--capture") captures(argv[2]);
         else if(argc!=1) throw std::invalid_argument("Usage: frontend_tests [--capture directory]");
         std::cout<<"3DS frontend: "<<checks<<" checks passed\n";

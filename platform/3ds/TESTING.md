@@ -626,6 +626,41 @@ The imported reference renderer rejects nonzero-eye model draws by design;
 the production slider path remains the separate NativeGpu renderer. No native
 timing or new hardware acceptance is inferred from these host probes.
 
+The exact direct-foreground ARM image (`a1e2332c`, run `38490041988`)
+passes all 57 CI tests and native arithmetic/shader/stack/package gates.
+Its matched explicit-300% Vulkan/accuracy replay reduces canvas means from
+1.868/1.691 ms to 0.005/0.005 ms in backgrounds 3/51. Some work moves into
+the existing upload: combined model preparation plus presentation means fall
+from 7.280/5.259 ms to 6.007/4.544 ms, rather than saving the entire old canvas
+duration. Counts/poses and the share of source-effects frames differ slightly.
+Adjacent same-label whole-frame returns average 59.585/59.487 per second,
+with minimum windows 54.218/53.520. The slow ordinary background-51 window
+still has source advancement up to 18.705 ms, including raster publication
+up to 7.596 ms. These inclusive child/parent timings must not be added.
+No movie errors, renderer retries or fallbacks are recorded. This is a real
+native component reduction, not sustained physical New-model 60 FPS.
+
+A separate visual run of that exact image captures the live launch scene and
+outdoor gameplay, including white ground dots, foreground geometry and the
+published lower LCD HUD. Screenshot pauses exclude this run from timing.
+The exit chord releases guest GSP rights and Azahar cleans up guest process 11.
+The idle emulator GUI then closes normally with exit code 0, without a forced
+stop. Earlier forced host stops after profile flush alone did not prove a guest
+GPU teardown hang. This verifies this emulator exit path, not physical console
+HOME/sleep/exit acceptance.
+
+The next candidate clips native RGB canvas rectangles once, fills one row and
+copies the identical bounded span to remaining rows. It removes per-pixel
+clipping/index/coverage checks from HUD/menu clears without another framebuffer
+or cross-frame cache. Coverage remains independent of RGB ink, including black.
+An independent per-destination-pixel painter checks 1,600 sequential full RGB
+and coverage outputs across both LCD widths, panels, one-pixel canvases,
+partial/offscreen/overflow-extreme rectangles and coverage resets. Existing
+HUD, mutable radio/portrait, custom layout and lower-LCD tests remain required.
+The appended `hud_prepare` diagnostic isolates HUD capture/redraw inside
+`raster`; the 512-KiB profile cap now holds 468 windows. Native timing remains
+required before calling the span change a performance improvement.
+
 The earlier direct-overlay candidate removes the EX BG1 staging image and applies the same
 zero-ink/CGRAM-black transparency directly during decoding. The 57,344-byte
 pixel allocation and full-image rescan are gone. All 384 synthetic comparisons

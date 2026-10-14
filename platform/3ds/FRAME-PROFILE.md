@@ -80,6 +80,7 @@ the following work:
 | `lcd_copy` | Exact lower RGB comparison, changed-buffer transpose and SDK cache flush |
 | `mono_retry` | One same-source tile presentation retry after a busy GPU acquire |
 | `mono_fallback` | Complete software redraw/presentation after tile rejection or an unsuccessful bounded retry |
+| `hud_prepare` | Lower HUD source capture, portrait/radio expansion and dashboard redraw, inside `raster` |
 
 The mono retry uses blocking `C3D_FrameBegin(0)` to retire the previous command
 queue before atlas/texture writes. `C3D_FrameSync()` only waits for VBlank

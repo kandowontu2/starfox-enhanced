@@ -276,7 +276,10 @@ void GameSession::publish_raster() {
         if(native_model_addresses_[9]) pose.projected_points_address=std::uint16_t(native_model_addresses_[9]);
         render::apply_source_depth_tables(rom_,native_model_depth_tables_,word(1),word(2),0,pose);
     }
-    hud_frame_=hud_.capture(game_);hud_.update(hud_frame_);
+    {
+        STARFOX_3DS_FRAME_PHASE(hud_prepare); // Child of raster, not extra frame time.
+        hud_frame_=hud_.capture(game_);hud_.update(hud_frame_);
+    }
     raster_=std::move(next);
 }
 void GameSession::finish_controller_remap() {

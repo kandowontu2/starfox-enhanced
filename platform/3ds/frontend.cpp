@@ -16,8 +16,22 @@ void Canvas::rectangle(int x,int y,int w,int h,Rgb c) {
     if(w<=0 || h<=0) return;
     const auto end_y=std::min<std::int64_t>(height_,std::int64_t(y)+h);
     const auto end_x=std::min<std::int64_t>(width_,std::int64_t(x)+w);
-    for(int row=std::max(0,y);row<end_y;++row)
-        for(int col=std::max(0,x);col<end_x;++col) pixel(col,row,c);
+    const auto first_y=std::max(0,y),first_x=std::max(0,x);
+    if(first_y>=end_y || first_x>=end_x) return;
+    // Clip once, fill one RGB row, then copy the same bounded span. HUD/menu
+    // clears used to repeat pixel()'s clipping, indexing and optional coverage
+    // check for every LCD pixel. No extra canvas or cross-frame cache is needed.
+    const auto columns=std::size_t(end_x-first_x),row_bytes=columns*3;
+    const auto first=(std::size_t(first_y)*width_+unsigned(first_x))*3;
+    for(std::size_t column=0;column<columns;++column) {
+        const auto at=first+column*3;
+        pixels_[at]=c.r;pixels_[at+1]=c.g;pixels_[at+2]=c.b;
+    }
+    for(int row=first_y+1;row<end_y;++row)
+        std::copy_n(pixels_.data()+first,row_bytes,
+            pixels_.data()+(std::size_t(row)*width_+unsigned(first_x))*3);
+    if(!coverage_.empty()) for(int row=first_y;row<end_y;++row)
+        std::fill_n(coverage_.data()+std::size_t(row)*width_+unsigned(first_x),columns,1U);
 }
 void Canvas::line(int x0,int y0,int x1,int y1,Rgb c) {
     // Bounded panel/diagnostic primitives; reject coordinates that could make
