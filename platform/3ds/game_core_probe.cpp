@@ -5,6 +5,7 @@
 #include "companion_manifest.hpp"
 #include "starfox/platform/nintendo_3ds/game_assets.hpp"
 #include "starfox/platform/nintendo_3ds/game_session.hpp"
+#include "starfox/platform/nintendo_3ds/game_routing.hpp"
 #include "starfox/platform/nintendo_3ds/game_models.hpp"
 #include "starfox/platform/nintendo_3ds/game_menu.hpp"
 #include "starfox/platform/nintendo_3ds/game_storage.hpp"
@@ -567,7 +568,8 @@ int main() {
                 // effects. Retain the exact native path for those frames.
                 const bool source_effect=source.raster && (source.raster->circle.active
                     || source.raster->wipe.active || source.raster->colour_math.active);
-                if(!source.plan.stereo && !source_effect && !menu->state().visible && !session->game().runtime_options_open()) {
+                if(ctr::reference_mono_eligible(source.current->flow,source.plan.stereo,source_effect,
+                    menu->state().visible,session->game().runtime_options_open())) {
                     if(!mono) mono=std::make_unique<ctr::NativeMono>();
                     if(mono->present(*session,source,dashboard)) presentation_completed();
                     frame_handled=true;return;

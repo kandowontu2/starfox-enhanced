@@ -240,6 +240,16 @@ void stereo_culling_and_clipping_tests() {
 }
 void routing_and_input_tests() {
     using enum starfox::simulation::GameFlowState;
+    for(auto state:{pregame_menu,title,ex_pregame_menu,intro,controls_type,controls_choice,
+            training,planet_select,planet_travel,gameplay,stage_results,game_over,
+            continue_choice,credits,finished}) {
+        for(unsigned flags=0;flags<16;++flags) {
+            const bool stereo=flags&1,effect=flags&2,menu=flags&4,options=flags&8;
+            const bool expected=state!=intro && flags==0;
+            require(reference_mono_eligible(state,stereo,effect,menu,options)==expected,
+                "Intro PICA routing or existing mono/effect/menu routing changed");
+        }
+    }
     require(game_routing(pregame_menu).screen==ScreenUse::setup,"Pre-game setup lost");
     require(game_routing(pregame_menu,true).screen==ScreenUse::menu_preview,"Pre-game preview lost");
     require(!game_routing(ex_pregame_menu).move_hud,"EX menu sprites treated as gameplay HUD");

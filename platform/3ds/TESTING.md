@@ -685,6 +685,19 @@ coverage resets and invalid-input rejection. Sixteen self-image comparisons
 check alias behaviour in both axes. Native timing is still required for this
 image-copy follow-up.
 
+A separate ordinary-Start replay of the rectangle-span image reaches the real
+pre-game menu, intro and title, not gameplay. Its EX intro/background-183
+same-label windows return about 25 presentations/second. Reference mono
+background preparation takes about 27 ms/call there; the intro's existing
+PICA effect frames use a different, much shorter ordered-layer preparation.
+This exposes a bottleneck not covered by the outdoor gameplay replay above.
+The following candidate keeps the entire intro on that existing PICA path,
+including slider-off frames. It retains the original eye plan, source cadence,
+layer order, top-screen intro artwork, menu and every other mono-flow policy.
+All 15 flows and 16 stereo/effect/menu/options flag combinations are covered by
+the host routing regression. Native speed and visual validation of the new
+route are still required; no hardware 60-FPS claim follows from this change.
+
 The earlier direct-overlay candidate removes the EX BG1 staging image and applies the same
 zero-ink/CGRAM-black transparency directly during decoding. The 57,344-byte
 pixel allocation and full-image rescan are gone. All 384 synthetic comparisons
