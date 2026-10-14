@@ -708,9 +708,11 @@ The 27-ms reference background calls disappear; PICA layer preparation is
 phases have different work and should not be compared as pixel-identical
 CPU benchmarks. Menu/title cadence remains near 60 returns/s, and planned
 DSP/GSP retirement and host exit code 0 occur without forced termination.
-The replay does not reach gameplay. Native visual acceptance is still open:
-separate window-capture attempts were blank and were excluded. These are
-emulator sensitivity measurements, not physical New-model 60-FPS acceptance.
+The replay does not reach gameplay. Earlier window-capture attempts were blank
+and excluded. Separate renderer-framebuffer captures now show EX intro artwork
+and the original controller screen with its live ship and SNES button diagram;
+these are selected visual checks, not complete intro/gameplay acceptance. These
+are emulator sensitivity measurements, not physical New-model 60-FPS acceptance.
 
 A broader ordinary-input replay then reaches EX's cartridge menu, controller
 type/choice and Training, without the direct-stage shortcut. Its attempted
@@ -720,7 +722,26 @@ reference mono model/composition calls average about 8 ms, including a roughly
 4-ms bitmap overlay. The next candidate keeps that cartridge menu on the
 existing ordered PICA path too. The source menu VM, settings, text, model viewer,
 fade, input and audio are unchanged; neither skipping nor replacing the real
-menu is an optimization. Native validation of this additional route is pending.
+menu is an optimization.
+
+The exact additional-menu image (`b51aba76`, ARM run `38496957241`) passes all
+57 host CI tests and ARM/shader/stack/package checks. Capture-free, same-movie
+Vulkan/explicit-300% controls measure 40.802 presentation returns/s on `ac49f8d7`
+and 40.535/s on `b51aba76` in five adjacent EX-menu/background-525 windows each.
+This routing change does **not** establish a menu speed improvement. In a steady
+new-image window, the source menu task costs 22.429 ms/call, with 7.754-ms
+background decodes and 3.561-ms uploads still present. Controller and Training
+remain reachable; a separate selected framebuffer check retains the controller
+artwork. Both controlled runs finish DSP/GSP retirement and host exit code 0.
+
+The next source change merges each 16-bit bitmap-font row into its touched
+column-major 4-bpp tile rows instead of updating four planes per occupied pixel.
+It retains source font data, text wrapping, clipping, transparent holes, ink,
+decimal positions and 16-bit bitmap address wrapping. A strict asset-free host
+test passes 635,230 complete-memory comparisons against independent point writes,
+including all 65,536 masks at each tile alignment, edge clipping and all inks.
+ARM integration, whole-cartridge regressions and native timing remain required;
+this isolated algorithm check is not an FPS result.
 
 The earlier direct-overlay candidate removes the EX BG1 staging image and applies the same
 zero-ink/CGRAM-black transparency directly during decoding. The 57,344-byte

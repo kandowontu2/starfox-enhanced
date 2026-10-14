@@ -36,6 +36,7 @@ on:
       - 'tests/tunnel_scanline_tests.cpp'
       - 'tests/object_record_tests.cpp'
       - 'tests/bus_transfer_tests.cpp'
+      - 'tests/game_bitmap_font_tests.cpp'
       - 'include/starfox/simulation/**'
       - 'tests/framebuffer_extents_tests.cpp'
       - 'include/starfox/render/framebuffer.hpp'

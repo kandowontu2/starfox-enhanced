@@ -10,6 +10,7 @@
 
 #include "owned_65816_step.hpp"
 #include "owned_bus_transfer.hpp"
+#include "game_bitmap_font.hpp"
 
 #include <algorithm>
 #include <array>
@@ -1723,14 +1724,12 @@ struct Wdc65816::Impl {
             font0trn + static_cast<std::uint32_t>(ascii - 32U));
         const auto glyph = font0fon
             + static_cast<std::uint32_t>(translated) * 24U;
+        const std::span<std::uint8_t,65536> bitmap_ram{superfx_ram.data(),65536};
         for (std::int32_t row = 0; row < 12; ++row) {
             const auto bits = rom->read16(
                 glyph + static_cast<std::uint32_t>(row * 2));
-            for (std::int32_t column = 0; column < width; ++column) {
-                if ((bits & (0x8000U >> column)) != 0U) {
-                    write_game_bitmap_pixel(x + column, y + row, colour);
-                }
-            }
+            detail::write_game_font_row(bitmap_ram,static_cast<std::uint16_t>(bitmap1),
+                x,y+row,bits,width,colour);
         }
     }
 
@@ -1822,12 +1821,11 @@ struct Wdc65816::Impl {
         // numeric glyphs. The text translation table's digit entries are not
         // those glyphs (notably zero becomes a solid block).
         const auto glyph = font0fon + (digit % 10U) * 24U;
+        const std::span<std::uint8_t,65536> bitmap_ram{superfx_ram.data(),65536};
         for (unsigned row = 0; row < 12U; ++row) {
             const auto bits = rom->read16(glyph + row * 2U);
-            for (unsigned column = 0; column < 15U; ++column) {
-                if (bits & (0x8000U >> column))
-                    write_game_bitmap_pixel(x + column, y + row + 1, 14U);
-            }
+            detail::write_game_font_row(bitmap_ram,static_cast<std::uint16_t>(bitmap1),
+                x,y+int(row)+1,bits,15U,14U);
         }
         write_superfx16(m_x1, static_cast<std::uint16_t>(x + 8));
     }
