@@ -587,6 +587,11 @@ independent per-pixel oracle compares 1,152 complete indexed images for
 gameplay/intro across random worlds, tied edge bands, supplied/source edges,
 invalid edge lengths and endpoint changes. Native timing is still required;
 passing that pixel oracle does not establish a speed gain.
+The freshly rebuilt actual cartridge adapter additionally retains all eight
+prior Original/EX 240-phase image digests, including complete-frame fallbacks
+and source-state purity/coverage checks. Each produces 80 complete audio
+blocks; that count is not a new full-PCM equivalence test. No private assets
+are copied or exported, and host duration is not console FPS.
 
 The earlier direct-overlay candidate removes the EX BG1 staging image and applies the same
 zero-ink/CGRAM-black transparency directly during decoding. The 57,344-byte
