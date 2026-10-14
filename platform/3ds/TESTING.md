@@ -698,6 +698,20 @@ All 15 flows and 16 stereo/effect/menu/options flag combinations are covered by
 the host routing regression. Native speed and visual validation of the new
 route are still required; no hardware 60-FPS claim follows from this change.
 
+The exact intro-routing ARM image (`ac49f8d7`, run `38495437084`) passes
+all 57 host CI tests and the native shader/stack/package gates. The matching
+accuracy-enabled Vulkan/explicit-300% replay changes EX intro/background-183
+same-label presentation returns from 27.227/s for the immediately preceding
+image-copy control to 60.013/s, with a minimum sampled window of 59.671/s.
+The 27-ms reference background calls disappear; PICA layer preparation is
+1.595 ms/call and models are 1.341 ms/call over that labeled group. These
+phases have different work and should not be compared as pixel-identical
+CPU benchmarks. Menu/title cadence remains near 60 returns/s, and planned
+DSP/GSP retirement and host exit code 0 occur without forced termination.
+The replay does not reach gameplay. Native visual acceptance is still open:
+separate window-capture attempts were blank and were excluded. These are
+emulator sensitivity measurements, not physical New-model 60-FPS acceptance.
+
 The earlier direct-overlay candidate removes the EX BG1 staging image and applies the same
 zero-ink/CGRAM-black transparency directly during decoding. The 57,344-byte
 pixel allocation and full-image rescan are gone. All 384 synthetic comparisons
