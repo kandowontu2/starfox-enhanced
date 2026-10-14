@@ -1,5 +1,7 @@
 #include "starfox/platform/nintendo_3ds/game_session.hpp"
 #include "starfox/platform/nintendo_3ds/bg1_overlay_dependencies.hpp"
+#include "starfox/platform/nintendo_3ds/mode2_foreground_upload.hpp"
+#include "starfox/render/palette.hpp"
 #include "../platform/3ds/reference/frame_3ds.hpp"
 #include <algorithm>
 #include <chrono>
@@ -21,7 +23,8 @@ struct ObjectBridgeTestAccess {
 }
 int main(int argc,char** argv) try {
     const bool bridge_parity=argc==5 && std::string_view{argv[4]}=="--bridge-parity";
-    if(argc!=4 && !bridge_parity) throw std::invalid_argument("Use ROM SYMBOLS MAP [--bridge-parity]; host component test, not hardware FPS");
+    const bool foreground_parity=argc==5 && std::string_view{argv[4]}=="--foreground-parity";
+    if(argc!=4 && !bridge_parity && !foreground_parity) throw std::invalid_argument("Use ROM SYMBOLS MAP [--bridge-parity|--foreground-parity]; host component test, not hardware FPS");
     std::uint64_t blocks=0;
     GameSession session(assets::RomImage::load(argv[1]),assets::SymbolMap::load(argv[2]),
         [&](auto){++blocks;},argv[3]);
@@ -48,6 +51,7 @@ int main(int argc,char** argv) try {
     std::unique_ptr<simulation::SnesPpuState> previous_bg1;
     unsigned bridge_comparisons{};
     unsigned transfer_comparisons{};
+    unsigned foreground_comparisons{};
     std::uint64_t reused_images{};
     std::uint64_t transfer_images{};
     for(unsigned frame=1;frame<=240;++frame) {
@@ -159,6 +163,32 @@ int main(int argc,char** argv) try {
         if(gpu_bg2 && indexed.write_coverage().size()!=indexed.pixels().size()) throw std::runtime_error("Mode2 foreground lacks exact coverage");
         if(std::any_of(indexed.pixels().begin(),indexed.pixels().end(),[](auto p){return p!=0;})) ++ink_frames;
         for(auto byte:indexed.pixels()) {digest^=byte;digest*=1099511628211ULL;}
+        if(foreground_parity && gpu_bg2 && !before.empty()) {
+            const auto& ppu=session.game().map().ppu_state();
+            const auto palette=render::apply_snes_brightness(render::decode_bgr555_palette(ppu.cgram),
+                session.game().map().display_brightness());
+            std::array<std::uint16_t,256> colours{};
+            for(unsigned i=0;i<256;++i) colours[i]=std::uint16_t(((palette[i].r>>3U)<<11U)
+                |((palette[i].g>>3U)<<6U)|((palette[i].b>>3U)<<1U)|1U);
+            std::vector<std::uint16_t> expected(400U*240U),uploaded(512U*256U,0xcafeU);
+            const auto coverage=indexed.write_coverage();
+            for(unsigned i=0;i<expected.size();++i) expected[i]=coverage[i]?colours[indexed.pixels()[i]]:0U;
+            if(renderer.can_reuse_presentation(session.game(),true,source.interpolation_alpha,true))
+                throw std::runtime_error("Composed canvas incorrectly reused as deferred world");
+            const auto& world=renderer.draw(session.game(),true,source.interpolation_alpha,true);
+            if(!renderer.deferred_mode2_foreground()
+                || &renderer.last_frame()!=&world
+                || !pack_mode2_foreground(world,renderer.source_foreground(),colours,uploaded,512))
+                throw std::runtime_error("Deferred native foreground is incomplete");
+            for(unsigned y=0;y<240;++y) for(unsigned x=0;x<512;++x)
+                if(uploaded[y*512+x]!=(x<400?expected[y*400+x]:0xcafeU))
+                    throw std::runtime_error("Actual cartridge direct foreground differs from composed upload");
+            if(!std::all_of(uploaded.begin()+512*240,uploaded.end(),[](auto p){return p==0xcafeU;})
+                || renderer.can_reuse_presentation(session.game(),true,source.interpolation_alpha,false)
+                || session.game().save_state()!=before)
+                throw std::runtime_error("Deferred upload changed padding, cache ownership or source state");
+            ++foreground_comparisons;
+        }
         if(gpu_bg2 && !before.empty()) {
             const auto& complete=renderer.draw(session.game(),false,source.interpolation_alpha);
             if(complete.width()!=400 || complete.height()!=240 || session.game().save_state()!=before)
@@ -182,6 +212,7 @@ int main(int argc,char** argv) try {
         <<" ex_overlay_cache_misses="<<renderer.ex_overlay_cache_misses()
         <<" bridge_comparisons="<<bridge_comparisons<<" bridge_image_hits="<<reused_images
         <<" transfer_comparisons="<<transfer_comparisons<<" transfer_image_hits="<<transfer_images
+        <<" foreground_comparisons="<<foreground_comparisons
         <<" final_bg="<<session.presentation(0,true).current->background_id
         <<" digest="<<std::hex<<digest<<'\n';
 } catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}

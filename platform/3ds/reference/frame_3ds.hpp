@@ -60,13 +60,23 @@ public:
     }
     [[nodiscard]] const render::Framebuffer& draw(
         const simulation::GameSimulation& game, bool gpu_bg2 = false,
-        double interpolation_alpha = 1.0);
+        double interpolation_alpha = 1.0, bool defer_gpu_foreground = false);
+    // Deferred mono GPU frames expose the existing world plus the covered
+    // source_foreground(), not an already composited image. Complete CPU and
+    // stereo consumers retain the default false request and native canvas.
     [[nodiscard]] bool can_reuse_presentation(
         const simulation::GameSimulation& game, bool gpu_bg2,
-        double interpolation_alpha = 1.0) const;
+        double interpolation_alpha = 1.0, bool defer_gpu_foreground = false) const;
     void capture_after_tick(const simulation::GameSimulation& game);
     [[nodiscard]] const render::Framebuffer& last_frame() const noexcept {
+        if (last_frame_deferred_foreground_) return world_;
         return last_frame_wide_ ? wide_frame_ : frame_;
+    }
+    [[nodiscard]] bool deferred_mode2_foreground() const noexcept {
+        return last_draw_valid_ && last_frame_deferred_foreground_;
+    }
+    [[nodiscard]] const render::Framebuffer& source_foreground() const noexcept {
+        return frame_;
     }
     // Decode the stage's currently active geometry while the source display
     // is black, before the first visible gameplay presentation.
@@ -206,6 +216,7 @@ private:
     simulation::GameFlowState last_flow_{};
     std::uint64_t last_scene_revision_{};
     bool last_frame_gpu_bg2_{};
+    bool last_frame_deferred_foreground_{};
     bool last_frame_wide_{};
     bool last_draw_valid_{};
     double last_interpolation_alpha_{1.0};

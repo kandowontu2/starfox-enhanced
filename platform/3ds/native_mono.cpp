@@ -29,10 +29,10 @@ bool NativeMono::present(GameSession& session,const GamePresentation& source,Ima
         && (game.flow_state()==simulation::GameFlowState::gameplay || game.flow_state()==simulation::GameFlowState::training);
     const auto scroll=renderer.current_background_scroll(game);
     if(gpu_bg2) impl_->display.prepare_mode2_plan(ppu,game.map().ppu_vram_revision(),scroll.first,scroll.second);
-    const bool reuse=renderer.can_reuse_presentation(game,gpu_bg2,source.interpolation_alpha);
+    const bool reuse=renderer.can_reuse_presentation(game,gpu_bg2,source.interpolation_alpha,gpu_bg2);
     const auto& indexed=[&]() -> const render::Framebuffer& {
         STARFOX_3DS_FRAME_PHASE(models);
-        return reuse?renderer.last_frame():renderer.draw(game,gpu_bg2,source.interpolation_alpha);
+        return reuse?renderer.last_frame():renderer.draw(game,gpu_bg2,source.interpolation_alpha,gpu_bg2);
     }();
     const auto palette=render::apply_snes_brightness(render::decode_bgr555_palette(ppu.cgram),game.map().display_brightness());
     // Preserve our native lower HUD/layout, not the reference options UI.
@@ -52,7 +52,8 @@ bool NativeMono::present(GameSession& session,const GamePresentation& source,Ima
         :present_mono_tiles_or_complete([&](bool retry) {
         const auto attempt=[&] {
             if(impl_->display.present_mode2(ppu,game.map().ppu_vram_revision(),
-                scroll.first,scroll.second,indexed,palette,reuse,nullptr,retry))
+                scroll.first,scroll.second,indexed,palette,reuse,nullptr,retry,
+                renderer.deferred_mode2_foreground()?&renderer.source_foreground():nullptr))
                 return MonoTileResult::presented;
             return impl_->display.last_frame_timing().gpu_begin_failed
                 ?MonoTileResult::busy:MonoTileResult::rejected;

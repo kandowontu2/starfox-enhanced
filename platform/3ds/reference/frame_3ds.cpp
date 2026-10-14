@@ -411,8 +411,13 @@ unsigned Frame3ds::preload_active_shapes(const simulation::GameSimulation& game)
 
 bool Frame3ds::can_reuse_presentation(
     const simulation::GameSimulation& game, bool gpu_bg2,
-    double interpolation_alpha) const {
+    double interpolation_alpha, bool defer_gpu_foreground) const {
+    const bool deferred = defer_gpu_foreground && gpu_bg2
+        && game.map().ppu_state().background_mode == 2U && stereo_strength_ == 0U
+        && (game.flow_state() == simulation::GameFlowState::gameplay
+            || game.flow_state() == simulation::GameFlowState::training);
     if (!last_draw_valid_ || last_frame_gpu_bg2_ != gpu_bg2
+        || last_frame_deferred_foreground_ != deferred
         || last_interpolation_alpha_ != interpolation_alpha
         || last_flow_ != game.flow_state()
         || last_scene_revision_ != game.scene_revision()) return false;
@@ -481,7 +486,7 @@ void Frame3ds::set_stereo_strength(std::uint8_t strength) noexcept {
 
 const render::Framebuffer& Frame3ds::draw(
     const simulation::GameSimulation& game, bool gpu_bg2,
-    double interpolation_alpha) {
+    double interpolation_alpha, bool defer_gpu_foreground) {
     const auto stage_begin = reference_system_tick();
     world_cache_snapshot_us_ = 0U;
     if (!snapshots_ready_) capture_after_tick(game);
@@ -521,6 +526,8 @@ const render::Framebuffer& Frame3ds::draw(
     const bool level_flow = game.flow_state() == simulation::GameFlowState::gameplay
         || game.flow_state() == simulation::GameFlowState::training;
     const bool stereo = mode2_gameplay && stereo_strength_ != 0U;
+    const bool deferred_foreground = defer_gpu_foreground && mode2_gameplay
+        && gpu_bg2 && !stereo;
     // Keep the cartridge's status sprites available for both screens, but
     // compose them only after the source raster has reached native width.
     const auto draw_source_sprites = [&](std::uint8_t priority) {
@@ -1210,7 +1217,13 @@ const render::Framebuffer& Frame3ds::draw(
     }
 #endif
     const auto stage_canvas_begin = reference_system_tick();
-    if (mode2_gameplay) {
+    if (deferred_foreground) {
+        // The acquired GPU upload consumes these same world/source rasters
+        // directly. Avoid a temporary full canvas, its coverage clear and two
+        // scans; palette expansion applies the original painter/alpha rules.
+        // CPU fallback and stereo still construct their complete indexed frame.
+        frame_.end_write_coverage();
+    } else if (mode2_gameplay) {
         frame_.end_write_coverage();
         wide_frame_.clear(0U);
         if (gpu_bg2) wide_frame_.begin_write_coverage();
@@ -1299,6 +1312,7 @@ const render::Framebuffer& Frame3ds::draw(
     last_flow_ = game.flow_state();
     last_scene_revision_ = game.scene_revision();
     last_frame_gpu_bg2_ = mode2_gameplay && gpu_bg2;
+    last_frame_deferred_foreground_ = deferred_foreground;
     last_frame_wide_ = true;
     last_interpolation_alpha_ = interpolation_alpha;
     last_draw_valid_ = true;
@@ -1338,7 +1352,7 @@ const render::Framebuffer& Frame3ds::draw(
             (stage_canvas_begin - stage_overlay_end) * tick_to_us),
         static_cast<std::uint32_t>(
             (stage_finish - stage_canvas_begin) * tick_to_us)};
-    return wide_frame_;
+    return last_frame();
 }
 
 } // namespace starfox::platform_3ds

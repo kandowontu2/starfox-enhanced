@@ -4,6 +4,7 @@
 #include "display_retirement.hpp"
 #include "stereo_3ds.hpp"
 #include "../native_context.hpp"
+#include "starfox/platform/nintendo_3ds/mode2_foreground_upload.hpp"
 
 #include <algorithm>
 #include <array>
@@ -784,11 +785,15 @@ bool Display3ds::present_mode2(
     std::int32_t scroll_x, std::int32_t scroll_y,
     const render::Framebuffer& foreground,
     const render::Palette256& palette, bool reuse_source,
-    const render::Framebuffer* right, bool wait_for_gpu) {
+    const render::Framebuffer* right, bool wait_for_gpu,
+    const render::Framebuffer* source_foreground) {
     frame_timing_ = {};
     front_buffer_valid_ = false; // Its visible image is not the full-raster cache.
     if (!eligible_mode2(ppu) || foreground.width() != 400U
-        || foreground.height() != 240U || foreground.draw_scale() != 1U) {
+        || foreground.height() != 240U || foreground.draw_scale() != 1U
+        || (source_foreground && (right != nullptr
+            || !platform::nintendo_3ds::valid_mode2_foreground_sources(
+                foreground, *source_foreground)))) {
         wait_for_bg2_plan();
         return false;
     }
@@ -893,18 +898,31 @@ bool Display3ds::present_mode2(
     for (std::uint32_t index = 0U; index < 256U; ++index)
         colours[index] = rgba5551(palette[index]);
     if (!reuse_source || !overlay_texture_valid_
-        || colours != cached_overlay_colours_) {
+        || colours != cached_overlay_colours_
+        || cached_overlay_deferred_ != (source_foreground != nullptr)) {
         stage_begin = svcGetSystemTick();
-        const auto coverage = foreground.write_coverage();
-        const auto has_coverage = coverage.size() == foreground.pixels().size();
-        const auto& pixels = foreground.pixels();
-        for (std::uint32_t y = 0U; y < 240U; ++y) {
-            for (std::uint32_t x = 0U; x < 400U; ++x) {
-                const auto index = static_cast<std::size_t>(y) * 400U + x;
-                linear_overlay_[static_cast<std::size_t>(y)
-                    * texture_width_ + x] = has_coverage
-                    ? (coverage[index] != 0U ? colours[pixels[index]] : 0U)
-                    : (pixels[index] != 0U ? colours[pixels[index]] : 0U);
+        if (source_foreground) {
+            if (!platform::nintendo_3ds::pack_mode2_foreground(foreground,
+                *source_foreground, colours,
+                std::span{linear_overlay_, texture_width_ * texture_height_},
+                texture_width_)) {
+                overlay_texture_valid_ = false;
+                C3D_FrameEnd(GX_CMDLIST_FLUSH);
+                frame_timing_.gpu_submitted = true;
+                return false;
+            }
+        } else {
+            const auto coverage = foreground.write_coverage();
+            const auto has_coverage = coverage.size() == foreground.pixels().size();
+            const auto& pixels = foreground.pixels();
+            for (std::uint32_t y = 0U; y < 240U; ++y) {
+                for (std::uint32_t x = 0U; x < 400U; ++x) {
+                    const auto index = static_cast<std::size_t>(y) * 400U + x;
+                    linear_overlay_[static_cast<std::size_t>(y)
+                        * texture_width_ + x] = has_coverage
+                        ? (coverage[index] != 0U ? colours[pixels[index]] : 0U)
+                        : (pixels[index] != 0U ? colours[pixels[index]] : 0U);
+                }
             }
         }
         frame_timing_.build_us += ticks_to_microseconds(
@@ -929,6 +947,7 @@ bool Display3ds::present_mode2(
         frame_timing_.transfer_us += ticks_to_microseconds(
             svcGetSystemTick() - stage_begin);
         cached_overlay_colours_ = colours;
+        cached_overlay_deferred_ = source_foreground != nullptr;
         overlay_texture_valid_ = true;
     }
 

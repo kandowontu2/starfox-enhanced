@@ -64,12 +64,15 @@ public:
     // BG2 tile geometry and palette expansion run on PICA200. The foreground
     // framebuffer must contain only the world, HUD and text; write coverage
     // supplies alpha so an explicitly drawn palette index zero stays opaque.
+    // With source_foreground (mono only), foreground is the existing world;
+    // its zero-ink and the covered 256x224 source merge during RGB5A1 upload.
     [[nodiscard]] bool present_mode2(const simulation::SnesPpuState& ppu,
         std::uint64_t ppu_vram_revision,
         std::int32_t scroll_x, std::int32_t scroll_y,
         const render::Framebuffer& foreground,
         const render::Palette256& palette, bool reuse_source = false,
-        const render::Framebuffer* right = nullptr, bool wait_for_gpu = false);
+        const render::Framebuffer* right = nullptr, bool wait_for_gpu = false,
+        const render::Framebuffer* source_foreground = nullptr);
     // Start the New 3DS geometry job before software rendering. The caller
     // must not advance the PPU until present_mode2() has consumed the job.
     void prepare_mode2_plan(const simulation::SnesPpuState& ppu,
@@ -196,6 +199,7 @@ private:
     bool cpu_frame_valid_{};
     bool overlay_texture_valid_{};
     bool right_texture_valid_{}, right_overlay_valid_{}, cached_frame_stereo_{};
+    bool cached_overlay_deferred_{};
     std::array<std::uint16_t, 256U> cached_right_colours_{};
     std::array<std::uint16_t, 256U> cached_right_overlay_colours_{};
     C3D_RenderTarget *top_{};

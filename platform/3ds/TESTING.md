@@ -593,6 +593,39 @@ and source-state purity/coverage checks. Each produces 80 complete audio
 blocks; that count is not a new full-PCM equivalence test. No private assets
 are copied or exported, and host duration is not console FPS.
 
+The exact `966a8cbc` canvas ARM image passes all 56 CI tests and native gates.
+Its explicit-300% Vulkan/accuracy replay contains 49 windows / 1,533 timing
+rows, no input errors, retries or fallbacks, and reaches DSP shutdown/profile
+flush. Canvas means are 1.868/1.691 ms for backgrounds 3/51, essentially
+unchanged from 1.868/1.692 in `a2908693`. Those scenes use the separate Mode 2
+canvas path, not the optimized eight-line margin bands. Adjacent same-label
+returns are 59.342/58.944 per second, with minima 54.216/52.898. This is not a
+speed gain or physical New-model timing. The exact host remains alive at final
+guest GPU teardown and is stopped only after the flush; configuration returns
+to explicit 100%. Clean guest GPU exit and sustained mono 60 FPS remain open.
+
+The following mono Mode 2 candidate merges world zero-ink and covered source
+sprites/text directly during the existing RGB5A1 upload. It avoids constructing
+and scanning an intermediate 400x240 foreground/coverage image; it adds no
+texture, raster allocation or model/simulation/audio scheduling change. The
+GPU-idle acquire still precedes writes to borrowed upload/texture storage.
+Opaque source index zero wins over the world, and world index zero stays
+transparent exactly as before. Texture padding is untouched. Cache ownership
+distinguishes composed and deferred rasters. Slider stereo still uses NativeGpu,
+not this imported mono renderer. Complete CPU fallbacks retain their existing
+full indexed canvases. Independent tests compare 256
+complete padded texture/alpha outputs against the old painter, including
+stale uncovered source ink, black, all palette indices, source purity and
+fail-closed extents. Native ARM and timing checks remain required.
+The rebuilt cartridge diagnostic also compares all 400x240 uploaded colour/
+alpha cells at 56 Mode 2 snapshots across seven Original/EX stages, with live
+palettes, before/after deferred-cache checks and complete CPU fallback checks.
+All seven retain their prior 240-phase indexed-image digests and 80 complete
+audio blocks. Original LEVEL1_1's unchanged Mode 1 path also retains its digest.
+The imported reference renderer rejects nonzero-eye model draws by design;
+the production slider path remains the separate NativeGpu renderer. No native
+timing or new hardware acceptance is inferred from these host probes.
+
 The earlier direct-overlay candidate removes the EX BG1 staging image and applies the same
 zero-ink/CGRAM-black transparency directly during decoding. The 57,344-byte
 pixel allocation and full-image rescan are gone. All 384 synthetic comparisons

@@ -269,3 +269,16 @@ CPU/VM/pool states, registers and instruction counts match. All eight prior
 240-phase image digests and 80 complete audio blocks remain unchanged.
 These correctness results do not establish sustained native mono 60 FPS;
 the exact ARM image still needs timing and full hardware acceptance.
+
+## Direct mono foreground upload
+
+Our native mono adaptation can now consume the reference world's 400x240
+indexed raster and its covered 256x224 source foreground directly in the
+existing RGB5A1 upload. It does not change the pinned reference's source
+simulation or world/model projection. Source coverage wins at (72,8), including
+opaque palette index zero. The world's established zero-ink transparency,
+live palette, texture padding and complete CPU fallback remain intact.
+The imported reference renderer stays mono-only; slider stereo still uses
+our NativeGpu path. Host tests compare the old painter's complete colour/alpha
+output and sampled actual Original/EX frames. ARM timing and physical New-model
+mono 60-FPS acceptance remain separate requirements.
