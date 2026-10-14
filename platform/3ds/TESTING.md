@@ -712,6 +712,16 @@ The replay does not reach gameplay. Native visual acceptance is still open:
 separate window-capture attempts were blank and were excluded. These are
 emulator sensitivity measurements, not physical New-model 60-FPS acceptance.
 
+A broader ordinary-input replay then reaches EX's cartridge menu, controller
+type/choice and Training, without the direct-stage shortcut. Its attempted
+window captures are blank, so it is excluded from controlled timing/visual
+acceptance. The profile nevertheless identifies a separate EX menu slowdown:
+reference mono model/composition calls average about 8 ms, including a roughly
+4-ms bitmap overlay. The next candidate keeps that cartridge menu on the
+existing ordered PICA path too. The source menu VM, settings, text, model viewer,
+fade, input and audio are unchanged; neither skipping nor replacing the real
+menu is an optimization. Native validation of this additional route is pending.
+
 The earlier direct-overlay candidate removes the EX BG1 staging image and applies the same
 zero-ink/CGRAM-black transparency directly during decoding. The 57,344-byte
 pixel allocation and full-image rescan are gone. All 384 synthetic comparisons

@@ -245,9 +245,9 @@ void routing_and_input_tests() {
             continue_choice,credits,finished}) {
         for(unsigned flags=0;flags<16;++flags) {
             const bool stereo=flags&1,effect=flags&2,menu=flags&4,options=flags&8;
-            const bool expected=state!=intro && flags==0;
+            const bool expected=state!=intro && state!=ex_pregame_menu && flags==0;
             require(reference_mono_eligible(state,stereo,effect,menu,options)==expected,
-                "Intro PICA routing or existing mono/effect/menu routing changed");
+                "Intro/EX PICA routing or existing mono/effect/menu routing changed");
         }
     }
     require(game_routing(pregame_menu).screen==ScreenUse::setup,"Pre-game setup lost");
