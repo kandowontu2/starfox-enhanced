@@ -415,6 +415,73 @@ void canvas_rectangle_oracle_tests() {
         }
     }
 }
+void canvas_image_oracle_tests() {
+    std::uint32_t seed=0x812e731bU;
+    const auto next=[&] {seed=seed*1664525U+1013904223U;return seed;};
+    for(const auto size:std::array<std::array<unsigned,2>,5>{{{320,240},{400,240},{74,74},{1,1},{13,7}}}) {
+        Canvas canvas(size[0],size[1]);
+        std::vector<std::uint8_t> expected(std::size_t(size[0])*size[1]*3,0),coverage(std::size_t(size[0])*size[1],0);
+        bool covered=false;
+        for(unsigned step=0;step<256;++step) {
+            if(step==60 || step==180) {canvas.begin_artwork();std::fill(coverage.begin(),coverage.end(),0);covered=true;}
+            const unsigned width=1+next()%size[0],height=1+next()%screen_height,pitch=width*3+next()%23;
+            std::vector<std::uint8_t> source(std::size_t(pitch)*height+16,0xCD);
+            for(unsigned row=0;row<height;++row) for(unsigned column=0;column<width*3;++column)
+                source[std::size_t(row)*pitch+column]=step%16?std::uint8_t(next()):0;
+            const auto source_before=source;
+            const ImageView image{{source.data(),std::size_t(pitch)*(height-1)+width*3},width,height,pitch};
+            int x=int(next()%1000)-350,y=int(next()%700)-250;
+            switch(step%16) {
+            case 0:x=0;y=0;break;
+            case 1:x=-int(width)+1;y=-int(height)+1;break;
+            case 2:x=int(size[0])-1;y=int(size[1])-1;break;
+            case 3:x=INT_MIN;y=INT_MIN;break;
+            case 4:x=INT_MAX;y=INT_MAX;break;
+            case 5:x=-1;y=1;break;
+            case 6:x=1;y=-1;break;
+            default:break;
+            }
+            canvas.image(x,y,image);
+            // Independent destination-coordinate oracle. Padding is never art,
+            // and copying black still claims coverage just like pixel().
+            for(unsigned row=0;row<size[1];++row) for(unsigned column=0;column<size[0];++column) {
+                const auto sx=std::int64_t(column)-x,sy=std::int64_t(row)-y;
+                if(sx<0 || sy<0 || sx>=width || sy>=height) continue;
+                const auto at=(std::size_t(row)*size[0]+column)*3,src=std::size_t(sy)*pitch+std::size_t(sx)*3;
+                for(unsigned channel=0;channel<3;++channel) expected[at+channel]=source[src+channel];
+                if(covered) coverage[at/3]=1;
+            }
+            require(std::equal(expected.begin(),expected.end(),canvas.view().pixels.begin()),"Clipped RGB image spans differ from pixel painter");
+            if(covered) require(std::equal(coverage.begin(),coverage.end(),canvas.coverage().begin()),"Image spans changed artwork ownership");
+            require(source==source_before,"RGB image draw changed source or padding");
+            const auto rgb_before=expected,coverage_before=coverage;
+            auto invalid=image;invalid.pixels=invalid.pixels.first(width*3-1);
+            rejects([&]{canvas.image(x,y,invalid);},"Invalid image was accepted before clipping");
+            require(std::equal(rgb_before.begin(),rgb_before.end(),canvas.view().pixels.begin()),"Invalid image partially drew pixels");
+            if(covered) require(std::equal(coverage_before.begin(),coverage_before.end(),canvas.coverage().begin()),"Invalid image partially claimed coverage");
+        }
+    }
+    // Self-images are legal in the existing API. A memcpy/memmove shortcut
+    // would change their forward-pixel smearing, especially between rows.
+    for(int y:{-1,0,1,3}) for(int x:{-2,0,1,4}) {
+        Canvas canvas(13,7);canvas.begin_artwork();
+        for(unsigned row=0;row<7;++row) for(unsigned column=0;column<13;++column)
+            canvas.rectangle(column,row,1,1,{std::uint8_t(column*11),std::uint8_t(row*31),std::uint8_t(column+row)});
+        auto expected=std::vector<std::uint8_t>(canvas.view().pixels.begin(),canvas.view().pixels.end());
+        const auto source=canvas.view();
+        canvas.image(x,y,{source.pixels.subspan(3),7,3,13*3});
+        for(unsigned row=0;row<3;++row) for(unsigned column=0;column<7;++column) {
+            const int dx=x+int(column),dy=y+int(row);
+            if(dx<0 || dy<0 || dx>=13 || dy>=7) continue;
+            const auto src=3+row*13*3+column*3;
+            const auto dst=(dy*13+dx)*3;
+            const std::array colour{expected[src],expected[src+1],expected[src+2]};
+            for(unsigned channel=0;channel<3;++channel) expected[dst+channel]=colour[channel];
+        }
+        require(std::equal(expected.begin(),expected.end(),canvas.view().pixels.begin()),"Self-image forward-pixel semantics changed");
+        require(std::all_of(canvas.coverage().begin(),canvas.coverage().end(),[](auto value){return value==1;}),"Self-image discarded coverage");
+    }
+}
 void dashboard_cache_tests() {
     CockpitDashboard dashboard;HudState state;
     std::string message="ALL SHIPS CHECK IN";state.radio_message=message;
@@ -599,7 +666,7 @@ void captures(const std::filesystem::path& directory) {
 int main(int argc,char** argv) {
     try {
         hardware_profile_tests();mono_presentation_tests();stereo_tests();pica_projection_tests();stereo_culling_and_clipping_tests();
-        routing_and_input_tests();lcd_tests();rgba_lcd_tests();hud_tests();canvas_rectangle_oracle_tests();dashboard_cache_tests();radio_artwork_cache_tests();presentation_clock_tests();
+        routing_and_input_tests();lcd_tests();rgba_lcd_tests();hud_tests();canvas_rectangle_oracle_tests();canvas_image_oracle_tests();dashboard_cache_tests();radio_artwork_cache_tests();presentation_clock_tests();
         if(argc==3 && std::string_view(argv[1])=="--capture") captures(argv[2]);
         else if(argc!=1) throw std::invalid_argument("Usage: frontend_tests [--capture directory]");
         std::cout<<"3DS frontend: "<<checks<<" checks passed\n";

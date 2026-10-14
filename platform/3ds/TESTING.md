@@ -658,8 +658,32 @@ and coverage outputs across both LCD widths, panels, one-pixel canvases,
 partial/offscreen/overflow-extreme rectangles and coverage resets. Existing
 HUD, mutable radio/portrait, custom layout and lower-LCD tests remain required.
 The appended `hud_prepare` diagnostic isolates HUD capture/redraw inside
-`raster`; the 512-KiB profile cap now holds 468 windows. Native timing remains
-required before calling the span change a performance improvement.
+`raster`; the 512-KiB profile cap now holds 468 windows.
+
+That exact rectangle-span ARM image (`d092afbb`, run `38492790923`) passes all
+57 CI tests and native gates. The matched accuracy-enabled Vulkan/explicit-300%
+replay has adjacent same-label whole-frame returns of 60.027/59.984 per second
+for backgrounds 3/51, with minimum windows 59.119/59.074. Raster publication
+means are 0.335/0.576 ms per call, with maxima 2.286/3.380 ms, versus
+0.345/0.844 ms and maxima 6.469/7.649 in the prior direct-foreground run.
+The new HUD child means are 0.017/0.254 ms, with maxima 1.800/2.828 ms.
+The native replay releases guest GSP rights, cleans up guest process 11 and
+closes its idle GUI with exit code 0 and no forced stop. These are controlled
+component/cadence measurements, not physical New-model 60 FPS acceptance.
+Transition windows contain much larger logic calls and are not included in
+the adjacent same-label rate calculation; neither those stalls nor broader
+Original/EX stage coverage can be dismissed from this short replay.
+
+The following candidate copies independent radio/portrait RGB images one
+clipped row at a time, instead of calling the bounded pixel painter for every
+pixel. Source padding is never copied and black pixels still claim coverage.
+Self-images keep their historical forward-pixel semantics through the existing
+painter, without a new snapshot or allocation. Independent full RGB/coverage
+oracles cover 1,280 sequential padded/mutable images across both LCD widths,
+small panels, clipping extremes, source heights larger than the destination,
+coverage resets and invalid-input rejection. Sixteen self-image comparisons
+check alias behaviour in both axes. Native timing is still required for this
+image-copy follow-up.
 
 The earlier direct-overlay candidate removes the EX BG1 staging image and applies the same
 zero-ink/CGRAM-black transparency directly during decoding. The 57,344-byte
