@@ -552,8 +552,9 @@ retires Citro3D. Plain pre-game menus, cartridge replacements and model preload
 still retire both presenters. Existing source effects and stereo projection
 remain unchanged. The two-resident-owner bound is covered by 2,000 host handoffs,
 including pending queues, failed init, duplicate/unknown owners, partial close,
-reopen and final retirement. This is an unmeasured native candidate until ARM
-compilation and an accuracy-enabled replay complete; it is not 60-FPS acceptance.
+reopen and final retirement. The `a2908693` follow-up passes all 55 asset-free
+CI tests plus native ARM, shader, stack and package gates. This is not
+60-FPS acceptance.
 An independent test also compiles the actual native context adapter against
 SDK stubs and exercises 2,000 switches, failed initialization, inactive/double
 close, final queue/SDK retirement and CPU-menu format restoration. Review of
@@ -561,6 +562,31 @@ the mono lower-LCD path additionally found that its flushed back buffer was
 not published by the upper-only Citro3D output callback. The candidate now
 swaps only the lower screen after a successful mono frame, including upper
 image reuse; it never manually swaps the GPU-owned top screen.
+
+The same explicit-300% Vulkan/accuracy sensitivity movie completes with no
+input errors, retries or fallbacks and reaches DSP shutdown/profile flush.
+Its 49 windows contain 1,534 timing rows. Adjacent same-label returns are
+59.404/59.207 per second for backgrounds 3/51, versus 59.404/58.898 for
+`a9bc520e`; that is not a large throughput improvement. Steady 927 joins total
+0.596 ms across 46 windows (rounded window totals). The mono canvas still
+costs 1.868/1.692 ms per call and mono raster 3.179/1.764 ms, respectively.
+These inclusive phases overlap other timings and must not be added together.
+Owned-window captures were blank or showed movie progress, not gameplay;
+lower-HUD visibility therefore remains unverified. Window inspection can
+perturb host timing. The exact host is stopped only after the profile flush,
+and CPU configuration returns to explicit 100%. Physical New-model timing,
+clean guest GPU exit and sustained mono 60 FPS remain unproven.
+
+The next canvas candidate computes each eight-line margin-colour histogram
+once per frame instead of once per output row. It also scans only the world
+margin spans, rather than traversing the source-covered centre to skip it.
+It retains lowest-index tie selection, opaque index zero, separate left/right
+edges and the original clamped endpoint rows. No cross-frame colour cache,
+new allocation, source simulation or audio scheduling is introduced. An
+independent per-pixel oracle compares 1,152 complete indexed images for
+gameplay/intro across random worlds, tied edge bands, supplied/source edges,
+invalid edge lengths and endpoint changes. Native timing is still required;
+passing that pixel oracle does not establish a speed gain.
 
 The earlier direct-overlay candidate removes the EX BG1 staging image and applies the same
 zero-ink/CGRAM-black transparency directly during decoding. The 57,344-byte

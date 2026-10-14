@@ -30,6 +30,14 @@ Its original notice is retained in `reference/CITRO2D-LICENSE.txt`. This imports
 code only, under the author permission recorded below, not ROMs or game artwork.
 Compilation and emulator checks do not establish sustained hardware 60 FPS.
 
+The canvas follow-up avoids recomputing identical eight-line edge histograms
+for each output row, and skips scanning world pixels hidden by the unchanged
+source centre. Band colours are rebuilt every frame, including clamped ends;
+lowest-index ties, zero ink and supplied/derived edges retain exact pixels.
+An independent per-pixel oracle covers 1,152 complete gameplay/intro canvases.
+This optimizes the credited native-canvas composition without replacing its
+artwork or changing game/audio cadence. Native timing remains required.
+
 The mono lower LCD uses a bounded two-buffer residency cache, validated against
 actual RGB bytes and committed only after a successful SDK cache flush. Changed
 HUD pixels invalidate both physical buffers. A 16-pixel tiled transpose replaces

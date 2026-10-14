@@ -182,26 +182,36 @@ void compose_native_canvas(const render::Framebuffer& source,
             }
             return true;
         }();
+    const bool extend_world = style == NativeCanvasStyle::gameplay
+        || style == NativeCanvasStyle::intro;
+    // A source eight-line band covers eight output rows (sixteen at the
+    // clamped ends). Build its histogram once, not once per output row.
+    // Recompute every frame: source/edge pixels can change independently of
+    // the palette, scroll or scene revision. Lowest-index tie ordering stays
+    // identical to the original per-row max_element selection.
+    std::array<std::uint8_t, 28U> left_bands{}, right_bands{};
+    if (extend_world) for (std::uint32_t band = 0; band < left_bands.size(); ++band) {
+        const auto first = band * 8U;
+        left_bands[band] = background_left.size() == 224U
+            ? dominant_band(background_left, first)
+            : dominant_edge(source, 0U, first, first + 8U);
+        right_bands[band] = background_right.size() == 224U
+            ? dominant_band(background_right, first)
+            : dominant_edge(source, 255U, first, first + 8U);
+    }
     for (std::uint32_t y = 0U; y < 240U; ++y) {
         auto* row = pixels.data() + static_cast<std::size_t>(y) * 400U;
         auto left_colour = fill_left;
         auto right_colour = fill_right;
-        if (style == NativeCanvasStyle::gameplay
-            || style == NativeCanvasStyle::intro) {
+        if (extend_world) {
             // Mode 1 can have a moving sky or floor. Continue its edge colour
             // in eight-line bands; an isolated star or model pixel must not
             // become a 72-pixel horizontal streak.
             const auto source_y = std::clamp<std::int32_t>(
                 static_cast<std::int32_t>(y) - 8, 0, 223);
-            const auto first = static_cast<std::uint32_t>(source_y) & ~7U;
-            left_colour = background_left.size() == 224U
-                ? dominant_band(background_left, first)
-                : dominant_edge(source, 0U, first,
-                    std::min<std::uint32_t>(first + 8U, 224U));
-            right_colour = background_right.size() == 224U
-                ? dominant_band(background_right, first)
-                : dominant_edge(source, 255U, first,
-                    std::min<std::uint32_t>(first + 8U, 224U));
+            const auto band = static_cast<std::uint32_t>(source_y) / 8U;
+            left_colour = left_bands[band];
+            right_colour = right_bands[band];
         }
         std::fill_n(row, left, left_colour);
         std::fill_n(row + right, 400U - right, right_colour);
@@ -227,15 +237,17 @@ void compose_native_canvas(const render::Framebuffer& source,
                     || style == NativeCanvasStyle::intro)
                     ? left_colour : y < 8U ? fill_left : fill_right);
         }
-        if (style == NativeCanvasStyle::gameplay
-            || style == NativeCanvasStyle::intro) {
+        if (extend_world) {
             const auto* world_row = world_pixels.data()
                 + static_cast<std::size_t>(y) * 400U;
-            for (std::uint32_t x = 0U; x < 400U; ++x) {
-                if (y >= 8U && y < 232U && x >= left && x < right)
-                    continue;
-                if (world_row[x] != 0U) row[x] = world_row[x];
-            }
+            const auto copy_world = [&](std::uint32_t begin, std::uint32_t end) {
+                for (auto x = begin; x < end; ++x)
+                    if (world_row[x] != 0U) row[x] = world_row[x];
+            };
+            if (y >= 8U && y < 232U) {
+                copy_world(0U, left);
+                copy_world(right, 400U);
+            } else copy_world(0U, 400U);
         }
     }
     if (style == NativeCanvasStyle::intro
