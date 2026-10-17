@@ -106,8 +106,10 @@ struct GpuComposite::Impl {
                 owner.empty_msaa=nullptr;owner.edge_pipeline=owner.pipeline=nullptr;owner.device=nullptr;
             }
         } initialization{*this};
-        split_pipelines=std::getenv("STARFOX_TEST_SPLIT_COMPOSITE_PIPELINES")
-            && !std::getenv("STARFOX_TEST_UNIFIED_COMPOSITE_PIPELINE");
+        // Keep margin reduction out of every pixel workgroup. This is also
+        // important for cold AMD Vulkan compilation, not just dispatch cost.
+        // Retain the unified version only as a byte-exact diagnostic reference.
+        split_pipelines=!std::getenv("STARFOX_TEST_UNIFIED_COMPOSITE_PIPELINE");
         const auto make_pipeline=[&](const auto& spirv,const auto& metal,const auto& dxil) {
             SDL_GPUComputePipelineCreateInfo info{};
             if(SDL_GetGPUShaderFormats(d)&SDL_GPU_SHADERFORMAT_SPIRV) {

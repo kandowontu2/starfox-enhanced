@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cmath>
+#include <limits>
 #include <optional>
 
 namespace starfox::app {
@@ -39,6 +40,9 @@ struct TouchGroupTransform {
 
 struct TouchLayoutConfig {
     std::array<TouchGroupTransform,static_cast<std::size_t>(TouchGroup::count)> groups{};
+    // V1 files retain their original base size. Reset/new layouts use the
+    // larger, resolution-relative defaults without rewriting a user's edits.
+    bool legacy_sizing{};
 
     [[nodiscard]] TouchGroupTransform& operator[](TouchGroup group) noexcept {
         return groups[static_cast<std::size_t>(group)];
@@ -80,8 +84,11 @@ struct TouchOverlayLayout {
         result.safe = safe;
         const auto available_width = safe.right - safe.left;
         const auto available_height = safe.bottom - safe.top;
-        result.unit = std::clamp(std::min(available_width * 0.045F,
-            available_height * 0.072F), 20.0F, 35.0F);
+        result.unit = config.legacy_sizing
+            ?std::clamp(std::min(available_width * 0.045F,
+                available_height * 0.072F), 20.0F, 35.0F)
+            :std::max(1.0F,std::min(available_width * 0.052F,
+                available_height * 0.092F));
         const auto margin = std::max(6.0F, result.unit * 0.28F);
         const auto row = safe.bottom - margin - result.unit * 3.2F;
         result.dpad = {safe.left + margin + result.unit * 3.0F, row};
@@ -112,26 +119,28 @@ struct TouchOverlayLayout {
             const auto y=centre.y+std::clamp(edit.y,-1.0F,1.0F)*available_height;
             centre.x=safe.left+radius_x<=safe.right-radius_x
                 ?std::clamp(x,safe.left+radius_x,safe.right-radius_x)
-                :(safe.left+safe.right)*.5F;
+                :std::clamp(x,safe.left,safe.right);
             centre.y=safe.top+radius_y<=safe.bottom-radius_y
                 ?std::clamp(y,safe.top+radius_y,safe.bottom-radius_y)
-                :(safe.top+safe.bottom)*.5F;
+                :std::clamp(y,safe.top,safe.bottom);
             return centre;
         };
         const auto scale=[&](TouchGroup group) {
             const auto value=config[group].scale;
-            const auto radius=group==TouchGroup::dpad?6.0F
-                :group==TouchGroup::actions?6.4F:0.0F;
-            const auto fit=radius>0.0F
-                ?std::min(2.0F,std::min(available_width,available_height)
-                    /(radius*result.unit)) :2.0F;
-            return std::min(std::isfinite(value)
-                ?std::clamp(value,0.55F,2.0F):1.0F,fit);
+            // No pinch or fit-to-viewport size cap: an oversized cluster may
+            // extend offscreen, and can still be dragged/shrunk in the editor.
+            // Only saturate arithmetic at the floating-point representational
+            // limit so hand-edited finite config values cannot overflow.
+            return std::isfinite(value) && value>0.0F?value:1.0F;
         };
-        result.dpad_unit=result.unit*scale(TouchGroup::dpad);
+        const auto scaled_unit=[&](TouchGroup group) {
+            return static_cast<float>(std::min(double(result.unit)*scale(group),
+                double(std::numeric_limits<float>::max())/64.0));
+        };
+        result.dpad_unit=scaled_unit(TouchGroup::dpad);
         result.dpad=transform_point(result.dpad,TouchGroup::dpad,
             result.dpad_unit*3.0F,result.dpad_unit*3.0F);
-        result.action_unit=result.unit*scale(TouchGroup::actions);
+        result.action_unit=scaled_unit(TouchGroup::actions);
         const auto face_centre=transform_point(action_centre,TouchGroup::actions,
             result.action_unit*3.2F,result.action_unit*3.2F);
         const auto face_step=result.action_unit*2.2F;
@@ -141,8 +150,12 @@ struct TouchOverlayLayout {
             {face_centre.x-face_step,face_centre.y}}};
         const auto transform_rect=[&](TouchRect rect,TouchGroup group) {
             const auto factor=scale(group);
-            const auto half_x=(rect.right-rect.left)*factor*.5F;
-            const auto half_y=(rect.bottom-rect.top)*factor*.5F;
+            const auto half_x=static_cast<float>(std::min(
+                double(rect.right-rect.left)*factor*.5,
+                double(std::numeric_limits<float>::max())/64.0));
+            const auto half_y=static_cast<float>(std::min(
+                double(rect.bottom-rect.top)*factor*.5,
+                double(std::numeric_limits<float>::max())/64.0));
             const auto centre=transform_point({(rect.left+rect.right)*.5F,
                 (rect.top+rect.bottom)*.5F},group,half_x,half_y);
             return TouchRect{centre.x-half_x,centre.y-half_y,
@@ -204,7 +217,8 @@ struct TouchOverlayLayout {
         for (std::size_t i = 0; i < actions.size(); ++i) {
             const auto ax = x - actions[i].x;
             const auto ay = y - actions[i].y;
-            if (ax * ax + ay * ay <= action_unit * action_unit * 1.32F)
+            if (double(ax) * ax + double(ay) * ay
+                <= double(action_unit) * action_unit * 1.32)
                 result |= buttons[i];
         }
         return result;
@@ -267,7 +281,8 @@ public:
         }
         transform.x=std::clamp(transform.x,-1.0F,1.0F);
         transform.y=std::clamp(transform.y,-1.0F,1.0F);
-        transform.scale=std::clamp(transform.scale,0.55F,2.0F);
+        if(!std::isfinite(transform.scale) || transform.scale<=0.0F)
+            transform.scale=baseline_[*selected_].scale;
         // Keep the persisted offset in the same range as the visible group.
         // Otherwise dragging past a screen edge builds up invisible motion
         // that the next drag must undo before the controls move again.
@@ -275,12 +290,16 @@ public:
         anchored[*selected_]={0.0F,0.0F,transform.scale};
         const auto base=TouchOverlayLayout::make(layout.width,layout.height,
             layout.safe,anchored).group_bounds(*selected_);
-        transform.x=std::clamp(transform.x,
-            std::max(-1.0F,(layout.safe.left-base.left)/width),
-            std::min(1.0F,(layout.safe.right-base.right)/width));
-        transform.y=std::clamp(transform.y,
-            std::max(-1.0F,(layout.safe.top-base.top)/height),
-            std::min(1.0F,(layout.safe.bottom-base.bottom)/height));
+        const auto anchor=[](float offset,float lo,float hi,float first,float last) {
+            // A cluster larger than an axis may move its centre across that
+            // axis. Never pass reversed bounds to std::clamp after a pinch.
+            if(last-first>hi-lo) first=last=(first+last)*.5F;
+            const auto extent=hi-lo;
+            return std::clamp(offset,std::max(-1.0F,(lo-first)/extent),
+                std::min(1.0F,(hi-last)/extent));
+        };
+        transform.x=anchor(transform.x,layout.safe.left,layout.safe.right,base.left,base.right);
+        transform.y=anchor(transform.y,layout.safe.top,layout.safe.bottom,base.top,base.bottom);
         config[*selected_]=transform;
     }
 

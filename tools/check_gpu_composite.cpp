@@ -320,6 +320,43 @@ void reference_touch(std::vector<uint8_t>& pixels,int w,int h,unsigned scale) {
     box(7,7,w*30/100,20,{205,215,230});box(w*70/100,7,w-8,20,{205,215,230});
     box(w*36/100,h-20,w*47/100,h-7,{205,215,230});box(w*53/100,h-20,w*64/100,h-7,{205,215,230});
 }
+bool margin_histogram_check(starfox::render::GpuRaster& raster) {
+    using namespace starfox::render;
+    // Exercise rows beyond the first 64 lanes, all 256 palette bins, tied
+    // maxima and high-DPI samples. The native scene is transparent so the
+    // CPU layer provides an independent reference for both edge reductions.
+    for(unsigned scale:{1U,2U,3U}) for(unsigned height:{64U,255U,256U,257U}) {
+        Framebuffer cpu(31,height,scale),empty(31,height,scale),actual(31,height,scale);
+        cpu.enable_layer_tags(true);actual.enable_layer_tags(true);
+        for(unsigned y=0;y<height;++y) for(unsigned x=0;x<31;++x)
+            cpu.set(x,y,std::uint8_t(x==1?(height==256?y%256:y<64?200:7)
+                :x==29?(y<128?11:22):y%256));
+        RasterCommands commands;commands.reset(empty.stored_width(),empty.stored_height());
+        if(!raster.render(commands,empty,nullptr)) return false;
+        GpuCompositeBackground background{raster.resident_output(),{},1,29};
+        auto expected=cpu;
+        const auto edge=[&](unsigned x) {
+            std::array<unsigned,256> counts{};
+            for(unsigned y=0;y<height;++y) ++counts[cpu.get(x,y)];
+            return std::uint8_t(std::distance(counts.begin(),std::max_element(counts.begin(),counts.end())));
+        };
+        const auto left=edge(1),right=edge(29);
+        for(unsigned y=0;y<height;++y) {expected.set(0,y,left);expected.set(30,y,right);}
+        // The compositor labels filled margins as 2D, like the CPU reference.
+        std::array<Rgba8,256> palette{};
+        for(unsigned i=0;i<256;++i) palette[i]={std::uint8_t(i),std::uint8_t(255-i),std::uint8_t(i^91),255};
+        GpuComposite composite;std::vector<std::uint8_t> rgba,reference;
+        LayerCompositeSettings settings;
+        if(!composite.compose(raster.resident_output(),scale,cpu,{},settings,palette,nullptr,&background)
+            || !composite.readback(actual,rgba)) {std::cerr<<composite.status();return false;}
+        expand_rgba(expected,reference,palette);
+        if(actual.pixels()!=expected.pixels() || actual.layer_tags()!=expected.layer_tags() || rgba!=reference) {
+            std::cerr<<"Margin histogram mismatch, height="<<height<<" scale="<<scale;return false;
+        }
+    }
+    std::cout<<"12 cooperative margin histogram cases match CPU pixels/tags/RGBA exactly\n";
+    return true;
+}
 }
 int main(int argc,char** argv) {
     using namespace starfox::render;
@@ -327,6 +364,10 @@ int main(int argc,char** argv) {
     struct Lifetime {~Lifetime(){SDL_Quit();}} lifetime;
     GpuRaster raster;GpuScene overlays;GpuComposite composite;SdlGpuEffects effects,referenceEffects;
     shadows::PortableShadows residentShadows;
+    if(argc==2 && std::string_view(argv[1])=="--margin-histograms") {
+        try {return margin_histogram_check(raster)?0:198;}
+        catch(const std::exception& e) {std::cerr<<"Margin histogram fixture: "<<e.what()<<'\n';return 199;}
+    }
     if(argc==2 && std::string_view(argv[1])=="--pipeline-guides") {
         try {return composite_pipeline_guides_check(raster)?0:194;}
         catch(const std::exception& e) {std::cerr<<"Compositor guide fixture: "<<e.what()<<'\n';return 195;}
@@ -1522,6 +1563,7 @@ int main(int argc,char** argv) {
             std::cerr<<"Combined planet/briefing/filter/fade/style/setup/touch mismatch "<<width<<" scale "<<scale;return 41;
         }
     }
+    if(!margin_histogram_check(raster)) return 198;
     std::cout<<cases<<" GPU composition cases match native pixels/tags/RGBA, late-overlay coverage/ownership/recovery, resident effects/shadows and early shadow/filter ordering exactly; "
         <<cases*4<<" horizontal shutter, "<<cases*32<<" circle (including wide/tangent), "<<cases*8<<" background fade and "
         <<cases*16<<" colour math cases (resident/uploaded), "<<cases*64<<" planet fade cases (resident/uploaded), "<<cases*16<<" cartridge window and "

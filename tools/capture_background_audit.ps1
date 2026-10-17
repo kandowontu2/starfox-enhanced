@@ -22,6 +22,7 @@ param(
     [switch]$ArmadaApproach,
     [switch]$GodMode,
     [switch]$AudioPreroll,
+    [switch]$Msu1,
     [ValidateRange(1,30000)][int]$Frames=1,
     [ValidateRange(20,240)][int]$PresentationFps=60,
     [ValidateSet('ORIGINAL','UNLOCKED')][string]$TimingMode='ORIGINAL',
@@ -162,7 +163,8 @@ try {
     $env:STARFOX_TEST_MODEL_SMOOTHING='0'
     $env:STARFOX_TEST_HDR_EFFECT='0'
     $env:STARFOX_TEST_CHROMATIC_ABERRATION='0'
-    $env:STARFOX_TEST_MSU1='0'
+    $env:STARFOX_TEST_MSU1=if($Msu1){'1'}else{'0'}
+    if($Msu1) {$env:STARFOX_TRACE_MSU1='1'}
     $env:STARFOX_TEST_VSYNC='0'
     $env:STARFOX_TEST_ENHANCED_SHADOWS='0'
     $env:STARFOX_TEST_RAY_TRACING='0'
@@ -177,7 +179,7 @@ try {
         foreach($tick in $Ticks) {
             if($tick -lt 0) {throw 'Negative preroll'}
             foreach($aspect in $Aspects) {
-                if($aspect -notin @('4_3','16_9','32_9')) {throw "Unsupported audit aspect: $aspect"}
+                if($aspect -notin @('4_3','16_9','16_10','21_9','32_9')) {throw "Unsupported audit aspect: $aspect"}
                 $stem="$Experience-$level-$tick-$aspect"
                 if($Background) {$stem="$Experience-$level-$Background-$tick-$aspect"}
                 $samples=1
@@ -228,6 +230,9 @@ try {
                 $process.Dispose()
                 if($exitCode -ne 0 -or !(Test-Path -LiteralPath $env:STARFOX_CAPTURE_PATH)) {throw "Capture failed: $stem"}
                 if($FinalTarget -and !(Test-Path -LiteralPath $env:STARFOX_CAPTURE_PRESENTATION_PATH)) {throw "Final capture missing: $stem"}
+                if($Msu1 -and !(Select-String -LiteralPath (Join-Path $auditPath "$stem.log") -Pattern '^msu1 enabled=1 available=1 ' -Quiet)) {
+                    throw "MSU-1 was requested but not confirmed active/available: $stem (see its log)"
+                }
                 if($Background) {
                     $selected=Get-Content -LiteralPath (Join-Path $auditPath "$stem.log") | Where-Object {$_ -match '^enhanced-backdrop-selection:'} | Select-Object -Last 1
                     if($selected -notmatch 'background=([0-9]+)' -or [int]$Matches[1] -ne $expectedBackground) {
@@ -247,7 +252,7 @@ try {
                     # Failed runs retain the complete original error log.
                     $trace=Get-Content -LiteralPath (Join-Path $auditPath "$stem.log")
                     $receipt=@($trace | Select-Object -First 20)
-                    $receipt+=@($trace | Where-Object {$_ -match '^(enhanced-backdrop-|render-state)'} | Select-Object -Last 6)
+                    $receipt+=@($trace | Where-Object {$_ -match '^(enhanced-backdrop-|render-state|msu1 )'} | Select-Object -Last 7)
                     $receipt+=@($trace | Where-Object {$_ -match '(?i)(warning|error|failed|fallback)'})
                     $receipt | Select-Object -Unique | Set-Content -LiteralPath (Join-Path $auditPath "$stem.receipt.txt")
                     # A redirector/AV may briefly retain the raw log's handle.

@@ -104,30 +104,50 @@ uint composedValue(uint2 at,uint cpu,uint2 sampleAt,uint2 sampleExtent,uint2 nat
     }
     return value;
 }
+#if !defined(STARFOX_COMPOSITE_PIXEL_ONLY)
+// Two shared histograms, not a dynamically indexed 256-entry private array
+// per invocation. The latter expands into huge spill/select programs on some
+// AMD Vulkan compilers, even in the separately compiled edge specialization.
+groupshared uint edgeCounts[512];
+#endif
 [numthreads(8,8,1)]
-void main(uint3 id:SV_DispatchThreadID) {
+void main(uint3 id:SV_DispatchThreadID,uint lane:SV_GroupIndex) {
 #if !defined(STARFOX_COMPOSITE_PIXEL_ONLY)
 #if defined(STARFOX_COMPOSITE_EDGE_ONLY)
     if(true) {
 #else
     if(!phase) {
 #endif
-        if(id.y || id.x>1) return;
-        if(repairMargins) {edgeColours[id.x]=backgroundAt(uint2(marginOrigin*scale,0),uint2(width,height))&255u;return;}
-        uint counts[256];for(uint c=0;c<256;++c) counts[c]=0;
-        uint x=(marginOrigin+(id.x?marginWidth-1:0))*scale;
-        for(uint y=0;y<height/scale;++y) {
-            uint2 at=uint2(x,y*scale);
-            uint ci=uniformCpuEnabled?0:cpuIndex(at,uint2(width,height));
-            int2 source=int2(at/scale)-int2(offsetX,offsetY);
-            uint2 sub=min(sourceScale-1,((at%scale)*2+1)*sourceScale/(scale*2));
-            uint2 nativeSample=0;
-            if(all(source>=0) && all(source<int2(sourceReferenceWidth,sourceReferenceHeight)/int(sourceScale)))
-                nativeSample=sourceSample(source,sub,at,uint2(width,height));
-            ++counts[composedValue(at,cpuAt(ci),at,uint2(width,height),nativeSample)&255u];
+        // Phase zero is exactly one workgroup. Every lane must reach both
+        // barriers; only the uniform repair branch may bypass the histogram.
+        if(repairMargins) {
+            if(lane<2) edgeColours[lane]=backgroundAt(uint2(marginOrigin*scale,0),uint2(width,height))&255u;
+            return;
         }
-        uint best=0;for(uint c=1;c<256;++c) if(counts[c]>counts[best]) best=c;
-        edgeColours[id.x]=best;return;
+        [loop] for(uint c=lane;c<512;c+=64) edgeCounts[c]=0;
+        GroupMemoryBarrierWithGroupSync();
+        [loop] for(uint y=lane;y<height/scale;y+=64) {
+            [unroll] for(uint side=0;side<2;++side) {
+                uint x=(marginOrigin+(side?marginWidth-1:0))*scale;
+                uint2 at=uint2(x,y*scale);
+                uint ci=uniformCpuEnabled?0:cpuIndex(at,uint2(width,height));
+                int2 source=int2(at/scale)-int2(offsetX,offsetY);
+                uint2 sub=min(sourceScale-1,((at%scale)*2+1)*sourceScale/(scale*2));
+                uint2 nativeSample=0;
+                if(all(source>=0) && all(source<int2(sourceReferenceWidth,sourceReferenceHeight)/int(sourceScale)))
+                    nativeSample=sourceSample(source,sub,at,uint2(width,height));
+                uint colour=composedValue(at,cpuAt(ci),at,uint2(width,height),nativeSample)&255u;
+                InterlockedAdd(edgeCounts[side*256+colour],1);
+            }
+        }
+        GroupMemoryBarrierWithGroupSync();
+        if(lane<2) {
+            uint best=0;
+            [loop] for(uint c=1;c<256;++c)
+                if(edgeCounts[lane*256+c]>edgeCounts[lane*256+best]) best=c;
+            edgeColours[lane]=best;
+        }
+        return;
     }
 #endif
 #if !defined(STARFOX_COMPOSITE_EDGE_ONLY)

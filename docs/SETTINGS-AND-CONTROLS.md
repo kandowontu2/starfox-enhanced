@@ -117,6 +117,10 @@ Select, and Start can be moved and resized individually. `APPLY` saves the
 layout in `touch-layout.cfg` in platform storage; `CANCEL` restores the previous
 layout. The visible buttons and their touch targets use the same window-space
 coordinates, so changing game resolution does not offset input.
+New/reset touch layouts use larger, screen-relative controls. Pinch resizing
+has no fixed 2x ceiling or forced fit-to-screen limit; oversized groups can
+extend offscreen and still be moved or shrunk. Existing saved layouts keep
+their original base sizing; use `RESET` to adopt the larger defaults.
 Game pace, render FPS, display mode, renderer, graphics choices, MSU-1 music,
 rumble, music/SFX volumes, God Mode, the FPS counter, and crosshair colour
 also persist in

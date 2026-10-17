@@ -1373,16 +1373,17 @@ bool load_touch_layout(const std::filesystem::path& path,
     if(path.empty()) return false;
     std::ifstream input{path};
     std::string version;
-    if(!(input>>version) || version!="SFE_TOUCH_LAYOUT_V1") return false;
+    if(!(input>>version) || (version!="SFE_TOUCH_LAYOUT_V1" && version!="SFE_TOUCH_LAYOUT_V2")) return false;
     TouchLayoutConfig loaded{};
+    loaded.legacy_sizing=version=="SFE_TOUCH_LAYOUT_V1";
     std::array<bool,static_cast<std::size_t>(TouchGroup::count)> seen{};
     int index{};
     float x{},y{},scale{};
     while(input>>index>>x>>y>>scale) {
         if(index<0 || index>=static_cast<int>(seen.size()) || seen[index]
-            || !std::isfinite(x) || !std::isfinite(y) || !std::isfinite(scale)) return false;
+            || !std::isfinite(x) || !std::isfinite(y) || !std::isfinite(scale) || scale<=0.0F) return false;
         loaded.groups[index]={std::clamp(x,-1.0F,1.0F),
-            std::clamp(y,-1.0F,1.0F),std::clamp(scale,0.55F,2.0F)};
+            std::clamp(y,-1.0F,1.0F),scale};
         seen[index]=true;
     }
     if(!std::all_of(seen.begin(),seen.end(),[](bool value){return value;})) return false;
@@ -1398,7 +1399,7 @@ bool save_touch_layout(const std::filesystem::path& path,
     if(error) return false;
     std::ofstream output{path,std::ios::trunc};
     if(!output) return false;
-    output<<"SFE_TOUCH_LAYOUT_V1\n";
+    output<<(layout.legacy_sizing?"SFE_TOUCH_LAYOUT_V1\n":"SFE_TOUCH_LAYOUT_V2\n");
     for(std::size_t i=0;i<layout.groups.size();++i) {
         const auto& group=layout.groups[i];
         output<<i<<' '<<group.x<<' '<<group.y<<' '<<group.scale<<'\n';

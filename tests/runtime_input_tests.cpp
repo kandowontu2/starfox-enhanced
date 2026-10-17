@@ -290,6 +290,10 @@ int main(int argc, char** argv) {
         using namespace starfox::app;
         TouchLayoutConfig config{};
         const auto base=TouchOverlayLayout::make(1179,546,{80,0,1099,546});
+        auto legacy=config;legacy.legacy_sizing=true;
+        const auto old=TouchOverlayLayout::make(1179,546,{80,0,1099,546},legacy);
+        require(base.unit>old.unit*1.4F,
+            "new touch defaults retained the small fixed-pixel size cap");
         TouchLayoutGesture gesture;
         gesture.down(1,base.dpad,base,config);
         gesture.move(1,{base.dpad.x+75,base.dpad.y-42},base,config);
@@ -342,8 +346,33 @@ int main(int argc, char** argv) {
         require(load_touch_layout(path,restored),"touch layout did not load");
         require(std::abs(restored[TouchGroup::dpad].x-config[TouchGroup::dpad].x)<.00001F
             && std::abs(restored[TouchGroup::actions].scale
-                -config[TouchGroup::actions].scale)<.00001F,
+                -config[TouchGroup::actions].scale)<.00001F && !restored.legacy_sizing,
             "touch layout did not round-trip");
+        config[TouchGroup::actions].scale=4.0F;
+        config[TouchGroup::dpad].scale=.2F;
+        require(save_touch_layout(path,config) && load_touch_layout(path,restored)
+            && restored[TouchGroup::actions].scale==4.0F
+            && restored[TouchGroup::dpad].scale==.2F,
+            "touch layout save/load restored the old pinch size limits");
+        const auto large=TouchOverlayLayout::make(1179,546,{80,0,1099,546},restored);
+        require(large.action_unit==base.action_unit*4.0F
+            && large.dpad_unit==base.dpad_unit*.2F,
+            "touch layout silently fitted a custom size back into the viewport");
+        gesture.clear();
+        const auto small=TouchOverlayLayout::make(1179,546,{80,0,1099,546},config);
+        gesture.down(6,small.dpad,small,config);
+        gesture.down(7,{small.dpad.x+10,small.dpad.y},small,config);
+        gesture.move(7,{small.dpad.x+210,small.dpad.y},small,config);
+        gesture.up(6,config);gesture.up(7,config);
+        require(config[TouchGroup::dpad].scale>4.0F,
+            "pinch gesture still stops at the old maximum scale");
+        const auto oversized=TouchOverlayLayout::make(1179,546,{80,0,1099,546},config);
+        require(std::isfinite(oversized.dpad.x) && std::isfinite(oversized.dpad.y),
+            "oversized touch group produced invalid drag bounds");
+        require(save_touch_layout(path,legacy) && load_touch_layout(path,restored)
+            && restored.legacy_sizing
+            && TouchOverlayLayout::make(1179,546,{80,0,1099,546},restored).unit==old.unit,
+            "V1 touch layout did not preserve its saved base sizing");
         std::error_code error;
         std::filesystem::remove(path,error);
         require(!error,"touch layout test file could not be removed");
