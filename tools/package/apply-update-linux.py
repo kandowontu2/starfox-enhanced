@@ -71,7 +71,7 @@ def machine(path):
 def eligible(target):
     target = Path(target).absolute()
     no_links(target)
-    if target == Path(target.anchor) or any(target == Path(p) or Path(p) in target.parents for p in MANAGED):
+    if target == Path(target.anchor) or "steamapps" in target.parts or any(target == Path(p) or Path(p) in target.parents for p in MANAGED):
         raise ValueError("Package-managed installations must use their normal installer")
     if any((part / ".git").exists() for part in (target, *target.parents)):
         raise ValueError("Source checkouts must be updated manually")

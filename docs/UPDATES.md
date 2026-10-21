@@ -20,7 +20,7 @@ is up to date. No network request occurs until the update screen is opened.
   `/usr/bin/curl`; installation uses `/usr/bin/python3` (standard library only,
   no pip/system package installation). Missing Python, root-owned/read-only
   directories, source checkouts, AppImage/Flatpak/Snap and system-managed
-  installation paths stay manual. Existing nested and flat ZIP layouts are
+  installation paths (including Steam-managed `steamapps` directories) stay manual. Existing nested and flat ZIP layouts are
   supported. Executable permissions are restored; user data is preserved.
 - macOS desktop: version checks use `/usr/bin/curl` and RELEASE NOTES opens the
   official download page. In-place replacement is not implemented for macOS.

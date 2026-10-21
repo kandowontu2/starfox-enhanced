@@ -24,7 +24,7 @@ jobs:
           - os: windows-2022
             generator: Visual Studio 17 2022
           - os: macos-14
-            generator: Xcode
+            generator: Unix Makefiles
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     env:
@@ -33,16 +33,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Configure asset-free updater targets
         run: >-
-          cmake -S . -B build/update-checks -G "${{ matrix.generator }}" -DCMAKE_BUILD_TYPE=Release
-          -DSTARFOX_BUILD_RUNTIME=ON -DSTARFOX_BUILD_TESTS=ON
-          -DSTARFOX_BUILD_TOOLS=OFF -DSTARFOX_BUILD_VR=OFF
-          -DSTARFOX_ENABLE_DISPLAYXR=OFF -DSTARFOX_ENABLE_LEIASR=OFF
-          -DSTARFOX_ENABLE_XBRZ=OFF -DSTARFOX_EMBED_RUNTIME_ASSETS=OFF
-          -DSTARFOX_PACKAGE_MSU1_MUSIC=OFF -DSTARFOX_EMBED_MSU1_MUSIC=OFF
-          -DSDL_UNIX_CONSOLE_BUILD=ON
-          -DSTARFOX_ROM_FILE=source-only-no-rom.sfc
-          -DSTARFOX_EX_ROM_FILE=source-only-no-ex-rom.sfc
-          -DSTARFOX_RETAIL_V12_FILE=source-only-no-retail.sfc
+          cmake -S tests/updater -B build/update-checks -G "${{ matrix.generator }}" -DCMAKE_BUILD_TYPE=Release
       - name: Build actual updater service and policy tests
         run: cmake --build build/update-checks --config Release --parallel 2 --target starfox_update_tests
       - name: Run native policy and idle-service tests

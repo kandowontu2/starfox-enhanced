@@ -255,6 +255,7 @@ bool UpdateService::determine_install_support() const {
     if(!std::filesystem::is_regular_file("/usr/bin/python3",ec) || access("/usr/bin/python3",X_OK)!=0
         || geteuid()==0 || access(directory_.c_str(),W_OK)!=0 || std::getenv("APPIMAGE")
         || std::getenv("FLATPAK_ID") || std::getenv("SNAP")) return false;
+    for(const auto& part:directory_) if(part=="steamapps") return false;
     for(const auto* root:{"/usr","/opt","/app","/snap","/nix","/var/lib/flatpak"}) {
         const auto path=directory_.lexically_normal().string();
         if(path==root || path.starts_with(std::string(root)+"/")) return false;

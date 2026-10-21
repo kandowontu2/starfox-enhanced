@@ -140,6 +140,8 @@ class LinuxUpdateTests(unittest.TestCase):
             updater.eligible(Path("/usr/bin"))
         with self.assertRaisesRegex(ValueError, "Source checkout"):
             updater.eligible(self.target)
+        with self.assertRaisesRegex(ValueError, "Package-managed"):
+            updater.eligible(self.root / "steamapps/common/game")
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "native Linux ownership and restart")
     def test_restart_waits_for_parent_preserves_data(self):
