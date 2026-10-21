@@ -163,6 +163,22 @@ The first normal launch copies missing data from former preference locations;
 existing portable files win, and originals are not deleted. Mobile and console
 builds use writable platform storage instead of their read-only package folders.
 
+## Checking for updates
+
+Open **Options → Check for updates** to see the **current version**, **latest
+version**, and whether a newer stable release is available. Checks run only
+when requested or when this screen is first opened, not during normal startup.
+
+Packaged Windows x64/x86 and portable Linux x64 desktop players can download a verified update and
+restart to install it after confirmation. Settings, saves, controller/touch/HUD
+layouts, imported game data and optional music are preserved. Source checkouts
+are never updated in place. Linux automatic installation uses system Python 3;
+read-only/package-managed installations stay manual. macOS desktop players can
+check versions and open the release page; mobile/console packages still need their platform's
+normal installer. This does not add unattended background installation.
+
+See [update behavior and safety](docs/UPDATES.md) for details.
+
 ## Development and credits
 
 To build, regenerate source assets or run tests, use the

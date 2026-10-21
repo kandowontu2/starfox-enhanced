@@ -23,6 +23,7 @@ extern "C" void StarfoxPS5_HideSplashScreen(void);
 #include "starfox/audio/stem_mixer.hpp"
 #include "starfox/audio/msu1_pack.hpp"
 #include "starfox/app/runtime_input.hpp"
+#include "starfox/app/update_service.hpp"
 #include "starfox/app/presentation_capture.hpp"
 #include "starfox/app/touch_overlay.hpp"
 #include "starfox/app/audio_queue.hpp"
@@ -9261,6 +9262,8 @@ int main(int argc, char** argv) {
         touch_editor.active=touch_editor_preview;
         if(touch_editor.active) touch_editor.initial_layout=touch_layout_config;
         bool running = true;
+        starfox::app::UpdateService updater{executable_directory};
+        bool confirm_update_download{};
         bool exit_confirmation =
             std::getenv("STARFOX_TEST_EXIT_CONFIRMATION") != nullptr;
         bool exit_yes_selected{};
@@ -9769,6 +9772,10 @@ int main(int argc, char** argv) {
                 std::cerr<<"scheduled-revival frame="<<presented_frames<<'\n';
             }
             window.update_temporary_status();
+            if(game.in_setup_menu() && game.pregame_page()==starfox::simulation::PregamePage::updates) {
+                if(updater.status().phase==starfox::app::UpdatePhase::idle) updater.check();
+                if(game.pregame_selection()!=1U) confirm_update_download=false;
+            } else confirm_update_download=false;
             if(game.stereo_output()==9 && window.leia_requested()) window.set_leia_requested(false);
             window.service_sr_platform(game.stereo_output()==9 && !window.leia_requested());
             for (const auto& action : scripted_state_actions) {
@@ -10805,6 +10812,29 @@ int main(int argc, char** argv) {
                         }
                         controls = {};
                         secondary_controls = {};
+                    } else if(game.in_setup_menu() && game.pregame_page()==starfox::simulation::PregamePage::updates
+                        && game.pregame_selection()<3U
+                        && (controls.pressed & (starfox::input::a|starfox::input::select))) {
+                        const auto state=updater.status();
+                        if(game.pregame_selection()==0U) {
+                            confirm_update_download=false;
+                            if(state.phase==starfox::app::UpdatePhase::checking || state.phase==starfox::app::UpdatePhase::downloading) updater.cancel();
+                            else updater.check();
+                        } else if(game.pregame_selection()==2U) {
+                            confirm_update_download=false;updater.open_release_page();
+                        } else if(state.phase==starfox::app::UpdatePhase::ready) {
+                            save_pregame_settings();
+                            if(updater.restart_to_install()) running=false;
+                        } else if(updater.install_supported() && state.release.newer && !state.release.asset_url.empty()
+                            && state.phase!=starfox::app::UpdatePhase::checking
+                            && state.phase!=starfox::app::UpdatePhase::downloading) {
+                            if(confirm_update_download) {confirm_update_download=false;updater.download();}
+                            else confirm_update_download=true;
+                        } else if(state.phase!=starfox::app::UpdatePhase::checking
+                            && state.phase!=starfox::app::UpdatePhase::downloading) {
+                            updater.open_release_page();
+                        }
+                        controls={};secondary_controls={};
                     } else if(game.in_setup_menu() && game.pregame_page()==starfox::simulation::PregamePage::stereo
                         && game.pregame_selection()==6U
                         && (controls.pressed & (starfox::input::a|starfox::input::select|starfox::input::left|starfox::input::right))) {
@@ -11359,13 +11389,41 @@ int main(int argc, char** argv) {
                         draw_row("BACK","",190,game.pregame_selection()==5);
                         draw_centred("DEPTH VALUES USE WORLD UNITS",207,10U);
                         draw_cursor(game.pregame_selection()==5?193:game.pregame_selection()==6?168:43+25*game.pregame_selection());
+                    } else if(game.pregame_page()==starfox::simulation::PregamePage::updates) {
+                        const auto state=updater.status();
+                        draw_centred("GAME UPDATES",5,10U);
+                        draw_row("CURRENT VERSION",starfox::app::UpdateService::installed_version(),28,false);
+                        draw_row("LATEST VERSION",state.release.version.empty()?"NOT CHECKED":state.release.version,46,false);
+                        auto message=state.message;
+                        for(auto& c:message) if(c>='a' && c<='z') c=char(c-'a'+'A');
+                        // Long error text must fit even in the 4:3 menu.
+                        draw_centred(message.substr(0,32),70,14U);
+                        if(message.size()>32) draw_centred(message.substr(32,32),82,14U);
+                        if(state.phase==starfox::app::UpdatePhase::downloading)
+                            draw_centred(std::to_string(state.percent)+"%",98,10U);
+                        const bool busy=state.phase==starfox::app::UpdatePhase::checking
+                            || state.phase==starfox::app::UpdatePhase::downloading;
+                        const bool automatic=updater.install_supported() && state.release.newer && !state.release.asset_url.empty();
+                        draw_row(busy?"CANCEL":"CHECK NOW",busy?"A  CANCEL":"A  CHECK",122,game.pregame_selection()==0U);
+                        draw_row(state.phase==starfox::app::UpdatePhase::ready?"RESTART TO UPDATE":"INSTALL UPDATE",
+                            state.phase==starfox::app::UpdatePhase::ready?"A  RESTART":busy?"PLEASE WAIT":
+                            automatic?(confirm_update_download?"A  CONFIRM":"A  DOWNLOAD"):"MANUAL",
+                            146,game.pregame_selection()==1U);
+                        draw_row("RELEASE NOTES","A  OPEN",170,game.pregame_selection()==2U);
+                        draw_row("BACK","",194,game.pregame_selection()==3U);
+                        draw_centred(confirm_update_download?"DOWNLOAD THIS UPDATE?":
+                            "SAVES / SETTINGS ARE KEPT",212,10U);
+                        draw_cursor(125+int(game.pregame_selection())*24);
                     } else if (game.pregame_page()
                         == starfox::simulation::PregamePage::options) {
                         draw_centred("OPTIONS", 5, 10U);
                         constexpr std::array<std::string_view, 6> language_names{
                             "ENGLISH", "JAPANESE", "GERMAN", "FRENCH", "SPANISH", "ENGLISH (EUROPE)"};
                         const auto order=starfox::simulation::pregame_menu_order(starfox::simulation::PregamePage::options);
+                        const auto selected=std::size_t(std::find(order.begin(),order.end(),game.pregame_selection())-order.begin());
+                        const auto first=std::min(selected>13?selected-13:0,order.size()-14);
                         for(std::size_t row=0;row<order.size();++row) {
+                            if(row<first || row>=first+14) continue;
                             std::string_view label;std::string value;
                             switch(order[row]) {
                             case 16:label="RENDERER";value=renderer_value;break;
@@ -11383,11 +11441,14 @@ int main(int argc, char** argv) {
                             case 8:label="CONTROLLER";value="A  REMAP";break;
                             case 12:label="LANGUAGE";value=language_names[game.language()];break;
                             case 14:label="FULLSCREEN";value=window.fullscreen()?"ON":"OFF";break;
+                            case 17:label="CHECK FOR UPDATES";value="A  OPEN";break;
                             case 11:label="BACK";break;
                             }
-                            const int y=25+12*int(row);const bool selected=game.pregame_selection()==order[row];
-                            draw_row(label,value,y,selected);if(selected) draw_cursor(y+3);
+                            const int y=25+12*int(row-first);const bool active=game.pregame_selection()==order[row];
+                            draw_row(label,value,y,active);if(active) draw_cursor(y+3);
                         }
+                        if(first>0) draw_centred("UP: MORE OPTIONS",13,7U);
+                        if(first+14<order.size()) draw_centred("DOWN: MORE OPTIONS",202,7U);
                     } else {
                         const auto timing = game.timing_mode()
                             == starfox::simulation::TimingMode::unlocked_20_fps

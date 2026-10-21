@@ -78,6 +78,16 @@ jobs:
         # Hardware/debug-layer tests run separately on an actual GPU, not on
         # these headless source-only runners. Their targets are still built.
         run: ctest --test-dir build/source-checks --output-on-failure --parallel 2 --exclude-regex starfox_3ds --label-exclude native_gpu
+      - name: Exercise safe Windows updater in an asset-free sandbox
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          STARFOX_UPDATE_TEST_FIXTURE: build/source-checks/starfox_update_exit_fixture.exe
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          if (!(Test-Path -LiteralPath $env:STARFOX_UPDATE_TEST_FIXTURE)) { throw 'Update restart fixture missing' }
+          python tests/test_app_update.py -v
+          if ($LASTEXITCODE -ne 0) { throw 'Updater safety tests failed' }
       - name: Preserve compact test results
         if: always()
         uses: actions/upload-artifact@v4
@@ -120,11 +130,11 @@ jobs:
           cmake --build build/source-checks --config Release --parallel 2 --target
           starfox_pc starfox_metal_pipeline_preparation_tests
           starfox_responsive_preparation_tests starfox_gpu_preparation_tests
-          starfox_sdl_gpu_preparation_check
+          starfox_sdl_gpu_preparation_check starfox_update_tests
       - name: Test ARC lifetime, async publication and event preparation
         run: |
           ctest --test-dir build/source-checks -C Release --output-on-failure \
-            -R '^starfox_(metal_pipeline_preparation|responsive_preparation|gpu_preparation)_tests$'
+            -R '^starfox_(metal_pipeline_preparation|responsive_preparation|gpu_preparation|update)_tests$'
           python3 tests/test_metal_shader_sources.py
       - name: Preserve compact results only
         if: always()

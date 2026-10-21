@@ -169,7 +169,7 @@ std::unique_ptr<GameSimulation> GameSimulation::restored_state(
     };
     if (!valid_enum(result->flow_state_, GameFlowState::finished)
         || !valid_enum(result->frontend_phase_, FrontendPhase::planet_fade_to_level)
-        || !valid_enum(result->pregame_page_, PregamePage::stereo)
+        || !valid_enum(result->pregame_page_, PregamePage::updates)
         || !valid_enum(result->experience_, Experience::starfox_ex)
         || !valid_enum(result->timing_mode_, TimingMode::original_speed)
         || !valid_enum(result->display_mode_, DisplayMode::fit_screen)

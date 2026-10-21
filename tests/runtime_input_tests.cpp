@@ -71,7 +71,7 @@ int main(int argc, char** argv) {
         using starfox::simulation::PregamePage;
         for (const auto page : {PregamePage::main, PregamePage::options,
                  PregamePage::two_d, PregamePage::three_d, PregamePage::cheats,
-                 PregamePage::global, PregamePage::stereo}) {
+                 PregamePage::global, PregamePage::stereo, PregamePage::updates}) {
             for (unsigned selection = 0; selection < 80; ++selection)
                 require(display_guide_visible(page, selection)
                         == (page == PregamePage::main

@@ -6912,6 +6912,30 @@ int main(int argc, char** argv) {
             select(action);
         };
         {
+            using starfox::simulation::PregamePage;
+            starfox::simulation::GameSimulation updates{upstream_rom,upstream_symbols,"BOOT"};
+            select_menu_action(updates,PregamePage::options,17U);
+            static_cast<void>(updates.tick({0,starfox::input::a,0}));
+            require(updates.pregame_page()==PregamePage::updates && updates.pregame_selection()==0,"update screen not reachable");
+            const auto saved_updates=updates.save_state();
+            const auto restored_updates=updates.restored_state(saved_updates);
+            require(restored_updates && restored_updates->pregame_page()==PregamePage::updates,
+                "update page cannot restore its own save state");
+            const auto volume=updates.music_volume();const auto god=updates.god_mode();
+            for(unsigned i=0;i<3;++i) {
+                static_cast<void>(updates.tick({0,starfox::input::a,0}));
+                static_cast<void>(updates.tick({0,starfox::input::start,0}));
+                require(updates.pregame_page()==PregamePage::updates && updates.in_setup_menu()
+                    && updates.music_volume()==volume && updates.god_mode()==god,"host update actions changed simulation");
+                static_cast<void>(updates.tick({0,starfox::input::down,0}));
+            }
+            static_cast<void>(updates.tick({0,starfox::input::a,0}));
+            require(updates.pregame_page()==PregamePage::options && updates.pregame_selection()==17,"update BACK selection lost");
+            static_cast<void>(updates.tick({0,starfox::input::a,0}));
+            static_cast<void>(updates.tick({0,starfox::input::b,0}));
+            require(updates.pregame_page()==PregamePage::options,"update B back failed");
+        }
+        {
             starfox::simulation::GameSimulation preview{
                 upstream_rom, upstream_symbols, "LEVEL1_1"};
             require(!preview.preview_requested(), "preview must default off");

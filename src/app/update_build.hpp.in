@@ -1,0 +1,4 @@
+#pragma once
+inline constexpr const char* starfox_update_version = "@PROJECT_VERSION@";
+inline constexpr const char* starfox_update_script = R"SFE_UPDATER(@STARFOX_UPDATE_SCRIPT@)SFE_UPDATER";
+inline constexpr const char* starfox_linux_update_script = R"SFE_LINUX(@STARFOX_LINUX_UPDATE_SCRIPT@)SFE_LINUX";

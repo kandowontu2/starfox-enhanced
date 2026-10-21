@@ -1395,6 +1395,16 @@ GameTickResult GameSimulation::tick_pregame_menu(
         return result;
     }
 
+    if(pregame_page_==PregamePage::updates) {
+        // Network and installation are host-owned; simulation owns navigation
+        // only. Never let update actions mutate cheats/volume or start a game.
+        if((menu_input.pressed & input::b) || (pregame_selection_==3U
+            && (menu_input.pressed & (input::a|input::select)))) {
+            pregame_page_=PregamePage::options;pregame_selection_=17U;
+            queue_sound_effect(0x11U);
+        }
+        result.audio_port_writes=map_.take_apu_port_writes();return result;
+    }
     if(pregame_page_==PregamePage::stereo) {
         const bool change=(menu_input.pressed & (input::left|input::right|input::a|input::select))!=0;
         const bool backwards=(menu_input.pressed & input::left)!=0;
@@ -1417,6 +1427,11 @@ GameTickResult GameSimulation::tick_pregame_menu(
         result.audio_port_writes=map_.take_apu_port_writes();return result;
     }
     if (pregame_page_ == PregamePage::options) {
+        if(pregame_selection_==17U && (menu_input.pressed & (input::a|input::select))) {
+            pregame_page_=PregamePage::updates;pregame_selection_=0U;
+            queue_sound_effect(0x11U);
+            result.audio_port_writes=map_.take_apu_port_writes();return result;
+        }
         if (pregame_selection_ == 9U
             && (menu_input.pressed & (starfox::input::left | starfox::input::right
                 | starfox::input::select | starfox::input::a)) != 0U) {

@@ -123,6 +123,7 @@ enum class PregamePage {
     cheats,
     global,
     stereo,
+    updates,
 };
 
 inline constexpr std::array<std::uint8_t, 14> main_menu_order{
@@ -131,14 +132,17 @@ inline constexpr std::array<std::uint8_t, 13> two_d_menu_order{8,18,36,37,38,39,
 inline constexpr std::array<std::uint8_t, 15> three_d_menu_order{42,7,11,9,30,78,17,79,12,22,35,33,34,45,23};
 inline constexpr std::array<std::uint8_t, 32> global_menu_order{
     29,72,32,71,76,77,10,65,66,28,70,27,73,74,61,62,67,63,68,48,49,50,52,53,54,55,56,57,69,59,60,23};
-#if defined(__ANDROID__) || defined(STARFOX_IOS_RUNTIME)
-inline constexpr std::array<std::uint8_t, 15> options_menu_order{16,15,9,0,1,2,3,4,13,5,6,7,8,12,11};
-#else
+#if defined(__3DS__)
 inline constexpr std::array<std::uint8_t, 15> options_menu_order{16,15,9,0,1,2,3,4,5,6,7,8,12,14,11};
+#elif defined(__ANDROID__) || defined(STARFOX_IOS_RUNTIME)
+inline constexpr std::array<std::uint8_t, 16> options_menu_order{16,15,9,0,1,2,3,4,13,5,6,7,8,12,17,11};
+#else
+inline constexpr std::array<std::uint8_t, 16> options_menu_order{16,15,9,0,1,2,3,4,5,6,7,8,12,14,17,11};
 #endif
 inline constexpr std::array<std::uint8_t, 8> cheats_menu_order{0,1,2,3,4,5,7,6};
 // Keep BACK's saved selection 5 stable. Native Leia is a host-owned option 6.
 inline constexpr std::array<std::uint8_t, 7> stereo_menu_order{0,1,2,3,4,6,5};
+inline constexpr std::array<std::uint8_t, 4> updates_menu_order{0,1,2,3};
 inline std::span<const std::uint8_t> pregame_menu_order(PregamePage page) {
     switch (page) {
     case PregamePage::two_d: return two_d_menu_order;
@@ -147,6 +151,7 @@ inline std::span<const std::uint8_t> pregame_menu_order(PregamePage page) {
     case PregamePage::cheats: return cheats_menu_order;
     case PregamePage::global: return global_menu_order;
     case PregamePage::stereo: return stereo_menu_order;
+    case PregamePage::updates: return updates_menu_order;
     default: return main_menu_order;
     }
 }
