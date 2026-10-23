@@ -21,11 +21,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-24.04
-            generator: Unix Makefiles
-          - os: windows-2022
-            generator: Visual Studio 17 2022
-          - os: macos-14
+          - os: macos-15
             generator: Unix Makefiles
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
