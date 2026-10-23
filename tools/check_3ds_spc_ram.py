@@ -38,11 +38,11 @@ def inspect(build: Path, native: bool) -> None:
         if not block:
             raise RuntimeError('Native block template is missing')
         inserted = block[1] + '\n'
-        entry = ('uint8_t* const ram = RAM;\n'
+        native_entry_decl = ('uint8_t* const ram = RAM;\n'
                  '    uint8_t const* const native_entry = native_blocks_ ? ram+0x624 : 0;')
-        if after.count(inserted) != 1 or after.count(entry) != 1:
+        if after.count(inserted) != 1 or after.count(native_entry_decl) != 1:
             raise RuntimeError('Native block differs from its independently tested template')
-        after = after.replace(inserted, '\topcode = *pc;').replace(entry, 'uint8_t* const ram = RAM;')
+        after = after.replace(inserted, '\topcode = *pc;').replace(native_entry_decl, 'uint8_t* const ram = RAM;')
     prefix = '#include "starfox/platform/nintendo_3ds/spc_ram.hpp"\n'
     start = '#if SPC_MORE_ACCURACY || defined(STARFOX_3DS_SPC_RAM_DISABLE)'
     end = '\n#endif\n\n#if SPC_MORE_ACCURACY'

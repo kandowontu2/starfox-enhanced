@@ -80,6 +80,27 @@ on:
 permissions:
   contents: read
 jobs:
+  host-correctness:
+    name: 3DS host cartridge and exact audio checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      CTR_ENABLE_IPO: ${{ github.event_name == 'workflow_dispatch' && inputs.enable_ipo && 'ON' || 'OFF' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify lean cartridge graph and standard companion loader
+        shell: bash
+        run: |
+          cmake -S platform/3ds -B "$RUNNER_TEMP/starfox-3ds-core-host" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DSTARFOX_3DS_BUILD_GAME_CORE=ON \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DSTARFOX_3DS_PROFILE_FRAMES=ON -DSTARFOX_3DS_ENABLE_IPO="$CTR_ENABLE_IPO"
+          cmake --build "$RUNNER_TEMP/starfox-3ds-core-host" --parallel 2
+          ctest --test-dir "$RUNNER_TEMP/starfox-3ds-core-host" --output-on-failure
+          python3 tools/check_3ds_spc_ram.py "$RUNNER_TEMP/starfox-3ds-core-host"
+          python3 tools/check_3ds_spc_output.py "$RUNNER_TEMP/starfox-3ds-core-host"
+          python3 tests/test_3ds_stack.py
+          python3 tests/test_3ds_shader.py
   native-diagnostics:
     name: New Nintendo 3DS-family native checks and test package
     runs-on: ubuntu-24.04
@@ -125,19 +146,6 @@ jobs:
             src/render/background_renderer.cpp src/render/sprite_renderer.cpp \
             -o "$RUNNER_TEMP/starfox-3ds-raster-contracts"
           "$RUNNER_TEMP/starfox-3ds-raster-contracts"
-      - name: Verify lean cartridge graph and standard companion loader
-        shell: bash
-        run: |
-          cmake -S platform/3ds -B "$RUNNER_TEMP/starfox-3ds-core-host" -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release -DSTARFOX_3DS_BUILD_GAME_CORE=ON \
-            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-            -DSTARFOX_3DS_PROFILE_FRAMES=ON -DSTARFOX_3DS_ENABLE_IPO="$CTR_ENABLE_IPO"
-          cmake --build "$RUNNER_TEMP/starfox-3ds-core-host" --parallel 2
-          ctest --test-dir "$RUNNER_TEMP/starfox-3ds-core-host" --output-on-failure
-          python3 tools/check_3ds_spc_ram.py "$RUNNER_TEMP/starfox-3ds-core-host"
-          python3 tools/check_3ds_spc_output.py "$RUNNER_TEMP/starfox-3ds-core-host"
-          python3 tests/test_3ds_stack.py
-          python3 tests/test_3ds_shader.py
       - name: Cross-build native diagnostics and experimental player
         shell: bash
         run: |
