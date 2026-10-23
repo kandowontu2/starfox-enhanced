@@ -577,7 +577,7 @@ void BackgroundRenderer::draw_bg2(
     std::uint32_t sky_source_min, bool continue_ground, bool extend_tunnel_diagonals) const noexcept {
     if ((ppu.main_screen & 0x02U) == 0U) return;
     const int ceiling_guard=extend_tunnel_diagonals?tunnel_ceiling_guard_page(ppu):0;
-    const auto row_scroll_y=[&](int y) {
+    const auto row_scroll_y=[&](int y) -> std::int32_t {
         if(ceiling_guard && y>=0 && y<10) return ceiling_guard;
         return ppu.bg2_scanline_scroll_enabled
             ?int(ppu.bg2_scanline_scroll_y[std::clamp(y,0,223)]):scroll_y;
@@ -776,7 +776,7 @@ void BackgroundRenderer::draw_bg2(
         const auto native_last = unsigned(std::clamp<std::int64_t>(
             std::int64_t(horizontal_origin) + 256, native_first, final_x));
         background_bands(row_workers,target.height(),parallel_background,[&](BackgroundBands bands) {
-        unsigned first_row,last_row;
+        std::uint32_t first_row,last_row;
         while(bands.claim(first_row,last_row)) for (unsigned y=first_row;y<last_row;++y) {
             const int row_x = ppu.bg2_horizontal_offsets_enabled && y < ppu.bg2_horizontal_offsets.size()
                 ? ppu.bg2_horizontal_offsets[y] : scroll_x;
@@ -840,7 +840,7 @@ void BackgroundRenderer::draw_bg2(
         && unique_regions.empty() && !single_occurrence_top_rows
         && !ending_star_extension && !game_over_star_extension) {
         background_bands(row_workers,target.height(),parallel_background,[&](BackgroundBands bands) {
-        unsigned first_row,last_row;
+        std::uint32_t first_row,last_row;
         while(bands.claim(first_row,last_row)) for (unsigned y=first_row;y<last_row;++y) {
             const int row_x = ppu.bg2_horizontal_offsets_enabled && y < ppu.bg2_horizontal_offsets.size()
                 ? ppu.bg2_horizontal_offsets[y] : scroll_x;
@@ -1074,7 +1074,7 @@ void BackgroundRenderer::draw_bg2(
                 auto unwrapped_source_x = sample_x + row_scroll_x;
                 if(authored_tunnel_extension && (logical_x<0 || logical_x>=256)) {
                     const auto centred_scroll=((row_scroll_x+128)&(width_pixels-1))-128;
-                    unwrapped_source_x=std::clamp(sample_x+centred_scroll,0,width_pixels-1);
+                    unwrapped_source_x=std::clamp<std::int32_t>(sample_x+centred_scroll,0,width_pixels-1);
                 }
                 if ((ending_star_extension || game_over_star_extension) && extend_horizontal
                     && (logical_x < 0 || logical_x >= 256)
