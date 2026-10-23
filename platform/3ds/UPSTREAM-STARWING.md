@@ -1,5 +1,31 @@
 # Starwing 3DS integration
 
+## October 23: v1.1 comparison and mono-first integration
+
+The current development branch integrates the previously isolated mono frame
+pipeline into the current main source, including complete-frame audio workers,
+source-clock presentation and the real pre-game menu. Slider-off gameplay no
+longer has to assemble the general stereo scene. Existing source effects and
+unsupported mono scenes retain their ordered PICA fallback.
+
+The latest comparison is Starwing **v1.1**, commit `0863e36`, released October 19:
+https://github.com/EstebanPdN/starwing-3ds/releases/tag/v1.1
+
+Its `tools/cmake/SpcNativeBlocks.cmake` and `tests/native_spc_block_test.cpp`
+provide a guarded RAM-only SPC loop shortcut and an interpreter-equivalence
+test. These are adapted in `spc_native_blocks.cmake` and
+`tests/nintendo_3ds_spc_native_blocks_tests.cpp`, credited to Esteban PDN and
+reused under the author's previously supplied permission. The adaptation
+composes with our existing RAM/timer patches rather than replacing them.
+Only the native 3DS core enables it; desktop audio, two-stem controls, source
+audio cadence and save formats remain unchanged. Unsafe opcodes, I/O/ROM
+access, instruction mutation and short cycle deadlines use the interpreter.
+
+This is implementation and validation work, not a claim of sustained console
+60 FPS. Mono gameplay is the acceptance target before further stereo tuning.
+
+## Earlier reference and integration history
+
 ## Reference mono pipeline (October 13 follow-up)
 
 To establish a meaningful mono baseline, `reference/` adapts Esteban PDN's

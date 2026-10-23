@@ -361,7 +361,14 @@ struct Spc700Audio::Impl {
 
 Spc700Audio::Spc700Audio()
     : music_impl_(std::make_unique<Impl>()),
-      effects_impl_(std::make_unique<Impl>()) {}
+      effects_impl_(std::make_unique<Impl>()) {
+#if defined(STARFOX_3DS_SPC_NATIVE_BLOCKS)
+    // Native-only guarded interpreter shortcut. Both original stems, clock
+    // deadlines, PCM rate and state format remain unchanged.
+    music_impl_->spc->enable_native_blocks(true);
+    effects_impl_->spc->enable_native_blocks(true);
+#endif
+}
 Spc700Audio::~Spc700Audio() = default;
 Spc700Audio::Spc700Audio(Spc700Audio&&) noexcept = default;
 Spc700Audio& Spc700Audio::operator=(Spc700Audio&&) noexcept = default;
