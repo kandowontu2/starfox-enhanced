@@ -308,3 +308,29 @@ The imported reference renderer stays mono-only; slider stereo still uses
 our NativeGpu path. Host tests compare the old painter's complete colour/alpha
 output and sampled actual Original/EX frames. ARM timing and physical New-model
 mono 60-FPS acceptance remain separate requirements.
+
+## Released v1.1 CPU helpers
+
+The October 19 v1.1 release also adds typed cartridge-call register setup and
+guarded collision/transfer dispatch blocks. We adapt its `wdc65816_entry.hpp`,
+`wdc65816_collision.hpp`, `wdc65816_transfer.hpp` and differential fixtures.
+Only the 3DS cartridge target defines `STARFOX_3DS_CPU_BLOCKS`; desktop calls
+retain their previous interpreter path. Instruction bytes, modes, remaining
+instruction budget, interrupts and debugger state are checked before entry.
+The original pinned opcode implementations still determine flags, cycles and
+I/O; altered or unsupported code falls back to ordinary instruction dispatch.
+Existing source register, instruction-count, return and error behavior remains.
+
+Host checks pass 196,608 stateful register entries across all statuses and modes,
+12,288 randomized collision cases per cartridge, and 16,384 transfer cases per
+cartridge plus 512 repeated-block exits. Both Original and EX use the existing
+companion in memory with `--companion EXISTING_BIN original|ex`; no ROM is copied.
+The comparisons include raw flags, complete RAM, cycles, open bus, executed PCs,
+I/O callback order and interrupt boundaries. These are correctness results, not
+physical-console performance acceptance.
+
+The merged background renderer also requires its atlas planner to resolve
+Mode-2 offsets per scanline's fine horizontal-scroll phase, not once per frame.
+The planner now preserves that dependency and the renderer's periodic fitting
+and rounding rules. Its existing 66,119,353 pixel/coverage/palette checks pass
+without changing the independent CPU oracle or accepting partial GPU frames.

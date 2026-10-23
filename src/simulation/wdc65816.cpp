@@ -9,6 +9,11 @@
 #include "starfox/state/container.hpp"
 
 #include "owned_65816_step.hpp"
+#include "wdc65816_entry.hpp"
+#if defined(STARFOX_3DS_CPU_BLOCKS)
+#include "wdc65816_collision.hpp"
+#include "wdc65816_transfer.hpp"
+#endif
 #include "owned_bus_transfer.hpp"
 #include "game_bitmap_font.hpp"
 
@@ -294,6 +299,12 @@ struct Wdc65816::Impl {
     std::uint32_t font0wid{};
     std::uint32_t font0fon{};
     std::uint32_t font0trn{};
+#if defined(STARFOX_3DS_CPU_BLOCKS)
+    std::uint32_t collision_entry{}, collision_filter{}, collision_next{}, collision_axis{};
+    std::uint32_t transfer_boot_loop{}, transfer_sboot_loop{}, transfer_init_screen{};
+    std::uint32_t transfer_restart_entry{}, transfer_background_entry{};
+    std::uint16_t transfer_upload_pointer{};
+#endif
     std::uint32_t projection_zero_loop{};
     std::uint32_t projection_return{};
     std::uint16_t projection_x{};
@@ -741,6 +752,18 @@ struct Wdc65816::Impl {
           font0wid(find_rom_symbol(symbols, "FONT0WID")),
           font0fon(find_rom_symbol(symbols, "FONT0FON")),
           font0trn(find_rom_symbol(symbols, "FONT0TRN")),
+#if defined(STARFOX_3DS_CPU_BLOCKS)
+          collision_entry(find_symbol(symbols, "INIT_STRATS_RAM_L")),
+          collision_filter(find_symbol(symbols, "CHKCOLL0") + 13U),
+          collision_next(find_symbol(symbols, "CHKCOLLNXT")),
+          collision_axis(find_symbol(symbols, "NORMALCOL")),
+          transfer_boot_loop(find_rom_symbol(symbols, "BOOT_LOOP")),
+          transfer_sboot_loop(find_rom_symbol(symbols, "SBOOT_LOOP")),
+          transfer_init_screen(find_rom_symbol(symbols, "INITSCREEN_L")),
+          transfer_restart_entry(find_rom_symbol(symbols, "RESTART_L")),
+          transfer_background_entry(find_rom_symbol(symbols, "DOBGREQ_L")),
+          transfer_upload_pointer(static_cast<std::uint16_t>(find_symbol(symbols, "ADDRESS"))),
+#endif
           projection_zero_loop(find_rom_symbol_or_aliases(
               symbols, "_BQAEPROJLX81", "_AOLLPROJLX81",
               "_AORBPROJLX81")),
@@ -3133,6 +3156,234 @@ std::size_t Wdc65816::call_near(
         service_transfer_flag, false);
 }
 
+#if defined(STARFOX_3DS_CPU_BLOCKS)
+std::size_t Wdc65816::call(
+    std::uint32_t address, Wdc65816Registers& registers,
+    std::size_t instruction_limit, bool service_transfer_flag, bool long_return) {
+    // Select once per source call. Ordinary strategies must not test the
+    // collision accelerator after every interpreted instruction.
+    if (long_return && !service_transfer_flag && impl_->collision_entry != 0U
+        && address == impl_->collision_entry) {
+        return call_impl<true, false>(address, registers, instruction_limit,
+            service_transfer_flag, long_return);
+    }
+    if (service_transfer_flag && address != 0U
+        && (address == impl_->transfer_restart_entry
+            || address == impl_->transfer_background_entry))
+        return call_impl<false, true>(address, registers, instruction_limit,
+            service_transfer_flag, long_return);
+    return call_impl<false, false>(address, registers, instruction_limit,
+        service_transfer_flag, long_return);
+}
+
+template<bool CollisionCall, bool AccelerateTransferCall>
+std::size_t Wdc65816::call_impl(
+    std::uint32_t address,
+    Wdc65816Registers& registers,
+    std::size_t instruction_limit,
+    bool service_transfer_flag,
+    bool long_return) {
+    STARFOX_3DS_FRAME_PHASE(cpu);
+    impl_->task_active = false;
+    auto& cpu = impl_->cpu;
+    detail::set_cartridge_call_registers(cpu, registers);
+    const auto return_sentinel = long_return
+        ? kReturnSentinel
+        : (address & 0xff0000U) | (kReturnSentinel & 0xffffU);
+    if (long_return) {
+        cpu.Push(static_cast<std::uint8_t>(return_sentinel >> 16U));
+    }
+    cpu.Push(static_cast<std::uint16_t>((kReturnSentinel & 0xffffU) - 1U));
+    detail::set_cartridge_program_address(cpu, address);
+
+    std::size_t instructions = 0;
+    std::array<std::uint32_t, 32> recent_program_counters{};
+    std::vector<std::uint32_t> crash_entry_trace;
+    std::uint32_t crash_entry{};
+    constexpr bool collision_call = CollisionCall;
+    detail::CollisionCodeBlock<99U> collision_filter;
+    detail::CollisionCodeBlock<18U> collision_next;
+    detail::CollisionCodeBlock<90U> collision_axis;
+    detail::TransferCodeBlock<21U> transfer_boot;
+    detail::TransferCodeBlock<32U> transfer_sboot;
+    std::array<detail::TransferCodeBlock<6U>, 2U> transfer_word_fill;
+    detail::TransferCodeBlock<12U> transfer_short_fill;
+    detail::TransferDispatch::ModeCache transfer_modes;
+    if constexpr (AccelerateTransferCall) {
+        using T = detail::TransferDispatch;
+        if (impl_->transfer_upload_pointer != 0U
+            && impl_->transfer_upload_pointer <= 253U) {
+            const auto pointer = static_cast<std::uint8_t>(impl_->transfer_upload_pointer);
+            transfer_boot.capture(cpu, impl_->transfer_boot_loop, T::boot_bytes(pointer));
+            transfer_sboot.capture(cpu, impl_->transfer_sboot_loop, T::sboot_bytes(pointer));
+        }
+        if (impl_->transfer_init_screen != 0U) {
+            std::size_t word_blocks = 0U;
+            for (std::uint32_t offset = 0U; offset < 100U; ++offset) {
+                const auto entry = impl_->transfer_init_screen + offset;
+                if (word_blocks < transfer_word_fill.size()) {
+                    auto& block = transfer_word_fill[word_blocks];
+                    block.capture(cpu, entry, T::word_fill_bytes);
+                    if (block.address != 0U) ++word_blocks;
+                }
+                if (transfer_short_fill.address == 0U)
+                    transfer_short_fill.capture(cpu, entry, T::short_index_fill_bytes);
+            }
+        }
+    }
+    if (collision_call) {
+        collision_filter.capture(impl_->wram, impl_->collision_filter,
+            detail::CollisionDispatch::filter_matches);
+        collision_next.capture(impl_->wram, impl_->collision_next,
+            detail::CollisionDispatch::next_matches);
+        collision_axis.capture(impl_->wram, impl_->collision_axis,
+            detail::CollisionDispatch::axis_matches);
+    }
+    while (cpu.program_address() != return_sentinel) {
+        // BGS.ASM's waittrans macro waits for the NMI-side transfer engine to
+        // clear TRANS_FLAG at WRAM $0000. During a bounded subroutine call no
+        // concurrent SNES NMI runs, so acknowledge those requests here when
+        // the caller is explicitly executing a transfer-side routine.
+        if (service_transfer_flag && impl_->wram[0] != 0U) {
+            impl_->service_transfer();
+        }
+        if (service_transfer_flag) impl_->service_planet_transfer();
+        const auto execution_address = cpu.program_address();
+        const auto execution_bank = static_cast<std::uint8_t>(
+            execution_address >> 16U);
+        if ((execution_address & 0xffffU) >= 0x8000U
+            && (execution_bank & 0x7fU) >= impl_->rom_bank_count) {
+            std::ostringstream message;
+            message << "65C816 subroutine at $" << std::hex << address
+                    << " escaped into unmapped ROM at $"
+                    << execution_address;
+            throw Wdc65816ExecutionError{message.str(), address,
+                execution_address, instructions};
+        }
+        if (instructions == instruction_limit) {
+            std::ostringstream message;
+            message << "65C816 subroutine at $" << std::hex << address
+                    << " exceeded the instruction limit at $"
+                    << cpu.program_address() << " (recent";
+            const auto available = std::min(instructions, recent_program_counters.size());
+            for (std::size_t age = available; age != 0; --age) {
+                const auto index = (instructions - age) % recent_program_counters.size();
+                message << " $" << recent_program_counters[index];
+            }
+            message << ')';
+            if (crash_entry != 0U) {
+                message << "; entered original crash handler at $" << crash_entry
+                        << " after";
+                for (const auto pc : crash_entry_trace) {
+                    message << " $" << pc;
+                }
+            }
+            throw Wdc65816ExecutionError{message.str(), address,
+                cpu.program_address(), instructions};
+        }
+        const auto pc = cpu.program_address();
+        if constexpr (AccelerateTransferCall) {
+            using T = detail::TransferDispatch;
+            const auto remaining = instruction_limit - instructions;
+            auto record = [&](std::uint32_t at) {
+                recent_program_counters[instructions
+                    % recent_program_counters.size()] = at;
+                ++instructions;
+            };
+            if ((pc == transfer_boot.address || pc == transfer_sboot.address)
+                && T::allowed(cpu, false, true, remaining, 13U)) {
+                if (transfer_boot.matches(cpu, pc)) {
+                    T::repeat(cpu, record, remaining, 13U, [&](auto& next) {
+                        T::upload<false>(cpu, next, transfer_modes);
+                    });
+                    continue;
+                }
+                if (transfer_sboot.matches(cpu, pc)) {
+                    T::repeat(cpu, record, remaining, 13U, [&](auto& next) {
+                        T::upload<true>(cpu, next, transfer_modes);
+                    });
+                    continue;
+                }
+            }
+            if ((pc == transfer_word_fill[0].address || pc == transfer_word_fill[1].address)
+                && T::allowed(cpu, true, true, remaining, 3U)
+                && (transfer_word_fill[0].matches(cpu, pc)
+                    || transfer_word_fill[1].matches(cpu, pc))) {
+                T::repeat(cpu, record, remaining, 3U, [&](auto& next) {
+                    T::word_fill(cpu, next);
+                });
+                continue;
+            }
+            if (pc == transfer_short_fill.address
+                && T::allowed(cpu, true, false, remaining, 6U)
+                && transfer_short_fill.matches(cpu, pc)) {
+                T::repeat(cpu, record, remaining, 6U, [&](auto& next) {
+                    T::short_index_fill(cpu, next);
+                });
+                continue;
+            }
+        }
+        // These blocks have no interrupts or transfer-side effects. A complete
+        // block fits inside the remaining budget, and debugger/trace callers
+        // retain ordinary one-instruction dispatch. Recheck captured bytes in
+        // case native code or a loaded state changed the copied RAM routines.
+        if (collision_call
+            && (pc == collision_filter.address || pc == collision_next.address
+                || pc == collision_axis.address)
+            && detail::CollisionDispatch::allowed(cpu,
+                pc == collision_next.address, instruction_limit - instructions)) {
+            auto record = [&](std::uint32_t at) {
+                recent_program_counters[instructions
+                    % recent_program_counters.size()] = at;
+                ++instructions;
+            };
+            // Direct-indexed object fields must stay in bank-zero's WRAM
+            // mirror. Invalid native pointers continue through the full bus.
+            const auto other_object = collision_filter.address != 0U
+                ? impl_->read_wram16(collision_filter.bytes[1U]) : 0U;
+            if (cpu.x() < 0x1f00U && other_object < 0x1f00U
+                && collision_filter.matches(impl_->wram, pc)) {
+                detail::CollisionDispatch::filter(cpu, record);
+                continue;
+            }
+            if (collision_next.matches(impl_->wram, pc)) {
+                detail::CollisionDispatch::next(cpu, record);
+                continue;
+            }
+            if (collision_axis.matches(impl_->wram, pc)) {
+                detail::CollisionDispatch::axis(cpu, record);
+                continue;
+            }
+        }
+        if (impl_->service_zero_projection(pc)) continue;
+        if (crash_entry == 0U
+            && (pc == 0x1fdc9dU || pc == 0x1fdcaaU || pc == 0x1fdcb7U
+                || pc == 0x1fdcc4U || pc == 0x1fdcd1U)) {
+            crash_entry = pc;
+            const auto available = std::min(instructions, recent_program_counters.size());
+            crash_entry_trace.reserve(available);
+            for (std::size_t age = available; age != 0; --age) {
+                const auto index = (instructions - age) % recent_program_counters.size();
+                crash_entry_trace.push_back(recent_program_counters[index]);
+            }
+        }
+        recent_program_counters[instructions % recent_program_counters.size()]
+            = pc;
+        detail::step_owned_65816(cpu);
+        ++instructions;
+    }
+
+    registers.a = cpu.a();
+    registers.x = cpu.x();
+    registers.y = cpu.y();
+    registers.direct = cpu.cpu_state.regs.d.u16;
+    registers.stack = cpu.cpu_state.regs.sp.u16;
+    registers.data_bank = static_cast<std::uint8_t>(cpu.cpu_state.data_segment_base >> 16U);
+    registers.status = cpu.GetStatusRegister();
+    return instructions;
+}
+
+#else
 std::size_t Wdc65816::call(
     std::uint32_t address,
     Wdc65816Registers& registers,
@@ -3233,6 +3484,8 @@ std::size_t Wdc65816::call(
     registers.status = cpu.GetStatusRegister();
     return instructions;
 }
+
+#endif
 
 Wdc65816TaskResult Wdc65816::begin_long_task(
     std::uint32_t address,

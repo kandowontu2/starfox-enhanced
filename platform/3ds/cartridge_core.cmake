@@ -57,6 +57,7 @@ target_include_directories(starfox_3ds_cartridge_core PUBLIC "${cartridge_root}/
 target_compile_features(starfox_3ds_cartridge_core PUBLIC cxx_std_20)
 target_compile_definitions(starfox_3ds_cartridge_core PUBLIC STARFOX_SCENE_SOURCE_ONLY=1)
 target_compile_definitions(starfox_3ds_cartridge_core PRIVATE STARFOX_3DS_SPC_NATIVE_BLOCKS=1)
+target_compile_definitions(starfox_3ds_cartridge_core PRIVATE STARFOX_3DS_CPU_BLOCKS=1)
 target_link_libraries(starfox_3ds_cartridge_core PUBLIC starfox_3ds_frontend
     starfox_3ds_source_geometry starfox_3ds_raster PRIVATE starfox_3ds_cpu starfox_3ds_spc)
 # Section GC is important for the old console: linked diagnostic bring-up must

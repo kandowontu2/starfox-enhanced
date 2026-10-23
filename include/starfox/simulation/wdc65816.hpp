@@ -226,6 +226,9 @@ public:
         bool service_transfer_flag = false);
 
 private:
+    template<bool CollisionCall, bool AccelerateTransferCall>
+    std::size_t call_impl(std::uint32_t address, Wdc65816Registers& registers,
+        std::size_t instruction_limit, bool service_transfer_flag, bool long_return);
     std::size_t call(
         std::uint32_t address,
         Wdc65816Registers& registers,
