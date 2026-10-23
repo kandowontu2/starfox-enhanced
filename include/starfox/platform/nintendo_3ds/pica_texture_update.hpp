@@ -27,6 +27,10 @@ public:
                 throw std::invalid_argument("3DS changed-tile upload requires independent storage");
         };
         independent(image.pixels);independent(previous);
+        if(image.indexed) {
+            independent(image.indexed->layers);
+            independent({reinterpret_cast<const std::uint8_t*>(image.indexed->palette.data()),image.indexed->palette.size_bytes()});
+        }
         const auto full=[&] {
             pack_pica_texture(image,destination);
             return PicaTextureUploadRange{0,layout.bytes,layout.width*layout.height/64};
@@ -63,6 +67,11 @@ public:
             }
         }
         if(!changed)return {};
+        // A successful indexed base is admitted only when all consumed inks
+        // and coverage match. Sparse index edits can therefore update the same
+        // exact Morton tiles; palette/coverage edits use the full upload path.
+        std::optional<detail::PicaIndexedPacker> indexed;
+        if(image.indexed)indexed.emplace(image);
         PicaTextureUploadRange result{layout.bytes,0,0};
         unsigned end=0;
         for(unsigned ty=0;ty<layout.height;ty+=8) for(unsigned tx=0;tx<layout.width;tx+=8) {
@@ -85,7 +94,9 @@ public:
                         detail::pica_store_abgr<4>(destination.data()+4*texel,pixel);
                     });
             };
-            if(image.channels==4) pack();
+            if(indexed) detail::pack_pica_tile(source_rows,source_columns,offset/4,
+                [&](unsigned texel,const std::uint8_t* pixel) {indexed->store(destination.data()+texel*4,pixel);});
+            else if(image.channels==4) pack();
             else {
                 unsigned texel=0;
                 for(const auto& xy:detail::pica_morton_coordinates)

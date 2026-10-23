@@ -12,5 +12,11 @@ class StemExecutor {
 public:
     virtual ~StemExecutor() = default;
     virtual void execute(StemTask foreground, StemTask background) = 0;
+    // Optional single background job. True borrows the task until finish();
+    // false means nothing was started and the caller keeps its joined path.
+    // The dispatch owner (never the job itself) must finish before destroying
+    // either the task or its context. Do not call finish during execute().
+    virtual bool begin(StemTask) { return false; }
+    virtual void finish() {}
 };
 } // namespace starfox::audio

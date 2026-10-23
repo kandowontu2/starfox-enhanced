@@ -333,6 +333,10 @@ public:
     // address (the renderer and runtime retain references to it).
     void swap_state(GameSimulation& other) noexcept;
     void present_frame();
+    // Ordinary gameplay/training raster updates touch WRAM/PPU, not the SPC
+    // acknowledgements consumed by tick(). Frontend/native handoffs retain a
+    // conservative audio barrier. Keep this predicate with present_frame().
+    [[nodiscard]] bool video_phase_independent_of_apu() const noexcept;
     void start_map(const std::string& symbol);
     void synchronize_apu_output_ports(
         const std::array<std::uint8_t, 4>& ports) noexcept {

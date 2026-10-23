@@ -6,8 +6,10 @@
 #include "starfox/platform/nintendo_3ds/settings_reset.hpp"
 #include "starfox/vr/game_scene.hpp"
 #include <functional>
+#include <type_traits>
 #include <unordered_set>
 
+namespace starfox::platform_3ds {class Frame3ds;}
 namespace starfox::platform::nintendo_3ds {
 struct GameAdvance {
     unsigned video_phases{},logic_ticks{},audio_blocks{};
@@ -49,6 +51,9 @@ struct GameSessionOptions {
     // Borrowed synchronous executor: complete both stems before source port
     // acknowledgement/state handoff. Platform owner must outlive the session.
     audio::StemExecutor* stem_executor{};
+    // Distinct borrowed owner for splitting the audio block already running
+    // on the frame worker. Never recursively dispatch to stem_executor.
+    audio::StemExecutor* frame_audio_stem_executor{};
 };
 // Graphics/SDK-independent native game owner. This is the actual simulation,
 // SPC driver and cartridge HUD, not the asset-free frontend diagnostic. Native
@@ -61,6 +66,15 @@ public:
     GameSession(assets::RomImage,assets::SymbolMap,PcmSink,
         std::string initial_map="BOOT",std::span<const std::uint8_t> cartridge_ram={},
         const GameSessionOptions& options={});
+    ~GameSession();
+    // Reference mono raster; lazily owned by the stable cartridge session.
+    // Its interpolation snapshots are captured at actual source ticks, not
+    // once per eye or by a separate simulation/audio timeline.
+    platform_3ds::Frame3ds& mono_renderer();
+    [[nodiscard]] bool mono_prepared() const noexcept {return mono_prepared_;}
+    // Bounded reference shape/LOD warmup while the host displays progress and
+    // services APT. Does not tick cartridge logic/audio or change preferences.
+    bool prepare_mono(const std::function<bool(unsigned,unsigned)>& progress);
     GameSession(const GameSession&)=delete;
     GameSession& operator=(const GameSession&)=delete;
     GameSession(GameSession&&)=delete; // Internal source references must stay stable.
@@ -68,8 +82,26 @@ public:
 
     // Monotonic nanoseconds from the platform clock, sampled ONCE per host
     // frame. Source raster is 60 Hz; SPC is 20 Hz even at original FX pacing.
+    // With overlap enabled, dispatch a complete packet as soon as its source
+    // phase produces it; later independent rasters can run even in this batch.
     GameAdvance advance(std::int64_t nanoseconds,input::ButtonMask held,bool focused=true,
-        std::optional<input::ButtonMask> mapped_gameplay={});
+        std::optional<input::ButtonMask> mapped_gameplay={},bool overlap_frame_audio=false);
+    // Optional presentation-only work can run on the owner thread while the
+    // most recent complete SPC block runs on the joined worker. Work
+    // must not advance/replace the session or inspect the mutable SPC owner.
+    // By default PCM/ports finish before returning. Native presentation can
+    // leave audio running across the idle interval with complete_audio=false;
+    // Gameplay/training's SPC-independent raster phases may also overlap it;
+    // advance() joins before a source tick, next packet or frontend handoff.
+    // Duplicate/rewind/focus-loss calls drain it, saves remain disabled while
+    // pending, and destruction joins before retiring borrowed storage.
+    void run_frame_work(audio::StemTask work,bool complete_audio=true);
+    template<class Work> requires std::is_invocable_v<Work&>
+    void run_frame_work(Work&& work,bool complete_audio=true) {
+        run_frame_work(audio::StemTask{const_cast<void*>(static_cast<const void*>(std::addressof(work))),[](void* context) {
+            (*static_cast<std::remove_reference_t<Work>*>(context))();
+        }},complete_audio);
+    }
     // Explicitly acknowledge the host editor; source cursor/state and partial
     // SPC cadence survive. Suppress held input before returning to Options.
     void finish_controller_remap();
@@ -108,6 +140,10 @@ private:
     void apply_native_capabilities() noexcept;
     void prepare_pace_shapes();
     void publish_raster();
+    bool start_frame_audio();
+    void join_frame_audio();
+    void finish_frame_audio();
+    struct FrameAudioWork;
     assets::RomImage rom_;
     assets::SymbolMap symbols_;
     simulation::TrigTables native_model_trig_;
@@ -132,7 +168,7 @@ private:
     std::vector<std::int16_t> mixed_;
     unsigned audio_phase_{};
     double fraction_{};
-    bool failed_{},suppress_held_{};
+    bool failed_{},suppress_held_{},deferred_audio_{},frame_work_active_{};
     std::optional<simulation::Experience> requested_experience_;
     std::optional<bool> requested_preview_;
     bool start_after_preview_{};
@@ -142,5 +178,10 @@ private:
     bool requested_hud_customization_{};
     CockpitLayout hud_layout_;
     audio::StemExecutor* stem_executor_{};
+    audio::StemExecutor* frame_audio_stem_executor_{};
+    std::unique_ptr<FrameAudioWork> frame_audio_work_;
+    // Destroy the borrowed-ROM renderer before game_, symbols_ and rom_.
+    std::unique_ptr<platform_3ds::Frame3ds> mono_renderer_;
+    bool mono_prepared_{};
 };
 } // namespace starfox::platform::nintendo_3ds

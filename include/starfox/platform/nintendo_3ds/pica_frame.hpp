@@ -2,6 +2,7 @@
 #include "starfox/platform/nintendo_3ds/pica_projection.hpp"
 #include <bit>
 #include <cstring>
+#include <memory>
 
 namespace starfox::platform::nintendo_3ds {
 inline constexpr unsigned pica_vertex_limit=32'766,pica_draw_limit=256;
@@ -63,7 +64,10 @@ inline std::array<unsigned,4> pica_screen_scissor(const PicaClip& clip) {
 // SNES CGADSUB layer bits: BG1..4, OBJ, backdrop. Zero protects host UI
 // and black window masks. A native Super FX model belongs to BG1, not OBJ.
 inline constexpr bool pica_source_layer(unsigned layer) noexcept {
-    return layer==0 || (layer<=32 && std::has_single_bit(layer));
+    // This runs for every covered PPU texel during upload validation. ARM11
+    // has no scalar population-count instruction; keep the one-hot test as
+    // ordinary integer operations, including the deliberately valid zero.
+    return layer<=32 && (layer&(layer-1U))==0;
 }
 struct PicaColourOp {
     bool subtract{},half{};
@@ -92,14 +96,135 @@ inline std::array<float,4> pica_uv_mode(bool screen_dither,bool projected_uv) {
     if(screen_dither && projected_uv) throw std::invalid_argument("Conflicting 3DS texture projectors");
     return {screen_dither || projected_uv?0.F:1.F,screen_dither?1.F:0.F,projected_uv?1.F:0.F,0};
 }
+struct PicaIndexedPixels {
+    // One palette index plus one normalized source layer per texel. A zero
+    // layer is transparent, not palette index zero (which can be opaque).
+    // Both planes use the image's byte pitch, including borrowed crops.
+    std::span<const std::uint8_t> layers;
+    // RGBA byte representations: normal inks followed by BG2-subtracted inks.
+    // Upload fuses palette expansion, opacity and Morton/ABGR packing.
+    std::span<const std::uint32_t> palette;
+};
+struct PicaImage;
+class PicaImageContentOwner;
+// Only the owning PPU producer can certify unchanged bytes. Generic borrowed
+// images retain exact byte comparisons; a copied certificate is also bound to
+// the complete colour/ownership descriptor and to the producer's lifetime.
+class PicaImageContent {
+public:
+    [[nodiscard]] bool colour_valid(const PicaImage&) const noexcept;
+    [[nodiscard]] bool layers_valid(const PicaImage&) const noexcept;
+    [[nodiscard]] bool same(const PicaImageContent&) const noexcept;
+private:
+    struct State;
+    std::shared_ptr<const State> state_;
+    std::uint64_t generation_{};
+    unsigned slot_{};
+    friend class PicaImageContentOwner;
+};
 struct PicaImage {
     std::span<const std::uint8_t> pixels;
-    unsigned width{},height{},pitch{},channels{4}; // RGB24 or RGBA8, row-major.
+    unsigned width{},height{},pitch{},channels{4}; // RGB24/RGBA8, or indexed when channels==1.
     bool repeat{}; // Source wrapping artwork must have power-of-two dimensions.
     // Optional one-byte provenance for an opaque/transparent PPU painter
     // group. Resident GPU_A8 storage, NOT six duplicated RGBA layer textures.
     std::span<const std::uint8_t> source_layers{};
     unsigned layer_pitch{};
+    std::optional<PicaIndexedPixels> indexed{};
+    PicaImageContent content{};
+};
+struct PicaImageContent::State {
+    struct Binding {
+        std::span<const std::uint8_t> pixels,layers,indexed_layers;
+        std::span<const std::uint32_t> palette;
+        unsigned width{},height{},pitch{},channels{},layer_pitch{};
+        bool repeat{},indexed{};
+        explicit Binding(const PicaImage& image) noexcept
+            :pixels(image.pixels),layers(image.source_layers),
+             indexed_layers(image.indexed?image.indexed->layers:std::span<const std::uint8_t>{}),
+             palette(image.indexed?image.indexed->palette:std::span<const std::uint32_t>{}),
+             width(image.width),height(image.height),pitch(image.pitch),channels(image.channels),
+             layer_pitch(image.layer_pitch),repeat(image.repeat),indexed(bool(image.indexed)) {}
+        Binding()=default;
+        template<class T> static bool same_span(std::span<const T> a,std::span<const T> b) noexcept {
+            return a.data()==b.data() && a.size()==b.size();
+        }
+        bool colour_equal(const Binding& other) const noexcept {
+            return width==other.width && height==other.height && pitch==other.pitch
+                && channels==other.channels && repeat==other.repeat && indexed==other.indexed
+                && same_span(pixels,other.pixels) && same_span(indexed_layers,other.indexed_layers)
+                && same_span(palette,other.palette);
+        }
+        bool layers_equal(const Binding& other) const noexcept {
+            return layer_pitch==other.layer_pitch && same_span(layers,other.layers);
+        }
+    };
+    static constexpr unsigned slots=4; // Bounded PPU raster strips, not all model textures.
+    std::array<Binding,slots> bindings{};
+    std::uint64_t generation{};
+    unsigned count{};
+    bool alive{true};
+};
+inline bool PicaImageContent::same(const PicaImageContent& other) const noexcept {
+    return state_ && state_->alive && generation_==state_->generation && slot_<state_->count
+        && state_==other.state_ && generation_==other.generation_ && slot_==other.slot_;
+}
+inline bool PicaImageContent::colour_valid(const PicaImage& image) const noexcept {
+    return same(*this) && state_->bindings[slot_].colour_equal(State::Binding(image));
+}
+inline bool PicaImageContent::layers_valid(const PicaImage& image) const noexcept {
+    return colour_valid(image) && state_->bindings[slot_].layers_equal(State::Binding(image));
+}
+class PicaRaster;
+class PicaBg2Tiles;
+class PicaImageContentOwner {
+    // Allocate before any prepare transaction, never during publication. A
+    // move transfers ownership; replacing/destroying a producer retires its
+    // certificates even if a resident texture still retains the metadata.
+    PicaImageContentOwner():state_(std::make_shared<PicaImageContent::State>()) {}
+public:
+    ~PicaImageContentOwner() {retire();}
+    PicaImageContentOwner(const PicaImageContentOwner&)=delete;
+    PicaImageContentOwner& operator=(const PicaImageContentOwner&)=delete;
+    PicaImageContentOwner(PicaImageContentOwner&& other) noexcept:state_(std::move(other.state_)) {moved();}
+    PicaImageContentOwner& operator=(PicaImageContentOwner&& other) noexcept {
+        if(this!=&other) {retire();state_=std::move(other.state_);moved();} return *this;
+    }
+private:
+    void retire() noexcept {if(state_) state_->alive=false;}
+    void moved() noexcept {
+        // Inline palettes/descriptors can change addresses during a move.
+        // Old borrowed frames must not keep a live proof of those addresses.
+        if(!state_)return;
+        if(state_->generation==std::numeric_limits<std::uint64_t>::max()) {retire();state_.reset();}
+        else {++state_->generation;state_->count=0;}
+    }
+    void publish(std::span<PicaImage> images,bool changed) noexcept {
+        // A moved-from owner or impossible generation overflow simply loses
+        // the optimization. The byte-verified path remains fully functional.
+        if(!state_ || images.size()>PicaImageContent::State::slots) return;
+        changed=changed || state_->count!=images.size();
+        for(unsigned i=0;i<images.size();++i) {
+            const PicaImageContent::State::Binding binding(images[i]);
+            changed=changed || !state_->bindings[i].colour_equal(binding)
+                || !state_->bindings[i].layers_equal(binding);
+        }
+        if(changed) {
+            if(state_->generation==std::numeric_limits<std::uint64_t>::max()) {
+                retire();state_.reset();return;
+            }
+            ++state_->generation;
+        }
+        state_->count=unsigned(images.size());
+        for(unsigned i=0;i<images.size();++i) {
+            state_->bindings[i]=PicaImageContent::State::Binding(images[i]);
+            images[i].content.state_=state_;images[i].content.generation_=state_->generation;
+            images[i].content.slot_=i;
+        }
+    }
+    std::shared_ptr<PicaImageContent::State> state_;
+    friend class PicaRaster;
+    friend class PicaBg2Tiles;
 };
 struct PicaTextureLayout {
     unsigned width{},height{},bytes{};
@@ -107,15 +232,22 @@ struct PicaTextureLayout {
 };
 inline PicaTextureLayout pica_texture_layout(PicaImage image) {
     if(!image.width || image.width>1024 || !image.height || image.height>1024
-        || (image.channels!=3 && image.channels!=4) || image.pitch<image.width*image.channels
+        || (image.channels!=3 && image.channels!=4 && image.channels!=1) || image.pitch<image.width*image.channels
         || image.pitch>16384 || !image.pixels.data()
         || image.pixels.size()<std::size_t(image.pitch)*(image.height-1)+image.width*image.channels
-        || (!image.source_layers.empty() && (image.channels!=4 || image.layer_pitch<image.width
+        || (bool(image.indexed)!=(image.channels==1))
+        || (image.indexed && (image.indexed->palette.size()!=512 || !image.indexed->palette.data()
+            || !image.indexed->layers.data()
+            || image.indexed->layers.size()<std::size_t(image.pitch)*(image.height-1)+image.width))
+        || (!image.source_layers.empty() && ((image.channels!=4 && image.channels!=1) || image.layer_pitch<image.width
             || image.layer_pitch>16384 || !image.source_layers.data()
             || image.source_layers.size()<std::size_t(image.layer_pitch)*(image.height-1)+image.width))
         || (image.source_layers.empty() && image.layer_pitch!=0)
         || (image.repeat && (!std::has_single_bit(image.width) || !std::has_single_bit(image.height))))
         throw std::invalid_argument("Invalid 3DS GPU texture");
+    if(image.indexed) for(const auto word:image.indexed->palette)
+        if(std::bit_cast<std::array<std::uint8_t,4>>(word)[3]!=255)
+            throw std::invalid_argument("Invalid 3DS indexed palette opacity");
     const auto w=std::max(8U,std::bit_ceil(image.width)),h=std::max(8U,std::bit_ceil(image.height));
     return {w,h,w*h*4,{float(image.width)/w,float(image.height)/h}};
 }
@@ -179,6 +311,24 @@ inline void pack_pica_tile(const std::array<const std::uint8_t*,8>& rows,
     const std::array<unsigned,8>& columns,unsigned first,Store store) {
     pack_pica_tile(rows,columns,first,store,std::make_index_sequence<64>{});
 }
+class PicaIndexedPacker {
+public:
+    explicit PicaIndexedPacker(PicaImage source):source_(source) {
+        for(unsigned i=0;i<palette_.size();++i) {
+            const auto word=source.indexed->palette[i];
+            palette_[i]=(word<<24)|((word<<8)&0x00ff0000U)|((word>>8)&0x0000ff00U)|(word>>24);
+        }
+    }
+    void store(std::uint8_t* destination,const std::uint8_t* index) const {
+        const auto layer=source_.indexed->layers[std::size_t(index-source_.pixels.data())];
+        if(!pica_source_layer(layer)) throw std::invalid_argument("Invalid 3DS indexed ownership");
+        const auto word=layer?palette_[(layer==2?256:0)+*index]:0U;
+        std::memcpy(destination,&word,sizeof(word));
+    }
+private:
+    PicaImage source_;
+    std::array<std::uint32_t,512> palette_{};
+};
 template<bool ExpandTile=false,class Store>
 inline void pack_pica_plane(PicaTextureLayout layout,unsigned width,unsigned height,
     unsigned pitch,unsigned channels,bool repeat,const std::uint8_t* source,Store store) {
@@ -214,6 +364,21 @@ inline void pack_pica_texture(PicaImage source,std::span<std::uint8_t> destinati
     const auto src=reinterpret_cast<std::uintptr_t>(source.pixels.data()),dst=reinterpret_cast<std::uintptr_t>(destination.data());
     if((dst>=src && dst-src<source.pixels.size()) || (src>=dst && src-dst<destination.size()))
         throw std::invalid_argument("3DS texture upload requires independent storage");
+    if(source.indexed) {
+        const auto cover=reinterpret_cast<std::uintptr_t>(source.indexed->layers.data());
+        const auto palette=reinterpret_cast<std::uintptr_t>(source.indexed->palette.data());
+        if((dst>=cover && dst-cover<source.indexed->layers.size())
+            || (cover>=dst && cover-dst<destination.size())
+            || (dst>=palette && dst-palette<source.indexed->palette.size_bytes())
+            || (palette>=dst && palette-dst<destination.size()))
+            throw std::invalid_argument("3DS indexed upload requires independent storage");
+        const detail::PicaIndexedPacker indexed(source);
+        detail::pack_pica_plane<true>(layout,source.width,source.height,source.pitch,1,source.repeat,
+            source.pixels.data(),[&](unsigned texel,const std::uint8_t* index) {
+                indexed.store(destination.data()+texel*4,index);
+            });
+        return;
+    }
     const auto pack=[&]<unsigned Channels>() {
         detail::pack_pica_plane<Channels==4>(layout,source.width,source.height,source.pitch,Channels,source.repeat,
             source.pixels.data(),[&](unsigned texel,const std::uint8_t* pixel) {
@@ -235,7 +400,11 @@ inline unsigned validate_pica_layers(PicaImage source) {
     unsigned classes=0;
     for(unsigned y=0;y<source.height;++y) for(unsigned x=0;x<source.width;++x) {
         const unsigned layer=source.source_layers[std::size_t(y)*source.layer_pitch+x];
-        const unsigned alpha=source.pixels[std::size_t(y)*source.pitch+x*4+3];
+        const unsigned alpha=source.indexed
+            ?(source.indexed->layers[std::size_t(y)*source.pitch+x]?255U:0U)
+            :source.pixels[std::size_t(y)*source.pitch+x*4+3];
+        if(source.indexed && layer!=source.indexed->layers[std::size_t(y)*source.pitch+x])
+            throw std::invalid_argument("Conflicting 3DS indexed/source ownership");
         if(!pica_source_layer(layer) || (layer==0?alpha!=0:alpha!=255))
             throw std::invalid_argument("Invalid/ambiguous 3DS PPU source ownership");
         classes|=layer;
@@ -304,7 +473,7 @@ inline void validate_pica_group(const PicaFrame& frame,unsigned reserved_texture
     if(frame.plan.eye_count!=(frame.plan.stereo?2U:1U))
         throw std::invalid_argument("Incomplete 3DS eye plan");
     unsigned bytes=reserved_texture_bytes;
-    for(auto texture:frame.textures) {
+    for(const auto& texture:frame.textures) {
         const auto size=pica_resident_texture_bytes(texture);
         if(size>pica_texture_budget-bytes) throw std::invalid_argument("3DS GPU texture budget exceeded: "
             +std::to_string(bytes)+" + "+std::to_string(size)+" > "+std::to_string(pica_texture_budget));

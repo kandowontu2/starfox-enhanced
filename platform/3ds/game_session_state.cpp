@@ -4,7 +4,7 @@
 
 namespace starfox::platform::nintendo_3ds {
 bool GameSession::state_available() const noexcept {
-    return !failed_ && !game_.runtime_options_open() && !requested_experience_ && !requested_preview_
+    return !failed_ && !deferred_audio_ && !frame_work_active_ && !game_.runtime_options_open() && !requested_experience_ && !requested_preview_
         && !requested_settings_reset_ && !requested_controller_remap_ && !requested_hud_customization_ && !start_after_preview_;
 }
 std::vector<std::uint8_t> GameSession::save_state() const {
@@ -19,6 +19,7 @@ std::unique_ptr<GameSession> GameSession::restored_state(std::span<const std::ui
     if(!state_available()) throw std::runtime_error("Close runtime options or finish cartridge handoff before loading a state");
     auto data=decode_game_state(bytes,assets::crc32(rom_.bytes()));
     GameSessionOptions options;options.preferences=preferences();options.stem_executor=stem_executor_;
+    options.frame_audio_stem_executor=frame_audio_stem_executor_;
     auto next=std::make_unique<GameSession>(rom_,symbols_,sink_,"BOOT",std::span<const std::uint8_t>{},options);
     // Restore from the candidate, NOT this->game_: GameSimulation retains ROM
     // and symbol pointers from the caller. Those must survive retiring *this.
@@ -41,6 +42,7 @@ std::unique_ptr<GameSession> GameSession::restored_state(std::span<const std::ui
 bool GameSession::toggle_runtime_options() {
     if(failed_ || requested_experience_ || requested_preview_ || requested_settings_reset_ || requested_controller_remap_ || requested_hud_customization_)
         throw std::runtime_error("Cannot open native options during a cartridge handoff");
+    finish_frame_audio();
     if(!game_.toggle_runtime_options()) return false;
     input_.reset();clock_.reset();previous_time_.reset();fraction_=0;suppress_held_=true;reset_hold_.cancel();
     try {history_.capture();history_.reset_interpolation();publish_raster();}

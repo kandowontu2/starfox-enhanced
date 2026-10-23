@@ -198,27 +198,30 @@ PicaFrame GameLayers::prepare_groups(const GamePresentation& frame,std::span<con
     working.clear();working.reserve(owners.size());
     for(unsigned i=0;i<owners.size();++i) {
         auto& owner=*owners[i];const auto& batch=batches[i];
-        const auto guard=batch.landscape_receiver?source_landscape_guard(frame):batch.water_receiver?source_water_guard(frame)
+        const bool finite_landscape=batch.landscape_receiver && frame.plan.stereo;
+        const auto guard=finite_landscape?source_landscape_guard(frame):batch.water_receiver?source_water_guard(frame)
             :batch.corridor_receiver?source_corridor_guard(frame):pica_raster_base_guard;
         // Reserve complete raster fallbacks for later groups, including all
         // three water regions. Never spend another group's finite-quad budget.
         const bool corridors=std::any_of(batches.begin(),batches.end(),[](const auto& group) {return group.corridor_receiver;});
         unsigned reserve=0;
         for(unsigned later=i+1;later<batches.size();++later)
-            reserve+=pica_raster_max_strips*(batches[later].water_receiver?3*12:batches[later].landscape_receiver?18:6);
+            reserve+=pica_raster_max_strips*(batches[later].water_receiver?3*12
+                :batches[later].landscape_receiver && frame.plan.stereo?18:6);
         const unsigned budget=!corridors && tile_vertex_budget>reserve?tile_vertex_budget-reserve:0;
         const auto tiles=budget?owner.tiles.prepare(frame.raster->ppu,batch,frame.plan,frame.raster->brightness,
-            frame.current->background_colour_subtract,budget,guard,batch.water_receiver || batch.landscape_receiver):std::optional<PicaFrame>{};
+            frame.current->background_colour_subtract,budget,guard,batch.water_receiver || batch.landscape_receiver,
+            indexed_mono_):std::optional<PicaFrame>{};
         const auto ready=tiles && batch.water_receiver?owner.receiver.prepare_water_tiles(frame,*tiles,owner.tiles.coverage_guard(),budget)
-            :tiles && batch.landscape_receiver?owner.receiver.prepare_tiles(frame,*tiles,owner.tiles.coverage_guard(),budget):tiles;
+            :tiles && finite_landscape?owner.receiver.prepare_tiles(frame,*tiles,owner.tiles.coverage_guard(),budget):tiles;
         PicaFrame prepared;
         if(ready) {
             const auto work=owner.raster.work();retired.decodes+=work.decodes;retired.colour_updates+=work.colour_updates;
             owner.raster=PicaRaster{};prepared=*ready;
         } else prepared=owner.raster.prepare(frame.raster->ppu,batch,frame.plan,frame.raster->brightness,
-            frame.current->background_colour_subtract,guard,true);
+            frame.current->background_colour_subtract,guard,true,indexed_mono_);
         tile_vertex_budget=prepared.vertices.size()<tile_vertex_budget?tile_vertex_budget-unsigned(prepared.vertices.size()):0;
-        if(batch.landscape_receiver && !ready) prepared=owner.receiver.prepare(frame,prepared,owner.raster.coverage_guard());
+        if(finite_landscape && !ready) prepared=owner.receiver.prepare(frame,prepared,owner.raster.coverage_guard());
         else if(batch.water_receiver && !ready) prepared=owner.receiver.prepare_water(frame,prepared,owner.raster.coverage_guard());
         else if(batch.corridor_receiver) prepared=owner.receiver.prepare_corridor(frame,prepared,owner.raster.coverage_guard());
         else if(batch.space==PicaSpace::scenery) {
@@ -242,7 +245,8 @@ GameLayerFrames GameLayers::prepare(const GamePresentation& frame,unsigned tile_
     if(policy.after_model_groups.empty()) {
         for(const auto& group:foreground_groups_) retire_after(group->raster.work());
         foreground_groups_.clear();
-        after=after_.prepare(frame.raster->ppu,policy.after_models,frame.plan,brightness,frame.current->background_colour_subtract);
+        after=after_.prepare(frame.raster->ppu,policy.after_models,frame.plan,brightness,frame.current->background_colour_subtract,
+            pica_raster_base_guard,false,indexed_mono_ && !policy.solid_frontend_margins);
     } else {
         retire_after(after_.work());after_=PicaRaster{};
         after=prepare_groups(frame,policy.after_model_groups,foreground_groups_,working_foreground_,foreground_,retired_after_work_);
@@ -250,32 +254,48 @@ GameLayerFrames GameLayers::prepare(const GamePresentation& frame,unsigned tile_
     const auto retire=[&](PpuRasterWork part) {
         retired_before_work_.decodes+=part.decodes;retired_before_work_.colour_updates+=part.colour_updates;
     };
+    const bool landscape=native_landscape_scene(frame),finite_landscape=landscape && frame.plan.stereo;
     PicaFrame before;bool tile_terrain=false;
     if(policy.before_model_groups.empty()) {
         for(const auto& group:panorama_groups_) {retire(group->raster.work());retire(group->tiles.work());}
         panorama_groups_.clear();
         unsigned guard=pica_raster_base_guard;
-        if(native_landscape_scene(frame)) guard=source_landscape_guard(frame);
+        if(finite_landscape) guard=source_landscape_guard(frame);
         const unsigned budget=after.vertices.size()<tile_vertex_budget
             ?tile_vertex_budget-unsigned(after.vertices.size()):0;
         const auto tiles=budget?before_tiles_.prepare(frame.raster->ppu,policy.before_models,frame.plan,brightness,
-            frame.current->background_colour_subtract,budget,guard,native_landscape_scene(frame)):std::optional<PicaFrame>{};
+            frame.current->background_colour_subtract,budget,guard,landscape,indexed_mono_):std::optional<PicaFrame>{};
         auto ready=tiles;
-        if(tiles && native_landscape_scene(frame)) {
+        if(tiles && finite_landscape) {
             ready=scenery_.prepare_tiles(frame,*tiles,before_tiles_.coverage_guard(),budget);
             tile_terrain=bool(ready);
         }
         if(ready) {retire(before_.work());before_=PicaRaster{};before=*ready;}
         else before=before_.prepare(frame.raster->ppu,policy.before_models,frame.plan,brightness,
-            frame.current->background_colour_subtract,guard);
+            frame.current->background_colour_subtract,guard,false,indexed_mono_ && !policy.solid_frontend_margins);
     } else {
         retire(before_.work());before_=PicaRaster{};
         const unsigned budget=after.vertices.size()<tile_vertex_budget?tile_vertex_budget-unsigned(after.vertices.size()):0;
         before=prepare_groups(frame,policy.before_model_groups,panorama_groups_,working_groups_,panorama_,retired_before_work_,budget);
     }
     GameLayerFrames result{before,after,backdrop(frame.raster->ppu->cgram[0],brightness)};
-    if(native_landscape_scene(frame) && policy.before_model_groups.empty() && !tile_terrain)
-        result.before_models=scenery_.prepare(frame,result.before_models);
+    if(landscape && policy.before_model_groups.empty()) {
+        if(finite_landscape && !tile_terrain) result.before_models=scenery_.prepare(frame,result.before_models);
+        else if(!finite_landscape) {
+            // At slider zero, the finite receiver is exactly the already
+            // camera-projected source BG2 image. Do not build, validate or draw
+            // that duplicate mesh. Keep original UVs, HDMA, alpha, source order
+            // and LCD edge clamping. The isolated source layer needs no A8 mask.
+            auto& group=result.before_models;
+            if(group.textures.size()>mono_landscape_images_.size())
+                throw std::logic_error("Too many mono 3DS landscape textures");
+            std::copy(group.textures.begin(),group.textures.end(),mono_landscape_images_.begin());
+            for(unsigned i=0;i<group.textures.size();++i) {
+                mono_landscape_images_[i].source_layers={};mono_landscape_images_[i].layer_pitch=0;
+            }
+            group.textures=std::span<const PicaImage>(mono_landscape_images_).first(group.textures.size());
+        }
+    }
     if(policy.solid_frontend_margins) result.clear=right_margin(result);
     return result;
 }

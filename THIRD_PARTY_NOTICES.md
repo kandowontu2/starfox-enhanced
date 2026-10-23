@@ -1,5 +1,15 @@
 # Third-party notices
 
+## New Nintendo 3DS reference mono renderer
+
+The mono frame/display path and supporting cache optimizations adapt
+[Esteban PDN's Starwing 3DS](https://github.com/EstebanPdN/starwing-3ds), pinned
+at `01bf4925951515244cdb03d58ad722417919d6ba`, with author permission recorded
+in `platform/3ds/UPSTREAM-STARWING.md`. No cartridge assets are included.
+Citro2D v1.7.0 is fetched from official devkitPro sources and altered to flush
+vertex/index data and split commands explicitly. Its original zlib-style
+notice is retained in `platform/3ds/reference/CITRO2D-LICENSE.txt`.
+
 ## AMD FidelityFX Super Resolution 1
 
 The FSR1 EASU/RCAS implementation in `third_party/fsr1` is from

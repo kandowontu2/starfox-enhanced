@@ -1,5 +1,6 @@
 #include "starfox/platform/nintendo_3ds/pica_raster.hpp"
 #include "starfox/platform/nintendo_3ds/frame_profile.hpp"
+#include "starfox/platform/nintendo_3ds/ppu_tile_dependencies.hpp"
 #include <bit>
 #include <cstring>
 #include <type_traits>
@@ -18,20 +19,11 @@ unsigned darkest(const std::array<std::uint16_t,256>& palette) {
 }
 bool same_vram_range(const simulation::SnesPpuState& a,const simulation::SnesPpuState& b,
     unsigned first,unsigned count) noexcept {
-    // Word-addressed maps/characters wrap independently at 64 KiB. Compare
-    // actual bytes, not a hash or an assumed non-wrapping allocation.
-    first&=65535U;
-    const auto head=std::min(count,65536U-first);
-    return std::memcmp(a.vram.data()+first,b.vram.data()+first,head)==0
-        && std::memcmp(a.vram.data(),b.vram.data(),count-head)==0;
+    return same_ppu_vram_range(a,b,first,count);
 }
 bool same_background_vram(const simulation::SnesPpuState& a,const simulation::SnesPpuState& b,
-    unsigned characters,unsigned map,unsigned size,unsigned depth) noexcept {
-    const unsigned pages=((size&1U)?2U:1U)*((size&2U)?2U:1U);
-    // All 1024 characters, including 16x16 sub-character wrap, and every
-    // configured map page remain dependencies. Mode-3 BG1 covers all VRAM.
-    return same_vram_range(a,b,characters*2U,1024U*depth*8U)
-        && same_vram_range(a,b,map*2U,pages*2048U);
+    unsigned characters,unsigned map,unsigned size,unsigned depth,bool large) noexcept {
+    return same_background_tiles(a,b,characters,map,size,depth,large);
 }
 bool same_source(const simulation::SnesPpuState& a,const simulation::SnesPpuState& b,const PpuPass& pass) {
     // Palette-only fades recolour cached indices. OAM activity must not force
@@ -58,7 +50,7 @@ bool same_source(const simulation::SnesPpuState& a,const simulation::SnesPpuStat
             && a.bg1_tile_size_16==b.bg1_tile_size_16 && a.bg1_scroll_x==b.bg1_scroll_x && a.bg1_scroll_y==b.bg1_scroll_y
             && a.tunnel_scene==b.tunnel_scene
             && same_background_vram(a,b,a.bg1_character_base,a.bg1_screen_base,a.bg1_screen_size,
-                a.background_mode==3?8U:4U);
+                a.background_mode==3?8U:4U,a.bg1_tile_size_16);
     case PpuLayer::bg2:
         return (a.main_screen&2)==(b.main_screen&2) && a.bg2_character_base==b.bg2_character_base
             && a.bg2_screen_base==b.bg2_screen_base && a.bg2_screen_size==b.bg2_screen_size
@@ -67,14 +59,14 @@ bool same_source(const simulation::SnesPpuState& a,const simulation::SnesPpuStat
             && a.bg2_vertical_offsets_enabled==b.bg2_vertical_offsets_enabled && a.bg2_scanline_scroll_enabled==b.bg2_scanline_scroll_enabled
             && a.bg2_scanline_scroll_y==b.bg2_scanline_scroll_y && a.tunnel_scene==b.tunnel_scene
             && (a.cgram==b.cgram || darkest(a.cgram)==darkest(b.cgram))
-            && same_background_vram(a,b,a.bg2_character_base,a.bg2_screen_base,a.bg2_screen_size,4U)
+            && same_background_vram(a,b,a.bg2_character_base,a.bg2_screen_base,a.bg2_screen_size,4U,a.bg2_tile_size_16)
             && (a.background_mode!=2 || !a.bg2_vertical_offsets_enabled
                 || same_vram_range(a,b,0x5f40U,64U));
     case PpuLayer::bg3:
         return (a.main_screen&4)==(b.main_screen&4) && a.bg3_character_base==b.bg3_character_base
             && a.bg3_screen_base==b.bg3_screen_base && a.bg3_screen_size==b.bg3_screen_size
             && a.bg3_tile_size_16==b.bg3_tile_size_16 && a.bg3_scroll_x==b.bg3_scroll_x && a.bg3_scroll_y==b.bg3_scroll_y
-            && same_background_vram(a,b,a.bg3_character_base,a.bg3_screen_base,a.bg3_screen_size,2U);
+            && same_background_vram(a,b,a.bg3_character_base,a.bg3_screen_base,a.bg3_screen_size,2U,a.bg3_tile_size_16);
     default: return false;
     }
 }
@@ -126,9 +118,13 @@ void validate(const simulation::SnesPpuState& ppu,const PpuBatch& batch,const Fr
 }
 }
 PicaFrame PicaRaster::prepare(std::shared_ptr<const simulation::SnesPpuState> source,const PpuBatch& batch,
-    const FramePlan& plan,unsigned brightness,unsigned subtract,unsigned receiver_guard,bool trim_transparent) {
+    const FramePlan& plan,unsigned brightness,unsigned subtract,unsigned receiver_guard,bool trim_transparent,
+    bool indexed_upload) {
     if(!source) throw std::invalid_argument("Missing immutable 3DS PPU snapshot");
     validate(*source,batch,plan,brightness,subtract);
+    // Finite receivers still sample the reference RGBA image on the CPU.
+    // Mono flat/infinity painter groups can fuse indexed expansion at upload.
+    indexed_upload=indexed_upload && !plan.stereo && !batch.water_receiver && !batch.corridor_receiver;
     const auto guard=batch.space==PicaSpace::scenery?std::max(pica_scenery_guard(plan),receiver_guard):pica_raster_base_guard;
     if(guard>(pica_raster_max_width-top_width)/2)
         throw std::invalid_argument("3DS source raster exceeds horizontal storage");
@@ -194,14 +190,22 @@ PicaFrame PicaRaster::prepare(std::shared_ptr<const simulation::SnesPpuState> so
         next->end_write_coverage();
     }
     const auto& bitmap=decode?*next:*indexed_;
-    const bool recolour=decode || palette_!=source->cgram || brightness_!=brightness || subtract_!=subtract;
+    const bool recolour=decode || palette_!=source->cgram || brightness_!=brightness || subtract_!=subtract
+        || indexed_upload!=indexed_upload_;
     auto pixels=std::vector<std::uint32_t>{};auto layers=std::vector<std::uint8_t>{};bool visible=visible_;
+    auto upload_indices=std::vector<std::uint8_t>{};
+    std::array<std::uint32_t,512> upload_palette{};
     auto occupied=occupied_;
     if(decode) for(auto& bounds:occupied) bounds={pica_raster_strip_width,screen_height,0,0};
     if(decode) layers.assign(std::size_t(width)*screen_height,0);
     if(recolour) {
         STARFOX_3DS_FRAME_PHASE(bg_colour);
-        pixels.assign(std::size_t(width)*screen_height,0);visible=false;
+        const bool expand=!indexed_upload || decode || !indexed_upload_;
+        if(expand) {
+            if(indexed_upload) upload_indices.assign(std::size_t(width)*screen_height,0);
+            else pixels.assign(std::size_t(width)*screen_height,0);
+            visible=false;
+        }
         std::array<std::uint32_t,256> normal{},background{};
         const auto packed=[](std::array<std::uint8_t,3> rgb) {
             // bit_cast preserves RGBA byte order on either endian host; the
@@ -212,7 +216,9 @@ PicaFrame PicaRaster::prepare(std::shared_ptr<const simulation::SnesPpuState> so
             normal[ink]=packed(colour(source->cgram[ink],brightness,0));
             background[ink]=packed(colour(source->cgram[ink],brightness,subtract));
         }
-        const auto convert=[&]<bool Decode>() {
+        std::copy(normal.begin(),normal.end(),upload_palette.begin());
+        std::copy(background.begin(),background.end(),upload_palette.begin()+256);
+        const auto convert=[&]<bool Decode,bool Indexed>() {
             const auto indices=bitmap.pixels().data();
             const auto coverage=bitmap.write_coverage().data();
             const auto tags=bitmap.layer_tags().data();
@@ -241,7 +247,9 @@ PicaFrame PicaRaster::prepare(std::shared_ptr<const simulation::SnesPpuState> so
                             layer=layers_[out+x];if(!layer) continue;
                         }
                         const auto ink=indices[in+x];
-                        pixels[out+x]=(layer==2?background:normal)[ink];visible=true;
+                        if constexpr(Indexed) upload_indices[out+x]=ink;
+                        else pixels[out+x]=(layer==2?background:normal)[ink];
+                        visible=true;
                     }
                     if constexpr(Decode) if(occupied_first!=end) {
                         auto& bounds=occupied[page];
@@ -251,14 +259,30 @@ PicaFrame PicaRaster::prepare(std::shared_ptr<const simulation::SnesPpuState> so
                 }
             }
         };
-        if(decode) convert.template operator()<true>();
-        else convert.template operator()<false>();
+        if(expand) {
+            if(indexed_upload) {
+                if(decode) convert.template operator()<true,true>();
+                else convert.template operator()<false,true>();
+            } else {
+                if(decode) convert.template operator()<true,false>();
+                else convert.template operator()<false,false>();
+            }
+        }
     }
     // All allocating work precedes publication. Shader/native upload errors
     // are the presenter's responsibility; no failed source decode is published.
     auto next_batch=batch;
     if(decode) {indexed_=std::move(next);layers_=std::move(layers);occupied_=occupied;++work_.decodes;}
-    if(recolour) {rgba_=std::move(pixels);++work_.colour_updates;}
+    if(recolour) {
+        if(indexed_upload) {
+            if(decode || !indexed_upload_) upload_indices_=std::move(upload_indices);
+            upload_palette_=upload_palette;
+            std::vector<std::uint32_t>().swap(rgba_);
+        } else {
+            rgba_=std::move(pixels);std::vector<std::uint8_t>().swap(upload_indices_);
+        }
+        indexed_upload_=indexed_upload;++work_.colour_updates;
+    }
     batch_=std::move(next_batch);source_=std::move(source);palette_=source_->cgram;
     brightness_=brightness;subtract_=subtract;visible_=visible;
     const float left=(float(top_width)-width)*.5F;
@@ -275,8 +299,11 @@ PicaFrame PicaRaster::prepare(std::shared_ptr<const simulation::SnesPpuState> so
         const auto offset=std::size_t(bounds[1])*width+start+bounds[0];
         // Reading an object's representation through unsigned-byte storage is
         // legal; its backing allocation remains the correctly typed word vector.
-        images_[strips]={std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(rgba_.data()),rgba_.size()*4).subspan(offset*4),size,height,width*4,4,false,
-            std::span<const std::uint8_t>(layers_).subspan(offset),width};
+        const auto ownership=std::span<const std::uint8_t>(layers_).subspan(offset);
+        if(indexed_upload_) images_[strips]={std::span<const std::uint8_t>(upload_indices_).subspan(offset),
+            size,height,width,1,false,ownership,width,PicaIndexedPixels{ownership,upload_palette_}};
+        else images_[strips]={std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(rgba_.data()),rgba_.size()*4).subspan(offset*4),size,height,width*4,4,false,
+            ownership,width};
         ++strips;
     };
     if(batch.visible_scenery_only && width>top_width+pica_raster_base_guard*2) {
@@ -331,6 +358,8 @@ PicaFrame PicaRaster::prepare(std::shared_ptr<const simulation::SnesPpuState> so
         const auto layer=batch.passes.front().layer;
         for(unsigned i=0;i<strips;++i) draws_[i].source_layer=layer==PpuLayer::bg1?1:layer==PpuLayer::bg2?2:4;
     }
+    static_assert(pica_raster_max_strips<=4);
+    content_.publish(std::span(images_).first(visible_?strips:0),recolour);
     return {plan,visible_?std::span<const PicaVertex>(vertices_).first(strips*6):std::span<const PicaVertex>{},
         visible_?std::span<const PicaDraw>(draws_).first(strips):std::span<const PicaDraw>{},
         visible_?std::span<const PicaImage>(images_).first(strips):std::span<const PicaImage>{}};

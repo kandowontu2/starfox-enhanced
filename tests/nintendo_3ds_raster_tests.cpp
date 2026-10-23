@@ -3,6 +3,10 @@
 #include "starfox/platform/nintendo_3ds/pica_window.hpp"
 #include "starfox/platform/nintendo_3ds/pica_colour.hpp"
 #include "starfox/platform/nintendo_3ds/game_effects.hpp"
+#include "starfox/platform/nintendo_3ds/pica_residency.hpp"
+#include "starfox/platform/nintendo_3ds/pica_texture_update.hpp"
+#include <atomic>
+#include <chrono>
 #include <iostream>
 
 namespace {
@@ -280,6 +284,108 @@ void same_raster(const PicaFrame& cached,const PicaFrame& fresh) {
             "Cache retained stale source coverage/ownership against a fresh decode");
     }
 }
+void indexed_raster_pipeline() {
+    for(unsigned mode:{1U,2U,3U}) for(bool scenery:{false,true}) {
+        auto ppu=source();ppu->background_mode=std::uint8_t(mode);
+        PpuBatch batch;batch.expand_horizontal=true;batch.space=scenery?PicaSpace::scenery:PicaSpace::screen;
+        batch.passes.push_back({PpuLayer::bg2,-1});
+        if(!scenery) {batch.passes.push_back({PpuLayer::objects,0});batch.passes.push_back({PpuLayer::bg3,-1});}
+        PicaRaster reference,compact;
+        for(unsigned phase=0;phase<8;++phase) {
+            ppu=std::make_shared<simulation::SnesPpuState>(*ppu);
+            if(phase==1) ppu->cgram[17]=0x7fff;
+            if(phase==2) ppu->cgram[129]=0;
+            if(phase==3) ppu->bg2_scroll_x=17;
+            if(phase==4) ppu->vram[0x8000+2]^=0xf0;
+            if(phase==5) ppu->oam[0]=31;
+            const unsigned brightness=phase==2?0:phase==6?7:15,subtract=phase%3;
+            const auto plan=plan_frame(phase==6?.5F:0.F,true,ScreenUse::world);
+            const auto a=reference.prepare(ppu,batch,plan,brightness,subtract,pica_raster_base_guard,true);
+            const auto b=compact.prepare(ppu,batch,plan,brightness,subtract,pica_raster_base_guard,true,true);
+            require(a.vertices.size()==b.vertices.size() && a.draws.size()==b.draws.size()
+                && a.textures.size()==b.textures.size() && std::equal(a.vertices.begin(),a.vertices.end(),b.vertices.begin()),
+                "Indexed raster changed painter geometry, crop or source coverage");
+            for(unsigned i=0;i<a.textures.size();++i) {
+                require(b.textures[i].channels==(plan.stereo?4U:1U),"Indexed mono/stereo format transition failed");
+                const auto la=pica_texture_layout(a.textures[i]),lb=pica_texture_layout(b.textures[i]);
+                require(la.width==lb.width && la.height==lb.height,"Indexed raster changed resident allocation");
+                std::vector<std::uint8_t> pa(la.bytes),pb(lb.bytes),ma(la.width*la.height),mb(lb.width*lb.height);
+                pack_pica_texture(a.textures[i],pa);pack_pica_texture(b.textures[i],pb);
+                pack_pica_layers(a.textures[i],ma);pack_pica_layers(b.textures[i],mb);
+                require(pa==pb && ma==mb,"Indexed raster changed expanded RGBA or A8 ownership bytes");
+            }
+            const auto work=compact.work();
+            compact.prepare(ppu,batch,plan,brightness,subtract,pica_raster_base_guard,true,true);
+            require(compact.work().decodes==work.decodes && compact.work().colour_updates==work.colour_updates,
+                "Held indexed raster defeated source caching");
+        }
+    }
+    auto ppu=source();ppu->background_mode=2;
+    PpuBatch batch;batch.expand_horizontal=true;batch.passes.push_back({PpuLayer::bg2,-1});
+    PicaRaster compact;const auto plan=plan_frame(0,true,ScreenUse::world);
+    const auto first=compact.prepare(ppu,batch,plan,15,0,pica_raster_base_guard,false,true);
+    const auto* inks=first.textures[0].pixels.data();const auto before=compact.work();
+    const std::vector<std::uint8_t> preserved(first.textures[0].pixels.begin(),first.textures[0].pixels.end());
+    ppu=std::make_shared<simulation::SnesPpuState>(*ppu);ppu->cgram[17]=0x1234;
+    const auto fade=compact.prepare(ppu,batch,plan,8,3,pica_raster_base_guard,false,true);
+    require(fade.textures[0].pixels.data()==inks && std::equal(preserved.begin(),preserved.end(),fade.textures[0].pixels.begin())
+        && compact.work().decodes==before.decodes && compact.work().colour_updates==before.colour_updates+1,
+        "Indexed palette fade rebuilt or rewrote the complete source image");
+}
+void indexed_pipeline_benchmark() {
+    using Clock=std::chrono::steady_clock;
+    const auto plan=plan_frame(0,true,ScreenUse::world);
+    for(unsigned scenario=0;scenario<3;++scenario) {
+        auto ppu=source();ppu->background_mode=2;
+        tile(*ppu,0x4000,1,2);tile(*ppu,0x4000,2,3);
+        ppu->cgram[17]=31<<5;ppu->cgram[18]=31<<10;ppu->cgram[19]=31;
+        for(unsigned row=0;row<32;++row) for(unsigned column=0;column<32;++column)
+            ppu->vram[0xc000+(row*32+column)*2]=std::uint8_t((row+column)%3);
+        PpuBatch batch;batch.expand_horizontal=true;batch.passes.push_back({PpuLayer::bg2});
+        if(scenario==2)batch.passes.push_back({PpuLayer::objects,1});
+        std::array<std::shared_ptr<const simulation::SnesPpuState>,32> inputs;
+        for(unsigned f=0;f<inputs.size();++f) {
+            auto next=std::make_shared<simulation::SnesPpuState>(*ppu);
+            if(scenario==1)next->bg2_scroll_x=std::int16_t(f*3);
+            if(scenario==2)next->oam[0]=std::uint8_t(f*3);
+            inputs[f]=std::move(next);
+        }
+        const auto run=[&](bool indexed) {
+            PicaRaster owner;
+            std::array<PicaTextureResidency,pica_raster_max_strips> caches;
+            std::array<PicaTexturePacker,pica_raster_max_strips> packers;
+            std::array<std::vector<std::uint8_t>,pica_raster_max_strips> colours,masks;
+            std::uint64_t elapsed{},digest{};
+            for(unsigned f=0;f<128;++f) {
+                std::atomic_signal_fence(std::memory_order_seq_cst);const auto begin=Clock::now();
+                const auto frame=owner.prepare(inputs[f%inputs.size()],batch,plan,scenario==0?f%16:15,
+                    scenario==0?(f/16)%4:0,pica_raster_base_guard,false,indexed);
+                for(unsigned i=0;i<frame.textures.size();++i) {
+                    caches[i].prepare(frame.textures[i],[&](PicaImage image,PicaTextureLayout layout) {
+                        colours[i].resize(layout.bytes);
+                        packers[i].pack(image,caches[i].colour_base(image),colours[i]);
+                    },[&](PicaImage image,PicaTextureLayout layout,unsigned) {
+                        masks[i].resize(layout.width*layout.height);pack_pica_layers(image,masks[i]);
+                    });
+                }
+                const auto end=Clock::now();std::atomic_signal_fence(std::memory_order_seq_cst);
+                if(f>=32)elapsed+=std::chrono::duration_cast<std::chrono::nanoseconds>(end-begin).count();
+                // Exact complete native colour/ownership digest, outside timing.
+                for(unsigned i=0;i<frame.textures.size();++i) for(const auto& plane:{&colours[i],&masks[i]})
+                    for(auto byte:*plane) digest=(digest^byte)*1099511628211ULL;
+            }
+            return std::pair{elapsed,digest};
+        };
+        for(unsigned pair=0;pair<4;++pair) {
+            std::pair<std::uint64_t,std::uint64_t> old,next;
+            if(pair&1) {next=run(true);old=run(false);} else {old=run(false);next=run(true);}
+            require(old.second==next.second,"Indexed complete pipeline benchmark changed native colour/ownership");
+            std::cout<<"INDEXED_PIPELINE scenario="<<scenario<<" pair="<<pair<<" frames=96 rgba_ns="<<old.first
+                <<" indexed_ns="<<next.first<<" ratio="<<double(old.first)/next.first<<" digest="<<old.second<<'\n';
+        }
+    }
+    std::cout<<"PASS: complete preparation/residency/native-pack host comparison; not ARM/GPU or console FPS\n";
+}
 void pass_memory_dependencies() {
     const auto plan=plan_frame(1,true,ScreenUse::world);
     const auto make_source=[] {
@@ -320,6 +426,13 @@ void pass_memory_dependencies() {
         const unsigned depth=layer==PpuLayer::bg3?2U:layer==PpuLayer::bg1 && mode==3?8U:4U;
         const unsigned character_bytes=1024U*depth*8U;
         const unsigned map_bytes=2048U*((size&1U)?2U:1U)*((size&2U)?2U:1U);
+        // Both character-bank endpoints below must actually be referenced;
+        // unused characters are deliberately not layer dependencies anymore.
+        for(const auto [entry,character]:std::array<std::array<unsigned,2>,2>{{{0,0},{map_bytes/2-1,1023}}}) {
+            const unsigned at=(map*2+entry*2)&65535U;
+            ppu->vram[at]=std::uint8_t(character);
+            ppu->vram[(at+1)&65535U]=std::uint8_t((ppu->vram[(at+1)&65535U]&0xfcU)|(character>>8));
+        }
         const auto contains=[](unsigned address,unsigned first,unsigned count) {
             return ((address-first)&65535U)<count;
         };
@@ -398,6 +511,57 @@ void pass_memory_dependencies() {
     changed=std::make_shared<simulation::SnesPpuState>(*changed);changed->mosaic=0x32;check(owner,changed,batch);
     changed=std::make_shared<simulation::SnesPpuState>(*changed);changed->bg2_scroll_x=-511;check(owner,changed,batch);
 }
+void referenced_character_cache() {
+    const auto plan=plan_frame(1,true,ScreenUse::world);
+    for(const auto layer:{PpuLayer::bg1,PpuLayer::bg2,PpuLayer::bg3})
+    for(unsigned size=0;size<4;++size) for(bool large:{false,true}) for(bool wrap:{false,true}) {
+        auto ppu=std::make_shared<simulation::SnesPpuState>();
+        const unsigned depth=layer==PpuLayer::bg3?2:layer==PpuLayer::bg1?8:4;
+        const unsigned characters=wrap?0x7ff0:0x4000,map=0x2000;
+        ppu->background_mode=depth==8?3:1;
+        ppu->main_screen=layer==PpuLayer::bg1?1:layer==PpuLayer::bg2?2:4;
+        if(layer==PpuLayer::bg1) {
+            ppu->bg1_character_base=characters;ppu->bg1_screen_base=map;
+            ppu->bg1_screen_size=size;ppu->bg1_tile_size_16=large;
+        } else if(layer==PpuLayer::bg2) {
+            ppu->bg2_character_base=characters;ppu->bg2_screen_base=map;
+            ppu->bg2_screen_size=size;ppu->bg2_tile_size_16=large;
+        } else {
+            ppu->bg3_character_base=characters;ppu->bg3_screen_base=map;
+            ppu->bg3_screen_size=size;ppu->bg3_tile_size_16=large;
+        }
+        for(unsigned i=0;i<256;++i) ppu->cgram[i]=std::uint16_t((i*131)&32767);
+        for(const unsigned character:{1023U,0U,15U,16U}) tile(*ppu,characters,character,1,depth);
+        const unsigned entries=1024U*((size&1)?2:1)*((size&2)?2:1);
+        for(unsigned i=0;i<entries;++i) {
+            const unsigned at=map*2+i*2;
+            ppu->vram[at]=255;ppu->vram[at+1]=std::uint8_t(3|((i%4)<<6));
+        }
+        PpuBatch batch{{{layer}},PicaSpace::screen,true};PicaRaster owner;
+        owner.prepare(ppu,batch,plan);
+        auto changed=std::make_shared<simulation::SnesPpuState>(*ppu);
+        changed->vram[(characters*2+400*depth*8)&65535]^=255;
+        const auto before=owner.work();
+        const auto cached=owner.prepare(changed,batch,plan);PicaRaster fresh;
+        same_raster(cached,fresh.prepare(changed,batch,plan));
+        require(owner.work().decodes==before.decodes && owner.work().colour_updates==before.colour_updates,
+            "Unused in-bank character rebuilt background pixels");
+        ppu=changed;
+        for(const unsigned character:large?std::vector<unsigned>{1023,0,15,16}:std::vector<unsigned>{1023}) {
+            changed=std::make_shared<simulation::SnesPpuState>(*ppu);
+            changed->vram[(characters*2+(character+1)*depth*8-1)&65535]^=255;
+            const auto work=owner.work();PicaRaster oracle;
+            same_raster(owner.prepare(changed,batch,plan),oracle.prepare(changed,batch,plan));
+            require(owner.work().decodes==work.decodes+1,"Referenced character/subtile wrap left stale raster ink");
+            ppu=changed;
+        }
+        changed=std::make_shared<simulation::SnesPpuState>(*ppu);
+        changed->vram[map*2+(entries-1)*2]^=128;
+        const auto work=owner.work();PicaRaster oracle;
+        same_raster(owner.prepare(changed,batch,plan),oracle.prepare(changed,batch,plan));
+        require(owner.work().decodes==work.decodes+1,"Offscreen map-page change escaped dependency checking");
+    }
+}
 void optical_coverage() {
     auto ppu=source();const auto untouched=*ppu;Canvas lower;PicaRaster renderer;
     PpuBatch batch{{{PpuLayer::bg2}},PicaSpace::scenery,true};
@@ -445,9 +609,9 @@ void transparent_priority_crop() {
     const auto full=renderer.prepare(ppu,batch,plan);validate_pica_frame(full,lower.view());
     const auto width=full.textures[0].pitch/4;
     const std::vector<std::uint8_t> pixels(full.textures[0].pixels.begin(),full.textures[0].pixels.end());
-    unsigned bytes=0;for(auto image:full.textures) bytes+=pica_resident_texture_bytes(image);
+    unsigned bytes=0;for(const auto& image:full.textures) bytes+=pica_resident_texture_bytes(image);
     const auto cropped=renderer.prepare(ppu,batch,plan,15,0,32,true);validate_pica_frame(cropped,lower.view());
-    unsigned crop_bytes=0;for(auto image:cropped.textures) crop_bytes+=pica_resident_texture_bytes(image);
+    unsigned crop_bytes=0;for(const auto& image:cropped.textures) crop_bytes+=pica_resident_texture_bytes(image);
     require(crop_bytes<bytes/8 && renderer.work().decodes==1 && renderer.work().colour_updates==1,
         "Empty priority rows still consumed full texture pages or cropping decoded the source again");
     unsigned black=0;
@@ -510,6 +674,100 @@ void composition() {
     rejected([&]{compositor.prepare_layers(no_eyes,{});},"Empty composition accepted a missing eye plan");
     auto empty=compositor.prepare_layers(plan,{});validate_pica_frame(empty,dashboard.view());
     require(empty.vertices.empty() && empty.draws.empty() && empty.textures.empty(),"Clear-only composition manufactured geometry");
+}
+void residency_benchmark() {
+    const auto ppu=source();const auto plan=plan_frame(0,true,ScreenUse::world);
+    PpuBatch batch{{{PpuLayer::bg2}},PicaSpace::scenery,true};PicaRaster producer;
+    const auto frame=producer.prepare(ppu,batch,plan);
+    const auto owned=frame.textures.front();auto raw=owned;raw.content={};
+    std::uint64_t digest=0;
+    const auto measure=[&](const PicaImage& image) {
+        PicaTextureResidency residency;
+        residency.prepare(image,[](auto,auto){},[](auto,auto,auto){});
+        for(unsigned n=0;n<32;++n) require(!residency.prepare(image,[](auto,auto){},[](auto,auto,auto){}),"Warm unchanged fixture uploaded");
+        const auto started=std::chrono::steady_clock::now();
+        for(unsigned n=0;n<1024;++n) {
+            const bool changed=residency.prepare(image,[](auto,auto){},[](auto,auto,auto){});
+            digest+=changed+residency.classes();
+        }
+        return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now()-started).count();
+    };
+    for(unsigned pair=0;pair<4;++pair) {
+        std::int64_t checked,certified;
+        if(pair&1) {certified=measure(owned);checked=measure(raw);}
+        else {checked=measure(raw);certified=measure(owned);}
+        std::cout<<"Unchanged residency pair="<<pair<<" frames=1024 exact_rows_ns="<<checked
+            <<" owned_generation_ns="<<certified<<" digest="<<digest<<"; host component only, NOT console FPS\n";
+    }
+}
+void content_certificates() {
+    const auto plan=plan_frame(0,true,ScreenUse::world);
+    for(bool indexed:{false,true}) {
+        auto ppu=source();ppu->cgram[17]=0x7fff;
+        PpuBatch batch{{{PpuLayer::bg2}},PicaSpace::scenery,true};
+        PicaRaster owner;PicaTextureResidency cache;
+        auto prepare=[&](unsigned brightness=15) {return owner.prepare(ppu,batch,plan,brightness,0,32,false,indexed).textures.front();};
+        auto image=prepare();const auto first=image.content;
+        require(first.colour_valid(image) && first.layers_valid(image),"Producer omitted its complete content certificate");
+        unsigned colours=0,masks=0;
+        const auto colour=[&](PicaImage source,PicaTextureLayout layout) {
+            ++colours;std::vector<std::uint8_t> packed(layout.bytes);pack_pica_texture(source,packed);
+        };
+        const auto layer=[&](PicaImage source,PicaTextureLayout layout,unsigned classes) {
+            ++masks;if(classes) {std::vector<std::uint8_t> packed(layout.width*layout.height);pack_pica_layers(source,packed);}
+        };
+        require(cache.prepare(image,colour,layer),"Certified image missed its first native upload");
+        for(unsigned repeat=0;repeat<8;++repeat) {
+            ppu=std::make_shared<simulation::SnesPpuState>(*ppu);image=prepare();
+            require(first.same(image.content) && image.content.colour_valid(image)
+                && !cache.prepare(image,colour,layer),"Unchanged owned bytes lost their residency proof");
+        }
+        require(colours==1 && masks==1,"Unchanged producer certificate repeated a native upload");
+        auto detached=image;detached.source_layers={};detached.layer_pitch=0;
+        require(detached.content.colour_valid(detached) && !detached.content.layers_valid(detached),
+            "Omitting isolated A8 artwork lost colour proof or retained a false ownership proof");
+        require(cache.prepare(detached,colour,layer) && colours==1,"Removing A8 unnecessarily uploaded colour");
+        require(cache.prepare(image,colour,layer) && colours==1,"Restoring A8 unnecessarily uploaded colour");
+        auto altered=image;std::vector<std::uint8_t> copy(image.pixels.begin(),image.pixels.end());
+        altered.pixels=copy;
+        require(!altered.content.colour_valid(altered) && cache.colour_matches(altered),
+            "Copied storage forged a producer proof or lost exact-byte fallback");
+        copy[0]^=1;
+        require(!cache.colour_matches(altered),"A foreign edited plane bypassed byte verification");
+        require(cache.prepare(altered,colour,layer) && !cache.colour_matches(image),
+            "Foreign bytes inherited the original producer certificate");
+        require(cache.prepare(image,colour,layer),"Restoring producer bytes retained a foreign residency base");
+        for(unsigned field=0;field<7;++field) {
+            altered=image;
+            if(field==0) --altered.width;
+            if(field==1) --altered.height;
+            if(field==2) ++altered.pitch;
+            if(field==3) altered.repeat=!altered.repeat;
+            if(field==4) --altered.layer_pitch;
+            if(field==5) altered.source_layers=altered.source_layers.subspan(1);
+            if(field==6) altered.pixels=altered.pixels.subspan(1);
+            require(field==4 || field==5 || !altered.content.colour_valid(altered),"Reshaped descriptor forged unchanged colour proof");
+            require(!altered.content.layers_valid(altered),"Reshaped descriptor forged unchanged ownership proof");
+        }
+        auto invalid=batch;invalid.last_row=225;
+        rejected([&]{owner.prepare(ppu,invalid,plan);},"Invalid prepare unexpectedly succeeded");
+        require(first.same(image.content) && image.content.colour_valid(image),"Failed preparation retired the previous complete certificate");
+        const auto old=image;image=prepare(7);
+        require(!old.content.colour_valid(old) && !old.content.same(image.content)
+            && image.content.colour_valid(image),"Palette/brightness edit retained the preceding generation");
+        rejected([&]{cache.prepare(image,[](auto,auto){throw std::runtime_error("flush");},layer);},"Injected colour failure did not propagate");
+        require(!cache.colour_matches(image),"Failed upload retained a valid native proof");
+        require(cache.prepare(image,colour,layer),"Failed upload skipped required repair");
+        const auto prior=image;
+        PicaRaster moved=std::move(owner);
+        require(!prior.content.colour_valid(prior),"Moving inline producer storage left an old live proof");
+        image=moved.prepare(ppu,batch,plan,7,0,32,false,indexed).textures.front();
+        require(image.content.colour_valid(image) && !cache.prepare(image,colour,layer),"Moved producer lost exact content reuse");
+        moved=PicaRaster{};
+        require(!image.content.colour_valid(image),"Retiring a producer left a resident proof alive");
+        cache.release_layers();cache.release_colour();
+        require(cache.pixels().empty() && cache.layers().empty(),"Retired native allocation retained comparison storage");
+    }
 }
 void corridor_batch_contract() {
     auto ppu=source();ppu->background_mode=1;ppu->tunnel_scene=true;
@@ -830,5 +1088,9 @@ void window_masks() {
     rejected([&]{pica_screen_scissor({0,0,0,240});},"Empty effect scissor accepted");
 }
 }
-int main() try {game_effect_flow();raster();pass_memory_dependencies();optical_coverage();disjoint_scenery_coverage();transparent_priority_crop();unique_sky_halves();composition();corridor_batch_contract();compact_strip_contract();screen_sprite_crop();window_masks();colour_effects();std::cout<<checks<<" 3DS native PPU/cache/composition checks passed; NOT full game/hardware acceptance\n";}
+int main(int argc,char** argv) try {
+    if(argc==2 && std::string_view(argv[1])=="--indexed-benchmark") {indexed_pipeline_benchmark();return 0;}
+    if(argc==2 && std::string_view(argv[1])=="--residency-benchmark") {residency_benchmark();return 0;}
+    require(argc==1,"Use no arguments for contracts or --indexed-benchmark");
+    game_effect_flow();raster();indexed_raster_pipeline();content_certificates();pass_memory_dependencies();referenced_character_cache();optical_coverage();disjoint_scenery_coverage();transparent_priority_crop();unique_sky_halves();composition();corridor_batch_contract();compact_strip_contract();screen_sprite_crop();window_masks();colour_effects();std::cout<<checks<<" 3DS native PPU/cache/composition checks passed; NOT full game/hardware acceptance\n";}
 catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}

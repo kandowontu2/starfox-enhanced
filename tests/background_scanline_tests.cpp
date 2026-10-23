@@ -3,6 +3,8 @@
 #include "starfox/assets/rom.hpp"
 #include "starfox/simulation/game_simulation.hpp"
 #include "tunnel_margin_cases.hpp"
+#include "starfox/platform/nintendo_3ds/bg1_overlay_dependencies.hpp"
+#include "starfox/platform/nintendo_3ds/indexed_overlay_rows.hpp"
 
 #include <array>
 #include <chrono>
@@ -299,6 +301,258 @@ void native_row_contract() {
 }
 } // namespace
 
+namespace {
+void reference_priority_split() {
+    BackgroundRenderer renderer;
+    for(unsigned n=0;n<64;++n) {
+        auto ppu=source(n);ppu.background_mode=1;
+        for(bool bg2:{false,true}) for(bool tracked:{false,true}) {
+            Framebuffer low(256,224),high(256,224),expected_low(256,224),expected_high(256,224);
+            for(auto* frame:{&low,&high,&expected_low,&expected_high}) {
+                frame->clear(199);
+                if(tracked) {frame->enable_layer_tags(true);frame->begin_write_coverage();}
+            }
+            if(bg2) {
+                renderer.draw_bg2(ppu,ppu.bg2_scroll_x,ppu.bg2_scroll_y,expected_low,TilePriorityPass::low);
+                renderer.draw_bg2(ppu,ppu.bg2_scroll_x,ppu.bg2_scroll_y,expected_high,TilePriorityPass::high);
+                renderer.draw_bg2_mode1_split(ppu,ppu.bg2_scroll_x,ppu.bg2_scroll_y,low,high);
+            } else {
+                renderer.draw_bg3(ppu,expected_low,TilePriorityPass::low);
+                renderer.draw_bg3(ppu,expected_high,TilePriorityPass::high);
+                renderer.draw_bg3_split(ppu,low,high);
+            }
+            if(low.pixels()!=expected_low.pixels() || high.pixels()!=expected_high.pixels())
+                throw std::runtime_error("Reference priority split differs from exact source planes");
+            if(tracked && (!std::ranges::equal(low.layer_tags(),expected_low.layer_tags())
+                || !std::ranges::equal(high.layer_tags(),expected_high.layer_tags())
+                || !std::ranges::equal(low.write_coverage(),expected_low.write_coverage())
+                || !std::ranges::equal(high.write_coverage(),expected_high.write_coverage())))
+                throw std::runtime_error("Reference priority split loses layer/coverage metadata");
+        }
+    }
+}
+}
+namespace {
+void reference_ex_direct_overlay() {
+    const BackgroundRenderer renderer;
+    // The removed path is the oracle: decode into a cleared source image,
+    // then copy only nonzero ink whose CGRAM RGB is not black.
+    for (unsigned n = 0; n < 192; ++n) {
+        auto ppu = source(n);
+        if (n % 17U == 0) ppu.background_mode = 0;
+        for (unsigned ink = 0; ink < ppu.cgram.size(); ++ink) {
+            if (ink % 7U == 0) ppu.cgram[ink] = 0;
+            else if (ink % 11U == 0) ppu.cgram[ink] = 0x8000U;
+            else if (ink % 13U == 0) ppu.cgram[ink] |= 0x8000U;
+        }
+        for (bool tracked : {false, true}) {
+            Framebuffer staged(256, 224), expected(256, 224), direct(256, 224);
+            for (auto* frame : {&expected, &direct}) {
+                frame->enable_layer_tags(tracked);
+                frame->clear(199);
+                for (std::size_t i = 0; i < frame->pixels().size(); ++i)
+                    frame->pixels()[i] = std::uint8_t(i * 19U + n);
+                if (tracked) frame->begin_write_coverage();
+            }
+            renderer.draw_bg1(ppu, staged, TilePriorityPass::all, 0, false, 16U);
+            for (unsigned y = 0; y < 224; ++y) for (unsigned x = 0; x < 256; ++x) {
+                const auto ink = staged.get(x, y);
+                if (ink != 0 && (ppu.cgram[ink] & 0x7fffU) != 0)
+                    expected.set(x, y, ink);
+            }
+            renderer.draw_bg1(ppu, direct, TilePriorityPass::all, 0, false, 16U, true);
+            if (expected.pixels() != direct.pixels()
+                || expected.layer_tags() != direct.layer_tags()
+                || !std::equal(expected.write_coverage().begin(),
+                    expected.write_coverage().end(), direct.write_coverage().begin()))
+                throw std::runtime_error("Direct EX BG1 overlay changed pixels, coverage or tags");
+        }
+    }
+}
+void bg1_cached_rows() {
+    const BackgroundRenderer renderer;
+    for (unsigned n = 0; n < 48; ++n) for (unsigned scale : {1U, 2U})
+        for (bool tagged : {false, true}) {
+            auto ppu = source(n);
+            ppu.main_screen = 1;
+            ppu.background_mode = n & 1U ? 3U : 2U;
+            ppu.mosaic = 0;
+            // Repeated vertical rows and adversarial tile-key patterns,
+            // including palette/flip variants and direct-map collisions.
+            // The next invocation changes VRAM/CGRAM but reuses tile IDs.
+            if (n % 3U == 0) {
+                ppu.bg1_screen_base = 0x6000;
+                for (unsigned entry = 0; entry < 4096; ++entry)
+                    word(ppu, 0x6000U + entry, std::uint16_t((entry % 31U) * 33U
+                        | ((entry % 8U) << 10U) | ((entry % 4U) << 14U)));
+            }
+            Framebuffer actual(400, 224, scale), expected(400, 224, scale);
+            for (auto* frame : {&actual, &expected}) {
+                frame->enable_layer_tags(tagged);
+                frame->enable_dither_pairs(true);
+                frame->clear(199); frame->begin_write_coverage();
+            }
+            const auto priority = static_cast<TilePriorityPass>(n % 3U);
+            renderer.draw_bg1(ppu, actual, priority, 72, n % 4U != 0, 16, n & 2U);
+            // Mosaic size one preserves coordinates but selects the original
+            // independent per-pixel/bitplane decoder instead of cached rows.
+            ppu.mosaic = 1;
+            renderer.draw_bg1(ppu, expected, priority, 72, n % 4U != 0, 16, n & 2U);
+            if (actual.pixels() != expected.pixels()
+                || actual.layer_tags() != expected.layer_tags()
+                || !std::ranges::equal(actual.write_coverage(), expected.write_coverage())
+                || !std::ranges::equal(actual.dither_pairs(), expected.dither_pairs()))
+                throw std::runtime_error("Draw-local BG1 cache differs from original point decoder");
+        }
+}
+
+void bg1_overlay_dependencies() {
+    using starfox::platform::nintendo_3ds::same_bg1_overlay_source;
+    const BackgroundRenderer renderer;
+    unsigned hits = 0;
+    for (unsigned n = 0; n < 32; ++n) {
+        auto before = source(n);
+        before.main_screen = 1;
+        before.background_mode = n & 1U ? 3U : 2U;
+        Framebuffer cached(256, 224);
+        renderer.draw_bg1(before, cached, TilePriorityPass::all, 0, false, 16, true);
+        // The native cache borrows a 400x240 background allocation. Its crop
+        // must be identical to decoding directly into the 256x224 foreground.
+        Framebuffer borrowed(400, 240);
+        renderer.draw_bg1(before, borrowed, TilePriorityPass::all, 0, false, 16, true);
+        starfox::platform::nintendo_3ds::IndexedOverlayRows rows;
+        rows.prepare(borrowed);
+        for (unsigned scale : {1U, 2U}) {
+            Framebuffer actual(256, 224, scale), direct(256, 224, scale);
+            for (auto* frame : {&actual, &direct}) {
+                frame->enable_layer_tags(true); frame->enable_dither_pairs(true);
+                frame->clear(199); frame->begin_write_coverage();
+                for (std::size_t i = 0; i < frame->pixels().size(); ++i)
+                    frame->set_dither_alternate(i, std::uint8_t(i));
+            }
+            rows.apply(borrowed, actual);
+            renderer.draw_bg1(before, direct, TilePriorityPass::all, 0, false, 16, true);
+            if (actual.pixels() != direct.pixels() || actual.layer_tags() != direct.layer_tags()
+                || !std::ranges::equal(actual.write_coverage(), direct.write_coverage())
+                || !std::ranges::equal(actual.dither_pairs(), direct.dither_pairs()))
+                throw std::runtime_error("Borrowed native BG1 cache differs from direct source decode");
+        }
+        for (unsigned mutation = 0; mutation < 18; ++mutation) {
+            auto after = before;
+            switch (mutation) {
+            case 0: break;
+            case 1: ++after.bg2_scroll_x; break;
+            case 2: after.main_screen ^= 6; break;
+            case 3: after.mosaic ^= 6; break;
+            case 4: after.cgram[0] ^= 31775; break;
+            case 5:
+                for (auto& colour : after.cgram)
+                    if (colour & 32767U) colour = 0x8001;
+                break;
+            case 6: for (auto& colour : after.cgram) colour ^= 0x8000; break;
+            case 7: ++after.bg2_character_base; break;
+            case 8: ++after.bg1_character_base; break;
+            case 9: ++after.bg1_scroll_x; break;
+            case 10: after.bg1_tile_size_16 = !after.bg1_tile_size_16; break;
+            case 11: after.vram[(unsigned(after.bg1_screen_base) * 2U) & 65535U] ^= 1; break;
+            case 12: {
+                const unsigned at = (unsigned(after.bg1_screen_base) * 2U) & 65535U;
+                const unsigned tile = (after.vram[at]
+                    | (unsigned(after.vram[(at + 1U) & 65535U]) << 8U)) & 1023U;
+                const unsigned depth = after.background_mode == 3U ? 8U : 4U;
+                after.vram[(unsigned(after.bg1_character_base) * 2U + tile * depth * 8U) & 65535U] ^= 128;
+                break;
+            }
+            case 13: after.cgram[1] = (after.cgram[1] & 32767U) ? 0x8000 : 1; break;
+            case 14: after.background_mode = after.background_mode == 2 ? 3 : 2; break;
+            case 15: after.main_screen ^= 1; break;
+            case 16: ++after.bg1_scroll_y; break;
+            case 17: after.mosaic ^= 0x11; break;
+            }
+            const bool same = same_bg1_overlay_source(before, after);
+            if (mutation < 8 && !same)
+                throw std::runtime_error("BG1 overlay rejected an irrelevant register/RGB change");
+            if (mutation >= 8 && mutation <= 16 && same)
+                throw std::runtime_error("BG1 overlay failed to invalidate a source dependency");
+            if (same) {
+                ++hits;
+                Framebuffer expected(256, 224);
+                renderer.draw_bg1(after, expected, TilePriorityPass::all, 0, false, 16, true);
+                if (cached.pixels() != expected.pixels())
+                    throw std::runtime_error("BG1 dependency reuse changed exact indexed pixels");
+            }
+        }
+        before.main_screen = 0;
+        auto disabled = before;
+        disabled.background_mode = 0;
+        disabled.vram.fill(255); disabled.cgram.fill(31);
+        if (!same_bg1_overlay_source(before, disabled))
+            throw std::runtime_error("Two disabled BG1 overlays are not identically empty");
+    }
+    if (hits < 256) throw std::runtime_error("BG1 reuse fixture did not exercise source hits");
+}
+
+void indexed_overlay_rows() {
+    using starfox::platform::nintendo_3ds::IndexedOverlayRows;
+    Framebuffer source_frame(400, 240);
+    for (unsigned y = 0; y < 240; ++y) for (unsigned x = 0; x < 400; ++x) {
+        if (x >= 256 || y >= 224 || (y % 7 != 0 && (x % 13 == 0 || x == 255)))
+            source_frame.set(x, y, std::uint8_t((x * 17U + y) % 255U + 1U));
+    }
+    const auto unchanged = source_frame.pixels();
+    IndexedOverlayRows rows;
+    rows.prepare(source_frame);
+    for (unsigned scale : {1U, 2U}) for (bool tagged : {false, true})
+        for (bool covered : {false, true}) for (bool annotated : {false, true})
+        for (bool recorded : {false, true}) for (unsigned width : {219U, 320U}) {
+            const unsigned height = width == 219 ? 171 : 240;
+            Framebuffer actual(width, height, scale), expected(width, height, scale);
+            RasterCommands actual_commands, expected_commands;
+            actual_commands.reset(actual.stored_width(), actual.stored_height());
+            expected_commands.reset(expected.stored_width(), expected.stored_height());
+            for (auto* frame : {&actual, &expected}) {
+                frame->enable_layer_tags(tagged); frame->enable_dither_pairs(annotated);
+                frame->clear(199);
+                if (covered) frame->begin_write_coverage();
+                if (annotated) for (std::size_t i = 0; i < frame->pixels().size(); ++i)
+                    frame->set_dither_alternate(i, std::uint8_t(i));
+            }
+            if (recorded) { actual.record_to(&actual_commands); expected.record_to(&expected_commands); }
+            rows.apply(source_frame, actual);
+            for (unsigned y = 0; y < 224; ++y) for (unsigned x = 0; x < 256; ++x) {
+                const auto ink = source_frame.get(x, y);
+                if (ink) expected.set(x, y, ink);
+            }
+            if (actual.pixels() != expected.pixels() || actual.layer_tags() != expected.layer_tags()
+                || !std::ranges::equal(actual.write_coverage(), expected.write_coverage())
+                || !std::ranges::equal(actual.dither_pairs(), expected.dither_pairs())
+                || actual_commands.commands.size() != expected_commands.commands.size())
+                throw std::runtime_error("Sparse BG1 transfer changed pixels or ownership");
+            for (std::size_t i = 0; i < actual_commands.commands.size(); ++i) {
+                const auto& a = actual_commands.commands[i]; const auto& b = expected_commands.commands[i];
+                if (a.left != b.left || a.top != b.top || a.right != b.right || a.bottom != b.bottom
+                    || a.even != b.even || a.odd != b.odd || a.tag != b.tag || a.dither != b.dither
+                    || a.textured != b.textured)
+                    throw std::runtime_error("Sparse BG1 transfer changed ordered point commands");
+            }
+        }
+    if (source_frame.pixels() != unchanged)
+        throw std::runtime_error("Sparse BG1 transfer mutated its immutable source");
+    const auto rejects = [](auto&& operation) {
+        try { operation(); } catch (const std::invalid_argument&) { return; }
+        throw std::runtime_error("Incomplete BG1 cache source was accepted");
+    };
+    IndexedOverlayRows empty;
+    Framebuffer destination(256, 224), narrow(255, 224), short_frame(256, 223), scaled(256, 224, 2);
+    rejects([&] { empty.apply(source_frame, destination); });
+    rejects([&] { rows.prepare(narrow); });
+    rejects([&] { rows.prepare(short_frame); });
+    rejects([&] { rows.prepare(scaled); });
+    source_frame.resize(256, 240);
+    rejects([&] { rows.apply(source_frame, destination); });
+}
+} // namespace
+
 int main(int argc, char** argv) try {
     if (argc == 2 && std::string_view(argv[1]) == "--benchmark") { benchmark(); return 0; }
     if (argc == 2 && std::string_view(argv[1]) == "--parallel-benchmark") { parallel_benchmark(); return 0; }
@@ -373,6 +627,11 @@ int main(int argc, char** argv) try {
                 throw std::runtime_error("Mode 2 offset-per-tile column split a BG2 tile (per-scanline fine scroll)");
         std::cout<<"Mode 2 offset-per-tile: columns follow each scanline's fine scroll\n";
     }
+    reference_priority_split();
+    reference_ex_direct_overlay();
+    bg1_cached_rows();
+    bg1_overlay_dependencies();
+    indexed_overlay_rows();
     const auto digest = oracle_trace();
     RowWorkers workers;
     for(unsigned count:{1U,2U,4U,8U}) {

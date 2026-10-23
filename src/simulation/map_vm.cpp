@@ -3,6 +3,7 @@
 #include "starfox/assets/bps.hpp"
 #include "starfox/state/archive.hpp"
 #include "starfox/state/container.hpp"
+#include "starfox/platform/nintendo_3ds/frame_profile.hpp"
 
 #include "starfox/simulation/math.hpp"
 
@@ -64,6 +65,15 @@ std::uint32_t symbol_or(const assets::SymbolMap* symbols,
 
 std::int8_t signed_byte(std::uint8_t value) noexcept {
     return starfox::bit_cast<std::int8_t>(value);
+}
+
+bool plain_wram(std::uint32_t address, std::size_t size) noexcept {
+    const auto bank = address >> 16U;
+    const auto offset = address & 0xffffU;
+    return size != 0 && (
+        (address >= 0x7e0000U && address < 0x800000U && size <= 0x800000U - address)
+        || ((bank < 0x40U || (bank >= 0x80U && bank < 0xc0U))
+            && offset < 0x2000U && size <= 0x2000U - offset));
 }
 
 } // namespace
@@ -249,6 +259,7 @@ std::int8_t MapVm::dots_mode() const noexcept {
 }
 
 void MapVm::write_native_byte(std::uint32_t address, std::uint8_t value) {
+    invalidate_object_image_write(address);
     native_memory_[address] = value;
     cpu_.write8(address, value);
 }
@@ -499,10 +510,23 @@ std::size_t MapVm::call_native_object_routine(
     std::uint8_t data_bank,
     std::uint8_t status,
     std::size_t instruction_limit) {
+    return call_native_object_routine_impl(
+        address,object,data_bank,status,instruction_limit,false);
+}
+
+std::size_t MapVm::call_native_object_routine_reusing_import(
+    std::uint32_t address,ObjectHandle object,std::size_t instruction_limit) {
+    return call_native_object_routine_impl(
+        address,object,0x7eU,0x24U,instruction_limit,true);
+}
+
+std::size_t MapVm::call_native_object_routine_impl(
+    std::uint32_t address,ObjectHandle object,std::uint8_t data_bank,
+    std::uint8_t status,std::size_t instruction_limit,bool reuse_imported_image) {
     if (!objects_->is_active(object)) {
         throw std::invalid_argument{"native routine object handle must be active"};
     }
-    sync_objects_to_cpu();
+    sync_objects_to_cpu(reuse_imported_image);
     Wdc65816Registers registers;
     registers.x = original_object_pointer(object);
     // TRANS.ASM's strategy loop advances with LDY _NEXT,X / TYX, so
@@ -524,7 +548,22 @@ std::size_t MapVm::call_native_routine(
     Wdc65816Registers& registers,
     std::size_t instruction_limit,
     bool service_transfer_flag) {
-    sync_objects_to_cpu();
+    return call_native_routine_impl(
+        address, registers, instruction_limit, service_transfer_flag, false);
+}
+
+std::size_t MapVm::call_native_routine_reusing_import(
+    std::uint32_t address, Wdc65816Registers& registers,
+    std::size_t instruction_limit, bool service_transfer_flag) {
+    return call_native_routine_impl(
+        address, registers, instruction_limit, service_transfer_flag, true);
+}
+
+std::size_t MapVm::call_native_routine_impl(
+    std::uint32_t address, Wdc65816Registers& registers,
+    std::size_t instruction_limit, bool service_transfer_flag,
+    bool reuse_imported_image) {
+    sync_objects_to_cpu(reuse_imported_image);
     const auto instructions = cpu_.call_long(
         address, registers, instruction_limit, service_transfer_flag);
     sync_objects_from_cpu();
@@ -578,6 +617,7 @@ Wdc65816TaskResult MapVm::resume_native_task(
     std::size_t instruction_limit,
     bool service_transfer_flag,
     bool sync_objects) {
+    object_bridge_->imported_image=false;
     const auto result = cpu_.resume_task(registers, stop_addresses,
         instruction_limit, service_transfer_flag);
     // Persistent front-end tasks deliberately borrow object-list scratch
@@ -676,9 +716,55 @@ void MapVm::write_native_object_byte(
     objects_->write_base_byte(handle, offset, value);
 }
 
-void MapVm::sync_objects_to_cpu() {
-    const auto active = objects_->active_handles();
-    const auto free = objects_->free_handles();
+void MapVm::invalidate_object_image_write(std::uint32_t address) noexcept {
+    auto& cache=*object_bridge_;
+    if(!cache.imported_image) return;
+    // Unrelated plain WRAM writes (scheduler flags or transfer cadence counters)
+    // do not alter the imported objects. I/O may launch DMA/HLE, so revoke it.
+    if(!plain_wram(address,1)) {cache.imported_image=false;return;}
+    const auto physical=[](std::uint32_t a) {
+        return a>=0x7e0000U && a<0x800000U ? a-0x7e0000U : a&0xffffU;
+    };
+    const auto byte=physical(address);
+    const auto contains=[&](std::uint32_t start,std::size_t length) {
+        const auto first=physical(start);
+        return byte>=first && byte-first<length;
+    };
+    if(contains(object_base_,object_count_*object_size_)
+        || contains(extended_object_base_,object_count_*object_size_)
+        || contains(active_list_,2) || contains(free_list_,2)) cache.imported_image=false;
+}
+
+void MapVm::sync_objects_to_cpu(bool reuse_imported_image) {
+    STARFOX_3DS_FRAME_PHASE(object_export);
+    auto& cache=*object_bridge_;
+    auto& active=cache.active_work;auto& free=cache.free_work;
+    active.clear();free.clear();
+    for(auto handle=objects_->first_active();handle;handle=objects_->next_active(handle)) active.push_back(handle);
+    for(auto handle=objects_->first_free();handle;handle=objects_->next_free(handle)) free.push_back(handle);
+    bool identical=reuse_imported_image && cache.imported_image
+        && active==cache.active && free==cache.free;
+    cache.imported_image=false; // A failed native call must never leave a lease.
+    if(identical) {
+        for(const auto handle:active) {
+            const auto& snapshot=cache.records[handle];
+            if(!snapshot.valid || !snapshot.imported || !snapshot.exportable
+                || snapshot.host!=objects_->at(handle)) {identical=false;break;}
+        }
+    }
+    if(identical) {
+        // The bytewise export's final operation is the last free NEXT word,
+        // or the last active fire pointer for a full pool. Keep open bus exact.
+        if(!free.empty()) (void)cpu_.read8(object_base_+(free.back()-1U)*object_size_+1U);
+        else if(!active.empty()) (void)cpu_.read8(extended_object_base_+(active.back()-1U)*object_size_+20U);
+        ++cache.image_hits;
+        return;
+    }
+    if(active!=cache.active) {
+        for(auto& record:cache.records) record.valid=false;
+        cache.list_image=false;
+        cache.active=active; // Native-pointer fixups depend on active membership.
+    }
     cpu_.write16(active_list_,
                  active.empty() ? 0U : original_object_pointer(active.front()));
     cpu_.write16(free_list_,
@@ -693,20 +779,52 @@ void MapVm::sync_objects_to_cpu() {
             ? original_object_pointer(active[index + 1U]) : 0U);
         cpu_.write16(base + 2U, index != 0
             ? original_object_pointer(active[index - 1U]) : 0U);
-        std::array<std::uint8_t, 57> record;
+        auto& snapshot=cache.records[handle];
+        const auto& object=objects_->at(handle);
+        const bool mapped=plain_wram(base+4U,object_size_-4U) && plain_wram(extended_base,extended_object_bytes_);
+        if(mapped && snapshot.valid && snapshot.exportable && snapshot.host==object
+            && cpu_.peek_wram_matches(base+4U,
+                std::span{snapshot.base}.first(object_size_).subspan(4)) == true
+            && cpu_.peek_wram_matches(extended_base,
+                std::span{snapshot.extended}.first(extended_object_bytes_)) == true) {
+            // Compare live plain RAM without intermediate stack copies, then
+            // reproduce the last byte of the omitted fire-pointer write.
+            (void)cpu_.read8(extended_base+20U);
+            ++cache.push_hits;continue;
+        }
+        std::array<std::uint8_t, 57> record{};
         const auto bytes = std::span{record}.first(object_size_);
         objects_->read_base_record(handle, bytes);
         // Preserve sequential bus effects and the later reference fixups.
         // Ordinary mapped pages need only one adapter/page lookup per record.
         cpu_.write_bytes(base + 4U, bytes.subspan(4));
-        const auto& object = objects_->at(handle);
         cpu_.write16(base + 6U, original_object_pointer(object.attached));
         cpu_.write16(base + 25U, original_object_pointer(object.immune_object));
         cpu_.write16(base + 27U, original_object_pointer(object.collision_object));
         cpu_.write_bytes(extended_base, std::span{object.extended}.first(extended_object_bytes_));
         cpu_.write16(extended_base + 19U, original_object_pointer(object.fire_object));
+        snapshot.valid=mapped;
+        // Export can contain an intentionally stale extended-byte mirror.
+        // The first import must still normalize every semantic mirror exactly
+        // like the uncached bridge before an import may ever be reused.
+        snapshot.imported=false;
+        snapshot.exportable=mapped;
+        if(mapped) {
+            snapshot.host=object;
+            snapshot.base=record;
+            std::copy_n(object.extended.begin(),extended_object_bytes_,snapshot.extended.begin());
+            const auto word=[](auto& output,unsigned offset,std::uint16_t value) {
+                output[offset]=static_cast<std::uint8_t>(value);
+                output[offset+1U]=static_cast<std::uint8_t>(value>>8U);
+            };
+            word(snapshot.base,6U,original_object_pointer(object.attached));
+            word(snapshot.base,25U,original_object_pointer(object.immune_object));
+            word(snapshot.base,27U,original_object_pointer(object.collision_object));
+            word(snapshot.extended,19U,original_object_pointer(object.fire_object));
+        }
     }
     for (std::size_t index = 0; index < free.size(); ++index) {
+        cache.records[free[index]].valid=false;
         const auto base = static_cast<std::uint32_t>(
             object_base_ + (free[index] - 1U) * object_size_);
         const auto next = index + 1U == free.size() ? 0U : static_cast<std::uint16_t>(
@@ -716,8 +834,11 @@ void MapVm::sync_objects_to_cpu() {
 }
 
 void MapVm::sync_objects_from_cpu() {
-    const auto read_list = [this](std::uint16_t pointer) {
-        std::vector<ObjectHandle> result;
+    STARFOX_3DS_FRAME_PHASE(object_import);
+    auto& cache=*object_bridge_;
+    cache.imported_image=false;
+    const auto read_list = [this](std::uint16_t pointer,std::vector<ObjectHandle>& result) {
+        result.clear();
         std::array<bool, kMaximumObjects + 1> seen{};
         while (pointer != 0) {
             const auto handle = native_object_handle(pointer);
@@ -728,31 +849,109 @@ void MapVm::sync_objects_from_cpu() {
             result.push_back(handle);
             pointer = cpu_.read16(pointer);
         }
-        return result;
     };
-    auto active = read_list(cpu_.read16(active_list_));
-    auto free = read_list(cpu_.read16(free_list_));
+    auto& active=cache.active_work;auto& free=cache.free_work;
+    const bool same_lists=cache.list_image
+        && cpu_.peek_wram_matches(active_list_,cache.active_head)==true
+        && cpu_.peek_wram_matches(free_list_,cache.free_head)==true
+        && cpu_.peek_wram_strided_words_match(object_base_,object_size_,
+            std::span{cache.next_links}.first(object_count_))==true;
+    if(same_lists) {
+        active=cache.active;free=cache.free;
+        // Both original walks terminate with a zero NEXT/head word. Preserve
+        // that final bus access before any later potentially observable I/O.
+        (void)cpu_.read8(free.empty()?free_list_+1U:
+            object_base_+(free.back()-1U)*object_size_+1U);
+        ++cache.list_hits;
+    } else {
+        read_list(cpu_.read16(active_list_),active);
+        read_list(cpu_.read16(free_list_),free);
+    }
     if (active.size() + free.size() != object_count_) {
         throw std::runtime_error{"native active/free lists do not cover the object pool"};
     }
-    objects_->restore_lists(active, free);
+    if(active!=cache.active) {
+        for(auto& record:cache.records) record.valid=false;
+        cache.active=active;
+    }
+    if(!objects_->lists_match(active,free)) objects_->restore_lists(active, free);
+    cache.free=free;
+    if(!same_lists) {
+        cache.list_image=plain_wram(active_list_,2) && plain_wram(free_list_,2)
+            && plain_wram(object_base_,object_count_*object_size_);
+        if(cache.list_image) {
+            const auto pointer=[this](ObjectHandle h) {
+                return h?static_cast<std::uint16_t>(object_base_+(h-1U)*object_size_):std::uint16_t{};
+            };
+            const auto heads=[&](auto& bytes,const auto& list) {
+                const auto head=pointer(list.empty()?0:list.front());
+                bytes[0]=static_cast<std::uint8_t>(head);bytes[1]=static_cast<std::uint8_t>(head>>8U);
+            };
+            heads(cache.active_head,active);heads(cache.free_head,free);
+            for(const auto* list:{&active,&free}) for(std::size_t n=0;n<list->size();++n)
+                cache.next_links[(*list)[n]-1U]=pointer(n+1U<list->size()?(*list)[n+1U]:0);
+        }
+    }
+    bool canonical_links=plain_wram(active_list_,2) && plain_wram(free_list_,2)
+        && plain_wram(object_base_,object_count_*object_size_)
+        && plain_wram(extended_object_base_,object_count_*object_size_);
+    // The next export repairs PREV words even though import follows only NEXT.
+    // Read these plain-RAM links before the original final payload accesses.
+    if(canonical_links) for(std::size_t n=0;n<active.size();++n) {
+        if(cpu_.read16(original_object_pointer(active[n])+2U)
+            !=(n?original_object_pointer(active[n-1U]):0U)) canonical_links=false;
+    }
+    for(const auto handle:free) cache.records[handle].valid=false;
     for (const auto handle : active) {
         const auto base = static_cast<std::uint32_t>(original_object_pointer(handle));
         const auto extended_base = extended_object_base_
             + static_cast<std::uint32_t>(handle - 1U) * object_size_;
-        std::array<std::uint8_t, 57> record;
+        auto& snapshot=cache.records[handle];
+        const bool mapped=plain_wram(base+4U,object_size_-4U) && plain_wram(extended_base,extended_object_bytes_);
+        if(mapped && snapshot.valid && snapshot.imported && snapshot.host==objects_->at(handle)
+            && cpu_.peek_wram_matches(base+4U,
+                std::span{snapshot.base}.first(object_size_).subspan(4)) == true
+            && cpu_.peek_wram_matches(extended_base,
+                std::span{snapshot.extended}.first(extended_object_bytes_)) == true) {
+            // Only immutable, byte-identical plain WRAM may skip the two
+            // stack copies. Reproduce the bytewise import's final bus access;
+            // changed records and I/O retain the complete ordered read path.
+            (void)cpu_.read8(extended_base+20U);
+            ++cache.pull_hits;continue;
+        }
+        std::array<std::uint8_t, 57> record{};
         const auto bytes = std::span{record}.first(object_size_);
         cpu_.read_bytes(base + 4U, bytes.subspan(4));
+        std::array<std::uint8_t,kExtendedObjectBytes> extended{};
+        const auto extended_bytes=std::span{extended}.first(extended_object_bytes_);
+        if(mapped) cpu_.read_bytes(extended_base,extended_bytes);
         objects_->write_base_record(handle, bytes);
         auto& object = objects_->at(handle);
         object.attached = object_handle(cpu_.read16(base + 6U));
         object.immune_object = object_handle(cpu_.read16(base + 25U));
         object.collision_object = object_handle(cpu_.read16(base + 27U));
-        const auto extended_bytes = std::span{record}.first(extended_object_bytes_);
-        cpu_.read_bytes(extended_base, extended_bytes);
+        // Non-WRAM records retain the original read ordering and callbacks.
+        if(!mapped) cpu_.read_bytes(extended_base,extended_bytes);
         objects_->write_extended_record(handle, extended_bytes);
         object.fire_object = object_handle(cpu_.read16(extended_base + 19U));
+        snapshot.valid=mapped;
+        snapshot.imported=mapped;
+        if(mapped) {
+            snapshot.host=object;snapshot.base=record;snapshot.extended=extended;
+            // Import may canonicalize invalid/host-form object references.
+            // The next export must rewrite those words even when the host and
+            // live bytes still match this imported snapshot.
+            const auto word=[](const auto& input,unsigned offset) {
+                return static_cast<std::uint16_t>(input[offset])
+                    | (static_cast<std::uint16_t>(input[offset+1U])<<8U);
+            };
+            snapshot.exportable=word(record,6U)==original_object_pointer(object.attached)
+                && word(record,25U)==original_object_pointer(object.immune_object)
+                && word(record,27U)==original_object_pointer(object.collision_object)
+                && word(extended,19U)==original_object_pointer(object.fire_object);
+        }
     }
+    cache.imported_image=canonical_links;
 }
 
 void MapVm::execute_inline_65816() {

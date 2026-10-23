@@ -131,6 +131,22 @@ class PackageTests(unittest.TestCase):
         self.pack()
         self.assertEqual(self.output.read_bytes(), first)
 
+    def test_explicit_native_profiling_setting(self):
+        for setting in ("ON", "OFF"):
+            with self.subTest(setting=setting):
+                output = self.root / (setting + ".zip")
+                info = MODULE.package(self.elf, self.dsx, self.smdh, COMMIT, output, setting)
+                self.assertEqual(info["frame_profiling"], setting == "ON")
+                with zipfile.ZipFile(output) as archive:
+                    self.assertEqual(json.loads(archive.read("BUILD-INFO.json"))["frame_profiling"], setting == "ON")
+        self.assertNotIn("frame_profiling", self.pack())
+        for setting in (True, False, "unknown", "on"):
+            with self.assertRaises(ValueError):
+                MODULE.package(self.elf, self.dsx, self.smdh, COMMIT, self.root / "invalid.zip", setting)
+        workflow = (ROOT / ".github/workflows/3ds-native-check.yml").read_text(encoding="utf-8")
+        self.assertIn('STARFOX_3DS_PROFILE_FRAMES="$CTR_PROFILE_FRAMES"', workflow)
+        self.assertIn('--frame-profiling "$CTR_PROFILE_FRAMES"', workflow)
+
     def test_new_family_native_labels(self):
         cmake = (ROOT / "platform/3ds/CMakeLists.txt").read_text(encoding="utf-8")
         player = (ROOT / "platform/3ds/game_core_probe.cpp").read_text(encoding="utf-8")
@@ -139,6 +155,53 @@ class PackageTests(unittest.TestCase):
         self.assertNotIn("old 3DS mono", cmake)
         self.assertNotIn("original models mono", cmake)
         self.assertNotIn("ORIGINAL 3DS TEST BUILD", player)
+
+    def test_explicit_indexed_mono_setting(self):
+        for setting in ("ON", "OFF"):
+            with self.subTest(setting=setting):
+                output = self.root / ("indexed-" + setting + ".zip")
+                info = MODULE.package(self.elf, self.dsx, self.smdh, COMMIT, output,
+                                      indexed_mono=setting)
+                self.assertEqual(info["indexed_mono"], setting == "ON")
+                with zipfile.ZipFile(output) as archive:
+                    self.assertEqual(json.loads(archive.read("BUILD-INFO.json"))["indexed_mono"], setting == "ON")
+        self.assertNotIn("indexed_mono", self.pack())
+        for setting in (True, False, "unknown", "on"):
+            with self.assertRaises(ValueError):
+                MODULE.package(self.elf, self.dsx, self.smdh, COMMIT,
+                               self.root / "invalid.zip", indexed_mono=setting)
+        workflow = (ROOT / ".github/workflows/3ds-native-check.yml").read_text(encoding="utf-8")
+        self.assertIn('STARFOX_3DS_INDEXED_MONO="$CTR_INDEXED_MONO"', workflow)
+        self.assertIn('--indexed-mono "$CTR_INDEXED_MONO"', workflow)
+        cmake = (ROOT / "platform/3ds/CMakeLists.txt").read_text(encoding="utf-8")
+        self.assertIn('option(STARFOX_3DS_INDEXED_MONO "Experiment with fused indexed mono background uploads (performance unverified)" OFF)', cmake)
+
+    def test_explicit_native_ipo_setting(self):
+        for setting in ("ON", "OFF"):
+            with self.subTest(setting=setting):
+                output = self.root / ("ipo-" + setting + ".zip")
+                info = MODULE.package(self.elf, self.dsx, self.smdh, COMMIT, output,
+                                      enable_ipo=setting)
+                self.assertEqual(info["interprocedural_optimization"], setting == "ON")
+                with zipfile.ZipFile(output) as archive:
+                    self.assertEqual(json.loads(archive.read("BUILD-INFO.json"))["interprocedural_optimization"], setting == "ON")
+        self.assertNotIn("interprocedural_optimization", self.pack())
+        for setting in (True, False, "unknown", "on"):
+            with self.assertRaises(ValueError):
+                MODULE.package(self.elf, self.dsx, self.smdh, COMMIT,
+                               self.root / "invalid.zip", enable_ipo=setting)
+        workflow = (ROOT / ".github/workflows/3ds-native-check.yml").read_text(encoding="utf-8")
+        self.assertIn('STARFOX_3DS_ENABLE_IPO="$CTR_ENABLE_IPO"', workflow)
+        self.assertIn('--enable-ipo "$CTR_ENABLE_IPO"', workflow)
+        self.assertIn('-DSTARFOX_3DS_ENABLE_IPO="$CTR_ENABLE_IPO"', workflow)
+        cmake = (ROOT / "platform/3ds/CMakeLists.txt").read_text(encoding="utf-8")
+        self.assertIn('option(STARFOX_3DS_ENABLE_IPO "Optimize the real native/core graph across translation units" OFF)', cmake)
+        self.assertIn('if(STARFOX_3DS_BUILD_NATIVE AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")', cmake)
+        self.assertIn('target_compile_options(${target} PRIVATE -ffat-lto-objects)', cmake)
+        # The unchanged code-generation gates need the actual SPC and all
+        # arithmetic-probe objects, not a separately compiled substitute.
+        self.assertIn('foreach(target starfox_3ds_spc starfox_3ds_spc_saturation_check\n'
+                      '                starfox_3ds_spc_counters_check starfox_3ds_spc_output_check)', cmake)
 
 
 if __name__ == "__main__":

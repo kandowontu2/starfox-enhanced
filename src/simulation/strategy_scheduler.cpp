@@ -64,6 +64,10 @@ std::size_t NativeStrategyScheduler::begin_tick() {
 }
 
 std::size_t NativeStrategyScheduler::tick_object(ObjectHandle object) {
+    return tick_object(object,false);
+}
+
+std::size_t NativeStrategyScheduler::tick_object(ObjectHandle object,bool reuse_imported_image) {
     // The escape camera inserts explosion objects after MAPVAR1. If its
     // building has already been removed, l_add inserts into the free list
     // instead and loses slots. Suppress only that obsolete cosmetic burst;
@@ -87,6 +91,8 @@ std::size_t NativeStrategyScheduler::tick_object(ObjectHandle object) {
     }
     native_state_->write_native_byte(alien_dead_, 0);
     try {
+        if(reuse_imported_image) return native_state_->call_native_object_routine_reusing_import(
+            do_strategy_,object,object_instruction_limit_);
         return native_state_->call_native_object_routine(
             do_strategy_, object, 0x7eU, 0x24U,
             object_instruction_limit_);
@@ -146,7 +152,7 @@ std::size_t NativeStrategyScheduler::tick_object(ObjectHandle object) {
     }
 }
 
-StrategyTickStats NativeStrategyScheduler::tick_all() {
+StrategyTickStats NativeStrategyScheduler::tick_all(bool force_full_object_sync) {
     STARFOX_3DS_FRAME_PHASE(strategies);
     StrategyTickStats result;
     std::array<std::uint64_t, kMaximumObjects + 1> visited{};
@@ -158,6 +164,7 @@ StrategyTickStats NativeStrategyScheduler::tick_all() {
         return ObjectHandle{};
     };
     auto object = objects_->first_active();
+    bool reuse_imported_image=false;
     for (std::size_t guard = 0; object != 0 && guard < 4096; ++guard) {
         if (visited[object] == objects_->generation(object)) {
             object = next_unvisited();
@@ -165,7 +172,8 @@ StrategyTickStats NativeStrategyScheduler::tick_all() {
         }
         visited[object] = objects_->generation(object);
         const auto prior_next = objects_->next_active(object);
-        result.instructions += tick_object(object);
+        result.instructions += tick_object(object,reuse_imported_image && !force_full_object_sync);
+        reuse_imported_image=true;
         ++result.objects_run;
 
         if (!objects_->is_active(object)) {

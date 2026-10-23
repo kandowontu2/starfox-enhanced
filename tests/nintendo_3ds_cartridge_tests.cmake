@@ -16,6 +16,16 @@ function(starfox_3ds_register_cartridge variant rom symbols)
         COMMAND starfox_3ds_game_session_check "${rom}" "${symbols}")
     add_test(NAME starfox_3ds_parallel_game_session_${variant}
         COMMAND starfox_3ds_parallel_game_session_check "${rom}" "${symbols}")
+    foreach(owner IN ITEMS game_session parallel_game_session)
+        add_test(NAME starfox_3ds_${owner}_audio_video_pipeline_${variant}
+            COMMAND starfox_3ds_${owner}_check "${rom}" "${symbols}" --audio-video-pipeline)
+        set_tests_properties(starfox_3ds_${owner}_audio_video_pipeline_${variant}
+            PROPERTIES TIMEOUT 1800 LABELS "3ds;cartridge;${variant}")
+        add_test(NAME starfox_3ds_${owner}_audio_render_overlap_${variant}
+            COMMAND starfox_3ds_${owner}_check "${rom}" "${symbols}" --audio-render-overlap)
+        set_tests_properties(starfox_3ds_${owner}_audio_render_overlap_${variant}
+            PROPERTIES TIMEOUT 1800 LABELS "3ds;cartridge;${variant}")
+    endforeach()
     foreach(check IN ITEMS capabilities native-depth states runtime-editor-parity editor-chords fps-chords stage-sweep death-source-route continue-yes-source-route continue-no-source-route)
         string(REPLACE "-" "_" name "${check}")
         set(argument "--${check}")

@@ -9,6 +9,16 @@
 
 namespace starfox::assets {
 namespace {
+template <typename Record>
+void index_bsp_addresses(const std::vector<Record>& records,
+    std::vector<std::pair<std::uint32_t, std::size_t>>& lookup) {
+    lookup.clear();lookup.reserve(records.size());
+    for (std::size_t index=0;index<records.size();++index)
+        lookup.emplace_back(records[index].address,index);
+    std::stable_sort(lookup.begin(),lookup.end(),[](const auto& a,const auto& b) {
+        return a.first<b.first;
+    });
+}
 
 constexpr std::uint8_t kEndShape = 0;
 constexpr std::uint8_t kPoints8 = 4;
@@ -197,6 +207,9 @@ Shape ShapeDecoder::decode(
     }
     decode_points(shape);
     decode_faces(shape);
+    index_bsp_addresses(shape.bsp_nodes,shape.bsp_node_lookup);
+    index_bsp_addresses(shape.bsp_leaves,shape.bsp_leaf_lookup);
+    index_bsp_addresses(shape.face_batches,shape.bsp_batch_lookup);
     decode_colours(shape, minimum_colour_count);
     return shape;
 }

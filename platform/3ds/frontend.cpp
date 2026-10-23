@@ -16,8 +16,22 @@ void Canvas::rectangle(int x,int y,int w,int h,Rgb c) {
     if(w<=0 || h<=0) return;
     const auto end_y=std::min<std::int64_t>(height_,std::int64_t(y)+h);
     const auto end_x=std::min<std::int64_t>(width_,std::int64_t(x)+w);
-    for(int row=std::max(0,y);row<end_y;++row)
-        for(int col=std::max(0,x);col<end_x;++col) pixel(col,row,c);
+    const auto first_y=std::max(0,y),first_x=std::max(0,x);
+    if(first_y>=end_y || first_x>=end_x) return;
+    // Clip once, fill one RGB row, then copy the same bounded span. HUD/menu
+    // clears used to repeat pixel()'s clipping, indexing and optional coverage
+    // check for every LCD pixel. No extra canvas or cross-frame cache is needed.
+    const auto columns=std::size_t(end_x-first_x),row_bytes=columns*3;
+    const auto first=(std::size_t(first_y)*width_+unsigned(first_x))*3;
+    for(std::size_t column=0;column<columns;++column) {
+        const auto at=first+column*3;
+        pixels_[at]=c.r;pixels_[at+1]=c.g;pixels_[at+2]=c.b;
+    }
+    for(int row=first_y+1;row<end_y;++row)
+        std::copy_n(pixels_.data()+first,row_bytes,
+            pixels_.data()+(std::size_t(row)*width_+unsigned(first_x))*3);
+    if(!coverage_.empty()) for(int row=first_y;row<end_y;++row)
+        std::fill_n(coverage_.data()+std::size_t(row)*width_+unsigned(first_x),columns,1U);
 }
 void Canvas::line(int x0,int y0,int x1,int y1,Rgb c) {
     // Bounded panel/diagnostic primitives; reject coordinates that could make
@@ -60,9 +74,28 @@ void Canvas::image(int x,int y,ImageView source) {
         || !valid_image(source,source.width,source.height)) throw std::invalid_argument("Invalid 3DS canvas image");
     if(x>=int(width_) || y>=int(height_) || std::int64_t(x)+source.width<=0
         || std::int64_t(y)+source.height<=0) return;
-    for(unsigned row=0;row<source.height;++row) for(unsigned col=0;col<source.width;++col) {
-        const auto at=std::size_t(row)*source.pitch+col*3;
-        pixel(x+int(col),y+int(row),{source.pixels[at],source.pixels[at+1],source.pixels[at+2]});
+    const auto src_address=reinterpret_cast<std::uintptr_t>(source.pixels.data());
+    const auto dst_address=reinterpret_cast<std::uintptr_t>(pixels_.data());
+    if((dst_address>=src_address && dst_address-src_address<source.pixels.size())
+        || (src_address>=dst_address && src_address-dst_address<pixels_.size())) {
+        // Retain the historical forward-pixel semantics for self-drawing.
+        // Normal radio/portrait images own independent storage and use spans.
+        for(unsigned row=0;row<source.height;++row) for(unsigned col=0;col<source.width;++col) {
+            const auto at=std::size_t(row)*source.pitch+col*3;
+            pixel(x+int(col),y+int(row),{source.pixels[at],source.pixels[at+1],source.pixels[at+2]});
+        }
+        return;
+    }
+    const auto first_x=unsigned(std::max<std::int64_t>(0,-std::int64_t(x)));
+    const auto first_y=unsigned(std::max<std::int64_t>(0,-std::int64_t(y)));
+    const auto end_x=unsigned(std::min<std::int64_t>(source.width,std::int64_t(width_)-x));
+    const auto end_y=unsigned(std::min<std::int64_t>(source.height,std::int64_t(height_)-y));
+    const auto columns=std::size_t(end_x-first_x);
+    for(unsigned row=first_y;row<end_y;++row) {
+        const auto dst=std::size_t(y+int(row))*width_+unsigned(x+int(first_x));
+        std::copy_n(source.pixels.data()+std::size_t(row)*source.pitch+first_x*3,
+            columns*3,pixels_.data()+dst*3);
+        if(!coverage_.empty()) std::fill_n(coverage_.data()+dst,columns,1U);
     }
 }
 void Canvas::scaled_artwork(int x,int y,ImageView source,std::span<const std::uint8_t> mask,unsigned quarters) {

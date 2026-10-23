@@ -1,9 +1,54 @@
 # Optional native phase timings
 
 `STARFOX_3DS_PROFILE_FRAMES=ON` records bounded owner-thread timings from the
-actual guest clock. The player writes at most 512 one-second windows to its
-separate diagnostic CSV; stream errors disable logging instead of stopping
-gameplay. It does not change source cadence, sound commands or presentation.
+actual guest clock. The player captures at most 512 one-second windows in a
+preallocated buffer smaller than 512 KiB. No profile CSV formatting, SD writes
+or flushes run during gameplay. On normal exit, after retiring the source,
+audio and GPU owners, it writes the separate CSV once. The CSV header, phase
+indices and timing values remain unchanged; stream errors do not stop gameplay.
+Copy the frame profile **after exiting normally**. A hard shutdown can leave
+that file empty; the separately flushed, bounded startup trace remains available
+for locating a freeze. Neither diagnostic contains game assets or save data.
+
+The October 12 hardware file has seven window gaps of approximately 5.6--6.2
+seconds outside measured frame work. The old loop synchronously serialized and
+flushed the profile after its frame timer ended, so its own SD stalls were not
+included in the reported frame duration and fed into the next source catch-up.
+Removing this gameplay I/O addresses that identified stall path, not the
+remaining layer/geometry costs or a claim of stable console 60 FPS.
+
+With frame-audio overlap enabled, the final complete SPC block runs on the
+joined core-2 task while the owner prepares/presents the immutable source
+snapshot. Its timing counters are captured in a separate profile and merged
+only after the join; there are no concurrent writes to the owner's counters.
+PCM submission and source-port acknowledgement stay on the owner thread.
+The `audio` phase can overlap `layers`, `composite` and `present`, so those
+durations are not additive either. Source catch-up blocks before the final
+phase remain synchronous. A host parity test establishes unchanged samples
+and source state, not physical-console frame rate.
+
+On supported New models, a distinct optional effects worker requests only an
+APT-granted core-1 time budget. During frame overlap, music runs on core 2,
+effects on that worker and presentation on the owner. The inner worker joins
+before the outer worker publishes the complete block. Denied budget/allocation
+keeps both stems serial on core 2. Existing granted budgets are respected;
+newly borrowed budgets are restored after worker retirement. State restores
+inherit both executor owners. No samples, voices, commands or VM acknowledgements
+are omitted. Worker timings can overlap one another as well as rendering, so
+their sum is not the frame duration or proof of sustained console 60 FPS.
+
+Background cache dependencies now include the complete configured tilemap and
+every character it references, rather than all 1024 characters in its bank.
+All map pages, tile priorities and offscreen entries are conservative
+dependencies; 16x16 tiles also retain the +1/+16/+17 subcharacters with 10-bit
+wrap. HDMA tables, palette/subtraction, source scroll, ownership and renderer
+policy checks are unchanged. An unchanged bank keeps its fast full-range byte
+comparison; a changed bank uses bounded, allocation-free dependency scratch.
+Changes to unrelated in-bank model/HUD artwork do not force a background
+traversal, recolour or texture replacement. Independent pixel/ownership tests
+exercise 2/4/8-bpp banks, all map sizes, address wrapping and uniform-merging
+invalidation. This does not establish how often a real stage benefits or its
+console frame rate.
 
 The original twenty-five phase names and enum indices stay unchanged. The
 source/audio/raster detail phases and five appended GPU phases distinguish
@@ -28,6 +73,20 @@ the following work:
 | `gpu_submit` | CPU-side FrameEnd command flush/submission |
 | `terrain_build` | Landscape-atlas clipping/unprojection/publication, including declined attempts |
 | `terrain_reuse` | Reuse of the identical validated landscape mesh with current borrowed artwork |
+| `mono_background` | Reference indexed background preparation/composition before models |
+| `mono_prepare` | Reference interpolated poses and world-cache validation |
+| `mono_raster` | Reference indexed model/particle/dot rasterization |
+| `mono_finish` | Reference world composition, native draw and final LCD canvas |
+| `lcd_copy` | Exact lower RGB comparison, changed-buffer transpose and SDK cache flush |
+| `mono_retry` | One same-source tile presentation retry after a busy GPU acquire |
+| `mono_fallback` | Complete software redraw/presentation after tile rejection or an unsuccessful bounded retry |
+| `hud_prepare` | Lower HUD source capture, portrait/radio expansion and dashboard redraw, inside `raster` |
+
+The mono retry uses blocking `C3D_FrameBegin(0)` to retire the previous command
+queue before atlas/texture writes. `C3D_FrameSync()` only waits for VBlank
+cadence; it is not a GPU queue join. See the
+[Citro3D render queue implementation](https://github.com/devkitPro/citro3d/blob/master/source/renderqueue.c).
+Other callers keep the reference nonblocking acquire by default.
 
 Parents include children. In particular, `cpu` also occurs inside strategies,
 view/cull/audio IRQ and video work; the two stem rows contain their SPC rows.
@@ -75,7 +134,7 @@ the earlier helper-only-fast candidate actually regressed full composition and
 was corrected before publication. These host measurements are not ARM timings,
 whole-game speed gains or New-console FPS. Other project compilers keep running.
 
-The same CSV header is retained; consumers must allow all thirty-two phase
+The same CSV header is retained; consumers must allow all thirty-seven phase
 names and reject unknown names rather than silently ignoring malformed data.
 The terrain rows are children of `layers`; a cache-hit count is not a console
 FPS claim. The first thirty enum indices remain unchanged. Finite vertices
@@ -87,3 +146,24 @@ guard coverage, resident byte budgets and transactional failure behavior remain.
 the original logic/video/capture/audio timers. Its default complete-state/PCM
 hashing and source-cadence assertions remain intact. This diagnostic is not a
 substitute for physical New-3DS-family performance/audio/slider acceptance.
+
+The presentation gate consumes completed source video phases, not a second
+wall-clock interval sampled after source work. At 60 Hz each new source phase
+permits one complete frame; at 30 Hz two phases do. Catch-up is coalesced into
+one latest-scene attempt. A zero-phase retry cannot publish a duplicate frame.
+The idle VBlank decision includes source work elapsed since that phase sample.
+Profile `frame` counts still include non-presenting retries, so dividing by
+mean loop duration is not completed-display FPS. Use the on-device completed
+presentation counter; do not substitute source phases or two stereo eyes.
+
+Native frame audio may now complete during the interval between presentation
+and the next source phase, rather than forcing every rendered frame to wait
+for its SPC packet. Ordinary SPC-independent gameplay/training rasters may
+continue while it runs; source logic, the next packet, frontend handoffs,
+duplicate/rewound time, focus loss and runtime-options entry join first.
+Normal host calls retain the joined API. Worker timing counters are merged only
+after completion, into the active profiling window. A packet crossing a window boundary is attributed to its
+completion window, so compare sustained intervals rather than one row.
+No commands, PCM samples, source phases or logic ticks are skipped. This is
+a scheduling change awaiting native performance measurement, not 60-FPS
+hardware acceptance.

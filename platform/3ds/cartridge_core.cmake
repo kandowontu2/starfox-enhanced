@@ -40,6 +40,7 @@ set(cartridge_sources
     src/assets/bps.cpp src/assets/decrunch.cpp src/assets/runtime_bundle.cpp src/assets/shape_decoder.cpp
     src/render/framebuffer.cpp src/render/palette.cpp src/render/scaled_text_renderer.cpp
     src/render/dust_renderer.cpp
+    src/render/particle_renderer.cpp
     src/render/pixel_filter.cpp src/render/scalefx.cpp src/render/row_workers.cpp
     src/simulation/dust_system.cpp src/simulation/game_simulation.cpp src/simulation/game_state.cpp
     src/simulation/map_vm.cpp src/simulation/object_pool.cpp src/simulation/state_container.cpp
@@ -50,6 +51,7 @@ list(TRANSFORM cartridge_sources PREPEND "${cartridge_root}/")
 add_library(starfox_3ds_cartridge_core STATIC ${cartridge_sources}
     game_assets.cpp game_hud.cpp game_session.cpp game_session_state.cpp game_state.cpp
     game_models.cpp game_dots.cpp game_layers.cpp game_scenery.cpp game_menu.cpp game_storage.cpp game_state_storage.cpp)
+target_sources(starfox_3ds_cartridge_core PRIVATE reference/frame_3ds.cpp reference/native_canvas.cpp)
 target_include_directories(starfox_3ds_cartridge_core PUBLIC "${cartridge_root}/include")
 target_compile_features(starfox_3ds_cartridge_core PUBLIC cxx_std_20)
 target_compile_definitions(starfox_3ds_cartridge_core PUBLIC STARFOX_SCENE_SOURCE_ONLY=1)

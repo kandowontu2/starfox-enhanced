@@ -2,6 +2,8 @@
 #include "starfox/platform/nintendo_3ds/pica_projection.hpp"
 #include "starfox/platform/nintendo_3ds/presentation_clock.hpp"
 #include "starfox/platform/nintendo_3ds/hardware_profile.hpp"
+#include "starfox/platform/nintendo_3ds/lcd_rgba.hpp"
+#include "starfox/platform/nintendo_3ds/mono_presentation.hpp"
 #include <algorithm>
 #include <climits>
 #include <filesystem>
@@ -23,6 +25,40 @@ template<class F> void rejects(F operation,const char* message) {
 }
 bool close(float a,float b) {return std::abs(a-b)<.0001F;}
 bool near(double a,double b,double tolerance=1.e-5) {return std::abs(a-b)<tolerance;}
+void mono_presentation_tests() {
+    using R=MonoTileResult;
+    for(auto first:{R::presented,R::busy,R::rejected})
+        for(auto second:{R::presented,R::busy,R::rejected})
+            for(bool complete_ok:{false,true}) {
+                std::string events;unsigned attempts{};
+                const bool result=present_mono_tiles_or_complete([&](bool retry) {
+                    require(retry==(attempts!=0),"Retry flag did not match its attempt");
+                    events+=retry?'R':'T';return attempts++?second:first;
+                },[&]{events+='S';},[&]{events+='F';return complete_ok;});
+                const bool expected=first==R::presented
+                    || (first==R::busy && second==R::presented) || complete_ok;
+                const auto order=first==R::presented?"T":first==R::rejected?"TSF"
+                    :second==R::presented?"TR":"TRSF";
+                require(result==expected,"Mono presentation lost the actual submission result");
+                require(events==order,"Mono presentation rerasterized a busy frame, skipped retirement or retried a rejected scene");
+                require(attempts<=2,"Busy GPU retry was not bounded");
+            }
+    // Do not swallow a draw failure, submit a fabricated success, or fall
+    // through into another owner after an exception.
+    for(unsigned fail_at:{0U,1U,2U}) {
+        std::string events;bool caught{};
+        try {
+            static_cast<void>(present_mono_tiles_or_complete([&](bool retry) {
+                events+=retry?'R':'T';
+                if(fail_at==0) throw std::runtime_error("tile failure");
+                return R::rejected;
+            },[&] {events+='S';if(fail_at==1) throw std::runtime_error("sync failure");},
+            [&]() -> bool {events+='F';throw std::runtime_error("fallback failure");}));
+        } catch(const std::runtime_error&) {caught=true;}
+        require(caught && events==(fail_at==0?"T":fail_at==1?"TS":"TSF"),
+            "Mono failure escaped its owner or falsely submitted a frame");
+    }
+}
 Rgb pixel(ImageView view,unsigned x,unsigned y) {
     const auto at=std::size_t(y)*view.pitch+x*3;
     return {view.pixels[at],view.pixels[at+1],view.pixels[at+2]};
@@ -204,6 +240,16 @@ void stereo_culling_and_clipping_tests() {
 }
 void routing_and_input_tests() {
     using enum starfox::simulation::GameFlowState;
+    for(auto state:{pregame_menu,title,ex_pregame_menu,intro,controls_type,controls_choice,
+            training,planet_select,planet_travel,gameplay,stage_results,game_over,
+            continue_choice,credits,finished}) {
+        for(unsigned flags=0;flags<16;++flags) {
+            const bool stereo=flags&1,effect=flags&2,menu=flags&4,options=flags&8;
+            const bool expected=state!=intro && state!=ex_pregame_menu && flags==0;
+            require(reference_mono_eligible(state,stereo,effect,menu,options)==expected,
+                "Intro/EX PICA routing or existing mono/effect/menu routing changed");
+        }
+    }
     require(game_routing(pregame_menu).screen==ScreenUse::setup,"Pre-game setup lost");
     require(game_routing(pregame_menu,true).screen==ScreenUse::menu_preview,"Pre-game preview lost");
     require(!game_routing(ex_pregame_menu).move_hud,"EX menu sprites treated as gameplay HUD");
@@ -252,6 +298,65 @@ void lcd_tests() {
     require(!valid_image({},0,0),"Empty image accepted");
     require(!valid_image({},UINT_MAX,UINT_MAX),"Overflowing image extent accepted");
 }
+void rgba_lcd_tests() {
+    constexpr auto row_bytes=bottom_width*3;
+    constexpr auto output_bytes=bottom_width*screen_height*4;
+    const unsigned pitch=row_bytes+13;
+    std::vector<std::uint8_t> pixels(pitch*screen_height,0xD3);
+    for(unsigned y=0;y<screen_height;++y) for(unsigned x=0;x<bottom_width;++x) {
+        auto* p=pixels.data()+std::size_t(y)*pitch+x*3;
+        p[0]=std::uint8_t(x*7);p[1]=std::uint8_t(y*13);p[2]=std::uint8_t(x+y);
+    }
+    ImageView source{pixels,bottom_width,screen_height,pitch};
+    std::vector<std::uint8_t> first(output_bytes+2,0xA5),second(output_bytes,0x5A);
+    const std::span<std::uint8_t> a{first.data()+1,output_bytes},b{second};
+    const auto verify=[&](std::span<const std::uint8_t> out) {
+        for(unsigned y=0;y<screen_height;++y) for(unsigned x=0;x<bottom_width;++x) {
+            const auto* p=pixels.data()+std::size_t(y)*pitch+x*3;
+            const auto at=(std::size_t(x)*screen_height+screen_height-1-y)*4;
+            require(out[at]==255 && out[at+1]==p[2] && out[at+2]==p[1] && out[at+3]==p[0],
+                "Tiled RGBA LCD conversion differs from the independent pixel oracle");
+        }
+    };
+    RgbaLcdCache cache;
+    require(cache.prepare(source,a),"Fresh lower framebuffer was assumed resident");verify(a);
+    require(cache.prepare(source,a),"Unflushed lower framebuffer was certified");cache.commit(a);
+    require(!cache.prepare(source,a),"Unchanged certified lower framebuffer was copied");
+    require(cache.prepare(source,b),"Second physical lower framebuffer was assumed resident");cache.commit(b);verify(b);
+    require(!cache.prepare(source,a) && !cache.prepare(source,b),"Double-buffer residency was lost");
+    // Same input address with different actual content must invalidate BOTH LCDs.
+    pixels[(screen_height-1)*pitch+(bottom_width-1)*3]^=0xFF;
+    require(cache.prepare(source,a),"Mutable RGB pointer reused stale lower content");cache.commit(a);verify(a);
+    require(cache.prepare(source,b),"Changed HUD failed to invalidate the other LCD");cache.commit(b);verify(b);
+    // Source row padding is not a displayed pixel dependency.
+    pixels[row_bytes]^=0xFF;
+    require(!cache.prepare(source,a),"Unused input row padding invalidated the LCD");
+    std::vector<std::uint8_t> packed(row_bytes*screen_height);
+    for(unsigned y=0;y<screen_height;++y)
+        std::copy_n(pixels.data()+std::size_t(y)*pitch,row_bytes,packed.data()+std::size_t(y)*row_bytes);
+    const ImageView contiguous{packed,bottom_width,screen_height,row_bytes};
+    require(!cache.prepare(contiguous,b),"Equivalent packed RGB content lost residency");
+    // A resident presenter returning from the other GPU owner must repaint
+    // both physical buffers, even if their pointers and desired RGB are equal.
+    cache.invalidate();
+    require(cache.prepare(source,a),"Handoff retained old first-buffer LCD certificate");cache.commit(a);
+    require(cache.prepare(source,b),"Handoff retained old second-buffer LCD certificate");cache.commit(b);
+    require(!cache.prepare(source,a) && !cache.prepare(source,b),"Repainted handoff buffers did not recertify");
+    cache.invalidate();cache.invalidate();
+    require(cache.prepare(source,a),"Repeated invalidation did not discard LCD certificate");cache.commit(a);
+    RgbaLcdCache next_owner;
+    require(next_owner.prepare(source,a),"A different display owner inherited old LCD residency");
+    const auto before=first;
+    auto invalid=source;invalid.height=screen_height-1;
+    rejects([&]{copy_rgba_lcd(invalid,a);},"Invalid RGBA source accepted");
+    rejects([&]{copy_rgba_lcd(source,a.first(output_bytes-1));},"Short RGBA destination accepted");
+    std::vector<std::uint8_t> shared(output_bytes);
+    rejects([&]{copy_rgba_lcd({shared,bottom_width,screen_height,row_bytes},shared);},"Overlapping RGBA storage accepted");
+    require(first==before && first.front()==0xA5 && first.back()==0xA5,"RGBA bounds rejection changed output or guards");
+    bool rejected{};
+    try {cache.commit(a);} catch(const std::logic_error&) {rejected=true;}
+    require(rejected,"LCD cache accepted a commit without a pending transfer");
+}
 void hud_tests() {
     rejects([]{Canvas canvas(UINT_MAX);},"Unbounded canvas allocation allowed");
     Canvas canvas;canvas.clear({1,2,3});
@@ -276,6 +381,116 @@ void hud_tests() {
     state.portrait.width=65;
     rejects([&]{draw_cockpit(canvas,state);},"Oversized radio portrait accepted");
     Canvas top(top_width);rejects([&]{draw_cockpit(top,{});},"Lower-screen HUD drawn onto upper screen");
+}
+void canvas_rectangle_oracle_tests() {
+    std::uint32_t seed=0x68bf1234U;
+    const auto next=[&] {seed=seed*1664525U+1013904223U;return seed;};
+    for(const auto size:std::array<std::array<unsigned,2>,5>{{{320,240},{400,240},{74,74},{1,1},{13,7}}}) {
+        Canvas canvas(size[0],size[1]);
+        std::vector<std::uint8_t> pixels(std::size_t(size[0])*size[1]*3,0),coverage(std::size_t(size[0])*size[1],0);
+        bool covered=false;
+        for(unsigned step=0;step<320;++step) {
+            // Beginning coverage does not clear artwork, and later fills must
+            // preserve old ownership outside their actual clipped rectangle.
+            if(step==80 || step==210) {canvas.begin_artwork();std::fill(coverage.begin(),coverage.end(),0);covered=true;}
+            int x=int(next()%1200)-400,y=int(next()%800)-300;
+            int width=int(next()%800)-40,height=int(next()%500)-30;
+            switch(step%32) {
+            case 0:x=0;y=0;width=int(size[0]);height=int(size[1]);break;
+            case 1:x=INT_MIN;y=INT_MIN;width=INT_MAX;height=INT_MAX;break;
+            case 2:x=INT_MAX;y=INT_MAX;width=INT_MAX;height=INT_MAX;break;
+            case 3:x=-2;y=-2;width=3;height=3;break;
+            case 4:x=int(size[0])-1;y=int(size[1])-1;width=INT_MAX;height=INT_MAX;break;
+            case 5:x=0;y=0;width=INT_MIN;height=INT_MIN;break;
+            case 6:x=0;y=0;width=int(size[0]);height=1;break;
+            case 7:x=0;y=0;width=1;height=int(size[1]);break;
+            default:break;
+            }
+            const Rgb colour{std::uint8_t(next()),std::uint8_t(next()),std::uint8_t(next())};
+            const auto before=covered?std::span<const std::uint8_t>(coverage):std::span<const std::uint8_t>{};
+            require(canvas.coverage().size()==before.size(),"Canvas coverage allocation changed unexpectedly");
+            canvas.rectangle(x,y,width,height,colour);
+            // Independent old painter: inspect every destination coordinate,
+            // not the optimized clip/span/copy implementation.
+            if(width>0 && height>0) for(unsigned row=0;row<size[1];++row)
+                for(unsigned column=0;column<size[0];++column)
+                    if(std::int64_t(column)>=x && std::int64_t(column)<std::int64_t(x)+width
+                        && std::int64_t(row)>=y && std::int64_t(row)<std::int64_t(y)+height) {
+                        const auto pixel=std::size_t(row)*size[0]+column,at=pixel*3;
+                        pixels[at]=colour.r;pixels[at+1]=colour.g;pixels[at+2]=colour.b;
+                        if(covered) coverage[pixel]=1;
+                    }
+            require(std::equal(pixels.begin(),pixels.end(),canvas.view().pixels.begin()),"Clipped RGB span differs from pixel painter");
+            if(covered) require(std::equal(coverage.begin(),coverage.end(),canvas.coverage().begin()),"Clipped span changed artwork coverage");
+        }
+    }
+}
+void canvas_image_oracle_tests() {
+    std::uint32_t seed=0x812e731bU;
+    const auto next=[&] {seed=seed*1664525U+1013904223U;return seed;};
+    for(const auto size:std::array<std::array<unsigned,2>,5>{{{320,240},{400,240},{74,74},{1,1},{13,7}}}) {
+        Canvas canvas(size[0],size[1]);
+        std::vector<std::uint8_t> expected(std::size_t(size[0])*size[1]*3,0),coverage(std::size_t(size[0])*size[1],0);
+        bool covered=false;
+        for(unsigned step=0;step<256;++step) {
+            if(step==60 || step==180) {canvas.begin_artwork();std::fill(coverage.begin(),coverage.end(),0);covered=true;}
+            const unsigned width=1+next()%size[0],height=1+next()%screen_height,pitch=width*3+next()%23;
+            std::vector<std::uint8_t> source(std::size_t(pitch)*height+16,0xCD);
+            for(unsigned row=0;row<height;++row) for(unsigned column=0;column<width*3;++column)
+                source[std::size_t(row)*pitch+column]=step%16?std::uint8_t(next()):0;
+            const auto source_before=source;
+            const ImageView image{{source.data(),std::size_t(pitch)*(height-1)+width*3},width,height,pitch};
+            int x=int(next()%1000)-350,y=int(next()%700)-250;
+            switch(step%16) {
+            case 0:x=0;y=0;break;
+            case 1:x=-int(width)+1;y=-int(height)+1;break;
+            case 2:x=int(size[0])-1;y=int(size[1])-1;break;
+            case 3:x=INT_MIN;y=INT_MIN;break;
+            case 4:x=INT_MAX;y=INT_MAX;break;
+            case 5:x=-1;y=1;break;
+            case 6:x=1;y=-1;break;
+            default:break;
+            }
+            canvas.image(x,y,image);
+            // Independent destination-coordinate oracle. Padding is never art,
+            // and copying black still claims coverage just like pixel().
+            for(unsigned row=0;row<size[1];++row) for(unsigned column=0;column<size[0];++column) {
+                const auto sx=std::int64_t(column)-x,sy=std::int64_t(row)-y;
+                if(sx<0 || sy<0 || sx>=width || sy>=height) continue;
+                const auto at=(std::size_t(row)*size[0]+column)*3,src=std::size_t(sy)*pitch+std::size_t(sx)*3;
+                for(unsigned channel=0;channel<3;++channel) expected[at+channel]=source[src+channel];
+                if(covered) coverage[at/3]=1;
+            }
+            require(std::equal(expected.begin(),expected.end(),canvas.view().pixels.begin()),"Clipped RGB image spans differ from pixel painter");
+            if(covered) require(std::equal(coverage.begin(),coverage.end(),canvas.coverage().begin()),"Image spans changed artwork ownership");
+            require(source==source_before,"RGB image draw changed source or padding");
+            const auto rgb_before=expected,coverage_before=coverage;
+            auto invalid=image;invalid.pixels=invalid.pixels.first(width*3-1);
+            rejects([&]{canvas.image(x,y,invalid);},"Invalid image was accepted before clipping");
+            require(std::equal(rgb_before.begin(),rgb_before.end(),canvas.view().pixels.begin()),"Invalid image partially drew pixels");
+            if(covered) require(std::equal(coverage_before.begin(),coverage_before.end(),canvas.coverage().begin()),"Invalid image partially claimed coverage");
+        }
+    }
+    // Self-images are legal in the existing API. A memcpy/memmove shortcut
+    // would change their forward-pixel smearing, especially between rows.
+    for(int y:{-1,0,1,3}) for(int x:{-2,0,1,4}) {
+        Canvas canvas(13,7);canvas.begin_artwork();
+        for(unsigned row=0;row<7;++row) for(unsigned column=0;column<13;++column)
+            canvas.rectangle(column,row,1,1,{std::uint8_t(column*11),std::uint8_t(row*31),std::uint8_t(column+row)});
+        auto expected=std::vector<std::uint8_t>(canvas.view().pixels.begin(),canvas.view().pixels.end());
+        const auto source=canvas.view();
+        canvas.image(x,y,{source.pixels.subspan(3),7,3,13*3});
+        for(unsigned row=0;row<3;++row) for(unsigned column=0;column<7;++column) {
+            const int dx=x+int(column),dy=y+int(row);
+            if(dx<0 || dy<0 || dx>=13 || dy>=7) continue;
+            const auto src=3+row*13*3+column*3;
+            const auto dst=(dy*13+dx)*3;
+            const std::array colour{expected[src],expected[src+1],expected[src+2]};
+            for(unsigned channel=0;channel<3;++channel) expected[dst+channel]=colour[channel];
+        }
+        require(std::equal(expected.begin(),expected.end(),canvas.view().pixels.begin()),"Self-image forward-pixel semantics changed");
+        require(std::all_of(canvas.coverage().begin(),canvas.coverage().end(),[](auto value){return value==1;}),"Self-image discarded coverage");
+    }
 }
 void dashboard_cache_tests() {
     CockpitDashboard dashboard;HudState state;
@@ -365,27 +580,65 @@ void radio_artwork_cache_tests() {
 void presentation_clock_tests() {
     for(unsigned rate:{30U,60U}) {
         PresentationClock clock;PresentationRate measured;
-        require(clock.due(0,rate),"Native clock skipped its first presentation");measured.completed(0);
+        require(clock.due(0,rate,0),"Native clock skipped its first presentation");measured.completed(0);
         unsigned rendered{};
         for(unsigned phase=1;phase<=6000;++phase) {
             const auto time=(std::int64_t(phase)*1'000'000'000+59)/60;
-            const bool due=clock.due(time,rate);
+            const bool due=clock.due(time,rate,1);
             require(due==(rate==60 || phase%2==0),"Native frame gate drifted away from integer 60 Hz source phases");
-            require(!clock.due(time,rate),"Duplicate host time submitted a second eye/frame");
+            require(!clock.due(time,rate,1),"Duplicate host time submitted a second eye/frame");
             if(due) {++rendered;measured.completed(time);}
             if(phase%60==0) require(measured.fps()==rate,"Measured native rate counted source ticks instead of presentations");
         }
         require(rendered==rate*100,"Native presentation count drifted over 100 seconds");
-        require(clock.due(200'000'000'000LL,rate) && !clock.due(200'000'000'000LL,rate),"Long stall produced catch-up presentations");
-        require(clock.due(1,rate) && !clock.due(1,rate),"Rewound clock retained old credit");
-        require(clock.due(1,rate==30?60:30),"Changing native target did not rebase presentation");
-        clock.reset();require(clock.due(1,rate),"Home/editor reset did not restart native presentation");
+        require(clock.due(200'000'000'000LL,rate,15) && !clock.due(200'000'000'000LL,rate,15),"Long stall produced catch-up presentations");
+        require(clock.due(1,rate,0) && !clock.due(1,rate,0),"Rewound clock retained old credit");
+        require(clock.due(1,rate==30?60:30,0),"Changing native target did not rebase presentation");
+        clock.reset();require(clock.due(1,rate,0),"Home/editor reset did not restart native presentation");
         const auto end=std::numeric_limits<std::int64_t>::max();
-        clock.reset();require(clock.due(end-1'000'000'000LL,rate) && clock.due(end,rate),"Long uptime overflowed native clock");
+        clock.reset();require(clock.due(end-1'000'000'000LL,rate,0) && clock.due(end,rate,60),"Long uptime overflowed native clock");
+        // Vary presentation work after each exact source-clock sample. The old
+        // independent gate loses ready frames when a long draw follows a short
+        // draw, even though all 60 source phases were completed on time.
+        clock.reset();require(clock.due(12'000'000,rate,0),"Jitter fixture did not start");
+        unsigned jitter_rendered{};
+        for(unsigned phase=1;phase<=6000;++phase) {
+            const auto source_time=(std::int64_t(phase)*1'000'000'000+59)/60;
+            const auto work=phase%2?2'000'000LL:12'000'000LL;
+            if(clock.due(source_time+work,rate,1)) ++jitter_rendered;
+            require(!clock.due(source_time+work+1,rate,0),"No source phase replayed the preceding image");
+        }
+        require(jitter_rendered==rate*100,"Render jitter discarded ready source presentations");
+        require(clock.due(end,rate,std::numeric_limits<unsigned>::max()),"Bounded catch-up rejected its final frame");
+        require(!clock.due(end,rate,std::numeric_limits<unsigned>::max()),"Catch-up burst submitted more than once");
     }
     PresentationClock clock;
-    for(unsigned invalid:{0U,20U,29U,31U,90U,120U,480U}) rejects([&]{static_cast<void>(clock.due(0,invalid));},"Unsupported native output target accepted");
-    rejects([&]{static_cast<void>(clock.due(-1,60));},"Negative native time accepted");
+    for(unsigned invalid:{0U,20U,29U,31U,90U,120U,480U}) rejects([&]{static_cast<void>(clock.due(0,invalid,0));},"Unsupported native output target accepted");
+    rejects([&]{static_cast<void>(clock.due(-1,60,0));},"Negative native time accepted");
+    require(source_phase_wait_needed(0,16'666'666) && !source_phase_wait_needed(0,16'666'667),"Source wait crossed the rational 60 Hz boundary");
+    require(source_phase_wait_needed(.5,8'333'333) && !source_phase_wait_needed(.5,8'333'334),"Wait ignored source phase debt");
+    require(!source_phase_wait_needed(.999,1'000'000),"Wait slept through a phase completed by source work");
+    require(source_phase_wait_needed(0,0) && !source_phase_wait_needed(0,std::numeric_limits<std::int64_t>::max()),"Wait mishandled empty work or long uptime");
+    require(source_phase_wait_nanoseconds(0,0)==16'666'667
+        && source_phase_wait_nanoseconds(.5,0)==8'333'334
+        && source_phase_wait_nanoseconds(.75,4'000'000)==166'667,
+        "Source sleep ignored the outstanding partial phase");
+    require(source_phase_wait_nanoseconds(.5,8'333'334)==0
+        && source_phase_wait_nanoseconds(0,std::numeric_limits<std::int64_t>::max())==0,
+        "Completed source work still slept or overflowed");
+    for(unsigned eighth=0;eighth<8;++eighth) for(std::int64_t work=0;work<=20'000'000;work+=97'013) {
+        const auto fraction=double(eighth)/8.0;
+        const auto wait=source_phase_wait_nanoseconds(fraction,work);
+        // Exact integer numerator for binary-eighth source fractions. The
+        // rational deadline must be rounded up, not stretched to LCD VBlank.
+        const auto debt=(8-std::int64_t(eighth))*1'000'000'000-work*480;
+        const auto expected=debt>0?(debt+479)/480:0;
+        require(wait==expected && wait>=0 && wait<=16'666'667,
+            "Source deadline sleep drifted or exceeded one phase");
+    }
+    for(double fraction:{-1.0,1.0,std::numeric_limits<double>::quiet_NaN()})
+        rejects([&]{static_cast<void>(source_phase_wait_needed(fraction,0));},"Invalid source wait fraction accepted");
+    rejects([&]{static_cast<void>(source_phase_wait_needed(0,-1));},"Negative source wait time accepted");
     PresentationRate measured;
     measured.completed(0);measured.completed(3'000'000'000LL);
     require(measured.fps()==0,"Long loading stall was advertised as a valid measured rate");
@@ -422,8 +675,8 @@ void captures(const std::filesystem::path& directory) {
 } // namespace
 int main(int argc,char** argv) {
     try {
-        hardware_profile_tests();stereo_tests();pica_projection_tests();stereo_culling_and_clipping_tests();
-        routing_and_input_tests();lcd_tests();hud_tests();dashboard_cache_tests();radio_artwork_cache_tests();presentation_clock_tests();
+        hardware_profile_tests();mono_presentation_tests();stereo_tests();pica_projection_tests();stereo_culling_and_clipping_tests();
+        routing_and_input_tests();lcd_tests();rgba_lcd_tests();hud_tests();canvas_rectangle_oracle_tests();canvas_image_oracle_tests();dashboard_cache_tests();radio_artwork_cache_tests();presentation_clock_tests();
         if(argc==3 && std::string_view(argv[1])=="--capture") captures(argv[2]);
         else if(argc!=1) throw std::invalid_argument("Usage: frontend_tests [--capture directory]");
         std::cout<<"3DS frontend: "<<checks<<" checks passed\n";

@@ -4470,6 +4470,12 @@ void GameSimulation::advance_msu_fade() {
     }
 }
 
+bool GameSimulation::video_phase_independent_of_apu() const noexcept {
+    return (flow_state_ == GameFlowState::gameplay || flow_state_ == GameFlowState::training)
+        && frontend_phase_ == FrontendPhase::none && !menu_preview_
+        && !runtime_options_open_ && !deferred_msu_track_;
+}
+
 void GameSimulation::present_frame() {
     if (!runtime_options_open_ && briefing_voice_frames_ != 0U) --briefing_voice_frames_;
     if (menu_preview_) {
@@ -6404,7 +6410,10 @@ GameTickResult GameSimulation::tick(const input::TickInput& input) {
     const auto call_transfer_routine = [&](std::uint32_t routine) {
         registers = {};
         registers.status = 0x24U;
-        result.prelude_instructions += map_.call_native_routine(
+        // DOSOUNDS and each preceding transfer imported the complete pool.
+        // Borrow that canonical WRAM image only while host objects/lists and
+        // mapped writes remain unchanged; import every routine's result.
+        result.prelude_instructions += map_.call_native_routine_reusing_import(
             routine, registers, 5'000'000, true);
     };
     // EX TRANS.ASM's NOBGMODE branch skips every palette update but still
@@ -6448,7 +6457,7 @@ GameTickResult GameSimulation::tick(const input::TickInput& input) {
     // advances the source table for presentation.
     registers = {};
     registers.status = 0x24U;
-    result.prelude_instructions += map_.call_native_routine(
+    result.prelude_instructions += map_.call_native_routine_reusing_import(
         do_window_wipe_, registers, 5'000'000, true);
     if (map_.read_native_byte(do_a_wipe_) != 0U) {
         wipe_logic_snapshot_ = map_.read_native_byte(wipe_logic_);

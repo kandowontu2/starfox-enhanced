@@ -16,23 +16,46 @@ struct NativeStemExecutor::Impl {
     Thread worker{};
     audio::StemTask task{};
     std::exception_ptr failure;
-    bool stopping{}, busy{};
+    bool stopping{}, busy{}, deferred{};
+    u32 previous_budget{};
+    bool budget_changed{};
 
-    Impl() {
+    explicit Impl(Role role) {
         LightLock_Init(&lock);
         LightEvent_Init(&ready, RESET_ONESHOT);
         LightEvent_Init(&done, RESET_ONESHOT);
         bool new_model{};
         if (R_FAILED(APT_CheckNew3DS(&new_model)) || !new_model) return;
+        const bool effects=role==Role::budgeted_effects;
+        if(effects) {
+            // Core 1 is shared with system services, not an unrestricted extra
+            // application core. Refuse it when APT cannot grant a budget.
+            if(R_FAILED(APT_GetAppCpuTimeLimit(&previous_budget))) return;
+            if(previous_budget<50) {
+                if(R_FAILED(APT_SetAppCpuTimeLimit(70))
+                    && R_FAILED(APT_SetAppCpuTimeLimit(50))) return;
+                budget_changed=true;
+            }
+        }
         s32 priority = 0x30;
         if (R_FAILED(svcGetThreadPriority(&priority, CUR_THREAD_HANDLE))) priority = 0x30;
         priority = std::clamp<s32>(priority, 0x18, 0x3f);
         // Core 2 is permission-dependent even on New 3DS. threadCreate returns
         // nullptr on failure, which leaves the serial implementation intact.
-        worker = threadCreate(entry, this, worker_stack_bytes, priority, 2, false);
+        worker = threadCreate(entry, this, worker_stack_bytes, priority, effects?1:2, false);
+        if(!worker) restore_budget();
+    }
+    void restore_budget() noexcept {
+        if(budget_changed) {
+            static_cast<void>(APT_SetAppCpuTimeLimit(previous_budget));
+            budget_changed=false;
+        }
     }
     ~Impl() {
         if (!worker) return;
+        // A dispatch may not have started yet. Finish it before setting stop;
+        // otherwise the worker could consume ready, see stop and drop the job.
+        try {finish();} catch(...) {}
         LightLock_Lock(&lock);
         stopping = true;
         LightLock_Unlock(&lock);
@@ -41,6 +64,7 @@ struct NativeStemExecutor::Impl {
         if (R_FAILED(threadJoin(worker, std::numeric_limits<u64>::max())))
             std::terminate();
         threadFree(worker);
+        restore_budget();
     }
     static void entry(void* context) noexcept {
         auto& self = *static_cast<Impl*>(context);
@@ -60,6 +84,37 @@ struct NativeStemExecutor::Impl {
             LightLock_Unlock(&self.lock);
             LightEvent_Signal(&self.done);
         }
+    }
+    bool begin(audio::StemTask background) {
+        if(!background.run) throw std::invalid_argument("Missing background SPC task");
+        LightLock_Lock(&lock);
+        if(busy) {
+            LightLock_Unlock(&lock);
+            throw std::logic_error("Overlapping SPC stem executor call");
+        }
+        if(!worker) {LightLock_Unlock(&lock);return false;}
+        busy=true;deferred=true;task=background;failure={};
+        LightLock_Unlock(&lock);
+        STARFOX_3DS_STARTUP_DETAIL_MARK(audio_worker_dispatch);
+        LightEvent_Signal(&ready);
+        return true;
+    }
+    void finish() {
+        LightLock_Lock(&lock);
+        const bool pending=busy;
+        if(pending && !deferred) {
+            LightLock_Unlock(&lock);
+            throw std::logic_error("Cannot finish a synchronous SPC executor call");
+        }
+        LightLock_Unlock(&lock);
+        if(!pending) return;
+        STARFOX_3DS_STARTUP_DETAIL_MARK(audio_worker_wait);
+        LightEvent_Wait(&done);
+        STARFOX_3DS_STARTUP_DETAIL_MARK(audio_worker_complete);
+        LightLock_Lock(&lock);
+        const auto error=failure;failure={};busy=false;deferred=false;
+        LightLock_Unlock(&lock);
+        if(error) std::rethrow_exception(error);
     }
     void execute(audio::StemTask foreground, audio::StemTask background) {
         if (!foreground.run || !background.run)
@@ -99,10 +154,12 @@ struct NativeStemExecutor::Impl {
         if (background_failure) std::rethrow_exception(background_failure);
     }
 };
-NativeStemExecutor::NativeStemExecutor() : impl_(std::make_unique<Impl>()) {}
+NativeStemExecutor::NativeStemExecutor(Role role) : impl_(std::make_unique<Impl>(role)) {}
 NativeStemExecutor::~NativeStemExecutor() = default;
 bool NativeStemExecutor::parallel_available() const noexcept { return impl_->worker != nullptr; }
 void NativeStemExecutor::execute(audio::StemTask foreground, audio::StemTask background) {
     impl_->execute(foreground, background);
 }
+bool NativeStemExecutor::begin(audio::StemTask background) {return impl_->begin(background);}
+void NativeStemExecutor::finish() {impl_->finish();}
 } // namespace starfox::platform::nintendo_3ds

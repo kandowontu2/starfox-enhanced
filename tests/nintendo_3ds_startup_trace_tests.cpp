@@ -86,6 +86,44 @@ int main() try {
     const auto stopped_clock=tick;unavailable.write("retry");
     unavailable.restart_window();unavailable.write_detail("retry_detail");
     require(tick == stopped_clock,"Failed SD stream retried I/O");
+    unavailable.restart_source_window();unavailable.first_gpu_window();
+    require(tick == stopped_clock,"Failed SD stream retried first GPU/source I/O");
+    std::ostringstream gpu_rows;
+    StartupTrace gpu_trace(gpu_rows,clock_tick);
+    {
+        ScopedStartupTraceActivation activation(gpu_trace);
+        for(unsigned i=0;i<1000;++i) gpu_trace.begin_frame();
+        const auto before_gpu=tick;
+        STARFOX_3DS_STARTUP_FIRST_GPU();
+#if defined(STARFOX_3DS_PROFILE_FRAMES)
+        require(tick>before_gpu && gpu_rows.str().ends_with("first_gpu_frame\n"),
+            "First GPU initialization after menu idle lost its receipt");
+#else
+        require(tick==before_gpu && gpu_rows.str().empty(),"Disabled first GPU path performed I/O");
+#endif
+        for(unsigned i=0;i<1000;++i) gpu_trace.begin_frame();
+        const auto warm_rows=gpu_rows.str();const auto warm_clock=tick;
+        for(unsigned i=0;i<1000;++i) {
+            STARFOX_3DS_STARTUP_FIRST_GPU();
+            STARFOX_3DS_STARTUP_MARK(gpu_initialize);
+            STARFOX_3DS_STARTUP_DETAIL_MARK(audio_worker_dispatch);
+        }
+        require(gpu_rows.str()==warm_rows && tick==warm_clock,
+            "Warm damage/renderer handoffs rearmed steady-gameplay SD writes");
+#if defined(STARFOX_3DS_PROFILE_FRAMES)
+        // Start can rearm its own bounded receipt, but cannot make subsequent
+        // presenter recreation pretend to be a new cartridge's first GPU.
+        STARFOX_3DS_STARTUP_RESTART(game_start_input);
+        for(unsigned i=0;i<1000;++i) gpu_trace.begin_frame();
+        const auto start_rows=gpu_rows.str();const auto start_clock=tick;
+        STARFOX_3DS_STARTUP_FIRST_GPU();
+        require(gpu_rows.str()==start_rows && tick==start_clock,"Start reset the GPU one-shot guard");
+        gpu_trace.restart_source_window();
+        STARFOX_3DS_STARTUP_FIRST_GPU();
+        require(tick>start_clock && gpu_rows.str().ends_with("first_gpu_frame\n"),
+            "A replacement cartridge did not regain its first GPU diagnostic");
+#endif
+    }
     std::ostringstream no_clock;
     StartupTrace disabled(no_clock,nullptr);disabled.write("boot");
     require(no_clock.str().empty(),"Disabled clock emitted data");

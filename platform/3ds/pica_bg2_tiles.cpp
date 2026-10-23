@@ -1,14 +1,16 @@
 // Tile atlas/HDMA quad integration inspired by Esteban PDN's starwing-3ds.
 // Adapted for our exact RGB8, source-layer stencil and shared-eye PICA owner.
 #include "starfox/platform/nintendo_3ds/pica_bg2_tiles.hpp"
+#include "starfox/platform/nintendo_3ds/ppu_tile_dependencies.hpp"
 #include <cstring>
 
 namespace starfox::platform::nintendo_3ds {
 namespace {
 bool same_range(const simulation::SnesPpuState& a,const simulation::SnesPpuState& b,unsigned first,unsigned count) {
-    first&=65535;const unsigned head=std::min(count,65536-first);
-    return std::memcmp(a.vram.data()+first,b.vram.data()+first,head)==0
-        && std::memcmp(a.vram.data(),b.vram.data(),count-head)==0;
+    return same_ppu_vram_range(a,b,first,count);
+}
+bool same_characters(const simulation::SnesPpuState& a,const simulation::SnesPpuState& b) {
+    return same_background_tiles(a,b,a.bg2_character_base,a.bg2_screen_base,a.bg2_screen_size,4,a.bg2_tile_size_16);
 }
 bool same_geometry(const simulation::SnesPpuState& a,const simulation::SnesPpuState& b) {
     const unsigned pages=((a.bg2_screen_size&1)?2:1)*((a.bg2_screen_size&2)?2:1);
@@ -22,14 +24,15 @@ bool same_geometry(const simulation::SnesPpuState& a,const simulation::SnesPpuSt
         && (!a.bg2_scanline_scroll_enabled || a.bg2_scanline_scroll_y==b.bg2_scanline_scroll_y)
         && (!a.bg2_vertical_offsets_enabled || (same_range(a,b,0x5f40,64)
             && a.bg2_character_base==b.bg2_character_base
-            && same_range(a,b,a.bg2_character_base*2,32768)))
+            && same_characters(a,b)))
         && same_range(a,b,a.bg2_screen_base*2,pages*2048);
 }
 }
 std::optional<PicaFrame> PicaBg2Tiles::prepare(std::shared_ptr<const simulation::SnesPpuState> source,
     const PpuBatch& batch,const FramePlan& plan,unsigned brightness,unsigned subtract,unsigned vertex_budget,
-    unsigned source_guard,bool complete_roll) {
+    unsigned source_guard,bool complete_roll,bool indexed_upload) {
     if(!source || brightness>15 || subtract>31) throw std::invalid_argument("Invalid 3DS GPU tile source");
+    indexed_upload=indexed_upload && !plan.stereo && !batch.water_receiver;
     vertex_budget=std::min(vertex_budget,pica_vertex_limit);
     const bool water=batch.water_receiver && batch.space==PicaSpace::scenery && source->background_mode==1
         && batch.expand_horizontal && complete_roll;
@@ -53,7 +56,7 @@ std::optional<PicaFrame> PicaBg2Tiles::prepare(std::shared_ptr<const simulation:
     const auto scroll=pass.scroll.value_or(std::array{source->bg2_scroll_x,source->bg2_scroll_y});
     bool decode=!source_ || batch!=batch_ || complete_roll_!=complete_plan
         || !same_geometry(*source_,*source) || (complete_plan && (source_->bg2_character_base!=source->bg2_character_base
-            || !same_range(*source_,*source,source->bg2_character_base*2,32768)));
+            || !same_characters(*source_,*source)));
     // Slider-only presentations may need less guard than an already decoded
     // frame. Retain sufficient coverage, as PicaRaster does, rather than
     // alternating source traversals while the game's PPU remains unchanged.
@@ -81,12 +84,17 @@ std::optional<PicaFrame> PicaBg2Tiles::prepare(std::shared_ptr<const simulation:
     if(active_keys.size()>1024) return {};
     const unsigned atlas_width=256,atlas_height=std::max(8U,unsigned((active_keys.size()+31)/32)*8);
     const bool rekey=decode && keys!=keys_;
-    const bool recolour=!source_ || rekey || brightness_!=brightness || subtract_!=subtract
-        || source_->cgram!=source->cgram || source_->bg2_character_base!=source->bg2_character_base
-        || !same_range(*source_,*source,source->bg2_character_base*2,32768);
+    const bool reink=!source_ || rekey || indexed_upload!=indexed_upload_
+        || source_->bg2_character_base!=source->bg2_character_base || !same_characters(*source_,*source);
+    const bool recolour=reink || brightness_!=brightness || subtract_!=subtract || source_->cgram!=source->cgram;
     std::vector<std::uint8_t> pixels;
+    std::vector<std::uint8_t> indexed_layers;
+    std::array<std::uint32_t,512> indexed_palette{};
     if(recolour) {
-        pixels.assign(std::size_t(atlas_width)*atlas_height*4,0);
+        if(!indexed_upload || reink) {
+            pixels.assign(std::size_t(atlas_width)*atlas_height*(indexed_upload?1:4),0);
+            if(indexed_upload) indexed_layers.assign(pixels.size(),0);
+        }
         // Source fades apply the same integer clamp/brightness calculation to
         // every occurrence of an ink. Do it once per palette entry, not three
         // times per atlas texel. Keep explicit RGBA bytes (no alignment/endian
@@ -99,14 +107,18 @@ std::optional<PicaFrame> PicaBg2Tiles::prepare(std::shared_ptr<const simulation:
                 palette[ink][channel]=std::uint8_t(((five<<3)|(five>>2))*brightness/15);
             }
             palette[ink][3]=255;
+            indexed_palette[ink]=indexed_palette[256+ink]=std::bit_cast<std::uint32_t>(palette[ink]);
         }
+        const auto write=[&](unsigned slot,unsigned x,unsigned y,unsigned ink) {
+            const auto at=std::size_t(slot/32*8+y)*atlas_width+slot%32*8+x;
+            if(indexed_upload) {pixels[at]=std::uint8_t(ink);indexed_layers[at]=2;}
+            else std::copy(palette[ink].begin(),palette[ink].end(),pixels.begin()+at*4);
+        };
+        if(!indexed_upload || reink)
         for(unsigned slot=0;slot<active_keys.size();++slot) {
             if(active_keys[slot]>=8192) {
-                const auto& rgba=palette[active_keys[slot]-8192];
-                for(unsigned y=0;y<8;++y) for(unsigned x=0;x<8;++x) {
-                    const auto at=(std::size_t(slot/32*8+y)*atlas_width+slot%32*8+x)*4;
-                    std::copy(rgba.begin(),rgba.end(),pixels.begin()+at);
-                }
+                for(unsigned y=0;y<8;++y) for(unsigned x=0;x<8;++x)
+                    write(slot,x,y,active_keys[slot]-8192);
                 continue;
             }
             const unsigned character=active_keys[slot]/8,bank=active_keys[slot]%8;
@@ -118,9 +130,7 @@ std::optional<PicaFrame> PicaBg2Tiles::prepare(std::shared_ptr<const simulation:
                     const unsigned mask=128>>x,ink=unsigned(bool(a&mask))|(unsigned(bool(b&mask))<<1)
                         |(unsigned(bool(c&mask))<<2)|(unsigned(bool(d&mask))<<3);
                     if(!ink) continue; // Only tile colour zero is transparent; black RGB is opaque.
-                    const auto& rgba=palette[bank*16+ink];
-                    const auto at=(std::size_t(slot/32*8+y)*atlas_width+slot%32*8+x)*4;
-                    std::copy(rgba.begin(),rgba.end(),pixels.begin()+at);
+                    write(slot,x,y,bank*16+ink);
                 }
             }
         }
@@ -159,12 +169,21 @@ std::optional<PicaFrame> PicaBg2Tiles::prepare(std::shared_ptr<const simulation:
     if(decode) next_batch=batch; // Complete all allocating work before publication.
     if(decode) {rectangles_.swap(rectangles);++work_.decodes;}
     if(decode) {vertices_.swap(vertices);keys_.swap(keys);batch_=std::move(*next_batch);}
-    if(recolour) {pixels_.swap(pixels);++work_.colour_updates;}
+    if(recolour) {
+        if(!indexed_upload || reink) pixels_.swap(pixels);
+        if(indexed_upload) {
+            if(reink) indexed_layers_.swap(indexed_layers);
+            indexed_palette_=indexed_palette;
+        } else std::vector<std::uint8_t>().swap(indexed_layers_);
+        indexed_upload_=indexed_upload;++work_.colour_updates;
+    }
     source_=std::move(source);width_=width;
     complete_roll_=complete_plan;
     brightness_=brightness;subtract_=subtract;
-    image_={pixels_,atlas_width,atlas_height,atlas_width*4,4};
+    image_={pixels_,atlas_width,atlas_height,atlas_width*(indexed_upload_?1:4),indexed_upload_?1U:4U};
+    if(indexed_upload_) image_.indexed=PicaIndexedPixels{indexed_layers_,indexed_palette_};
     draw_={0,unsigned(vertices_.size()),0,pica_identity,batch.space,false,false,false};draw_.source_layer=2;
+    content_.publish(vertices_.empty()?std::span<PicaImage>{}:std::span(&image_,1),recolour);
     if(vertices_.empty()) return PicaFrame{plan,{},{},{}};
     return PicaFrame{plan,vertices_,std::span(&draw_,1),std::span(&image_,1)};
 }

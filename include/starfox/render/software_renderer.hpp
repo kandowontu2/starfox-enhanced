@@ -263,6 +263,26 @@ struct PreparedShapePrimitives {
     // flags are retained; consumers must implement them, never flatten/drop them.
 };
 
+// Caller-owned working storage from EstebanPdN/starwing-3ds (01bf4925).
+// Reusing capacity avoids per-model projection/clipping allocations. A scratch
+// object belongs to one serialized draw stream; do not share it across threads.
+namespace software_renderer_detail {
+struct Vec3 { double x{}, y{}, z{}; };
+struct ScreenPoint { double x{}, y{}, z{}; bool visible{}; };
+struct TexturePoint { double u{}, v{}; };
+struct RasterVertex { ScreenPoint point{}; TexturePoint texture{}; };
+struct Scratch {
+    std::vector<Vec3> transformed_vertices;
+    std::vector<ScreenPoint> projected;
+    std::vector<const assets::Face*> ordered_faces;
+    std::vector<Vec3> camera_polygon;
+    std::vector<Vec3> camera_clipping_scratch;
+    std::vector<ScreenPoint> polygon;
+    std::vector<RasterVertex> raster_polygon;
+    std::vector<RasterVertex> clipping_scratch;
+};
+}
+
 class SoftwareRenderer {
 public:
     explicit SoftwareRenderer(RenderSettings settings = {});
@@ -280,7 +300,8 @@ public:
         bool clear_target = true,
         SurfaceBuffer* surfaces = nullptr,
         shadows::Scene* shadow_scene = nullptr,
-        RenderDiagnostics* axis_diagnostics = nullptr) const;
+        RenderDiagnostics* axis_diagnostics = nullptr,
+        software_renderer_detail::Scratch* reusable_scratch = nullptr) const;
 
     // MHUD.MC's first-person direction indicators are a Super FX line pass,
     // separate from both the 3D object list and the SNES OAM reticle.
@@ -296,7 +317,8 @@ public:
 private:
     void draw_impl(const assets::Shape&,const RenderPose&,Framebuffer&,bool,
         SurfaceBuffer*,shadows::Scene*,RenderDiagnostics*,bool shadow_only,
-        PreparedShapePrimitives* primitives=nullptr) const;
+        PreparedShapePrimitives* primitives=nullptr,
+        software_renderer_detail::Scratch* reusable_scratch=nullptr) const;
     RenderSettings settings_;
 };
 

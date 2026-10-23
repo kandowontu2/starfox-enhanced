@@ -122,6 +122,47 @@ void map_single_occurrence() {
             "Map restriction suppressed travel's world surround");
     }
 }
+void indexed_mono_pipeline() {
+    using enum simulation::GameFlowState;
+    for(auto flow:{intro,title,controls_type,controls_choice,planet_select,planet_travel,
+        gameplay,training,stage_results,game_over,continue_choice,ex_pregame_menu,finished,credits})
+        for(unsigned mode:{1U,2U,3U}) for(unsigned budget:{0U,pica_vertex_limit}) {
+            auto frame=source(flow,mode);
+            auto scene=std::make_shared<vr::GameSceneSnapshot>(*frame.current);
+            scene->background_landscape=mode==2 && (flow==gameplay || flow==training || flow==stage_results);
+            frame.current=frame.previous=scene;
+            GameLayers reference,compact(true);Canvas lower;
+            const auto a=reference.prepare(frame,budget),b=compact.prepare(frame,budget);
+            require(a.clear==b.clear,"Indexed mono changed the backdrop/frontend margins");
+            for(const auto pair:{std::pair{&a.before_models,&b.before_models},std::pair{&a.after_models,&b.after_models}}) {
+                const auto& x=*pair.first;const auto& y=*pair.second;
+                require(x.vertices.size()==y.vertices.size() && x.draws.size()==y.draws.size()
+                    && x.textures.size()==y.textures.size() && std::equal(x.vertices.begin(),x.vertices.end(),y.vertices.begin()),
+                    "Indexed native policy changed the source painter geometry");
+                validate_pica_frame(y,lower.view());
+                for(unsigned i=0;i<x.draws.size();++i) {
+                    const auto& dx=x.draws[i];const auto& dy=y.draws[i];
+                    require(dx.first==dy.first && dx.count==dy.count && dx.texture==dy.texture
+                        && dx.space==dy.space && dx.source_layer==dy.source_layer && dx.depth_test==dy.depth_test
+                        && dx.depth_write==dy.depth_write && dx.clip==dy.clip,
+                        "Indexed native policy changed painter order, stencil or model depth");
+                }
+                for(unsigned i=0;i<x.textures.size();++i) {
+                    const auto lx=pica_texture_layout(x.textures[i]),ly=pica_texture_layout(y.textures[i]);
+                    require(lx.bytes==ly.bytes && x.textures[i].source_layers.empty()==y.textures[i].source_layers.empty(),
+                        "Indexed native policy changed texture layout or source stencil ownership");
+                    std::vector<std::uint8_t> px(lx.bytes),py(ly.bytes);
+                    pack_pica_texture(x.textures[i],px);pack_pica_texture(y.textures[i],py);
+                    require(px==py,"Indexed native policy changed complete native artwork bytes");
+                    if(!x.textures[i].source_layers.empty()) {
+                        std::vector<std::uint8_t> mx(lx.bytes/4),my(ly.bytes/4);
+                        pack_pica_layers(x.textures[i],mx);pack_pica_layers(y.textures[i],my);
+                        require(mx==my,"Indexed native policy changed colour-math ownership bytes");
+                    }
+                }
+            }
+        }
+}
 void priority_pixels() {
     using enum simulation::GameFlowState;
     for(unsigned mode:{1U,2U,3U}) {
@@ -277,8 +318,15 @@ void landscape_depth() {
             "Ground used only infinite scenery displacement instead of finite stereo disparity");
         for(float slider:{0.F,.5F,1.F}) {
             frame.plan=plan_frame(slider,true,ScreenUse::world);prepared=layers.prepare(frame);
-            require(saved.size()==prepared.before_models.vertices.size() && std::equal(saved.begin(),saved.end(),prepared.before_models.vertices.begin()),
-                "Slider changed shared terrain vertices instead of eye projection");
+            const auto& native=prepared.before_models;
+            if(frame.plan.stereo) require(saved.size()==native.vertices.size()
+                && std::equal(saved.begin(),saved.end(),native.vertices.begin()),
+                "Stereo slider changed shared terrain vertices instead of eye projection");
+            else require(native.vertices.size()==6 && native.draws.size()==1
+                && native.draws.front().space==PicaSpace::scenery
+                && std::equal(native.vertices.begin(),native.vertices.end(),saved.begin())
+                && native.textures.front().source_layers.empty(),
+                "Mono retained duplicate finite ground or changed source landscape pixels");
             require(layers.work()[0].decodes==work[0].decodes && layers.work()[0].colour_updates==work[0].colour_updates,
                 "Slider reran source landscape tile/colour preparation");
             validate_pica_frame(prepared.before_models,lower.view());
@@ -289,6 +337,77 @@ void landscape_depth() {
     scene->flow=simulation::GameFlowState::gameplay;ppu->tunnel_scene=true;
     auto raster=std::make_shared<GameRasterSnapshot>(*frame.raster);raster->ppu=ppu;frame.raster=raster;
     require(!native_landscape_scene(frame),"Tunnel artwork was misclassified as outdoor ground");
+}
+void mono_landscape_pixels() {
+    // Rasterize submitted mono triangles independently, once per covered pixel.
+    // This covers the entire 400x240 LCD (not just the canonical 256x224),
+    // including atlas edge quads and raster-fallback transparent holes.
+    using Sample=std::pair<std::array<std::uint8_t,4>,unsigned>;
+    const auto pixels=[](const PicaFrame& group) {
+        std::vector<Sample> output(top_width*screen_height);
+        for(const auto& draw:group.draws) {
+            require(draw.space==PicaSpace::scenery && draw.source_layer==2
+                && !draw.depth_test && !draw.depth_write && !draw.projected_uv,
+                "Mono landscape kept a finite/depth receiver or changed source ownership");
+            const auto& image=group.textures[draw.texture];
+            require(image.source_layers.empty() && !image.layer_pitch,
+                "Mono isolated landscape retained redundant GPU provenance storage");
+            for(unsigned i=draw.first;i<draw.first+draw.count;i+=3) {
+                const auto vertices=group.vertices.subspan(i,3);
+                const auto cross=[](const Point3& a,const Point3& b,double x,double y) {
+                    return (b[0]-a[0])*(y-a[1])-(b[1]-a[1])*(x-a[0]);
+                };
+                const auto& a=vertices[0].position;const auto& b=vertices[1].position;const auto& c=vertices[2].position;
+                const double area=cross(a,b,c[0],c[1]);if(std::abs(area)<1.e-12) continue;
+                const int left=std::max(0,int(std::floor(std::min({a[0],b[0],c[0]}))));
+                const int top=std::max(0,int(std::floor(std::min({a[1],b[1],c[1]}))));
+                const int right=std::min(int(top_width),int(std::ceil(std::max({a[0],b[0],c[0]}))));
+                const int bottom=std::min(int(screen_height),int(std::ceil(std::max({a[1],b[1],c[1]}))));
+                for(int y=top;y<bottom;++y) for(int x=left;x<right;++x) {
+                    const std::array w{cross(b,c,x+.5,y+.5)/area,cross(c,a,x+.5,y+.5)/area,cross(a,b,x+.5,y+.5)/area};
+                    if(std::any_of(w.begin(),w.end(),[](double weight){return weight< -1.e-6;})) continue;
+                    double u=0,v=0;for(unsigned k=0;k<3;++k) {u+=w[k]*vertices[k].uv[0];v+=w[k]*vertices[k].uv[1];}
+                    const auto tx=unsigned(std::clamp(u*image.width,0.,double(image.width-1)));
+                    const auto ty=unsigned(std::clamp(v*image.height,0.,double(image.height-1)));
+                    const auto at=std::size_t(ty)*image.pitch+tx*4;
+                    if(image.pixels[at+3]) output[unsigned(y)*top_width+unsigned(x)]={
+                        {image.pixels[at],image.pixels[at+1],image.pixels[at+2],image.pixels[at+3]},2};
+                }
+            }
+        }
+        return output;
+    };
+    for(int roll:{-3,0,3}) for(int unique:{-1,0,1}) {
+        auto frame=source(simulation::GameFlowState::gameplay,2);
+        auto scene=std::make_shared<vr::GameSceneSnapshot>(*frame.current);
+        scene->background_landscape=true;scene->landscape_grid_height=-145;scene->landscape_atlas_origin=232;
+        scene->background_landscape_unique_half=unique==0;scene->background_landscape_unique_right_half=unique==1;
+        frame.current=frame.previous=scene;frame.plan=plan_frame(0,true,ScreenUse::world);
+        auto ppu=std::make_shared<simulation::SnesPpuState>(*frame.raster->ppu);
+        ppu->main_screen=2;ppu->bg2_screen_size=3;ppu->bg2_scroll_x=-17;ppu->bg2_scroll_y=232;
+        ppu->bg2_vertical_offsets_enabled=true;ppu->cgram[33]=0;
+        for(unsigned row=0;row<8;++row) ppu->vram[0x2040+row*2]=std::uint8_t(row%2?0xaa:0x55);
+        for(unsigned i=0;i<4096;++i) {
+            const unsigned tile=(i%11==3?0:i%7==2?2:1)|((i/128%8)<<10)|((i%2)<<13)|((i%4)<<14);
+            ppu->vram[0x6400+i*2]=std::uint8_t(tile);ppu->vram[0x6401+i*2]=std::uint8_t(tile>>8);
+        }
+        for(unsigned i=0;i<32;++i) {
+            const unsigned word=0x4000|((8190+roll*int(i+1))&8191),at=(0x2fa0+i)*2;
+            ppu->vram[at]=std::uint8_t(word);ppu->vram[at+1]=std::uint8_t(word>>8);
+        }
+        auto raster=std::make_shared<GameRasterSnapshot>(*frame.raster);raster->ppu=ppu;frame.raster=raster;
+        const auto batch=game_layer_plan(frame).before_models;
+        PicaRaster oracle;const auto authored=oracle.prepare(ppu,batch,frame.plan,15);
+        GameLayers layers;Canvas lower;
+        for(unsigned budget:{0U,pica_vertex_limit,1U}) {
+            const auto prepared=layers.prepare(frame,budget);
+            validate_pica_frame(prepared.before_models,lower.view());
+            const auto native=pixels(prepared.before_models);
+            for(unsigned y=0;y<screen_height;++y) for(unsigned x=0;x<top_width;++x)
+                require(native[y*top_width+x]==pixel(authored,int(x)-72,int(y)-8),
+                    "Mono atlas/raster changed source HDMA, wrapping, unique sky, black opacity or LCD margins");
+        }
+    }
 }
 void atlas_landscape_depth() {
     for(int roll:{-3,0,3}) for(unsigned offset:{232U,1008U,8190U}) {
@@ -540,7 +659,8 @@ void landscape_bg1_priority() {
                 return layer;
             };
             require(visible_layer(false)==1,"Stereo landscape swallowed a BG1 light or model base");
-            require(visible_layer(true)==2,"Negative control did not reproduce conflicting ground-depth occlusion");
+            require(visible_layer(true)==(frame.plan.stereo?2U:1U),
+                "Ground-depth negative control failed, or mono retained a duplicate finite mesh");
         }
     }
 }
@@ -635,6 +755,12 @@ void results_landscape_priorities() {
             frame.plan=plan_frame(slider,true,ScreenUse::world,settings);prepared=layers.prepare(frame,budget);
             native=composite.prepare(frame.plan,std::array{prepared.before_models,prepared.after_models},lower.view());
             validate_pica_frame(native,lower.view());
+            require(std::any_of(native.draws.begin(),native.draws.end(),[](const auto& draw) {
+                return draw.space==PicaSpace::world && draw.source_layer==2;
+            })==frame.plan.stereo,"Results mono retained finite terrain, or stereo lost its receiver");
+            if(!frame.plan.stereo) for(unsigned y=0;y<224;++y) for(unsigned x=0;x<256;++x)
+                require(mono_receiver_pixel(native,x,y)==pixel(authored,x,y),
+                    "Mono results changed black opacity or interleaved BG2/OBJ source priorities");
             require(layers.work()[0].decodes==work[0].decodes && layers.work()[0].colour_updates==work[0].colour_updates,
                 "Results slider reran source landscape/OBJ decoding or recolouring");
         }
@@ -1584,7 +1710,7 @@ STARFOX_SCENERY_NOINLINE void operator delete[](void* memory,std::size_t) noexce
 #undef STARFOX_SCENERY_NOINLINE
 int main(int argc,char** argv) try {
     if(argc==2 && std::string_view(argv[1])=="--scenery-only") {warmed_scenery_storage();return 0;}
-    priority_pixels();map_single_occurrence();policy_contracts();margins_and_cache();landscape_depth();atlas_landscape_depth();landscape_bg1_priority();unique_landscape_policy();results_landscape_priorities();atlas_water_depth();water_depth();water_priority_pixels();water_eye_coverage();corridor_source_symbols();corridor_depth();corridor_eye_coverage();corridor_eye_coverage(true);corridor_eye_coverage(false,true);corridor_eye_coverage(true,true);corridor_eye_coverage(false,true,true);corridor_eye_coverage(true,true,true);colony_depth();panorama_depth();panorama_atlas_priority_pixels();offscreen_landscape_receiver();ex_menu_panorama_depth();receiver_eye_coverage();
+    indexed_mono_pipeline();priority_pixels();map_single_occurrence();policy_contracts();margins_and_cache();landscape_depth();mono_landscape_pixels();atlas_landscape_depth();landscape_bg1_priority();unique_landscape_policy();results_landscape_priorities();atlas_water_depth();water_depth();water_priority_pixels();water_eye_coverage();corridor_source_symbols();corridor_depth();corridor_eye_coverage();corridor_eye_coverage(true);corridor_eye_coverage(false,true);corridor_eye_coverage(true,true);corridor_eye_coverage(false,true,true);corridor_eye_coverage(true,true,true);colony_depth();panorama_depth();panorama_atlas_priority_pixels();offscreen_landscape_receiver();ex_menu_panorama_depth();receiver_eye_coverage();
     warmed_scenery_storage();
     std::cout<<checks<<" 3DS actual source painter-policy checks passed; not full terrain/menu/hardware acceptance\n";
 } catch(const std::exception& error) {count_scenery_allocations=false;std::cerr<<scenario<<error.what()<<'\n';return 1;}

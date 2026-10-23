@@ -6,6 +6,7 @@
 #include "starfox/platform/nintendo_3ds/frame_profile.hpp"
 #include "starfox/platform/nintendo_3ds/startup_trace.hpp"
 #include "starfox/compat/bit_cast.hpp"
+#include "reference/frame_3ds.hpp"
 #include <cctype>
 
 namespace starfox::platform::nintendo_3ds {
@@ -31,8 +32,10 @@ GameSession::GameSession(assets::RomImage rom,assets::SymbolMap symbols,PcmSink 
          ?simulation::Experience::original:simulation::Experience::starfox_ex),
      decoder_(rom_,symbols_),game_(rom_,symbols_,initial_map,cartridge_ram,true),
      sink_(std::move(sink)),hud_(rom_,symbols_),history_(game_,rom_,symbols_,vr::SceneCameraPolicy::source),
-     stem_executor_(options.stem_executor) {
+     stem_executor_(options.stem_executor),frame_audio_stem_executor_(options.frame_audio_stem_executor) {
     if(!sink_) throw std::invalid_argument("3DS game requires a PCM consumer");
+    if(stem_executor_ && stem_executor_==frame_audio_stem_executor_)
+        throw std::invalid_argument("3DS overlapped audio requires a distinct stem executor");
     constexpr std::array native_names{"M_BIGZ","M_DEPTHSTAB","M_DEPTHTABLE",
         "M_WIREMODE","M_WOBBLEMODE","M_WABBLEMODE","M_CELMODE",
         "M_SINEOFFSET","M_COLORWARP","M_PROJPNTS"};
@@ -123,6 +126,60 @@ GameSession::GameSession(assets::RomImage rom,assets::SymbolMap symbols,PcmSink 
     }
     start_after_preview_=options.start_after_preview;
     history_.capture();history_.reset_interpolation();publish_raster();
+}
+struct GameSession::FrameAudioWork {
+    GameSession& session;
+    unsigned music{},sfx{};
+    bool running{};
+    std::optional<FrameProfile> profile;
+    explicit FrameAudioWork(GameSession& owner):session(owner) {}
+    static void run(void* context) {
+        auto& task=*static_cast<FrameAudioWork*>(context);
+        std::optional<ScopedFrameProfileActivation> activation;
+        if(task.profile) activation.emplace(*task.profile);
+        STARFOX_3DS_FRAME_PHASE(audio);
+        task.session.audio_.render_stems_logic_tick(task.session.pending_audio_,
+            task.session.frame_audio_stem_executor_);
+        audio::mix_stems(task.session.audio_.last_music_samples(),task.session.audio_.last_effect_samples(),
+            task.music,task.sfx,task.session.mixed_);
+    }
+    void merge_profile() noexcept {
+        // Completion can fall in the following timing window. Never retain a
+        // borrowed profiling parent across frames; merge into the active owner.
+        if(profile && active_frame_profile) active_frame_profile->merge_completed(*profile);
+        profile.reset();
+    }
+};
+GameSession::~GameSession() {
+    // The native executor outlives this owner, but its borrowed job does not.
+    // A failed presentation still must retire the worker before SPC/context.
+    try {finish_frame_audio();} catch(...) {}
+}
+platform_3ds::Frame3ds& GameSession::mono_renderer() {
+    if(!mono_renderer_) {
+        auto next=std::make_unique<platform_3ds::Frame3ds>(rom_,symbols_);
+        next->set_top_hud_visible(false);next->capture_after_tick(game_);
+        mono_renderer_=std::move(next);
+    }
+    return *mono_renderer_;
+}
+bool GameSession::prepare_mono(const std::function<bool(unsigned,unsigned)>& progress) {
+    if(frame_work_active_ || deferred_audio_) throw std::logic_error("Finish audio before mono preload");
+    if(mono_prepared_) return true;
+    struct Context {
+        const std::function<bool(unsigned,unsigned)>& progress;
+        bool canceled{};
+    } context{progress};
+    auto& renderer=mono_renderer();
+    static_cast<void>(renderer.preload_catalog(12U*1024U*1024U,[](void* data,unsigned done,unsigned total) {
+        auto& c=*static_cast<Context*>(data);
+        if(c.canceled) return false;
+        c.canceled=c.progress && !c.progress(done,total);
+        return !c.canceled;
+    },&context));
+    if(context.canceled) return false;
+    static_cast<void>(renderer.preload_active_shapes(game_));
+    mono_prepared_=true;return true;
 }
 void GameSession::apply_native_capabilities() noexcept {
     // A GAME archive carries desktop host preferences as well as the source
@@ -219,7 +276,10 @@ void GameSession::publish_raster() {
         if(native_model_addresses_[9]) pose.projected_points_address=std::uint16_t(native_model_addresses_[9]);
         render::apply_source_depth_tables(rom_,native_model_depth_tables_,word(1),word(2),0,pose);
     }
-    hud_frame_=hud_.capture(game_);hud_.update(hud_frame_);
+    {
+        STARFOX_3DS_FRAME_PHASE(hud_prepare); // Child of raster, not extra frame time.
+        hud_frame_=hud_.capture(game_);hud_.update(hud_frame_);
+    }
     raster_=std::move(next);
 }
 void GameSession::finish_controller_remap() {
@@ -239,10 +299,17 @@ void GameSession::finish_hud_customization(std::optional<CockpitLayout> applied)
     suppress_held_=true;reset_hold_.cancel();history_.reset_interpolation();
 }
 GameAdvance GameSession::advance(std::int64_t time,input::ButtonMask held,bool focused,
-    std::optional<input::ButtonMask> mapped_gameplay) {
+    std::optional<input::ButtonMask> mapped_gameplay,bool overlap_frame_audio) {
     STARFOX_3DS_FRAME_PHASE(advance);
     if(failed_) throw std::runtime_error("Reconstruct 3DS game after a failed source/audio tick");
+    if(frame_work_active_) throw std::logic_error("Cannot advance source during overlapping frame work");
     if(time<0) throw std::invalid_argument("Invalid 3DS monotonic frame time");
+    // A complete packet may remain on the worker through gameplay's two
+    // intervening raster phases. Those phases read WRAM/PPU, not SPC ports.
+    // Explicit barriers (including duplicate/rewind calls) still drain it.
+    if(deferred_audio_ && (!overlap_frame_audio || !focused
+        || !game_.video_phase_independent_of_apu() || !previous_time_ || time<=*previous_time_))
+        finish_frame_audio();
     GameAdvance result;result.requested_experience=requested_experience_;
     result.requested_preview=requested_preview_;result.start_after_preview=start_after_preview_;
     result.requested_settings_reset=requested_settings_reset_;
@@ -293,11 +360,15 @@ GameAdvance GameSession::advance(std::int64_t time,input::ButtonMask held,bool f
     fraction_=result.raster_fraction=batch.interpolation_alpha;
     try {
         for(unsigned phase=0;phase<batch.simulation_steps;++phase) {
+            if(deferred_audio_ && !game_.video_phase_independent_of_apu()) finish_frame_audio();
             {
                 STARFOX_3DS_FRAME_PHASE(video);
                 prepare_pace_shapes();game_.present_frame();++result.video_phases;
             }
             if(game_.logic_tick_ready()) {
+                // No source tick may observe stale SMP acknowledgements, nor
+                // append to the vector still borrowed by the previous packet.
+                if(deferred_audio_) finish_frame_audio();
                 const bool runtime=game_.runtime_options_open(),paused=game_.paused();
                 auto controls=GameMenu::filter(game_,input_.consume());
                 const auto previous_output_rate=game_.presentation_fps();
@@ -333,6 +404,7 @@ GameAdvance GameSession::advance(std::int64_t time,input::ButtonMask held,bool f
                     STARFOX_3DS_FRAME_PHASE(logic);
                     return game_.tick(controls);
                 }();++result.logic_ticks;
+                if(mono_renderer_) mono_renderer_->capture_after_tick(game_);
                 // Let the source own navigation, Start and confirmation/axis
                 // release guards. Replace only an output-rate change it really
                 // applied, not an action guessed from the pre-tick cursor or
@@ -370,12 +442,32 @@ GameAdvance GameSession::advance(std::int64_t time,input::ButtonMask held,bool f
                 }
             }
             if(!game_.runtime_options_open() && ++audio_phase_==3) {
-                STARFOX_3DS_FRAME_PHASE(audio);
-                audio_.render_stems_logic_tick(pending_audio_,stem_executor_);
-                audio::mix_stems(audio_.last_music_samples(),audio_.last_effect_samples(),
-                    game_.music_volume(),game_.sfx_volume(),mixed_);
-                sink_(mixed_);game_.synchronize_apu_output_ports(audio_.output_ports());
-                pending_audio_.clear();audio_phase_=0;++result.audio_blocks;
+                // Original FX pacing can make logic less frequent than SPC.
+                // Retire the previous packet before producing another even
+                // when this phase did not have a source tick.
+                if(deferred_audio_) finish_frame_audio();
+                // Dispatch at the packet boundary, before snapshot/render
+                // preparation and any later independent raster in this batch.
+                // A source tick, APU-dependent phase or new packet still joins
+                // above. Deferring dispatch until frame work made catch-up
+                // batches serialize SPC even when their next raster was safe.
+                deferred_audio_=overlap_frame_audio && stem_executor_
+                    && !requested_controller_remap_ && !requested_hud_customization_;
+                if(deferred_audio_) {
+                    // Executors without begin() keep the old joined path for
+                    // intermediate packets and the render overlap fallback
+                    // for the last packet. No borrowed writes are overwritten.
+                    if(!start_frame_audio() && phase+1!=batch.simulation_steps)
+                        finish_frame_audio();
+                } else {
+                    STARFOX_3DS_FRAME_PHASE(audio);
+                    audio_.render_stems_logic_tick(pending_audio_,stem_executor_);
+                    audio::mix_stems(audio_.last_music_samples(),audio_.last_effect_samples(),
+                        game_.music_volume(),game_.sfx_volume(),mixed_);
+                    sink_(mixed_);game_.synchronize_apu_output_ports(audio_.output_ports());
+                    pending_audio_.clear();
+                }
+                audio_phase_=0;++result.audio_blocks;
             }
             if(requested_controller_remap_ || requested_hud_customization_) {
                 clock_.reset();fraction_=result.raster_fraction=0;
@@ -391,6 +483,71 @@ GameAdvance GameSession::advance(std::int64_t time,input::ButtonMask held,bool f
         }
     } catch(...) {failed_=true;throw;}
     return result;
+}
+bool GameSession::start_frame_audio() {
+    if(!deferred_audio_) return false;
+    if(!frame_audio_work_) frame_audio_work_=std::make_unique<FrameAudioWork>(*this);
+    auto& background=*frame_audio_work_;
+    if(background.running) return true;
+    background.music=game_.music_volume();background.sfx=game_.sfx_volume();
+    if(active_frame_profile) background.profile.emplace(active_frame_profile->fork());
+    background.running=stem_executor_->begin({&background,FrameAudioWork::run});
+    // A refused dispatch has no job or completed profile to merge. Joined
+    // fallback work below captures its own profiling parent when it runs.
+    if(!background.running) background.profile.reset();
+    return background.running;
+}
+void GameSession::join_frame_audio() {
+    // Owner-thread blocking only: do not include rendering, background SPC,
+    // profile merging, PCM delivery or source port acknowledgement. Refused
+    // dispatches have no borrowed worker and never pass through this marker.
+    STARFOX_3DS_FRAME_PHASE(audio_join);
+    stem_executor_->finish();
+}
+void GameSession::finish_frame_audio() {
+    if(!deferred_audio_) return;
+    if(!frame_audio_work_ || !frame_audio_work_->running) {
+        run_frame_work([] {});return;
+    }
+    auto& background=*frame_audio_work_;
+    try {join_frame_audio();}
+    catch(...) {background.running=false;background.merge_profile();failed_=true;throw;}
+    background.running=false;background.merge_profile();
+    sink_(mixed_);game_.synchronize_apu_output_ports(audio_.output_ports());
+    pending_audio_.clear();deferred_audio_=false;
+}
+void GameSession::run_frame_work(audio::StemTask work,bool complete_audio) {
+    if(!work.run) throw std::invalid_argument("Missing 3DS presentation work");
+    if(failed_) throw std::runtime_error("Cannot render a failed 3DS game session");
+    if(frame_work_active_) throw std::logic_error("Overlapping 3DS frame work call");
+    frame_work_active_=true;
+    try {
+        if(deferred_audio_) {
+            if(!frame_audio_work_) frame_audio_work_=std::make_unique<FrameAudioWork>(*this);
+            auto& background=*frame_audio_work_;
+            if(!background.running) {
+                background.music=game_.music_volume();background.sfx=game_.sfx_volume();
+                if(active_frame_profile) background.profile.emplace(active_frame_profile->fork());
+                const audio::StemTask task{&background,FrameAudioWork::run};
+                background.running=!complete_audio && stem_executor_->begin(task);
+                if(!background.running) {
+                    stem_executor_->execute(work,task);background.merge_profile();
+                    sink_(mixed_);game_.synchronize_apu_output_ports(audio_.output_ports());
+                    pending_audio_.clear();deferred_audio_=false;
+                } else work.run(work.context);
+            } else work.run(work.context);
+            if(complete_audio) finish_frame_audio();
+        } else work.run(work.context);
+        frame_work_active_=false;
+    } catch(...) {
+        // Join even if foreground rendering failed. Preserve the original
+        // exception, and never free/retry a still-borrowed SPC job.
+        if(frame_audio_work_) {
+            if(frame_audio_work_->running) try {join_frame_audio();} catch(...) {}
+            frame_audio_work_->running=false;frame_audio_work_->merge_profile();
+        }
+        frame_work_active_=false;failed_=true;throw;
+    }
 }
 GamePresentation GameSession::presentation(float slider,bool hardware,const StereoSettings& settings) const {
     if(failed_) throw std::runtime_error("Cannot present a failed 3DS game session");

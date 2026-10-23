@@ -4,6 +4,7 @@
 #include <array>
 #include <string>
 #include <vector>
+#include <utility>
 
 namespace starfox::assets {
 
@@ -128,6 +129,10 @@ struct Shape {
     std::vector<FaceBatch> face_batches;
     std::vector<BspNode> bsp_nodes;
     std::vector<BspLeaf> bsp_leaves;
+    // Derived immutable address tables (starwing-3ds); never borrowed pointers.
+    std::vector<std::pair<std::uint32_t, std::size_t>> bsp_node_lookup;
+    std::vector<std::pair<std::uint32_t, std::size_t>> bsp_leaf_lookup;
+    std::vector<std::pair<std::uint32_t, std::size_t>> bsp_batch_lookup;
     std::uint32_t bsp_root_address{};
     std::vector<std::uint16_t> colour_words;
     std::vector<ColourMaterial> colour_materials;

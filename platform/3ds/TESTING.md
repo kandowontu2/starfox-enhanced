@@ -8,14 +8,20 @@ request further old-model performance tests. Legacy mono code and historical
 results below are retained, but no longer describe the supported target.
 For now, development/regression testing remains emulator-led rather than
 requesting a hardware test for each incremental candidate.
+The current priority is sustained **60 FPS in mono**, with the slider fully
+down. Do not request stereo tuning/acceptance tests until that baseline is
+stable. The existing slider functionality is retained, not treated as evidence
+that the mono performance target is already met.
 Fresh settings use stereo separation 16 and convergence 512; existing saved
 values are preserved. The Stereoscopic 3D menu still controls both. The new
 default increases distant-background depth without moving HUD/menu text or
 changing the one-eye slider-off/New 2DS XL path.
 
-1. The latest source-only candidate is the experimental
+1. The baseline source-only candidate is the experimental
    `StarFoxEnhanced-3ds-test.zip` artifact from
-   [ARM run 38206689640](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38206689640).
+   [ARM run 38468745995](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38468745995).
+   The separate IPO experiment in ARM run 38472933253 is described below;
+   it does not establish the mono 60-FPS target or change the default build.
    R376 remains the hardware-tested baseline, not the latest source candidate.
    Extract the ZIP to the SD card's root, keeping its folder structure. When
    updating an earlier build, replace only the `.3dsx` and `.smdh`; preserve the existing
@@ -30,11 +36,11 @@ changing the one-eye slider-off/New 2DS XL path.
 5. R376 is confirmed running on New 3DS XL with sound, slider and HOME/exit.
    Its remaining reported problems are ground hiding lights/model bottoms and
    low presentation FPS. Start with Preview OFF and the slider down, then
-   compare slider off/halfway and enable the FPS counter. Preserve the newest
+   keep the slider down and enable the FPS counter. Preserve the newest
    `native-frame-profile-*.csv` for performance investigation. If a hard freeze
    recurs, stop repeating it and send the newest startup/frame CSVs.
-6. Once ordinary Start is stable, try Training and Corneria. On New 3DS/XL, start with the slider low, then
-   compare slider off and halfway. New 2DS XL uses mono with the same faster
+6. Once ordinary Start is stable, try Training, Original and EX gameplay with
+   the slider fully down. New 2DS XL uses mono with the same faster
    CPU/cache profile. Check sound, pause/resume, and Select + Start to exit.
 
 Back up existing `/3ds/starfox-enhanced/` saves/settings first. If boot fails,
@@ -61,7 +67,739 @@ still required.
 
 ## Current build and validation
 
-The current source candidate (R412) is commit
+The earlier frame-pipeline baseline is source
+`f635c0d1d85dd0f2973651bb18725abe865d8260`, from
+[ARM run 38444509351](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38444509351).
+It uses the imported Starwing mono renderer for ordinary mono scenes, retains
+the exact native path for cartridge window/colour effects, and removes gameplay
+profile SD writes. The final SPC block overlaps presentation and independent
+gameplay raster phases, joining before source logic or the next packet; a distinct,
+APT-budgeted effects worker can split that complete block on supported models.
+Warm GPU handoffs no longer restart startup-trace SD writes. Presentation now
+consumes completed source phases instead of independently gating those frames
+with a second wall clock. The native ARM, shader and stack gates pass. Eight
+Original/EX serial/parallel audio tests passed for the earlier pipeline source
+`2780dcaa`, including deliberately
+held packets across intervening rasters and exact PCM/VM state at barriers.
+Earlier full-suite baselines each made 22,173 checks, including menu/editor
+handoffs, disk settings/SRAM reopen, restores and 30/60 output cadence; those
+historical full-suite runs are not a new full-suite result for this commit.
+No source audio command or simulation phase is dropped. The save codec also
+retains legitimate full-bank SPC transfers in partial-phase states within its
+unchanged 4-MiB whole-file cap and wire schema.
+
+Accuracy-enabled OpenGL and explicitly selected Vulkan input replays of that earlier
+image reach planned DSP shutdown without movie errors. The OpenGL visual samples
+retain white ground dots and foreground models. Complete guest GSP retirement
+and clean emulator shutdown are not established by every run; stopping the owned
+emulator after a bounded replay is not a clean-exit result. The recorded 100%
+CPU samples remain far below the mono target. A separately repaired 300% CPU
+replay shows sampled completed-presentation HUD readings of 49/56/50 FPS, not
+sustained console 60 FPS. Its input ordering was probed and validated separately;
+the original 100% movie desynchronizes at that clock and is excluded. The
+emulator's unimplemented New-model CPU/cache service makes this sensitivity
+experiment distinct from physical New 3DS validation. No incremental tester
+request or release is implied by these results.
+
+The follow-up mono queue fix distinguishes a busy acquire from tile rejection:
+it retries the same immutable foreground once with a blocking GPU acquire, instead of
+immediately rerasterizing the complete scene. Actual atlas/quad rejection still
+uses the complete fallback with a blocking acquire before rewriting textures.
+The SDK's VBlank sync is not a GPU queue join. Host tests
+cover all success/busy/rejection pairs, bounded retry, failure propagation and
+retirement order; profiling appends separate `mono_retry` / `mono_fallback` rows.
+In the prior commit's 300%-clock Vulkan profile, the background-3 interval has
+482 mono draws for 337 mono presentations, consistent with 145 extra fallback
+redraws. The follow-up source `490c0f0b` in
+[ARM run 38422455437](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38422455437)
+records 145 actual fallback calls and no busy-acquire retries in that same
+background interval. It did not measurably improve this replay's timing.
+
+The next source follow-up merges opaque uniform BG2 runs **before** the
+fragment-budget check. A separate 3,600-phase real EX `LEVEL1_1` host probe
+reproduces 679 raw-plan rejections (maximum 22,500 fragments); compaction
+eliminates those rejections with at most 1,500 fragments in that background.
+Its 728 sampled/previously-rejected frames retain exact indexed pixels and
+coverage. The corresponding Original probe retains exact pixels in 43 sampled
+frames and does not introduce budget failures. Asset-free tests additionally
+cover scanline HDMA, rolled carry, palettes/flips, 16-pixel tiles, character
+address wrapping, transparent ink, exact capacity and cleared failure output.
+The new asset-free reference-planner test passes 43,613,479 checks, and the
+native source-only CI passes all 51 host tests plus ARM/shader/stack/package
+gates. The ARM planner's static frame is 81,288 bytes within its 128-KiB worker
+reservation; this is not a full call-chain/physical peak-memory result.
+
+The same validated 300%-clock Vulkan movie now records no `mono_fallback` or
+`mono_retry` calls. In its background-3 interval, mean inclusive loop time
+drops from 38.484 to 23.169 ms, and mono finishing from 11.988 to 5.934 ms/call.
+The background-51 interval is broadly unchanged (19.381 to 19.094 ms/loop).
+Window labels may include transitions, and presentation counts/poses differ;
+these means are not completed-presentation FPS. Unrelated concurrent work was
+retained. This removes a reproduced expensive fallback, but does not establish
+sustained 60 FPS or native New-model CPU/cache performance. Input replay has no
+movie errors and reaches planned DSP shutdown/profile flush; complete guest GSP
+retirement remains unverified, so the owned emulator was stopped afterward.
+No incremental hardware test or release is implied.
+
+The model-span follow-up replaces point-by-point opaque/two-ink polygon writes
+with clipped indexed rows. Absolute screen dithering parity, opaque black,
+coverage, layer ownership and recorded/scaled fallbacks are preserved.
+47,571,416 framebuffer comparisons and the existing 4,608-frame polygon oracle
+pass. Original/EX 240-phase checks keep their previous frame digests and
+80 audio blocks. All 51 asset-free host CI tests and the native ARM, shader,
+stack and packaging gates pass.
+
+In the same accuracy-enabled Vulkan/300%-clock sensitivity replay, EX
+background-3 model rasterization decreases from 5.807 to 3.133 ms/call;
+background-51 decreases from 2.896 to 1.755 ms/call. Finishing is broadly
+unchanged (5.499 and 5.160 ms/call). Inclusive loop means are 19.431 and
+17.688 ms, respectively; they are not completed-presentation FPS. Counts,
+poses and window-end labels differ, and unrelated concurrent work remains.
+There are no replay errors, fallback or retry calls. Planned DSP shutdown
+and profile flush occur; guest GSP retirement remains unverified and the owned
+emulator was stopped afterward. Stable mono 60 FPS is still an open gate.
+
+The next validated source adds a bounded draw-local BG1 row cache and bulk
+opaque-run world composition. 18,552 independent ordered-point comparisons
+cover clipping, scaling, transparency, tags, coverage, dither and in-place
+shifts. The background's pinned pre-optimization trace and 192 cached-versus-
+point cases also pass. Original/EX retain their prior 240-phase frame digests
+and 80 audio blocks. All 52 asset-free CI tests and the ARM/shader/stack/package
+gates pass. Two appended finishing subphases retain the fixed 512-window,
+512-KiB diagnostic cap and shutdown-only SD serialization.
+
+The same accuracy-enabled 300%-clock replay measures background-3 finishing
+at 5.378 ms/call and background-51 at 5.201, versus 5.499/5.160 previously.
+This is a small change, not a major native gain. The new child phases place
+about 3.45 ms/call in the EX overlay and 1.69--1.86 in final canvas work.
+The subsequent tag-free row experiment (`4c308b7f`, ARM run 38437029767) passes
+all correctness/native gates but increases overlay timing to 3.677 ms/call.
+That specialization is reverted in the current candidate. Its draw-local
+opacity masks skip clipped tile rows that cannot write any visible ink, with
+all 52 asset-free host CI tests and native ARM/shader/stack/package gates passing.
+Original/EX retain their previous 240-phase image digests and 80 audio blocks.
+The same accuracy-enabled Vulkan/300%-clock sensitivity replay measures EX
+overlay means of 3.182/3.190 ms in backgrounds 3/51, versus 3.454/3.460 for
+`502788c5` (about 8% lower). Finishing is 5.105/4.931 ms; canvas remains
+1.863/1.694 ms. Inclusive loop means are 19.234/17.557 ms, not completed FPS.
+No fallback, retry or movie errors occur; planned DSP shutdown and profile
+flush occur. Guest GSP retirement remains unverified, so the owned emulator
+was stopped after the flush and its CPU setting restored to 100%.
+The sensitivity, window/count/concurrent-load and unverified guest-exit
+limitations above still apply. No incremental hardware request, release or
+60-FPS acceptance is implied.
+
+The subsequent source-only experiment (`fe4f5f18`,
+[ARM run 38440520170](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38440520170))
+kept all lazily decoded vertical rows for
+each of 32 tile keys, instead of evicting an earlier row when the scanline
+changes. Its draw-local payload is bounded to 9,408 bytes, does not survive a
+draw, and initializes a row before its validity bit permits any read. The
+independent mosaic-size-one decoder comparisons now include deliberate
+tile-key collisions. Local background/extents/composition tests and both
+240-phase Original/EX image digests pass with 80 audio blocks unchanged.
+All 52 CI tests and ARM/shader/stack/package gates pass, with a 9,944-byte
+static `draw_bg1` frame. It does not improve the native sensitivity replay:
+overlay means are 3.224/3.231 ms in backgrounds 3/51, versus 3.182/3.190 for
+the smaller opacity-mask cache. Finishing is 5.146/4.971 ms and inclusive
+loop means 19.311/17.466 ms; those loop means are not completed FPS.
+No fallback, retry or replay errors occur; planned DSP shutdown/profile flush
+occur, but guest GSP retirement remains unverified. The owned emulator was
+stopped after the flush and restored to 100% CPU. The larger cache is reverted
+because its extra stack is not justified by the measured result; the stronger
+independent collision fixture is retained. The current renderer remains the
+validated opacity-mask implementation above, not a new 60-FPS result.
+
+The next source-only follow-up checks exact BG1 tilemap/referenced-character
+bytes, scroll/geometry and CGRAM black/nonblack membership between draws.
+Nonblack RGB-only changes keep the indexed overlay and use the live palette.
+The real EX 240-phase host probe finds 197 unchanged-source phases; the
+renderer records 190 cache hits and 50 rebuilds, including handoffs through
+eight complete CPU-background fallback checks. It borrows the existing
+400x240 CPU-background allocation only while BG2 is on PICA; CPU BG2 and EX
+BG1 roles invalidate each other before storage is reused. No extra pixel
+allocation is introduced. A <=904-byte row index transfers only the source
+256x224 rectangle, retaining transparent holes, coverage, tags, dither erasure
+and ordered commands. Independent tests cover 576 dependency mutations,
+64 borrowed-versus-direct rasters and 64 sparse-transfer mode combinations.
+Original/EX retain their prior 240-phase image digests and 80 audio blocks.
+All 52 CI tests and ARM/shader/stack/package gates pass. The same
+accuracy-enabled Vulkan/300%-clock sensitivity replay records overlay means
+of 0.963/1.146 ms in backgrounds 3/51, versus 3.182/3.190 for the earlier
+opacity-mask source. Finishing drops to 2.890/2.888 ms/call; inclusive loop
+means are 15.744/15.762 ms. These are not completed-presentation FPS.
+There are no fallback, retry or replay errors. Planned DSP shutdown/profile
+flush occur; guest GSP retirement remains unverified, and the owned emulator
+was stopped after the flush with CPU configuration restored to 100%.
+Counts/poses, window-end labels and concurrent unrelated work limit timing
+comparisons. Retain this exact reuse improvement, but sustained mono 60 FPS
+and full native/hardware acceptance remain open gates.
+
+The subsequently rejected experiment (`b22d1c38`,
+[ARM run 38448334985](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38448334985))
+fuses native world-canvas clearing, coverage reset and
+transparent composition into one pass over the existing allocation. It applies
+only to independent, equal-size 1x canvases without tags, dither metadata or
+recorded commands; rejected cases keep the old compositor. Independent point
+comparisons cover 256 canvas fixtures, dirty repeated reuse and 13 rejected
+contracts. The source-idle wait also sleeps only until the remaining 60-Hz
+source deadline, rather than an unrelated LCD VBlank. Rational partial-phase
+tests retain source cadence and bound each sleep to at most 16,666,667 ns.
+An appended `presentations` CSV counter follows successful whole-frame returns
+(including visible-frame reuse), not loops, source phases, stereo eyes or
+physical GPU retirement. It occupies prior padding, retaining the 512-KiB
+window buffer and shutdown-only SD writes. All 52 CI tests and the
+ARM/shader/stack/package gates pass; eight 240-phase stage probes keep their
+prior image digests and 80 audio blocks. In the same accuracy-enabled
+Vulkan/300%-clock replay, however, canvas work increases to 2.069/2.073 ms
+in backgrounds 3/51 from 1.864/1.693 ms with the previous compositor.
+The fused canvas and its now-unused API are reverted; the source deadline
+wait and presentation counter remain for isolated follow-up validation.
+The combined experiment averages 57.161/55.847 successful presentations per
+second over 16/29 adjacent same-label windows, with minimum one-second-window
+rates of 48.843/48.914. Inclusive loop means of 13.635/13.729 ms are not FPS.
+These successful returns include visible-frame reuse, not physical GPU
+retirement. Legacy CSVs lack this counter, so no directly measured success-rate
+delta is claimed. Planned DSP shutdown/profile flush occur without retry,
+fallback or replay errors; guest GSP retirement remains unverified, and the
+owned emulator was stopped after the flush with CPU configuration restored to
+100%. The rollback restores the three canvas files exactly to their verified
+pre-experiment source. Sustained mono 60 FPS remains open.
+
+The isolated rollback (`1e80339f`, ARM run 38449713288) passes the 52 host
+checks plus ARM/shader/stack/package gates. The same accuracy-enabled mono
+replay restores canvas means to 1.866/1.694 ms and finish means to
+2.859/2.825 ms in backgrounds 3/51. Successful whole-frame returns average
+57.519/56.076 per second across 16/29 same-label windows, with minima
+48.845/48.753. Source logic overruns and GPU-effects windows remain below
+target; inclusive loop means of 13.602/13.407 ms are not FPS. No fallback,
+retry or replay errors occur. Planned DSP shutdown and buffered profile flush
+occur before the owned emulator is stopped; guest GSP retirement is still
+unverified, CPU configuration is restored to 100%, and no assets/saves are
+copied or erased. The same sensitivity and concurrent-load limitations apply.
+
+The next source-only experiment gives source-clock-admitted GPU frames
+explicit pacing ownership instead of waiting for a second LCD deadline.
+Unclocked probes, quick menus and editors retain LCD pacing. Switching back
+to LCD ownership rearms its lease. The blocking `C3D_FrameBegin(0)` still
+retires every preceding GPU queue before uploads. Citro3D's
+[render queue implementation](https://github.com/devkitPro/citro3d/blob/master/source/renderqueue.c)
+separates these display and retirement waits. Pacing tests cover 100,000
+source-clock counter/wrap cases and ownership handoffs; the three targeted
+PICA/frontend/profile checks pass. The source (`5cda2750`, ARM run
+38452274142) also passes all 52 CI checks and native gates. In the same
+accuracy-enabled mono replay, GPU pacing work drops from 3.833/2.146 ms
+to below 0.001 ms in backgrounds 3/51; blocking acquisition remains at
+0.001 ms. Successful presentation averages are 57.514/57.065 per second,
+with minimum same-label window rates of 48.982/50.813, not stable 60.
+The first segment is essentially unchanged; the second was 56.076 in the
+isolated rollback. Canvas/overlay/raster costs remain unchanged. No retry,
+fallback or replay errors occur, and planned DSP shutdown/profile flush
+precede the owned emulator stop. CPU configuration returns to 100%; guest
+GSP retirement and physical New-model performance remain unverified. The
+next investigation was the upstream runtime's exact object-bridge snapshots
+and list reuse.
+
+The exact object-bridge cache (`98adacfda8`, ARM run 38457573595) passes
+the 52 CI checks and native gates. An independent bytewise oracle retains
+complete pool/CPU state through Original/EX mutations, restores, noncanonical
+pointers, stale extended mirrors and I/O ordering. Seven real full-state/audio
+checks and both full Original/EX session regressions also pass (501.23/644.25
+seconds for those broad sessions). Eight real stage probes retain their prior
+240-phase pixel digests and 80 complete audio blocks.
+
+Its accuracy-enabled Vulkan/300%-clock replay averages 57.576/57.198
+successful whole-frame returns per second in backgrounds 3/51, with minimum
+same-label window rates of 48.993/49.873. Logic means are 10.486/12.171 ms;
+strategy means are 3.565/3.954 ms. These are small changes from the previous
+cache-free bridge, not stable mono 60 or physical-console results. Planned DSP
+shutdown and profile flush occur before the owned host is stopped; guest GPU
+retirement remains unverified and CPU configuration returns to 100%. The
+next investigation is the reference's consecutive strategy-call batching.
+
+The consecutive-call follow-up (`6188962393`, ARM run 38461773934) reuses
+only canonical, complete imports inside the strategy scheduler. Native writes,
+host/list changes, pointer/link repair, failures, I/O and restore retain the
+defensive bridge. The bytewise oracle and 128 actual interpreter calls per
+layout pass. In 64 sampled real strategy ticks across eight Original/EX stages,
+964 imported-image reuses retain complete CPU/VM/pool states, source instruction
+counts and run/removal counts versus forced full synchronization. All prior
+240-phase image digests and 80 audio blocks match. Seven real state/audio checks,
+all 52 CI tests and the ARM/shader/stack/package gates pass.
+
+The same accuracy-enabled Vulkan/300%-clock replay records strategy means of
+2.705/3.174 ms in backgrounds 3/51, versus 3.565/3.954 for the previous cache.
+Logic means are 9.740/11.453 ms. Successful whole-frame return averages are
+58.027/58.119 per second, with minimum same-label window rates of 49.024/52.539.
+Counts/poses and windows differ; unrelated concurrent work is retained. These
+are sensitivity results, not sustained physical New-model 60 FPS. No retry,
+fallback or replay errors occur. Planned DSP shutdown/profile flush precede
+the verified owned-host stop; guest GSP retirement remains unverified and CPU
+configuration returns to 100%. The next measured work is the repeated palette,
+sprite and related general-routine synchronization. No incremental hardware
+request or release is implied.
+
+The transfer-chain follow-up also borrows canonical imported objects for the
+consecutive palette, EX colour-cycle, sprite and window-wipe routines after
+DOSOUNDS. It does not skip source routines, palette cadence, native imports or
+audio acknowledgements. Independent bytewise tests cover general calls and
+failed-call recovery. Eight real Original/EX stage probes match the defensive
+path after all 628 sampled named transfer calls, exercising 564 image reuses;
+complete CPU/VM/pool states, returned registers and instruction counts match.
+The prior 240-phase pixel digests and 80 complete audio blocks remain intact.
+The follow-up (`64fd561b87`, ARM run 38464851895) passes all 52 CI tests and
+native ARM/shader/stack/package checks. Seven actual Original/EX state and
+serial/parallel complete-audio pipeline checks also pass locally (173.97 s,
+with the eight stage probes running concurrently).
+
+The exact image's accuracy-enabled Vulkan/300%-clock replay records logic
+means of 9.122/10.982 ms in backgrounds 3/51. Successful whole-frame returns
+average 58.260/58.502 per second, with minimum adjacent same-label window
+rates of 49.057/52.530. Poses/counts and windows differ and unrelated concurrent
+work is retained. This is a small measured gain, not stable physical New-model
+60 FPS. The 179/245-ms CPU-call maxima occur in scene-boundary windows, excluded
+from those adjacent rates; they do not explain the ordinary slow windows.
+Those ordinary windows still show source advancement, model/layer work and
+audio on the frame path. Investigate that scheduling/critical path next rather
+than treating a transition maximum as steady gameplay cost. Parent timings
+include children and must not be summed as independent frame costs.
+
+No retry/fallback/replay errors occur. Planned DSP shutdown/profile flush
+precede the verified forced owned-host stop; guest GSP retirement is still
+unverified. CPU configuration returns to 100%. This does not request an
+incremental hardware test or claim completed mono acceptance.
+
+### Packet-boundary dispatch follow-up
+
+Source `954fe805fa` starts complete SPC packets inside the source-phase loop,
+including catch-up batches, before raster snapshot preparation. Source logic,
+APU-dependent rasters, new packets and host handoffs still join the worker.
+The host default stays synchronous and denied dispatch retains its joined
+fallback. Follow-up `d7afe35d` isolates the synchronous test oracle from the
+tested worker; it changes no native player code. Eleven actual Original/EX
+state, complete-PCM serial/parallel overlap, catch-up pipeline and state-codec
+checks pass (507.24 seconds with two test jobs). ARM run 38468745995 passes
+all 52 CI tests, native/shader/stack checks and the asset-free package gate.
+
+The exact image's accuracy-enabled Vulkan/300%-clock sensitivity replay still
+averages 58.259/58.672 successful whole-frame returns per second in backgrounds
+3/51, with minimum adjacent same-label windows of 49.058/52.320. The previous
+image measured 58.260/58.502. Poses, counts and windows differ; unrelated
+compiler jobs remain running. This is not a meaningful resolution of the mono
+60 FPS deficit. The ordinary slow background-51 window still reaches 21.125 ms
+in source advancement. Parent timings include children, not additive costs.
+No retry/fallback or replay error is recorded. Planned DSP shutdown and profile
+flush precede the verified forced owned-host stop; guest GSP retirement remains
+unverified. CPU configuration is restored to 100%.
+
+The next source-only experiment exposes the existing strict IPO/LTO build
+option through `enable_ipo` in the native workflow. It remains OFF by default.
+Both host/native builds use the explicit selection, and the package records
+it in `BUILD-INFO.json`; stack, shader and arithmetic gates remain mandatory.
+A successful compile alone is not grounds to enable it in a production build.
+Native timing and source correctness must still be checked.
+
+The first explicit IPO run, `38471535057` at source `37bb31d2`, passes all
+52 host tests (128.26 seconds) and links the actual ARM player, but fails the
+mandatory timer assembly gate: its slim LTO objects contain GIMPLE without
+the ARM instructions that `objdump` must inspect. It produces no accepted
+player package. The follow-up retains fat LTO objects only for the actual SPC
+library and native arithmetic probes. Those objects keep inspectable ARM code
+alongside their LTO representation; the player still links with IPO. All
+existing instruction/source/size assertions remain unchanged. These component
+object checks do not prove the final LTO-linked player's runtime arithmetic or
+speed, so exact native replay and timing remain required after CI succeeds.
+
+The fat-object follow-up, source `f67451b0` in
+[ARM run 38472933253](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38472933253),
+passes all 52 CI tests (128.72 seconds) and every unchanged native arithmetic,
+shader, stack and packaging gate. Its actual compiler settings retain LTO for
+the CPU/session and append fat-object emission for the SPC/arithmetic probes;
+no Ofast or fast-math is enabled. The verified native image is 2,711,856 bytes.
+It replaces only the existing emulator image, preserving assets and saves.
+
+A nearby repeat of the earlier image measures 58.259/58.571 successful
+whole-frame returns per second in backgrounds 3/51. The IPO image measures
+58.836/58.584, with minimum adjacent same-label windows of 49.092/52.361.
+Logic means are 9.009/10.718 ms versus 9.121/10.982 for the paired baseline;
+audio means are 6.194/6.592 ms in the IPO run. Both valid replays retain the
+accuracy-enabled Vulkan/300%-clock sensitivity settings, have no movie input
+errors or renderer retry/fallback rows, and reach planned DSP shutdown/profile
+flush. The owned hosts are stopped afterward and CPU configuration returns to
+explicit 100%. The unrelated-load, differing-count/window, unimplemented
+New-model CPU/cache, physical-output and guest-GSP limits above still apply.
+This does not resolve sustained mono 60 FPS, so IPO stays experimental and OFF
+by default. Source-update bridge costs remain the next investigation, not
+further stereo tuning or another minor hardware request.
+
+The follow-up adds `object_export` and `object_import` timing around the whole
+host-object/65C816 bridge, including canonical-image hits and defensive paths.
+These are child timings within source advancement, including logic/strategies, not additional costs
+to sum with their parents. With profiling disabled the markers do not read a
+clock or change simulation work. The existing CSV columns and phase indices
+remain stable; the two names are appended. Adding phases does not increase the
+console's 512-KiB diagnostic storage cap: the in-memory buffer now holds 489
+one-second windows (instead of 512), with shutdown-only serialization and no
+gameplay allocation/SD writes. This instrumentation is not a performance fix.
+
+The exact native timing image from source `76aea9b9` passes all 53 CI tests
+(107.19 seconds), including enabled/disabled timing and complete Original/EX
+object-state parity. All mandatory native arithmetic, shader, stack and package
+gates pass. Its accuracy-enabled Vulkan/explicit-300%-clock sensitivity replay
+has no movie errors or renderer retry/fallback and reaches planned DSP shutdown
+and buffered profile flush. The owned host is stopped afterward; guest GSP
+retirement and physical New-model CPU/cache timing remain unverified.
+Successful whole-frame return rates remain 58.258/58.400 in backgrounds 3/51,
+with minimum adjacent same-label windows 49.053/52.566. This is not mono 60 FPS
+acceptance. In the ordinary slow background-51 window, export/import occupy
+24.966/54.390 ms across 619 calls each; logic totals 161.957 ms across 13 ticks.
+These parent/child durations must not be added together.
+
+The next source change compares unchanged cached records directly with current
+plain WRAM, avoiding the sequential read/copy into two temporary records before
+comparison. The narrow peek rejects I/O, ROM, other RAM and mapping boundaries;
+it returns no borrowed memory and changes no bus state. A hit still reproduces
+the original final bus byte. Changed records, list validation/repair, host
+mutation, canonicalization, restore and I/O ordering retain their existing paths.
+Independent adapter checks cover mirrors, mismatches, writes, restore, boundary
+rejection and complete CPU/I/O state. Performance improvement must be measured
+on the newly compiled native image, not inferred from this implementation.
+
+That image (`eb8c4b7a`, ARM run `38477936637`) passes all 53 CI tests
+(126.51 seconds), the unchanged native gates, eight actual Original/EX
+pixel/state probes, and actual source PCM/state checks. The same accuracy-enabled
+Vulkan/explicit-300%-clock sensitivity replay measures 58.818/59.110 successful
+whole-frame returns per second in backgrounds 3/51, up from 58.258/58.400;
+the minimum windows remain 49.112/52.515. Mean export/import cost falls from
+0.039/0.084 to 0.031/0.064 ms in background 3 and from 0.037/0.080 to
+0.030/0.062 ms in background 51. Ordinary slow-window source advancement still
+reaches 19.777 ms before presentation. Counts and poses vary slightly between
+runs. This modest improvement does not establish sustained 60 FPS, physical
+New-model CPU/cache timing, or GPU retirement. No movie errors or renderer
+retry/fallback are recorded; planned DSP shutdown and profile flush occur, then
+the verified owned host is stopped and its clock restored to 100%.
+
+The next source experiment checks unchanged active/free lists against both
+live heads and every live NEXT word before reusing their already validated
+order. The new strided-word peek accepts only a fully bounded plain-WRAM range,
+does not compare payload gaps or expose pointers, and preserves the final bus
+access before later I/O. A changed head/link takes the original cycle, alignment,
+coverage and duplicate validation path. PREV repair and all changed payload
+imports remain unchanged. This is not an unchecked lease on native writes or
+a measured speed improvement until the actual ARM replay establishes one.
+The host experiment passes the independent bytewise Original/EX bridge,
+1,054,116 bus/adapter checks, all eight unchanged real-stage pixel digests,
+and actual source PCM/state-restore checks. Its transient host cache grows by
+176 bytes to 20,072 bytes, with no extra cartridge or presentation snapshot.
+Malformed heads and active/free cycles still fail before mutating the pool;
+native list reorders still import and noncanonical PREV words still repair.
+These checks establish the tested state/pixel behavior, not native performance.
+
+The exact list-reuse ARM image (`3a3c7e16`, run `38480792957`) passes all
+53 CI tests (86.15 seconds) and unchanged mandatory native gates. Its identical
+accuracy-enabled Vulkan/explicit-300%-clock sensitivity movie measures mean
+import costs of 0.044/0.042 ms in backgrounds 3/51, versus 0.064/0.062 ms in
+the preceding image. Mean logic costs are 7.103/9.008 ms versus 7.986/9.903 ms.
+Successful whole-frame return rates are 59.404/59.189, with minimum same-label
+windows 54.216/53.751. The extra background-51 window and slightly different
+poses/counts limit direct aggregate comparisons; child timings are not additive
+with their parents. Its ordinary slow window still reaches 18.740 ms of source
+advancement before presentation. No movie errors, invalid-memory messages or
+renderer retry/fallback are recorded. Planned DSP shutdown and buffered profile
+flush occur; the verified host is stopped afterward and its clock restored to
+100%. Stable mono 60 FPS, physical New-model timing and guest GSP clean exit
+remain unproven. The next measurement must isolate actual SPC join/wait time
+from source work before considering any later APU barrier. Full PCM, port,
+state/restore and source-cadence parity remain required; no audio work is dropped.
+
+A separate shutdown-logging replay is excluded: a Qt help window reset the
+clock's explicit-selection flag, so its numeric 300 setting was ignored and
+movie input ordering failed. It is not timing, correctness or clean-exit
+evidence. The validation launcher now fails closed unless the requested
+comparison clock is explicitly selected as well as numerically configured.
+
+The actual SPC-owner join measurement is now complete (`a9bc520e`, ARM run
+`38482979365`): all 53 CI tests and unchanged native gates pass. The appended
+`audio_join` phase times only accepted packet `finish()` calls, excluding worker
+work, rendering, profile merging, PCM delivery and port acknowledgement. The
+512-KiB profile cap now holds 478 windows. Independent held-worker tests verify
+the boundary and failure cleanup with profiling both enabled and disabled;
+actual Original/EX PCM, VM/SPC and restore checks pass without moving any barrier.
+In the same accuracy-enabled, explicit-300%-clock sensitivity replay, 927 joins
+across 46 adjacent same-label gameplay windows total only 0.595 ms (summing
+rounded window totals); their reported maximum is 0.001 ms per join. Larger
+load/transition waits are not included in that steady-window result.
+Successful whole-frame rates are 59.404/58.898 in backgrounds 3/51, with minima
+54.216/52.899. The slowest ordinary background-51 window still reaches 18.705 ms
+of source advancement before drawing. Therefore steady audio waiting is ruled
+out for these dips; source-frame work and renderer owner handoffs are the next
+targets, not later APU joins. The movie has no input errors or renderer fallback,
+and reaches planned DSP shutdown/profile flush before the verified host is
+stopped. CPU configuration returns to explicit 100%. Physical New-model timing,
+guest GSP clean exit and sustained mono 60 FPS remain unproven. Slightly differing
+poses/counts and emulator clock/cache limits still preclude hardware claims.
+
+The next candidate retains the reference-mono and source-effects presenters
+inside one bounded Citro3D context, rather than destroying/recreating both
+whenever a cartridge colour/window effect changes. Only one owner is active.
+A handoff detaches the old LCD outputs and joins the SDK command queue before
+changing formats, binding the new targets or writing LCD/texture memory. Targets,
+textures, shaders and CPU BG2 planning caches remain owned by their original
+presenter. Returning to mono restores C2D draw state and invalidates physical
+LCD certificates, so a cached texture is never confused with an unchanged
+front-buffer image. Closing deletes only that owner's targets; the final lease
+retires Citro3D. Plain pre-game menus, cartridge replacements and model preload
+still retire both presenters. Existing source effects and stereo projection
+remain unchanged. The two-resident-owner bound is covered by 2,000 host handoffs,
+including pending queues, failed init, duplicate/unknown owners, partial close,
+reopen and final retirement. The `a2908693` follow-up passes all 55 asset-free
+CI tests plus native ARM, shader, stack and package gates. This is not
+60-FPS acceptance.
+An independent test also compiles the actual native context adapter against
+SDK stubs and exercises 2,000 switches, failed initialization, inactive/double
+close, final queue/SDK retirement and CPU-menu format restoration. Review of
+the mono lower-LCD path additionally found that its flushed back buffer was
+not published by the upper-only Citro3D output callback. The candidate now
+swaps only the lower screen after a successful mono frame, including upper
+image reuse; it never manually swaps the GPU-owned top screen.
+
+The same explicit-300% Vulkan/accuracy sensitivity movie completes with no
+input errors, retries or fallbacks and reaches DSP shutdown/profile flush.
+Its 49 windows contain 1,534 timing rows. Adjacent same-label returns are
+59.404/59.207 per second for backgrounds 3/51, versus 59.404/58.898 for
+`a9bc520e`; that is not a large throughput improvement. Steady 927 joins total
+0.596 ms across 46 windows (rounded window totals). The mono canvas still
+costs 1.868/1.692 ms per call and mono raster 3.179/1.764 ms, respectively.
+These inclusive phases overlap other timings and must not be added together.
+Owned-window captures were blank or showed movie progress, not gameplay;
+lower-HUD visibility therefore remains unverified. Window inspection can
+perturb host timing. The exact host is stopped only after the profile flush,
+and CPU configuration returns to explicit 100%. Physical New-model timing,
+clean guest GPU exit and sustained mono 60 FPS remain unproven.
+
+The next canvas candidate computes each eight-line margin-colour histogram
+once per frame instead of once per output row. It also scans only the world
+margin spans, rather than traversing the source-covered centre to skip it.
+It retains lowest-index tie selection, opaque index zero, separate left/right
+edges and the original clamped endpoint rows. No cross-frame colour cache,
+new allocation, source simulation or audio scheduling is introduced. An
+independent per-pixel oracle compares 1,152 complete indexed images for
+gameplay/intro across random worlds, tied edge bands, supplied/source edges,
+invalid edge lengths and endpoint changes. Native timing is still required;
+passing that pixel oracle does not establish a speed gain.
+The freshly rebuilt actual cartridge adapter additionally retains all eight
+prior Original/EX 240-phase image digests, including complete-frame fallbacks
+and source-state purity/coverage checks. Each produces 80 complete audio
+blocks; that count is not a new full-PCM equivalence test. No private assets
+are copied or exported, and host duration is not console FPS.
+
+The exact `966a8cbc` canvas ARM image passes all 56 CI tests and native gates.
+Its explicit-300% Vulkan/accuracy replay contains 49 windows / 1,533 timing
+rows, no input errors, retries or fallbacks, and reaches DSP shutdown/profile
+flush. Canvas means are 1.868/1.691 ms for backgrounds 3/51, essentially
+unchanged from 1.868/1.692 in `a2908693`. Those scenes use the separate Mode 2
+canvas path, not the optimized eight-line margin bands. Adjacent same-label
+returns are 59.342/58.944 per second, with minima 54.216/52.898. This is not a
+speed gain or physical New-model timing. The exact host remains alive at final
+guest GPU teardown and is stopped only after the flush; configuration returns
+to explicit 100%. Clean guest GPU exit and sustained mono 60 FPS remain open.
+
+The following mono Mode 2 candidate merges world zero-ink and covered source
+sprites/text directly during the existing RGB5A1 upload. It avoids constructing
+and scanning an intermediate 400x240 foreground/coverage image; it adds no
+texture, raster allocation or model/simulation/audio scheduling change. The
+GPU-idle acquire still precedes writes to borrowed upload/texture storage.
+Opaque source index zero wins over the world, and world index zero stays
+transparent exactly as before. Texture padding is untouched. Cache ownership
+distinguishes composed and deferred rasters. Slider stereo still uses NativeGpu,
+not this imported mono renderer. Complete CPU fallbacks retain their existing
+full indexed canvases. Independent tests compare 256
+complete padded texture/alpha outputs against the old painter, including
+stale uncovered source ink, black, all palette indices, source purity and
+fail-closed extents. Native ARM and timing checks remain required.
+The rebuilt cartridge diagnostic also compares all 400x240 uploaded colour/
+alpha cells at 56 Mode 2 snapshots across seven Original/EX stages, with live
+palettes, before/after deferred-cache checks and complete CPU fallback checks.
+All seven retain their prior 240-phase indexed-image digests and 80 complete
+audio blocks. Original LEVEL1_1's unchanged Mode 1 path also retains its digest.
+The imported reference renderer rejects nonzero-eye model draws by design;
+the production slider path remains the separate NativeGpu renderer. No native
+timing or new hardware acceptance is inferred from these host probes.
+
+The exact direct-foreground ARM image (`a1e2332c`, run `38490041988`)
+passes all 57 CI tests and native arithmetic/shader/stack/package gates.
+Its matched explicit-300% Vulkan/accuracy replay reduces canvas means from
+1.868/1.691 ms to 0.005/0.005 ms in backgrounds 3/51. Some work moves into
+the existing upload: combined model preparation plus presentation means fall
+from 7.280/5.259 ms to 6.007/4.544 ms, rather than saving the entire old canvas
+duration. Counts/poses and the share of source-effects frames differ slightly.
+Adjacent same-label whole-frame returns average 59.585/59.487 per second,
+with minimum windows 54.218/53.520. The slow ordinary background-51 window
+still has source advancement up to 18.705 ms, including raster publication
+up to 7.596 ms. These inclusive child/parent timings must not be added.
+No movie errors, renderer retries or fallbacks are recorded. This is a real
+native component reduction, not sustained physical New-model 60 FPS.
+
+A separate visual run of that exact image captures the live launch scene and
+outdoor gameplay, including white ground dots, foreground geometry and the
+published lower LCD HUD. Screenshot pauses exclude this run from timing.
+The exit chord releases guest GSP rights and Azahar cleans up guest process 11.
+The idle emulator GUI then closes normally with exit code 0, without a forced
+stop. Earlier forced host stops after profile flush alone did not prove a guest
+GPU teardown hang. This verifies this emulator exit path, not physical console
+HOME/sleep/exit acceptance.
+
+The next candidate clips native RGB canvas rectangles once, fills one row and
+copies the identical bounded span to remaining rows. It removes per-pixel
+clipping/index/coverage checks from HUD/menu clears without another framebuffer
+or cross-frame cache. Coverage remains independent of RGB ink, including black.
+An independent per-destination-pixel painter checks 1,600 sequential full RGB
+and coverage outputs across both LCD widths, panels, one-pixel canvases,
+partial/offscreen/overflow-extreme rectangles and coverage resets. Existing
+HUD, mutable radio/portrait, custom layout and lower-LCD tests remain required.
+The appended `hud_prepare` diagnostic isolates HUD capture/redraw inside
+`raster`; the 512-KiB profile cap now holds 468 windows.
+
+That exact rectangle-span ARM image (`d092afbb`, run `38492790923`) passes all
+57 CI tests and native gates. The matched accuracy-enabled Vulkan/explicit-300%
+replay has adjacent same-label whole-frame returns of 60.027/59.984 per second
+for backgrounds 3/51, with minimum windows 59.119/59.074. Raster publication
+means are 0.335/0.576 ms per call, with maxima 2.286/3.380 ms, versus
+0.345/0.844 ms and maxima 6.469/7.649 in the prior direct-foreground run.
+The new HUD child means are 0.017/0.254 ms, with maxima 1.800/2.828 ms.
+The native replay releases guest GSP rights, cleans up guest process 11 and
+closes its idle GUI with exit code 0 and no forced stop. These are controlled
+component/cadence measurements, not physical New-model 60 FPS acceptance.
+Transition windows contain much larger logic calls and are not included in
+the adjacent same-label rate calculation; neither those stalls nor broader
+Original/EX stage coverage can be dismissed from this short replay.
+
+The following candidate copies independent radio/portrait RGB images one
+clipped row at a time, instead of calling the bounded pixel painter for every
+pixel. Source padding is never copied and black pixels still claim coverage.
+Self-images keep their historical forward-pixel semantics through the existing
+painter, without a new snapshot or allocation. Independent full RGB/coverage
+oracles cover 1,280 sequential padded/mutable images across both LCD widths,
+small panels, clipping extremes, source heights larger than the destination,
+coverage resets and invalid-input rejection. Sixteen self-image comparisons
+check alias behaviour in both axes. Native timing is still required for this
+image-copy follow-up.
+
+A separate ordinary-Start replay of the rectangle-span image reaches the real
+pre-game menu, intro and title, not gameplay. Its EX intro/background-183
+same-label windows return about 25 presentations/second. Reference mono
+background preparation takes about 27 ms/call there; the intro's existing
+PICA effect frames use a different, much shorter ordered-layer preparation.
+This exposes a bottleneck not covered by the outdoor gameplay replay above.
+The following candidate keeps the entire intro on that existing PICA path,
+including slider-off frames. It retains the original eye plan, source cadence,
+layer order, top-screen intro artwork, menu and every other mono-flow policy.
+All 15 flows and 16 stereo/effect/menu/options flag combinations are covered by
+the host routing regression. Native speed and visual validation of the new
+route are still required; no hardware 60-FPS claim follows from this change.
+
+The exact intro-routing ARM image (`ac49f8d7`, run `38495437084`) passes
+all 57 host CI tests and the native shader/stack/package gates. The matching
+accuracy-enabled Vulkan/explicit-300% replay changes EX intro/background-183
+same-label presentation returns from 27.227/s for the immediately preceding
+image-copy control to 60.013/s, with a minimum sampled window of 59.671/s.
+The 27-ms reference background calls disappear; PICA layer preparation is
+1.595 ms/call and models are 1.341 ms/call over that labeled group. These
+phases have different work and should not be compared as pixel-identical
+CPU benchmarks. Menu/title cadence remains near 60 returns/s, and planned
+DSP/GSP retirement and host exit code 0 occur without forced termination.
+The replay does not reach gameplay. Earlier window-capture attempts were blank
+and excluded. Separate renderer-framebuffer captures now show EX intro artwork
+and the original controller screen with its live ship and SNES button diagram;
+these are selected visual checks, not complete intro/gameplay acceptance. These
+are emulator sensitivity measurements, not physical New-model 60-FPS acceptance.
+
+A broader ordinary-input replay then reaches EX's cartridge menu, controller
+type/choice and Training, without the direct-stage shortcut. Its attempted
+window captures are blank, so it is excluded from controlled timing/visual
+acceptance. The profile nevertheless identifies a separate EX menu slowdown:
+reference mono model/composition calls average about 8 ms, including a roughly
+4-ms bitmap overlay. The next candidate keeps that cartridge menu on the
+existing ordered PICA path too. The source menu VM, settings, text, model viewer,
+fade, input and audio are unchanged; neither skipping nor replacing the real
+menu is an optimization.
+
+The exact additional-menu image (`b51aba76`, ARM run `38496957241`) passes all
+57 host CI tests and ARM/shader/stack/package checks. Capture-free, same-movie
+Vulkan/explicit-300% controls measure 40.802 presentation returns/s on `ac49f8d7`
+and 40.535/s on `b51aba76` in five adjacent EX-menu/background-525 windows each.
+This routing change does **not** establish a menu speed improvement. In a steady
+new-image window, the source menu task costs 22.429 ms/call, with 7.754-ms
+background decodes and 3.561-ms uploads still present. Controller and Training
+remain reachable; a separate selected framebuffer check retains the controller
+artwork. Both controlled runs finish DSP/GSP retirement and host exit code 0.
+
+The next source change merges each 16-bit bitmap-font row into its touched
+column-major 4-bpp tile rows instead of updating four planes per occupied pixel.
+It retains source font data, text wrapping, clipping, transparent holes, ink,
+decimal positions and 16-bit bitmap address wrapping. A strict asset-free host
+test passes 635,230 complete-memory comparisons against independent point writes,
+including all 65,536 masks at each tile alignment, edge clipping and all inks.
+ARM integration, whole-cartridge regressions and native timing remain required;
+this isolated algorithm check is not an FPS result.
+
+The earlier direct-overlay candidate removes the EX BG1 staging image and applies the same
+zero-ink/CGRAM-black transparency directly during decoding. The 57,344-byte
+pixel allocation and full-image rescan are gone. All 384 synthetic comparisons
+match the removed path's pixels, coverage and tags, and both Original/EX
+240-phase source checks retain their prior image digests and 80 audio blocks.
+Display retirement now detaches linked outputs to join the GPU command queue
+before Citro2D frees vertex/index buffers; `C3D_FrameSync` only waits for VBlank.
+The shared retirement helper passes 700 cold/partial/paired/busy-state cycles
+plus idempotent closes. All 51 asset-free host CI tests and native ARM,
+shader, stack and package gates pass. These host checks do not establish
+physical GPU lifetime or full audio-suite acceptance for this commit.
+
+The same accuracy-enabled Vulkan/300% sensitivity replay reports EX background-3
+mono finishing at 5.417 ms/call versus 5.934 for `61acaae1`, with inclusive
+loop means of 22.296 versus 23.169 ms. Background-51 finishing is 5.151 versus
+5.673 ms/call. No fallback or retry occurs. Counts/poses and window-end labels
+differ, concurrent unrelated work remains, and these durations are not completed
+presentation FPS. Planned DSP shutdown and profile flush occur without replay
+errors. Guest GSP exit remains unverified; the owned emulator was stopped after
+the flush and its configuration restored to 100%. Model scan conversion and
+final composition remain the next measured hot paths. The mono 60 FPS gate is
+still open. No incremental hardware request or release is implied.
+
+CI dispatch now accepts `profile_frames=false` for production-style timing.
+`BUILD-INFO.json` records the explicit native profiling setting; older packages
+without that field have an unspecified setting. With profiling disabled,
+there is no frame/startup CSV instrumentation, not an empty performance result.
+With it enabled, exit normally before copying the buffered frame-profile CSV.
+The diagnostics-free mono baseline is source
+`6974f23f8d7a37e6122932f453c84b3457764227`, from
+[ARM run 38336169249](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38336169249).
+Its package explicitly records `frame_profiling: false`. The accuracy-enabled
+Azahar run, with both stereo settings at zero, reaches the real pre-game menu,
+Original intro/title/Controls and Training without an out-of-bounds exception.
+The completed-frame overlay remains below 60 FPS; this is not performance
+acceptance. Azahar also reports the New 3DS CPU configuration service as
+unimplemented, so its timing is not a physical New 3DS clock measurement.
+No further incremental hardware test is requested for this baseline.
+The mono performance gate is still open. Emulator speed is not physical New
+3DS speed; no incremental tester request is implied by these source changes.
+
+### Mono landscape work reduction
+
+With the slider at zero, GameLayers now submits the original camera-projected
+BG2 artwork once instead of also constructing/drawing its duplicate finite
+stereo receiver. It retains the direct atlas and raster fallback, source HDMA,
+opacity, colour-math layer ownership and LCD edge clamping. Isolated BG2 needs
+no resident A8 ownership copy. Results-screen BG2/OBJ painter groups remain in
+their authored order. Nonzero-slider receiver geometry is unchanged.
+Independent host checks compare all 400x240 pixels in 27 rolled/unique-sky,
+atlas/raster/budget cases, plus black opacity, lights, gate bases and results
+sprite priorities. These are correctness checks, not measured FPS gains;
+the diagnostics-free ARM/emulator performance check remains required.
+
+### Earlier R412 source candidate
+
+The earlier source candidate (R412) is commit
 `e98788bef9dbfbca46cfbe0506b02a356b6a3388`, from
 [ARM run 38206689640](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38206689640).
 The asset-free ZIP is 1,133,475 bytes, SHA256

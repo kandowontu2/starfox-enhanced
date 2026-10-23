@@ -29,13 +29,15 @@ public:
         MapVm& native_state,
         std::size_t object_instruction_limit = 1'000'000U);
 
-    [[nodiscard]] StrategyTickStats tick_all();
+    // Full synchronization is retained for differential diagnostics/recovery.
+    [[nodiscard]] StrategyTickStats tick_all(bool force_full_object_sync = false);
     [[nodiscard]] StrategyTickStats tick_all_no_objects(
         std::span<const ObjectHandle> protected_objects);
     [[nodiscard]] std::size_t tick_object(ObjectHandle object);
     [[nodiscard]] std::size_t begin_tick();
 
 private:
+    [[nodiscard]] std::size_t tick_object(ObjectHandle object,bool reuse_imported_image);
     ObjectPool* objects_{};
     MapVm* native_state_{};
     std::uint32_t do_strategy_{};

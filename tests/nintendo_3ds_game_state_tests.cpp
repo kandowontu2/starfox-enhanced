@@ -65,6 +65,18 @@ void codec() {
         rejects([&]{static_cast<void>(decode_game_state(saved,cartridge^1));});
         auto extended=saved;extended.push_back(0);rejects([&]{static_cast<void>(decode_game_state(extended,cartridge));});
     }
+    // Complete IPL-sized transfers exceed the former 4096-write cap. Their
+    // partial audio phase and every timestamped command must round-trip within
+    // the unchanged whole-file budget and the independent field serializer.
+    auto transfer=data(2);transfer.pending_audio.resize(2U*65536U+8U);
+    for(unsigned i=0;i<transfer.pending_audio.size();++i)
+        transfer.pending_audio[i]={std::uint8_t(i%4),std::uint8_t(i),i*4};
+    const auto transfer_saved=encode_game_state(transfer,cartridge);
+    require(transfer_saved==packet(transfer) && transfer_saved.size()<maximum_game_state_bytes,
+        "Large source transfer changed wire schema or state budget");
+    const auto transfer_loaded=decode_game_state(transfer_saved,cartridge);
+    require(transfer_loaded.pending_audio==transfer.pending_audio && transfer_loaded.audio_phase==2,
+        "Large source transfer lost commands, timestamps or partial cadence");
     for(unsigned field=0;field<7;++field) {
         auto bad=data();switch(field) {
         case 0:bad.audio_phase=3;break;case 1:bad.pending_audio[0].port=4;break;

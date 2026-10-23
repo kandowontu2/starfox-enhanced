@@ -45,6 +45,10 @@ public:
     // Borrow an existing, joined presentation pool. Command recording stays
     // serial; ground history is preserved in column strips. Null is serial.
     RowWorkers* row_workers{};
+    // Decode both priority planes in one pass (starwing-3ds native cache).
+    void draw_bg2_mode1_split(const simulation::SnesPpuState&,std::int32_t,std::int32_t,
+        Framebuffer& low,Framebuffer& high) const noexcept;
+    void draw_bg3_split(const simulation::SnesPpuState&,Framebuffer& low,Framebuffer& high) const noexcept;
     void draw_bg1(
         const simulation::SnesPpuState& ppu,
         Framebuffer& target,

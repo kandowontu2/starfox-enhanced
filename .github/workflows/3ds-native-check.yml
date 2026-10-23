@@ -1,6 +1,19 @@
 name: 3DS native bring-up checks
 on:
   workflow_dispatch:
+    inputs:
+      profile_frames:
+        description: 'Include frame/startup diagnostics (disable for production-style performance checks)'
+        type: boolean
+        default: true
+      indexed_mono:
+        description: 'Test fused indexed mono uploads; experimental and disabled by default'
+        type: boolean
+        default: false
+      enable_ipo:
+        description: 'Experiment with strict native link-time optimization; disabled by default'
+        type: boolean
+        default: false
   push:
     branches: [codex/3ds-native-bringup]
     paths:
@@ -11,6 +24,7 @@ on:
       - 'tests/3ds_audio_stubs/**'
       - 'tests/3ds_stem_stubs/**'
       - 'tests/3ds_display_stubs/**'
+      - 'tests/3ds_context_stubs/**'
       - 'tools/check_3ds*.cpp'
       - '.github/workflows/3ds-native-check.yml'
       - 'tests/nintendo_3ds_pica_tests.cpp'
@@ -22,6 +36,7 @@ on:
       - 'tests/tunnel_scanline_tests.cpp'
       - 'tests/object_record_tests.cpp'
       - 'tests/bus_transfer_tests.cpp'
+      - 'tests/game_bitmap_font_tests.cpp'
       - 'include/starfox/simulation/**'
       - 'tests/framebuffer_extents_tests.cpp'
       - 'include/starfox/render/framebuffer.hpp'
@@ -72,6 +87,9 @@ jobs:
     env:
       # Official devkitPro/devkitARM image, pinned rather than floating latest.
       CTR_IMAGE: devkitpro/devkitarm@sha256:116afba8df8453961de2936ffab20dd441edf4d682856c1ec8b0e53d7ed0bbf5
+      CTR_PROFILE_FRAMES: ${{ (github.event_name != 'workflow_dispatch' || inputs.profile_frames) && 'ON' || 'OFF' }}
+      CTR_INDEXED_MONO: ${{ github.event_name == 'workflow_dispatch' && inputs.indexed_mono && 'ON' || 'OFF' }}
+      CTR_ENABLE_IPO: ${{ github.event_name == 'workflow_dispatch' && inputs.enable_ipo && 'ON' || 'OFF' }}
     steps:
       - uses: actions/checkout@v4
       - name: Verify texture packing and independent stereo projections
@@ -113,7 +131,7 @@ jobs:
           cmake -S platform/3ds -B "$RUNNER_TEMP/starfox-3ds-core-host" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release -DSTARFOX_3DS_BUILD_GAME_CORE=ON \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-            -DSTARFOX_3DS_PROFILE_FRAMES=ON -DSTARFOX_3DS_ENABLE_IPO=OFF
+            -DSTARFOX_3DS_PROFILE_FRAMES=ON -DSTARFOX_3DS_ENABLE_IPO="$CTR_ENABLE_IPO"
           cmake --build "$RUNNER_TEMP/starfox-3ds-core-host" --parallel 2
           ctest --test-dir "$RUNNER_TEMP/starfox-3ds-core-host" --output-on-failure
           python3 tools/check_3ds_spc_ram.py "$RUNNER_TEMP/starfox-3ds-core-host"
@@ -126,8 +144,9 @@ jobs:
           docker pull "$CTR_IMAGE"
           docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
             -e STARFOX_3DS_TEST_PLAYER=ON \
-            -e STARFOX_3DS_PROFILE_FRAMES=ON \
-            -e STARFOX_3DS_ENABLE_IPO=OFF \
+            -e STARFOX_3DS_PROFILE_FRAMES="$CTR_PROFILE_FRAMES" \
+            -e STARFOX_3DS_INDEXED_MONO="$CTR_INDEXED_MONO" \
+            -e STARFOX_3DS_ENABLE_IPO="$CTR_ENABLE_IPO" \
             -v "$GITHUB_WORKSPACE:/src" -w /src "$CTR_IMAGE" \
             bash tools/build_3ds_frontend.sh . build/3ds-native
           for target in starfox_3ds_frontend_check starfox_3ds_spc_saturation_check starfox_3ds_spc_counters_check starfox_3ds_spc_output_check starfox_3ds_gpu_check starfox_3ds_game_core_check starfox_3ds_test_player; do
@@ -139,6 +158,19 @@ jobs:
         run: |
           docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
             -v "$GITHUB_WORKSPACE:/src" -w /src "$CTR_IMAGE" bash -euc '
+              for mode in baseline mask; do
+                define=""
+                if [ "$mode" = baseline ]; then define="-DSTARFOX_LAYER_BASELINE"; fi
+                "$DEVKITARM/bin/arm-none-eabi-g++" -Iinclude -std=gnu++20 -O3 \
+                  -march=armv6k -mtune=mpcore -mfloat-abi=hard -mfpu=vfp $define \
+                  -S tools/check_3ds_layer_predicate.cpp -o "build/3ds-native/layer-$mode.s"
+                printf "%s layer predicate assembly:\n" "$mode"
+                cat "build/3ds-native/layer-$mode.s"
+              done
+              if grep -q popcount build/3ds-native/layer-mask.s; then
+                echo "Per-pixel source-layer test still calls population count" >&2
+                exit 1
+              fi
               for target in starfox_3ds_frontend_check starfox_3ds_spc_saturation_check starfox_3ds_spc_counters_check starfox_3ds_spc_output_check starfox_3ds_gpu_check starfox_3ds_game_core_check starfox_3ds_test_player; do
                 "$DEVKITARM/bin/arm-none-eabi-readelf" -h "build/3ds-native/$target.elf"
                 "$DEVKITARM/bin/arm-none-eabi-size" "build/3ds-native/$target.elf"
@@ -159,6 +191,9 @@ jobs:
             --3dsx build/3ds-native/starfox_3ds_test_player.3dsx \
             --smdh build/3ds-native/test-player.smdh \
             --source-commit "$GITHUB_SHA" \
+            --frame-profiling "$CTR_PROFILE_FRAMES" \
+            --indexed-mono "$CTR_INDEXED_MONO" \
+            --enable-ipo "$CTR_ENABLE_IPO" \
             --output StarFoxEnhanced-3ds-test.zip
           unzip -t StarFoxEnhanced-3ds-test.zip
       - name: Upload experimental player for hardware testing, not a verified release
@@ -237,5 +272,6 @@ jobs:
           path: |
             build/3ds-native/compile_commands.json
             build/3ds-native/CMakeCache.txt
+            build/3ds-native/layer-*.s
           if-no-files-found: warn
           retention-days: 7

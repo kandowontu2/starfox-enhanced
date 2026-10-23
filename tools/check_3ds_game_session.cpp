@@ -14,6 +14,7 @@
 #include "starfox/platform/nintendo_3ds/game_effects.hpp"
 #include "starfox/platform/nintendo_3ds/pica_composite.hpp"
 #include "starfox/platform/nintendo_3ds/presentation_clock.hpp"
+#include "starfox/platform/nintendo_3ds/frame_profile.hpp"
 #include "fortuna_route_inputs.hpp"
 #include "corneria_route_inputs.hpp"
 #include "attack_carrier_route_inputs.hpp"
@@ -21,6 +22,7 @@
 #include "native_stem_executor.hpp"
 #endif
 #include <bit>
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -30,20 +32,28 @@ namespace {
 using namespace starfox;
 using namespace platform::nintendo_3ds;
 unsigned checks{};
+std::atomic<std::uint64_t> audio_join_tick{};
+std::uint64_t audio_join_clock() noexcept {return audio_join_tick.load(std::memory_order_relaxed);}
 void require(bool value,const char* message) {++checks;if(!value) throw std::runtime_error(message);}
 #if defined(STARFOX_3DS_CHECK_PARALLEL_AUDIO)
 struct CountingStemExecutor final : audio::StemExecutor {
     NativeStemExecutor worker;
     std::uint64_t completed{};
-    CountingStemExecutor() {require(worker.parallel_available(),"Parallel session oracle accidentally used serial fallback");}
+    explicit CountingStemExecutor(NativeStemExecutor::Role role=NativeStemExecutor::Role::application):worker(role) {
+        require(worker.parallel_available(),"Parallel session oracle accidentally used serial fallback");
+    }
     void execute(audio::StemTask foreground,audio::StemTask background) override {
         worker.execute(foreground,background);++completed;
     }
+    bool begin(audio::StemTask background) override {return worker.begin(background);}
+    void finish() override {worker.finish();++completed;}
 };
 CountingStemExecutor* checked_stem_executor{};
+CountingStemExecutor* checked_frame_audio_stem_executor{};
 GameSessionOptions checked_options(const GameSessionOptions& source={}) {
     require(checked_stem_executor,"Parallel session executor lifetime missing");
-    auto result=source;result.stem_executor=checked_stem_executor;return result;
+    auto result=source;result.stem_executor=checked_stem_executor;
+    result.frame_audio_stem_executor=checked_frame_audio_stem_executor;return result;
 }
 // Stack-only wrapper; owners returned by restored_state remain ordinary
 // GameSession objects and inherit their executor through the production path.
@@ -113,6 +123,291 @@ struct SourceOracle {
         }
     }
 };
+void audio_render_overlap(const assets::RomImage& rom,const assets::SymbolMap& symbols) {
+    struct SerialExecutor final : audio::StemExecutor {
+        void execute(audio::StemTask foreground,audio::StemTask background) override {
+            foreground.run(foreground.context);background.run(background.context);
+        }
+    } fallback;
+    auto options=checked_options();
+    if(!options.stem_executor) options.stem_executor=&fallback;
+    auto recursive=options;recursive.frame_audio_stem_executor=recursive.stem_executor;
+    rejects([&] {GameSession invalid(rom,symbols,[](auto){},"BOOT",{},recursive);},
+        "Same frame/stem worker was accepted for a recursively dispatched block");
+#if defined(STARFOX_3DS_CHECK_PARALLEL_AUDIO)
+    const auto inner_before=checked_frame_audio_stem_executor->completed;
+#endif
+    for(bool idle_overlap:{false,true}) for(const auto* map:{"BOOT","LEVEL1_1"}) {
+        std::vector<std::int16_t> reference_pcm,overlapped_pcm;
+        // The independent synchronous oracle must not borrow the production
+        // worker: the tested owner can retain its packet even when rendering
+        // is skipped. Sharing that worker serializes unrelated owners or
+        // rejects the oracle's next packet before the tested owner can join.
+        GameSession reference(rom,symbols,[&](auto pcm) {reference_pcm.insert(reference_pcm.end(),pcm.begin(),pcm.end());},map);
+        CheckedSession overlapped(rom,symbols,[&](auto pcm) {overlapped_pcm.insert(overlapped_pcm.end(),pcm.begin(),pcm.end());},map,{},options);
+        unsigned deferred{},work_calls{};
+        for(unsigned frame=0;frame<180;++frame) {
+            const auto held=std::string_view(map)!="BOOT" && frame%17<3?input::ButtonMask(input::a):input::ButtonMask{};
+            const auto expected=reference.advance(timestamp(frame),held);
+            const auto actual=overlapped.advance(timestamp(frame),held,true,{},true);
+            require(actual.video_phases==expected.video_phases && actual.logic_ticks==expected.logic_ticks
+                && actual.audio_blocks==expected.audio_blocks,"Overlap changed video, logic or audio cadence");
+            const auto emitted=overlapped_pcm.size();
+            const auto view=overlapped.presentation(1,true);
+            if(actual.audio_blocks) {
+                ++deferred;
+                require(!overlapped.state_available(),"Incomplete SPC block was advertised as a savable timeline");
+            }
+            overlapped.run_frame_work([&] {
+                ++work_calls;
+                const auto current=overlapped.presentation(1,true);
+                require(current.current==view.current && current.previous==view.previous && current.raster==view.raster
+                    && current.interpolation_alpha==view.interpolation_alpha,
+                    "Audio worker changed borrowed rendering snapshots");
+                require(overlapped_pcm.size()==emitted,"SPC worker submitted PCM off the presentation owner thread");
+            },!idle_overlap);
+            if(idle_overlap) {
+                // A duplicate-time host call is still a source ownership
+                // barrier. It must join/acknowledge the independent packet,
+                // without adding a raster, logic tick or input transition.
+                reference.advance(timestamp(frame),held);
+                const auto joined=overlapped.advance(timestamp(frame),held,true,{},true);
+                require(joined.duplicate,"Idle overlap advanced an extra source video phase");
+            }
+            require(reference_pcm==overlapped_pcm,"Overlap changed a PCM sample or packet order");
+            try {
+                require(reference.save_state()==overlapped.save_state(),
+                    "Overlap changed VM/SPC, port acknowledgements, partial cadence or interpolation state");
+            } catch(const std::exception& error) {
+                throw std::runtime_error(std::string(map)+" frame "+std::to_string(frame)+": "+error.what());
+            }
+            if(frame%31==0) {
+                const auto duplicate_reference=reference.advance(timestamp(frame),held);
+                const auto duplicate_overlap=overlapped.advance(timestamp(frame),held,true,{},true);
+                overlapped.run_frame_work([] {});
+                require(duplicate_reference.duplicate && duplicate_overlap.duplicate
+                    && reference.save_state()==overlapped.save_state(),"Duplicate frame changed overlap source state");
+            }
+        }
+        require(deferred>=59 && work_calls==180,"Overlap fixture did not exercise complete SPC blocks");
+        // A caller can skip drawing: the next advance still joins/emits the
+        // block before any source video phase reads its acknowledged ports.
+        for(unsigned frame=180;frame<=183;++frame) {
+            reference.advance(timestamp(frame),0);
+            overlapped.advance(timestamp(frame),0,true,{},true);
+        }
+        overlapped.run_frame_work([] {});
+        require(reference_pcm==overlapped_pcm && reference.save_state()==overlapped.save_state(),
+            "Skipping frame work lost a sound block or source acknowledgement");
+        auto reference_next=reference.restored_state(reference.save_state());
+        auto overlapped_next=overlapped.restored_state(overlapped.save_state());
+#if defined(STARFOX_3DS_CHECK_PARALLEL_AUDIO)
+        const auto restored_inner_before=checked_frame_audio_stem_executor->completed;
+#endif
+        for(unsigned frame=0;frame<12;++frame) {
+            reference_next->advance(timestamp(frame),0);
+            overlapped_next->advance(timestamp(frame),0,true,{},true);
+            overlapped_next->run_frame_work([] {});
+            require(reference_pcm==overlapped_pcm && reference_next->save_state()==overlapped_next->save_state(),
+                "Restored overlap owner changed PCM/source state");
+        }
+#if defined(STARFOX_3DS_CHECK_PARALLEL_AUDIO)
+        require(checked_frame_audio_stem_executor->completed>restored_inner_before,
+            "Restored session lost the distinct inner audio executor");
+#endif
+    }
+    CheckedSession failure(rom,symbols,[](auto){},"BOOT",{},options);
+    failure.advance(0,0);failure.advance(50'000'000,0,true,{},true);
+    rejects([&] {failure.run_frame_work([] {throw std::runtime_error("presentation failed");});},
+        "Presentation failure escaped overlap failure handling");
+    rejects([&] {failure.advance(100'000'000,0);},"Failed overlapped source was retried");
+    require(!failure.state_available(),"Failed overlap retained state-save availability");
+#if defined(STARFOX_3DS_CHECK_PARALLEL_AUDIO)
+    require(checked_frame_audio_stem_executor->completed>inner_before,
+        "Three-way overlap parity never dispatched the distinct effects worker");
+#endif
+}
+void audio_video_pipeline(const assets::RomImage& rom,const assets::SymbolMap& symbols) {
+    // Hold the packet until finish(), so a fast host worker cannot hide an
+    // accidental raster wait. Real parallel execution has a separate oracle.
+    struct HeldPacketExecutor final : audio::StemExecutor {
+        audio::StemTask packet{};
+        audio::StemExecutor* delegate{};
+        unsigned started{},finished{};
+        bool fail_finish{};
+        void execute(audio::StemTask foreground,audio::StemTask background) override {
+            if(packet.run) throw std::logic_error("Joined work overlapped a held packet");
+            if(delegate) delegate->execute(foreground,background);
+            else {foreground.run(foreground.context);background.run(background.context);}
+        }
+        bool begin(audio::StemTask task) override {
+            if(packet.run) throw std::logic_error("Second packet borrowed the first packet's writes");
+            if(delegate && !delegate->begin(task)) throw std::runtime_error("Parallel pipeline lost its native worker");
+            packet=task;++started;return true;
+        }
+        void finish() override {
+            if(!packet.run) return;
+            const auto work=packet;packet={};++finished;
+            if(delegate) delegate->finish();else work.run(work.context);
+            audio_join_tick.fetch_add(37,std::memory_order_relaxed);
+            if(fail_finish) throw std::runtime_error("Retired audio worker failed");
+        }
+    };
+    for(auto timing:{simulation::TimingMode::original_speed,simulation::TimingMode::unlocked_20_fps}) {
+        HeldPacketExecutor worker;
+        GameSessionOptions options;options.preferences=GamePreferences{};
+        options.preferences->timing=timing;
+        std::vector<std::int16_t> expected_pcm,actual_pcm;
+        GameSession reference(rom,symbols,[&](auto pcm){expected_pcm.insert(expected_pcm.end(),pcm.begin(),pcm.end());},"LEVEL1_1",{},options);
+#if defined(STARFOX_3DS_CHECK_PARALLEL_AUDIO)
+        worker.delegate=checked_stem_executor;
+        options.frame_audio_stem_executor=checked_frame_audio_stem_executor;
+#endif
+        options.stem_executor=&worker;
+        GameSession pipelined(rom,symbols,[&](auto pcm){
+            actual_pcm.insert(actual_pcm.end(),pcm.begin(),pcm.end());
+            audio_join_tick.fetch_add(101,std::memory_order_relaxed);
+        },"LEVEL1_1",{},options);
+        FrameProfile join_profile(audio_join_clock,1000);
+        ScopedFrameProfileActivation profile_activation(join_profile);
+        const auto check_joins=[&] {
+            const auto& joins=join_profile.totals()[unsigned(FramePhase::audio_join)];
+#if defined(STARFOX_3DS_PROFILE_FRAMES)
+            require(joins==FramePhaseTotals{worker.finished,std::uint64_t(worker.finished)*37,
+                worker.finished?37U:0U},
+                "Audio join timing included PCM/rendering or missed an actual worker barrier");
+#else
+            require(joins==FramePhaseTotals{},"Disabled audio join marker changed runtime counters");
+#endif
+        };
+        unsigned unjoined_rasters{};
+        for(unsigned frame=0;frame<72;++frame) {
+            const auto held=frame%17<3?input::ButtonMask(input::a):input::ButtonMask{};
+            const bool borrowed=worker.packet.run;
+            const bool safe=pipelined.game().video_phase_independent_of_apu();
+            const auto completed=worker.finished;
+            const auto expected=reference.advance(timestamp(frame),held);
+            const auto actual=pipelined.advance(timestamp(frame),held,true,{},true);
+            require(actual.video_phases==expected.video_phases && actual.logic_ticks==expected.logic_ticks
+                && actual.audio_blocks==expected.audio_blocks,"Video pipeline changed source/SPC cadence");
+            pipelined.run_frame_work([] {audio_join_tick.fetch_add(59,std::memory_order_relaxed);},false);
+            check_joins();
+            const auto expected_view=reference.presentation(0,false);
+            const auto actual_view=pipelined.presentation(0,false);
+            require(*expected_view.raster->ppu==*actual_view.raster->ppu
+                && expected_view.current->flow==actual_view.current->flow
+                && expected_view.interpolation_alpha==actual_view.interpolation_alpha,
+                "Unacknowledged SPC packet changed presented source raster");
+            if(borrowed && safe && actual.video_phases && !actual.logic_ticks && !actual.audio_blocks) {
+                require(worker.finished==completed && worker.packet.run,
+                    "SPC-independent raster waited for the held audio packet");
+                ++unjoined_rasters;
+            }
+            if(worker.packet.run) require(!pipelined.state_available(),"Borrowed audio packet exposed a save timeline");
+            // Alternate explicit completion after two rasters with packets
+            // left borrowed until the next source-logic/new-packet barrier.
+            if(frame%6==5) {
+                pipelined.run_frame_work([] {});
+                check_joins();
+                require(expected_pcm==actual_pcm && reference.save_state()==pipelined.save_state(),
+                    "Cross-raster pipeline changed PCM, VM/SPC state or acknowledgements");
+            }
+        }
+        require(unjoined_rasters>=12 && worker.started>=23 && worker.finished==worker.started,
+            "Video pipeline fixture did not exercise sustained held-packet ownership");
+        // Missed LCD deadlines admit several source phases at once. Every
+        // packet must start inside advance(), not wait until frame work or be
+        // forced synchronous just because a later raster remains in the batch.
+        // The held executor makes early ownership visible even on fast hosts.
+        unsigned catchup_packets{},catchup_unjoined{};
+        std::int64_t catchup_time=timestamp(71);
+        constexpr std::array catchup_steps{2U,2U,5U,1U,3U,6U,4U,2U};
+        for(unsigned batch=0;batch<24;++batch) {
+            catchup_time+=std::int64_t(catchup_steps[batch%catchup_steps.size()])*16'666'667;
+            const auto held=batch%5==0?input::ButtonMask(input::a):input::ButtonMask{};
+            const auto before=worker.started;
+            const auto expected=reference.advance(catchup_time,held);
+            const auto actual=pipelined.advance(catchup_time,held,true,{},true);
+            require(actual.video_phases==expected.video_phases && actual.logic_ticks==expected.logic_ticks
+                && actual.audio_blocks==expected.audio_blocks,"Catch-up dispatch changed source/SPC cadence");
+            require(worker.started-before==actual.audio_blocks,
+                "Catch-up packet was serialized or dispatched after source advancement");
+            catchup_packets+=actual.audio_blocks;
+            if(worker.packet.run) {
+                ++catchup_unjoined;
+                require(!pipelined.state_available(),"Catch-up packet exposed an incomplete save timeline");
+            }
+            const auto expected_view=reference.presentation(0,false),actual_view=pipelined.presentation(0,false);
+            require(*expected_view.raster->ppu==*actual_view.raster->ppu
+                && expected_view.current->flow==actual_view.current->flow
+                && expected_view.interpolation_alpha==actual_view.interpolation_alpha,
+                "Catch-up audio ownership changed the source raster");
+            pipelined.run_frame_work([] {});
+            check_joins();
+            require(expected_pcm==actual_pcm && reference.save_state()==pipelined.save_state(),
+                "Catch-up dispatch changed complete PCM, VM/SPC state or acknowledgements");
+        }
+        require(catchup_packets>=24 && catchup_unjoined>=8 && worker.started==worker.finished,
+            "Catch-up fixture did not retain and retire enough packets");
+        std::int64_t time=catchup_time;
+        for(unsigned barrier=0;barrier<4;++barrier) {
+            for(unsigned phase=0;phase<6 && !worker.packet.run;++phase) {
+                time+=16'666'667;reference.advance(time,0);
+                pipelined.advance(time,0,true,{},true);pipelined.run_frame_work([] {},false);
+            }
+            require(worker.packet.run,"Barrier fixture failed to retain a complete packet");
+            if(barrier==0) {reference.advance(time,0);pipelined.advance(time,0,true,{},true);}
+            if(barrier==1) {reference.advance(time,0,false);pipelined.advance(time,0,false,{},true);}
+            if(barrier==2) {--time;reference.advance(time,0);pipelined.advance(time,0,true,{},true);}
+            if(barrier==3) {require(reference.toggle_runtime_options()==pipelined.toggle_runtime_options(),"Pipeline options action diverged");}
+            check_joins();
+            require(!worker.packet.run && expected_pcm==actual_pcm && reference.game().save_state()==pipelined.game().save_state()
+                && reference.audio().save_state()==pipelined.audio().save_state(),"Host handoff failed to retire/acknowledge the borrowed packet");
+            if(barrier==1 || barrier==2) {reference.advance(time,0);pipelined.advance(time,0,true,{},true);}
+        }
+    }
+    // Render, worker and PCM failures must retire the same borrowed job once.
+    // The marker must stop before profile merging/PCM acknowledgement, even
+    // during unwinding. Refused dispatches have no join to time at all.
+    for(unsigned failure=0;failure<4;++failure) {
+        HeldPacketExecutor worker;
+        struct RefusedExecutor final : audio::StemExecutor {
+            void execute(audio::StemTask foreground,audio::StemTask background) override {
+                foreground.run(foreground.context);background.run(background.context);
+            }
+        } refused;
+        GameSessionOptions options;options.stem_executor=failure==3?
+            static_cast<audio::StemExecutor*>(&refused):static_cast<audio::StemExecutor*>(&worker);
+        GameSession session(rom,symbols,[&](auto) {
+            audio_join_tick.fetch_add(101,std::memory_order_relaxed);
+            if(failure==2) throw std::runtime_error("PCM delivery failed");
+        },"BOOT",{},options);
+        FrameProfile profile(audio_join_clock,1000);
+        ScopedFrameProfileActivation activation(profile);
+        session.advance(0,0);session.advance(50'000'000,0,true,{},true);
+        if(failure<3) require(worker.packet.run,"Failure fixture never borrowed its audio packet");
+        worker.fail_finish=failure==1;
+        const auto render=[&] {
+            audio_join_tick.fetch_add(59,std::memory_order_relaxed);
+            if(failure==0) throw std::runtime_error("Foreground rendering failed");
+        };
+        if(failure<3) rejects([&]{session.run_frame_work(render);},"Audio/render/PCM failure was lost");
+        else session.run_frame_work(render);
+        const auto expected=failure<3?FramePhaseTotals{1,37,37}:FramePhaseTotals{};
+#if defined(STARFOX_3DS_PROFILE_FRAMES)
+        require(profile.totals()[unsigned(FramePhase::audio_join)]==expected,
+            "Unwinding/refused dispatch lost the exact owner-thread audio join boundary");
+#else
+        static_cast<void>(expected);
+        require(profile.totals()[unsigned(FramePhase::audio_join)]==FramePhaseTotals{},
+            "Disabled unwind marker recorded an audio join");
+#endif
+        require(!worker.packet.run && worker.finished==(failure<3?1U:0U),
+            "Failure/refused dispatch retained or joined a second audio packet");
+        if(failure<3) require(!session.state_available(),"Failed audio owner exposed a savable timeline");
+    }
+    std::cout<<"  Held SPC packet: nonblocking gameplay rasters, source/packet barriers, exact join timing, original/unlocked timing, PCM/state equality and host handoffs checked\n";
+}
 void native_depth_preferences(const assets::RomImage& rom,const assets::SymbolMap& symbols) {
     for(const auto map:{"BOOT","LEVEL1_1"}) {
         CheckedSession fresh(rom,symbols,[](auto){},map);
@@ -619,7 +914,7 @@ void presentation_cadence(const assets::RomImage& rom,const assets::SymbolMap& s
             require(valid_image(first.dashboard,bottom_width,screen_height),"FPS overlay source dashboard invalid");
             measured.completed(now);++renders;
         };
-        require(gate.due(0,rate),"New native output gate did not render its first frame");present(0);
+        require(gate.due(0,rate,0),"New native output gate did not render its first frame");present(0);
         for(unsigned poll=1;poll<=1200;++poll) {
             const input::ButtonMask held=std::string_view(map)=="BOOT" && poll==32?input::start
                 :std::string_view(map)!="BOOT" && poll>=120 && poll<400?input::ButtonMask(input::y|input::up|input::right):0;
@@ -629,7 +924,7 @@ void presentation_cadence(const assets::RomImage& rom,const assets::SymbolMap& s
             require(!result.time_clamped && !result.requested_experience && !result.requested_preview,
                 "Ordinary native cadence fixture clamped or changed source owner");
             if(poll%4==0) source.raster();
-            if(gate.due(now,rate)) present(now);
+            if(gate.due(now,rate,result.video_phases)) present(now);
             if(poll%240==0) {
                 require(phases==poll/4 && ticks==source.ticks && blocks==source.blocks,
                     "30/60 presentation target altered source raster, logic or SPC cadence");
@@ -1551,9 +1846,13 @@ int main(int argc,char** argv) {
     try {
 #if defined(STARFOX_3DS_CHECK_PARALLEL_AUDIO)
         CountingStemExecutor parallel_executor;
+        CountingStemExecutor inner_executor(NativeStemExecutor::Role::budgeted_effects);
         checked_stem_executor=&parallel_executor;
+        checked_frame_audio_stem_executor=&inner_executor;
 #endif
         const bool states_only=argc==4 && std::string_view(argv[3])=="--states-only";
+        const bool overlap_only=argc==4 && std::string_view(argv[3])=="--audio-render-overlap";
+        const bool pipeline_only=argc==4 && std::string_view(argv[3])=="--audio-video-pipeline";
         const bool capabilities_only=argc==4 && std::string_view(argv[3])=="--capabilities-only";
         const bool depth_only=argc==4 && std::string_view(argv[3])=="--native-depth-only";
         const bool sweep=argc==4 && std::string_view(argv[3])=="--stage-sweep";
@@ -1566,9 +1865,13 @@ int main(int argc,char** argv) {
         const bool death_route=argc==4 && std::string_view(argv[3])=="--death-source-route";
         const bool continue_yes=argc==4 && std::string_view(argv[3])=="--continue-yes-source-route";
         const bool continue_no=argc==4 && std::string_view(argv[3])=="--continue-no-source-route";
-        if(argc!=3 && !states_only && !capabilities_only && !depth_only && !sweep && !fortuna_route && !corneria_route && !carrier_route && !runtime_editors && !editor_chords && !fps_chords && !death_route && !continue_yes && !continue_no && !(argc==5 && std::string_view(argv[3])=="--capture"))
-            throw std::invalid_argument("Usage: game_session_check ROM SYMBOLS [--capture DIRECTORY | --states-only | --capabilities-only | --native-depth-only | --stage-sweep | --fortuna-source-route | --corneria-source-route | --attack-carrier-source-route | --runtime-editor-parity | --editor-chords | --fps-chords | --death-source-route | --continue-yes-source-route | --continue-no-source-route]");
+        if(argc!=3 && !states_only && !overlap_only && !pipeline_only && !capabilities_only && !depth_only && !sweep && !fortuna_route && !corneria_route && !carrier_route && !runtime_editors && !editor_chords && !fps_chords && !death_route && !continue_yes && !continue_no && !(argc==5 && std::string_view(argv[3])=="--capture"))
+            throw std::invalid_argument("Usage: game_session_check ROM SYMBOLS [--capture DIRECTORY | --states-only | --audio-render-overlap | --audio-video-pipeline | --capabilities-only | --native-depth-only | --stage-sweep | --fortuna-source-route | --corneria-source-route | --attack-carrier-source-route | --runtime-editor-parity | --editor-chords | --fps-chords | --death-source-route | --continue-yes-source-route | --continue-no-source-route]");
         const auto rom=assets::RomImage::load(argv[1]);const auto symbols=assets::SymbolMap::load(argv[2]);
+        if(pipeline_only) {
+            audio_video_pipeline(rom,symbols);
+            std::cout<<"3DS cross-raster audio pipeline: "<<checks<<" checks passed; scheduling/source parity, not console FPS\n";return 0;
+        }
         if(depth_only) {
             native_depth_preferences(rom,symbols);
             std::cout<<"3DS native depth preferences: "<<checks<<" checks passed; host source/state parity, not physical stereo acceptance\n";return 0;
@@ -1607,6 +1910,10 @@ int main(int argc,char** argv) {
         if(states_only) {
             full_state_parity(rom,symbols);
             std::cout<<"3DS actual full states: "<<checks<<" checks passed; host source parity, not console acceptance\n";return 0;
+        }
+        if(overlap_only) {
+            audio_render_overlap(rom,symbols);
+            std::cout<<"3DS overlapped audio/render source parity: "<<checks<<" checks passed\n";return 0;
         }
         native_depth_preferences(rom,symbols);
         parity(rom,symbols,"BOOT");parity(rom,symbols,"LEVEL1_1");handoff(rom,symbols);

@@ -178,6 +178,36 @@ void composite_transparent_layer(const Framebuffer& source,
                 + static_cast<std::size_t>(
                     static_cast<std::int64_t>(stored_source_left)
                         + stored_offset_x);
+            if (!carry_pairs && &source != &destination) {
+                // The native world commonly fills most of a row. Preserve
+                // zero-ink transparency, but copy/mark each opaque run once
+                // instead of clearing dither and setting coverage per cell.
+                // In-place shifts retain the ordered legacy point loop below.
+                auto x = stored_source_left;
+                while (x < stored_source_right) {
+                    while (x < stored_source_right && source_pixels[source_index] == 0U) {
+                        ++x; ++source_index; ++destination_index;
+                    }
+                    const auto first = source_index;
+                    const auto output = destination_index;
+                    while (x < stored_source_right && source_pixels[source_index] != 0U) {
+                        ++x; ++source_index; ++destination_index;
+                    }
+                    const auto length = source_index - first;
+                    if (!length) continue;
+                    std::copy_n(source_pixels.data() + first, length,
+                        destination_pixels.data() + output);
+                    destination.mark_written(output, length);
+                    if (transfer_tags) {
+                        if (source_tagged)
+                            std::copy_n(source_tags.data() + first, length,
+                                destination_tags.data() + output);
+                        else std::fill_n(destination_tags.data() + output,
+                            length, geometry_tag);
+                    }
+                }
+                continue;
+            }
             for (auto x = stored_source_left; x < stored_source_right; ++x) {
                 const auto colour = source_pixels[source_index];
                 if (colour != 0U || (carry_pairs && (pairs[source_index]&256))) {

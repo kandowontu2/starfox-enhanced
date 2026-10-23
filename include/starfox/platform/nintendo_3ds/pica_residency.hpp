@@ -56,16 +56,22 @@ inline void release_pica_texture_cache(std::vector<std::uint8_t>& cache) noexcep
 class PicaTextureResidency {
 public:
     void release_colour() noexcept {
+        colour_content_={};
         release_pica_texture_cache(pixels_);colour_valid_=false;
+        release_pica_texture_cache(indexed_layers_);indexed_=false;
+        std::vector<std::uint32_t>().swap(indexed_palette_);
         width_=height_=channels_=0;repeat_=false;
     }
     void release_layers() noexcept {
+        layer_content_={};
         release_pica_texture_cache(layers_);layers_valid_=true;
         layer_width_=layer_height_=classes_=0;layer_repeat_=false;
     }
     bool colour_matches(PicaImage image) const noexcept {
+        if(colour_valid_ && image.content.colour_valid(image) && image.content.same(colour_content_))return true;
         return colour_valid_ && image.width==width_ && image.height==height_
             && image.channels==channels_ && image.repeat==repeat_
+            && indexed_matches(image)
             && rows_equal(image.pixels,image.pitch,image.width*image.channels,image.height,pixels_);
     }
     // Borrow only a successful residency base with identical logical layout.
@@ -73,12 +79,14 @@ public:
     // callback; a failed flush/released allocation never provides a base.
     std::span<const std::uint8_t> colour_base(PicaImage image) const noexcept {
         if(!colour_valid_ || image.width!=width_ || image.height!=height_
-            || image.channels!=channels_ || image.repeat!=repeat_)return {};
+            || image.channels!=channels_ || image.repeat!=repeat_
+            || (!(image.content.colour_valid(image) && image.content.same(colour_content_)) && !indexed_matches(image)))return {};
         return pixels_;
     }
     bool layers_match(PicaImage image) const noexcept {
         if(!layers_valid_)return false;
         if(image.source_layers.empty())return layers_.empty();
+        if(image.content.layers_valid(image) && image.content.same(layer_content_))return true;
         return !layers_.empty() && image.width==layer_width_ && image.height==layer_height_
             && image.repeat==layer_repeat_
             && rows_equal(image.source_layers,image.layer_pitch,image.width,image.height,layers_);
@@ -87,29 +95,48 @@ public:
     bool prepare(PicaImage image,ColourUpload colour_upload,LayerUpload layer_upload) {
         const auto layout=pica_texture_layout(image);
         const bool colour_same=colour_matches(image),layers_same=layers_match(image);
-        if(colour_same && layers_same)return false;
+        if(colour_same && layers_same) {remember_content(image);return false;}
         // A layout change/reserve must not invalidate its own borrowed input.
-        for(const auto input:{image.pixels,image.source_layers})
-            for(const auto retained:{std::span<const std::uint8_t>(pixels_),std::span<const std::uint8_t>(layers_)}) {
+        for(const auto input:{image.pixels,image.source_layers,image.indexed?image.indexed->layers:std::span<const std::uint8_t>{}})
+            for(const auto retained:{std::span<const std::uint8_t>(pixels_),std::span<const std::uint8_t>(layers_),std::span<const std::uint8_t>(indexed_layers_)}) {
                 if(input.empty() || retained.empty())continue;
                 const auto from=reinterpret_cast<std::uintptr_t>(input.data()),saved=reinterpret_cast<std::uintptr_t>(retained.data());
                 if((from>=saved && from-saved<retained.size()) || (saved>=from && saved-from<input.size()))
                     throw std::invalid_argument("3DS texture residency requires independent source storage");
             }
         auto classes=classes_;
-        if(!image.source_layers.empty() && (!colour_same || !layers_same))
+        const bool indexed_coverage_same=image.indexed && indexed_ && image.width==width_ && image.height==height_
+            && rows_equal(image.indexed->layers,image.pitch,image.width,image.height,indexed_layers_);
+        if(!image.source_layers.empty() && (!layers_same || (!colour_same && !indexed_coverage_same)))
             classes=validate_pica_layers(image);
         if(!colour_same)pixels_.reserve(std::size_t(image.width)*image.height*image.channels);
+        if(!colour_same && image.indexed) {
+            indexed_layers_.reserve(std::size_t(image.width)*image.height);
+            indexed_palette_.reserve(512);
+        }
         if(!layers_same && !image.source_layers.empty())
             layers_.reserve(std::size_t(image.width)*image.height);
         if(!colour_same) {
-            colour_valid_=false;colour_upload(image,layout);
+            colour_content_={};colour_valid_=false;colour_upload(image,layout);
             copy_rows(image.pixels,image.pitch,image.width*image.channels,image.height,pixels_);
+            if(image.indexed) {
+                copy_rows(image.indexed->layers,image.pitch,image.width,image.height,indexed_layers_);
+                indexed_palette_.assign(image.indexed->palette.begin(),image.indexed->palette.end());
+                indexed_inks_.fill(0);
+                for(std::size_t i=0;i<pixels_.size();++i) if(const auto layer=indexed_layers_[i]) {
+                    const auto ink=(layer==2?256U:0U)+pixels_[i];
+                    indexed_inks_[ink/32]|=1U<<(ink%32);
+                }
+            } else {
+                release_pica_texture_cache(indexed_layers_);
+                std::vector<std::uint32_t>().swap(indexed_palette_);
+            }
+            indexed_=bool(image.indexed);
             width_=image.width;height_=image.height;channels_=image.channels;repeat_=image.repeat;
             colour_valid_=true;
         }
         if(!layers_same) {
-            layers_valid_=false;layer_upload(image,layout,image.source_layers.empty()?0:classes);
+            layer_content_={};layers_valid_=false;layer_upload(image,layout,image.source_layers.empty()?0:classes);
             if(image.source_layers.empty())release_layers();
             else {
                 copy_rows(image.source_layers,image.layer_pitch,image.width,image.height,layers_);
@@ -117,14 +144,42 @@ public:
                 classes_=classes;layers_valid_=true;
             }
         }
-        return true;
+        remember_content(image);return true;
     }
     std::span<const std::uint8_t> pixels() const noexcept {return pixels_;}
     std::span<const std::uint8_t> layers() const noexcept {return layers_;}
-    std::size_t colour_capacity() const noexcept {return pixels_.capacity();}
+    std::size_t colour_capacity() const noexcept {
+        return pixels_.capacity()+indexed_layers_.capacity()+indexed_palette_.capacity()*sizeof(std::uint32_t);
+    }
     std::size_t layer_capacity() const noexcept {return layers_.capacity();}
     unsigned classes() const noexcept {return classes_;}
 private:
+    void remember_content(const PicaImage& image) noexcept {
+        colour_content_=image.content.colour_valid(image)?image.content:PicaImageContent{};
+        layer_content_=image.content.layers_valid(image)?image.content:PicaImageContent{};
+    }
+    PicaImageContent colour_content_,layer_content_;
+    bool indexed_matches(PicaImage image) const noexcept {
+        return indexed_==bool(image.indexed) && (!indexed_ ||
+            (image.indexed->palette.size()==indexed_palette_.size()
+                && indexed_palette_matches(image.indexed->palette)
+                && rows_equal(image.indexed->layers,image.pitch,image.width,image.height,indexed_layers_)));
+    }
+    bool indexed_palette_matches(std::span<const std::uint32_t> palette) const noexcept {
+        // Compare only palette entries consumed by the last complete indexed
+        // image. Changes to unused OBJ/HUD/background inks must not force a
+        // full LCD upload. Any changed ink/coverage plane still fails the row
+        // comparison and commits a newly computed dependency set after upload.
+        for(unsigned word=0;word<indexed_inks_.size();++word) {
+            auto bits=indexed_inks_[word];
+            while(bits) {
+                const auto bit=unsigned(std::countr_zero(bits)),ink=word*32+bit;
+                if(palette[ink]!=indexed_palette_[ink])return false;
+                bits&=bits-1;
+            }
+        }
+        return true;
+    }
     static bool rows_equal(std::span<const std::uint8_t> source,unsigned pitch,unsigned row_bytes,
         unsigned height,const std::vector<std::uint8_t>& cache) noexcept {
         if(cache.size()!=std::size_t(row_bytes)*height || !source.data()
@@ -141,9 +196,11 @@ private:
         for(unsigned y=0;y<height;++y)
             std::copy_n(source.begin()+std::size_t(y)*pitch,row_bytes,cache.begin()+std::size_t(y)*row_bytes);
     }
-    std::vector<std::uint8_t> pixels_,layers_;
+    std::vector<std::uint8_t> pixels_,layers_,indexed_layers_;
+    std::vector<std::uint32_t> indexed_palette_;
+    std::array<std::uint32_t,16> indexed_inks_{};
     unsigned width_{},height_{},channels_{},layer_width_{},layer_height_{},classes_{};
-    bool colour_valid_{},layers_valid_{true},repeat_{},layer_repeat_{};
+    bool colour_valid_{},layers_valid_{true},repeat_{},layer_repeat_{},indexed_{};
 };
 // The native presenter calls this ONLY after its previous GPU work completes.
 // Preflight everything, release ALL obsolete allocations, THEN upload. Updating
@@ -157,7 +214,7 @@ void update_pica_texture_residency(std::span<const PicaImage> images,PicaImage d
         throw std::invalid_argument("Invalid 3DS resident texture slots");
     auto bytes=pica_resident_texture_bytes(dashboard);
     if(bytes>pica_texture_budget) throw std::invalid_argument("3DS resident dashboard budget exceeded");
-    for(const auto image:images) {
+    for(const auto& image:images) {
         const auto size=pica_resident_texture_bytes(image);
         if(size>pica_texture_budget-bytes) throw std::invalid_argument("3DS resident texture budget exceeded");
         bytes+=size;

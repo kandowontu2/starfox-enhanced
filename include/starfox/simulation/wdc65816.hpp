@@ -124,6 +124,17 @@ public:
     // Unsupported/ROM/I/O addresses return nullopt rather than reading them.
     [[nodiscard]] std::optional<std::uint8_t> peek_ram8(std::uint32_t address) const noexcept;
     [[nodiscard]] std::optional<std::uint16_t> peek_ram16(std::uint32_t address) const noexcept;
+    // Compare a nonempty contiguous plain-WRAM record without copying it or
+    // touching the bus. nullopt rejects I/O/ROM/other RAM and mapping boundaries.
+    // Callers eliding bus reads must still reproduce their final open-bus byte.
+    [[nodiscard]] std::optional<bool> peek_wram_matches(
+        std::uint32_t address, std::span<const std::uint8_t> expected) const noexcept;
+    // The same strict plain-WRAM contract for little-endian words separated
+    // by a fixed byte stride. Validate the entire range before comparing;
+    // no mapped pointer escapes, and gaps are neither read nor compared.
+    [[nodiscard]] std::optional<bool> peek_wram_strided_words_match(
+        std::uint32_t address, std::size_t stride,
+        std::span<const std::uint16_t> expected) const noexcept;
     void write8(std::uint32_t address, std::uint8_t value);
     void write16(std::uint32_t address, std::uint16_t value);
     [[nodiscard]] bool load_cartridge_ram(
@@ -135,6 +146,8 @@ public:
     void set_apu_output_ports(
         const std::array<std::uint8_t, 4>& ports) noexcept;
     [[nodiscard]] const SnesPpuState& ppu_state() const noexcept;
+    [[nodiscard]] std::uint64_t ppu_memory_revision() const noexcept;
+    [[nodiscard]] std::uint64_t ppu_vram_revision() const noexcept;
     [[nodiscard]] const NativeModelDrawState& native_model_draw() const noexcept;
     void set_native_model_draw(const NativeModelDrawState& state) noexcept;
     [[nodiscard]] const std::vector<std::uint32_t>& unknown_superfx_launches()
