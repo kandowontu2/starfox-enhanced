@@ -17,12 +17,20 @@ values are preserved. The Stereoscopic 3D menu still controls both. The new
 default increases distant-background depth without moving HUD/menu text or
 changing the one-eye slider-off/New 2DS XL path.
 
-1. The baseline source-only candidate is the experimental
+The October 23 tester report confirms regular 60-FPS mono gameplay on a New
+3DS-family console, but not a sustained all-scenes target: the large-ship intro
+slows down, stereo is reported around 25 FPS, and SCRAMBLE/sky faults were found.
+The follow-up below restores the mono compositing blend state and preserves
+the intro's authored BSP/panel order without flattening stereo geometry.
+It is a bug-fix candidate, not a claim of completed stereo performance work.
+
+1. The latest source-only sky/intro follow-up is the experimental
    `StarFoxEnhanced-3ds-test.zip` artifact from
-   [ARM run 38468745995](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38468745995).
-   The separate IPO experiment in ARM run 38472933253 is described below;
-   it does not establish the mono 60-FPS target or change the default build.
-   R376 remains the hardware-tested baseline, not the latest source candidate.
+   [ARM run 40055088137](https://github.com/kandowontu2/starfox-enhanced/actions/runs/40055088137),
+   source commit `859cf02cf35cdd2800b5afcc4bd6b2ee91cbd595`.
+   Both CI jobs passed, including 61 host tests and native shader/ARM gates.
+   IPO remains disabled. CI/emulator checks do not establish physical-console
+   stereo performance or complete the outstanding large-ship slowdown work.
    Extract the ZIP to the SD card's root, keeping its folder structure. When
    updating an earlier build, replace only the `.3dsx` and `.smdh`; preserve the existing
    BIN, settings, saves and diagnostics.
