@@ -8769,6 +8769,13 @@ int main(int argc, char** argv) {
                 game.map().write_native_byte(address.front(),static_cast<std::uint8_t>(mode));
                 std::cerr<<"test-ex-model-wobble: requested="<<mode<<'\n';
             }
+            if (const auto* label = std::getenv("STARFOX_TEST_MAP_JUMP")) {
+                // After the level's own setup, continue its map script at an
+                // authored label (e.g. LEVEL1_END: Venom's final-base demo).
+                game.set_god_mode(true);
+                game.map().start(symbols.find(label).at(0), game.player());
+                game.map().advance_distance(1);
+            }
             if (std::getenv("STARFOX_TEST_TITANIA_END") || std::getenv("STARFOX_TEST_ARMADA_APPROACH")) {
                 // Enter the authored corridor or water background command.
                 const bool armada=std::getenv("STARFOX_TEST_ARMADA_APPROACH")!=nullptr;
@@ -9391,6 +9398,7 @@ int main(int argc, char** argv) {
         starfox::render::Framebuffer pipeline_preparation_overlay{224U,12U};
         bool ray_preparation_was_pending=false;
         starfox::render::Framebuffer exit_confirmation_overlay{112U, 40U};
+        starfox::render::Framebuffer stage_results_overlay{superfx_ui_width, superfx_height};
         starfox::render::Framebuffer mode2_background_cache{
             snes_width, snes_height};
         starfox::simulation::SnesPpuState mode2_background_ppu;
@@ -9775,7 +9783,113 @@ int main(int argc, char** argv) {
         };
         sync_modern();
         bool modern_failure_reported=false;
+        std::string modern_failure_reason;
 #endif
+        // EXIT GAME? and the save-slot window, drawn into one 112x40 bitmap that
+        // both presentations show (MODERN as an overlay on a dark panel).
+        // The stage-clear tally (score, total, teammates' shields) in the
+        // 224x192 Super FX window, CGRAM colour indices on a clear layer.
+        // Shared by the existing presentation and MODERN, which draws the
+        // portraits itself (faces=false) as replaceable 2D layers.
+        const auto draw_stage_results=[&](const auto& results,starfox::render::Framebuffer& target,bool faces=true) {
+            text_renderer.draw_game_text(
+                results.credit_bonus ? bonus_text : score_text, 16, 24, target);
+            text_renderer.draw_game_text(
+                total_score_text, 16, 40, target);
+            text_renderer.draw_game_text(
+                team_text, 48, 69, target);
+            if (!results.credit_bonus) {
+                sprite_renderer.draw_completion_bar(results.displayed_percentage, target);
+                const auto percentage_text = std::to_string(results.displayed_percentage) + "%";
+                // Align both values with the right edge of Slippy's frame.
+                text_renderer.draw_ascii(percentage_text,
+                    208 - text_renderer.measure_ascii(percentage_text), 24, target);
+            }
+            const auto total_text = std::to_string(results.total_percentage * 100U);
+            text_renderer.draw_ascii(total_text,
+                208 - text_renderer.measure_ascii(total_text), 40, target);
+            constexpr std::array<std::int32_t, 3> face_x{16, 96, 176};
+            constexpr std::array<std::int32_t, 3> bar_x{11, 91, 171};
+            constexpr std::array<std::int32_t, 3> name_x{15, 96, 173};
+            constexpr std::array<std::int32_t, 3> down_x{11, 91, 170};
+            constexpr std::array<std::uint8_t, 3> live_face_frame{
+                7U, 9U, 11U};
+            for (std::size_t teammate = 0; teammate < 3U; ++teammate) {
+                const auto alive = results.teammate_health[teammate] != 0U;
+                const auto face_frame = alive
+                    ? live_face_frame[teammate]
+                    : static_cast<std::uint8_t>(
+                        (game.map().read_native_byte(game_frame_address) & 1U)
+                            != 0U ? 4U : 17U);
+                if (faces) text_renderer.draw_face(
+                    face_frame, face_x[teammate], 96, target);
+                if (alive) {
+                    text_renderer.draw_game_text(teammate_text[teammate],
+                        name_x[teammate], 152, target);
+                    for (std::int32_t y = 138; y < 150; ++y) {
+                        for (std::int32_t x = bar_x[teammate];
+                             x < bar_x[teammate] + 44; ++x) {
+                            const auto border = y == 138 || y == 149
+                                || x == bar_x[teammate]
+                                || x == bar_x[teammate] + 43;
+                            const auto filled = y >= 140 && y < 148
+                                && x >= bar_x[teammate] + 2
+                                && x - bar_x[teammate] - 2
+                                    < std::min<std::uint8_t>(
+                                        results.teammate_health[teammate], 40U);
+                            target.set(x, y, static_cast<std::uint8_t>(
+                                7U * 16U + (border ? 14U
+                                    : (filled ? 2U : 0U))));
+                        }
+                    }
+                } else {
+                    text_renderer.draw_game_text(teammate_text[teammate],
+                        name_x[teammate], 137, target);
+                    text_renderer.draw_game_text(teammate_down_text,
+                        down_x[teammate], 151, target);
+                }
+            }
+        };
+        const auto draw_confirmation_overlay=[&] {
+            exit_confirmation_overlay.clear();
+            if (state_slot_window) {
+                text_renderer.draw_ascii("SAVE SLOT", 18, 3, exit_confirmation_overlay, 1U, 0U);
+                text_renderer.draw_ascii("SLOT " + std::to_string(state_slot), 30, 16,
+                    exit_confirmation_overlay, 1U, 0U);
+                text_renderer.draw_ascii("ENTER: CLOSE", 8, 29, exit_confirmation_overlay, 1U, 0U);
+            }
+            if (exit_confirmation) {
+                constexpr std::string_view prompt{"EXIT GAME?"};
+                text_renderer.draw_ascii(prompt,
+                    (static_cast<std::int32_t>(
+                         exit_confirmation_overlay.width())
+                        - text_renderer.measure_ascii(prompt)) / 2,
+                    4, exit_confirmation_overlay, 1U, 0U);
+                const auto yes_width = text_renderer.measure_ascii("YES");
+                const auto choice_gap = text_renderer.measure_ascii("       ");
+                const auto no_width = text_renderer.measure_ascii("NO");
+                const auto choices_x =
+                    (static_cast<std::int32_t>(
+                         exit_confirmation_overlay.width())
+                        - yes_width - choice_gap - no_width) / 2;
+                text_renderer.draw_ascii("YES",
+                    choices_x,
+                    22, exit_confirmation_overlay, 1U, 0U);
+                text_renderer.draw_ascii("NO",
+                    choices_x + yes_width + choice_gap,
+                    22, exit_confirmation_overlay, 1U, 0U);
+                const auto selected_x = exit_yes_selected
+                    ? choices_x
+                    : choices_x + yes_width + choice_gap;
+                const auto selected_width = text_renderer.measure_ascii(
+                    exit_yes_selected ? std::string_view{"YES"}
+                                      : std::string_view{"NO"});
+                for (auto x = 0; x < selected_width; ++x) {
+                    exit_confirmation_overlay.set(
+                        selected_x + x, 35, 1U);
+                }
+            }
+        };
         while (running) {
             if(test_frames && std::getenv("STARFOX_TEST_REVIVAL")
                 && std::getenv("STARFOX_TEST_REVIVAL_FRAME")
@@ -9788,6 +9902,31 @@ int main(int argc, char** argv) {
                 game.map().write_native_byte(symbols.find("LIVES").at(0),2U);
                 game.objects().at(game.player()).strategy_address=symbols.find("PLAYERDEAD_ISTRAT").at(0);
                 std::cerr<<"scheduled-revival frame="<<presented_frames<<'\n';
+            }
+            // STARFOX_TEST_DEFEAT=SHAPE,DIE_STRATEGY,FRAME: at that presented
+            // frame, the first object of that shape dies through the given
+            // strategy (reach a boss's clear sequence without a fight).
+            if(const auto* defeat=std::getenv("STARFOX_TEST_DEFEAT"); test_frames && defeat) {
+                const std::string spec{defeat};
+                const auto a=spec.find(','),b=spec.rfind(',');
+                if(a==std::string::npos || b==a) throw std::runtime_error("STARFOX_TEST_DEFEAT needs SHAPE,STRATEGY,FRAME");
+                if(presented_frames==std::stoull(spec.substr(b+1))) {
+                    std::uint32_t shape{};
+                    for(const auto value:symbols.find(spec.substr(0,a))) if(value<0x10000U) {shape=value;break;}
+                    const auto strategy=symbols.find(spec.substr(a+1,b-a-1)).at(0);
+                    unsigned killed{};
+                    for(const auto handle:game.objects().active_handles()) {
+                        auto& object=game.objects().at(handle);
+                        if(!shape || object.shape!=shape) continue;
+                        object.health=0U;object.strategy_flags[1]|=0x01U;object.strategy_address=strategy;++killed;break; // The body; its parts follow it.
+                    }
+                    std::cerr<<"scheduled-defeat frame="<<presented_frames<<" objects="<<killed<<'\n';
+                }
+            }
+            // Open EXIT GAME? mid-run, as Escape does (MODERN -> fallback hand-off).
+            if(test_frames && std::getenv("STARFOX_TEST_EXIT_CONFIRMATION_FRAME") && !exit_confirmation
+                && presented_frames==std::stoull(std::getenv("STARFOX_TEST_EXIT_CONFIRMATION_FRAME"))) {
+                exit_confirmation=true;exit_yes_selected=false;
             }
             window.update_temporary_status();
             if(game.in_setup_menu() && game.pregame_page()==starfox::simulation::PregamePage::updates) {
@@ -12069,10 +12208,12 @@ int main(int argc, char** argv) {
                 ++profile_fractional_presentations;
             }
 #if defined(STARFOX_MODERN)
-            // Host overlays (EXIT GAME?, save slots, HUD/touch editors, key
-            // remapping, frame freeze) are drawn by the existing presentation
-            // path, so those frames fall back to it.
-            const bool host_overlay=exit_confirmation || state_slot_window || hud_editor.active
+            // Host overlays (HUD/touch editors, key remapping, frame freeze)
+            // are drawn by the existing presentation path, so those frames
+            // fall back to it. EXIT GAME? and the save-slot window are MODERN
+            // overlays: falling back mid-game spun up the whole existing
+            // renderer (and its video memory) just to show a 112x40 box.
+            const bool host_overlay=hud_editor.active
                 || touch_editor.active || remap_menu.active || frame_frozen;
             if(modern && !host_overlay && starfox::modern::ModernRuntime::draws(game)) {
                 const bool final_test_frame=test_frames!=0 && presented_frames+1U>=test_frames;
@@ -12094,10 +12235,31 @@ int main(int argc, char** argv) {
                     fps_overlay={&live_fps_overlay,int(display_width-live_fps_overlay.width()-4U),4,
                         int(display_width),int(snes_height)};
                 }
+                starfox::modern::HostOverlay dialog;
+                if(exit_confirmation || state_slot_window) {
+                    draw_confirmation_overlay();
+                    dialog={&exit_confirmation_overlay,int(display_width-exit_confirmation_overlay.width())/2,
+                        int(snes_height-exit_confirmation_overlay.height())/2,int(display_width),int(snes_height),true};
+                }
+                // The stage-clear tally, drawn as the existing presentation
+                // draws it; MODERN adds the portraits (replacement art).
+                std::optional<starfox::vr::StageTallyLayer> tally;
+                if(results.visible && game.experience()!=starfox::simulation::Experience::starfox_ex) {
+                    stage_results_overlay.clear(0U);
+                    draw_stage_results(results,stage_results_overlay,false);
+                    tally.emplace();tally->ink=&stage_results_overlay;
+                    constexpr std::array<std::uint8_t,3> live_face_frame{7U,9U,11U};
+                    const auto blink=(game.map().read_native_byte(game_frame_address)&1U)!=0U;
+                    for(unsigned teammate=0;teammate<3U;++teammate) {
+                        tally->faces[teammate]=results.teammate_health[teammate]!=0U
+                            ?live_face_frame[teammate]:std::uint8_t(blink?4U:17U);
+                        tally->face_at[teammate]={16+80*int(teammate),96};
+                    }
+                }
                 // Same internal raster as the existing renderer: canvas x scale.
                 if(modern->present(window.renderer(),interpolation_alpha,
                     int(display_width*render_scale),int(snes_height*render_scale),
-                    modern_capture.empty()?nullptr:modern_capture.c_str(),fps_overlay)) {
+                    modern_capture.empty()?nullptr:modern_capture.c_str(),fps_overlay,dialog,tally?&*tally:nullptr)) {
                     if(!advance_frozen_frame) live_fps.record_frame(std::chrono::steady_clock::now());
                     if(presented_frames==0) startup_trace->mark("first game/menu frame presented");
                     complete_presentation();
@@ -12107,9 +12269,11 @@ int main(int argc, char** argv) {
                     }
                     continue;
                 }
-                if(!modern_failure_reported) {
-                    std::cerr<<"modern: falling back to the existing renderer: "<<modern->status()<<'\n';
-                    modern_failure_reported=true;
+                // Report each new reason once (with the flow it happened in).
+                if(!modern_failure_reported || modern->status()!=modern_failure_reason) {
+                    std::cerr<<"modern: falling back to the existing renderer (flow "<<int(game.flow_state())<<", frame "
+                        <<presented_frames<<"): "<<modern->status()<<std::endl;
+                    modern_failure_reported=true;modern_failure_reason=modern->status();
                 }
             }
 #endif
@@ -14855,63 +15019,7 @@ int main(int argc, char** argv) {
             if (results.visible
                 && game.experience()
                     != starfox::simulation::Experience::starfox_ex) {
-                text_renderer.draw_game_text(
-                    results.credit_bonus ? bonus_text : score_text, 16, 24, superfx_ui);
-                text_renderer.draw_game_text(
-                    total_score_text, 16, 40, superfx_ui);
-                text_renderer.draw_game_text(
-                    team_text, 48, 69, superfx_ui);
-                if (!results.credit_bonus) {
-                    sprite_renderer.draw_completion_bar(results.displayed_percentage, superfx_ui);
-                    const auto percentage_text = std::to_string(results.displayed_percentage) + "%";
-                    // Align both values with the right edge of Slippy's frame.
-                    text_renderer.draw_ascii(percentage_text,
-                        208 - text_renderer.measure_ascii(percentage_text), 24, superfx_ui);
-                }
-                const auto total_text = std::to_string(results.total_percentage * 100U);
-                text_renderer.draw_ascii(total_text,
-                    208 - text_renderer.measure_ascii(total_text), 40, superfx_ui);
-                constexpr std::array<std::int32_t, 3> face_x{16, 96, 176};
-                constexpr std::array<std::int32_t, 3> bar_x{11, 91, 171};
-                constexpr std::array<std::int32_t, 3> name_x{15, 96, 173};
-                constexpr std::array<std::int32_t, 3> down_x{11, 91, 170};
-                constexpr std::array<std::uint8_t, 3> live_face_frame{
-                    7U, 9U, 11U};
-                for (std::size_t teammate = 0; teammate < 3U; ++teammate) {
-                    const auto alive = results.teammate_health[teammate] != 0U;
-                    const auto face_frame = alive
-                        ? live_face_frame[teammate]
-                        : static_cast<std::uint8_t>(
-                            (game.map().read_native_byte(game_frame_address) & 1U)
-                                != 0U ? 4U : 17U);
-                    text_renderer.draw_face(
-                        face_frame, face_x[teammate], 96, superfx_ui);
-                    if (alive) {
-                        text_renderer.draw_game_text(teammate_text[teammate],
-                            name_x[teammate], 152, superfx_ui);
-                        for (std::int32_t y = 138; y < 150; ++y) {
-                            for (std::int32_t x = bar_x[teammate];
-                                 x < bar_x[teammate] + 44; ++x) {
-                                const auto border = y == 138 || y == 149
-                                    || x == bar_x[teammate]
-                                    || x == bar_x[teammate] + 43;
-                                const auto filled = y >= 140 && y < 148
-                                    && x >= bar_x[teammate] + 2
-                                    && x - bar_x[teammate] - 2
-                                        < std::min<std::uint8_t>(
-                                            results.teammate_health[teammate], 40U);
-                                superfx_ui.set(x, y, static_cast<std::uint8_t>(
-                                    7U * 16U + (border ? 14U
-                                        : (filled ? 2U : 0U))));
-                            }
-                        }
-                    } else {
-                        text_renderer.draw_game_text(teammate_text[teammate],
-                            name_x[teammate], 137, superfx_ui);
-                        text_renderer.draw_game_text(teammate_down_text,
-                            down_x[teammate], 151, superfx_ui);
-                    }
-                }
+                draw_stage_results(results, superfx_ui);
             }
             if (results.visible && game.experience()
                     == starfox::simulation::Experience::starfox_ex) {
@@ -15411,44 +15519,7 @@ int main(int argc, char** argv) {
                 text_renderer.draw_ascii(
                     fps_text, 0, 0, live_fps_overlay, 1U, 0U);
             }
-            exit_confirmation_overlay.clear();
-            if (state_slot_window) {
-                text_renderer.draw_ascii("SAVE SLOT", 18, 3, exit_confirmation_overlay, 1U, 0U);
-                text_renderer.draw_ascii("SLOT " + std::to_string(state_slot), 30, 16,
-                    exit_confirmation_overlay, 1U, 0U);
-                text_renderer.draw_ascii("ENTER: CLOSE", 8, 29, exit_confirmation_overlay, 1U, 0U);
-            }
-            if (exit_confirmation) {
-                constexpr std::string_view prompt{"EXIT GAME?"};
-                text_renderer.draw_ascii(prompt,
-                    (static_cast<std::int32_t>(
-                         exit_confirmation_overlay.width())
-                        - text_renderer.measure_ascii(prompt)) / 2,
-                    4, exit_confirmation_overlay, 1U, 0U);
-                const auto yes_width = text_renderer.measure_ascii("YES");
-                const auto choice_gap = text_renderer.measure_ascii("       ");
-                const auto no_width = text_renderer.measure_ascii("NO");
-                const auto choices_x =
-                    (static_cast<std::int32_t>(
-                         exit_confirmation_overlay.width())
-                        - yes_width - choice_gap - no_width) / 2;
-                text_renderer.draw_ascii("YES",
-                    choices_x,
-                    22, exit_confirmation_overlay, 1U, 0U);
-                text_renderer.draw_ascii("NO",
-                    choices_x + yes_width + choice_gap,
-                    22, exit_confirmation_overlay, 1U, 0U);
-                const auto selected_x = exit_yes_selected
-                    ? choices_x
-                    : choices_x + yes_width + choice_gap;
-                const auto selected_width = text_renderer.measure_ascii(
-                    exit_yes_selected ? std::string_view{"YES"}
-                                      : std::string_view{"NO"});
-                for (auto x = 0; x < selected_width; ++x) {
-                    exit_confirmation_overlay.set(
-                        selected_x + x, 35, 1U);
-                }
-            }
+            draw_confirmation_overlay();
             auto base_palette = starfox::render::decode_bgr555_palette(
                 game.map().ppu_state().cgram);
             if(background_renderer.menu_text_outline) {

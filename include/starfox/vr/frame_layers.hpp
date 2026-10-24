@@ -7,7 +7,7 @@
 #include <optional>
 #include <span>
 #include <vector>
-namespace starfox::render {class ScaledTextRenderer;}
+namespace starfox::render {class ScaledTextRenderer; class Framebuffer;}
 namespace starfox::simulation {class TrigTables;}
 namespace starfox::vr {
 class EnhancedLandscape;
@@ -18,6 +18,14 @@ class EnhancedLandscape;
 // flat source_panel_camera lands them on the original screen pixels.
 // TODO(MODERN): switch application.cpp and steam_frame_application.cpp to
 // these functions once they can be tested in a headset.
+// The desktop's stage-clear tally: its text, numbers and meters as indexed
+// ink in the 224x192 Super FX window (portraits left out), and the three
+// portrait frames with their top-left corners in that window.
+struct StageTallyLayer {
+    const render::Framebuffer* ink{};
+    std::array<uint8_t,3> faces{};
+    std::array<std::array<int,2>,3> face_at{};
+};
 struct FrameLayerInputs {
     const assets::RomImage* rom{};
     const assets::SymbolMap* symbols{};
@@ -98,6 +106,8 @@ struct FrameLayerInputs {
     // Flat views: draw the cartridge's PAUSE text (PAUSETXT) while paused,
     // as the desktop does on its Super FX UI layer.
     bool pause_text{};
+    // Flat views: the stage tally, placed like the pause text.
+    std::optional<StageTallyLayer> stage_tally;
 };
 struct FrameLayers {
     std::vector<DrawPacket> backgrounds,tunnel_surround,sprites;

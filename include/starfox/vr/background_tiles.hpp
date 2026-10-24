@@ -61,13 +61,16 @@ struct PhotographicBody {
 // CHEQUERED_TABLES (indexed by camera Z). Fitted to those tables: ceiling and
 // floor 60 units from the eye (focal 256), bands repeating every 256 units of
 // world Z, ceiling lit rings over [2,66) and a floor chequer over [184,312).
-// The side walls are Super FX models; the packet is the camera-attached
-// ceiling and floor (source units; place it with tunnel_corridor_model),
+// The packet is a closed box (source units; place it with
+// tunnel_corridor_model): ceiling and floor half_width wide (the authored
+// bounds, e.g. MTUNNEL +-90) and the two side walls. Ceiling and floor are
 // coloured from the cartridge art per depth row, with the art's tile-stepped
-// edge strips fitted to straight lines, so band and strip edges are geometric
-// at any resolution. Empty when no page shows a fitted strip; callers then
-// keep the native layer.
-[[nodiscard]] DrawPacket tunnel_corridor_packet(const simulation::SnesPpuState&,unsigned brightness=15,bool srgb=false);
+// edge strips fitted to straight lines and scaled so its wall line meets the
+// walls; the walls carry what the art paints beyond that line, at its true
+// depth. Empty when no page shows a fitted strip; callers then keep the
+// native layer.
+[[nodiscard]] DrawPacket tunnel_corridor_packet(const simulation::SnesPpuState&,unsigned brightness=15,bool srgb=false,
+    float half_width=90.F);
 [[nodiscard]] bool is_tunnel_corridor(const DrawPacket&) noexcept;
 // Planet landscapes as a sky dome plus a ground plane (one packet), coloured
 // by view direction from the BG2 art exactly as the native screen maps it at
@@ -128,11 +131,36 @@ enum class LandscapeTexture {sky,ground};
 // tunnel corridor colours its rows by distance along the corridor instead of
 // the eye's view depth, and extends behind the seat.
 void set_headset_mapping(DrawPacket&) noexcept;
-// Placement for a camera at world X/Z (source units, fractional for
-// display-rate motion): the corridor stays fixed in world X and Z (bands)
-// and follows the camera vertically, as the cartridge's tables do.
-[[nodiscard]] Matrix4 tunnel_corridor_model(double camera_z,double camera_x) noexcept;
+// Placement for a camera at world X/Y/Z (source units, Y down; fractional for
+// display-rate motion): the box stays fixed in the world, centred on
+// centre_x/centre_y (the authored bounds' middle, e.g. MTUNNEL 0 / -60).
+[[nodiscard]] Matrix4 tunnel_corridor_model(double camera_z,double camera_x,double camera_y,
+    double centre_y=-60.,double centre_x=0.) noexcept;
 [[nodiscard]] DrawPacket tunnel_surround_packet(const std::array<float,4>& colour);
+// Space Armada's boss room as a real room around the reactor. The cartridge
+// paints it as one fixed BG2 picture (ceiling and floor bands, a dark far
+// wall); the 3D room puts that wall on the ring the BOSS_8_4 wall panels
+// rotate on, an ellipse radius wide and 2*radius deep about the model origin
+// (the ring's centre at world Y 0; source units, +Y up, forward -Z), with the
+// ceiling at world Y top and the floor at bottom (Y down), coloured as the
+// painting's far wall (nucleus_floor_packet draws the ceiling and floor; the
+// eye sits camera_offset units behind the ring's centre at height eye_y).
+// Draw it like the layer it replaces: behind every object.
+// Empty when the art has no wall band at its centre.
+[[nodiscard]] DrawPacket nucleus_room_packet(const simulation::SnesPpuState&,unsigned brightness,bool srgb,
+    float radius,float top,float bottom,float eye_y,float camera_offset);
+[[nodiscard]] bool is_nucleus_room(const DrawPacket&) noexcept;
+// The room's ceiling and floor, in nucleus_room_packet's model space and
+// placed as it is: sectors about the reactor's axis (model reactor_x,
+// reactor_z), turned by its spin (radians), alternating two of the
+// painting's shades and clipped to the drum's ellipse. Draw it before the
+// room.
+[[nodiscard]] DrawPacket nucleus_floor_packet(const simulation::SnesPpuState&,unsigned brightness,bool srgb,
+    float radius,float top,float bottom,float eye_y,float camera_offset,float reactor_x,float reactor_z,double turn,unsigned sectors);
+[[nodiscard]] bool is_nucleus_floor(const DrawPacket&) noexcept;
+// Placement for a camera at world X/Y/Z (source units, Y down): the room is
+// fixed in the world around the ring centre at world Z centre_z.
+[[nodiscard]] Matrix4 nucleus_room_model(double camera_x,double camera_y,double camera_z,double centre_z) noexcept;
 [[nodiscard]] DrawPacket tunnel_surround_packet(const std::array<float,4>& wall,
     const std::array<float,4>& ceiling,const std::array<float,4>& floor);
 // Opaque CGRAM-zero backdrop, with source integer fading followed by target
@@ -161,6 +189,11 @@ struct BackgroundTileOptions {
     bool ex_city_planets{}; // BG_5_2: unique planets/palace, surrounding stars/city.
     unsigned guard_inset{}; // Native pixel columns omitted from each side.
     std::array<int32_t,2> horizontal_bounds{0,256}; // Logical pixels, not stretched UVs.
+    // Source pixels the quad reaches past every edge, sampling the first row
+    // above and the last 12 rows mirrored below (the wrapped tilemap at the
+    // sides): a layer rolled as geometry (space horizons) still covers the
+    // view's corners.
+    unsigned overscan{};
     std::optional<std::array<int16_t,2>> scroll_override;
     // Flat presentation only: fractional scroll (source pixels) added to the
     // integer scroll, and a display-rate Mode 2 horizon line (intercept,

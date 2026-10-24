@@ -1007,7 +1007,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                         if(!plan.textures.empty() && !landscape_textures.update_models(plan.texture_models))
                             throw std::runtime_error("MODERN landscape texture motion update failed");
                         reticle_active=plan.reticle.has_value();
-                        if(reticle_active) upload(vector_reticle,std::span(&*plan.reticle,1));
+                        if(reticle_active) upload(vector_reticle,std::span(&plan.reticle->packet,1));
                         colour_math_active=plan.colour_math.has_value();
                         if(colour_math_active) {
                             colour_math_over_hud=plan.colour_math->over_hud;

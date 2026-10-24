@@ -4,11 +4,14 @@
 #include "starfox/vr/packed_vram.hpp"
 #include "starfox/render/palette.hpp"
 #include "starfox/render/background_renderer.hpp"
+#include <algorithm>
 #include <stdexcept>
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
 #include <numbers>
+#include <optional>
+#include <span>
 #include <mutex>
 #include <bit>
 
@@ -132,13 +135,18 @@ namespace {
 constexpr uint32_t corridor_marker=2048U;
 constexpr float corridor_ceiling_height=60.F,corridor_floor_height=60.F;
 constexpr float corridor_ceiling_vp=112.5F,corridor_floor_vp=111.5F;
-constexpr uint32_t corridor_ring_start=2,corridor_ring_length=64,corridor_floor_start=184,corridor_floor_length=128;
+// Page-24 bands in world Z mod 256, as the cartridge shows them against the
+// objects: its CHEQUERED tables are indexed by OLDVIEWPOSZ, one tick (63
+// units) behind the camera the objects are drawn with, so on screen every
+// band sits 63 units further out than the table's own phase (2 / 184).
+constexpr uint32_t corridor_ring_start=2+63,corridor_ring_length=64,corridor_floor_start=184+63,corridor_floor_length=128;
 constexpr float corridor_far=8388608.F; // Far enough that the planes meet the horizon.
 constexpr std::size_t corridor_tables=272,corridor_zones=272+2*448,corridor_zone_count=3,corridor_texels=272+2*448+4*8;
 }
-DrawPacket tunnel_corridor_packet(const simulation::SnesPpuState& source,unsigned brightness,bool srgb) {
+DrawPacket tunnel_corridor_packet(const simulation::SnesPpuState& source,unsigned brightness,bool srgb,float half_width) {
     if(brightness>15) throw std::invalid_argument("Invalid corridor brightness");
-    DrawPacket packet;packet.model=tunnel_corridor_model(0,0);
+    if(!(half_width>0)) throw std::invalid_argument("Invalid corridor half-width");
+    DrawPacket packet;packet.model=tunnel_corridor_model(0,0,-60,0);
     if(!source.tunnel_scene || !source.bg2_scanline_scroll_enabled || !(source.main_screen&2)) return packet;
     // Art probe: BG2 at native screen (x,row) on page 24 or 280. Each row,
     // from the centre outward: a graded ceiling/floor colour, then one or two
@@ -199,6 +207,38 @@ DrawPacket tunnel_corridor_packet(const simulation::SnesPpuState& source,unsigne
         fitted+=data[base+6]!=0;
     }
     if(!fitted) return packet;
+    // The art grades the ceiling's and floor's centre by screen row: a
+    // stepped haze fixed to the screen that does not move with the corridor,
+    // so in 3D it reads as static stripes over the moving bands. Keep each
+    // page's dominant centre colour on every row instead.
+    for(unsigned page=0;page<2;++page) for(const bool ceiling:{true,false}) {
+        std::array<unsigned,256> counts{};
+        const int first=ceiling?0:112,last=ceiling?112:224;
+        for(int row=first;row<last;++row) ++counts[data[corridor_tables+page*448+unsigned(row)*2]&255U];
+        const auto dominant=uint32_t(std::max_element(counts.begin(),counts.end())-counts.begin());
+        for(int row=first;row<last;++row) data[corridor_tables+page*448+unsigned(row)*2]=dominant;
+    }
+    {
+        // The art's side-wall line: the outermost boundary of the table with
+        // the most zones (Armada: 1.470, i.e. 88 units out at height 60).
+        // Scale every boundary so it lands on the box's real walls; the
+        // zones past it (page 24's light rib chunk, the wall colours) are
+        // the art's painting of those walls and go on the wall planes.
+        float line=0;unsigned most=0;
+        for(unsigned table=0;table<4;++table) {
+            const auto base=corridor_zones+table*8;
+            if(data[base+6]>most) {most=data[base+6];line=starfox::bit_cast<float>(data[base+(most-1)*2]);}
+        }
+        if(line>0) {
+            const float factor=half_width/corridor_ceiling_height/line;
+            for(unsigned table=0;table<4;++table) {
+                const auto base=corridor_zones+table*8;
+                for(unsigned zone=0;zone<data[base+6];++zone)
+                    data[base+zone*2]=starfox::bit_cast<uint32_t>(starfox::bit_cast<float>(data[base+zone*2])*factor);
+            }
+        }
+    }
+    data[8]=starfox::bit_cast<uint32_t>(half_width);
     data[1]=starfox::bit_cast<uint32_t>(corridor_ceiling_height);
     data[2]=starfox::bit_cast<uint32_t>(corridor_floor_height);
     data[3]=corridor_ring_start;data[4]=corridor_ring_length;
@@ -211,9 +251,11 @@ DrawPacket tunnel_corridor_packet(const simulation::SnesPpuState& source,unsigne
     for(unsigned i=0;i<256;++i) data[16+i]=uint32_t(palette[i].r)
         |(uint32_t(palette[i].g)<<8)|(uint32_t(palette[i].b)<<16)|0xff000000U;
     packet.geometry.texels=std::move(data);
-    // Wide ceiling and floor planes (uv.x = 0 ceiling, 1 floor) in model
-    // space, forward -Z, from one band period behind the eye to far away.
-    const float w=corridor_far,top=corridor_ceiling_height,bottom=-corridor_floor_height,near=256.F,far=-corridor_far;
+    // A closed box in model space (origin on the corridor's centre line, +Y
+    // up, forward -Z), from one band period behind the eye to far away:
+    // ceiling and floor (uv.x = 0, 1) as wide as the art's strips, and the
+    // side walls (uv.x = 2) the art paints beyond its wall lines.
+    const float w=half_width,top=corridor_ceiling_height,bottom=-corridor_floor_height,near=256.F,far=-corridor_far;
     const auto quad=[&](std::array<std::array<float,3>,4> corners,float face) {
         for(unsigned corner:{0U,1U,2U,0U,2U,3U}) {
             SceneVertex vertex{};
@@ -224,6 +266,8 @@ DrawPacket tunnel_corridor_packet(const simulation::SnesPpuState& source,unsigne
     };
     quad({{{-w,top,near},{w,top,near},{w,top,far},{-w,top,far}}},0);
     quad({{{-w,bottom,near},{w,bottom,near},{w,bottom,far},{-w,bottom,far}}},1);
+    quad({{{-w,bottom,near},{-w,top,near},{-w,top,far},{-w,bottom,far}}},2);
+    quad({{{w,bottom,near},{w,top,near},{w,top,far},{w,bottom,far}}},2);
     return packet;
 }
 std::array<unsigned,2> bg2_art_size(const simulation::SnesPpuState& ppu) noexcept {
@@ -344,9 +388,9 @@ DrawPacket landscape_world_packet(const simulation::SnesPpuState& ppu,
     // Ground dots drawn on the 3D ground plane itself (RGBA, alpha 0 = none):
     // the cartridge's 256-unit lattice, anchored to the world.
     data.push_back(ground_dot_colour.value_or(0U));
-    // Ground dot spacing (source units): every other dot of the cartridge's
-    // 256-unit lattice, which crowded wide views.
-    data.push_back(starfox::bit_cast<uint32_t>(512.F));
+    // Ground dot spacing (source units): every fourth dot of the cartridge's
+    // 256-unit lattice, which crowded wide views (512 still did at 32:9).
+    data.push_back(starfox::bit_cast<uint32_t>(1024.F));
     // Geometry: a dome (64 x 32) then the ground plane at Y = -1; drawn in
     // that order without depth so the ground covers the dome's lower half.
     auto& vertices=packet.geometry.vertices;vertices.clear();
@@ -518,13 +562,210 @@ bool is_tunnel_corridor(const DrawPacket& packet) noexcept {
     return texels.size()==corridor_texels && texels[7]==corridor_marker && !packet.geometry.vertex_view().empty()
         && (packet.geometry.vertex_view().front().texture[3]&8U)!=0;
 }
-Matrix4 tunnel_corridor_model(double camera_z,double camera_x) noexcept {
+namespace {
+constexpr uint32_t nucleus_marker=4096U,nucleus_floor_marker=4097U;
+constexpr std::size_t nucleus_texels=16;
+// The painting's ceiling and floor bands placed in the room (model Z ranges
+// about the ring's centre, nearest first) and its wall colour.
+struct NucleusBand {double z0,z1;std::array<float,4> rgba;};
+struct NucleusSurfaces {std::array<std::vector<NucleusBand>,2> bands;std::array<float,2> y{};std::array<float,4> wall{};};
+std::optional<NucleusSurfaces> nucleus_surfaces(const simulation::SnesPpuState& source,unsigned brightness,bool srgb,
+    float radius,float top,float bottom,float eye_y,float camera_offset) {
+    if(brightness>15) throw std::invalid_argument("Invalid nucleus room brightness");
+    if(!(radius>0) || !(top<bottom) || !std::isfinite(eye_y) || !std::isfinite(camera_offset))
+        throw std::invalid_argument("Invalid nucleus room dimensions");
+    if(!(source.main_screen&2) || source.background_mode!=2) return {};
+    // The entry (BG_1_3DA) twists the camera through heights outside the
+    // room; the eye only places the painting's bands, so keep it inside.
+    eye_y=std::clamp(eye_y,top+1.F,bottom-1.F);
+    // The picture as the screen shows it (the layer sits 16 rows up from its
+    // scroll), centre column, with the per-row offsets centred.
+    auto ppu=source;
+    ppu.bg2_scroll_y=int16_t(ppu.bg2_scroll_y+16);
+    ppu.bg2_horizontal_offsets.fill(128);ppu.bg2_horizontal_offsets_enabled=true;
+    ppu.bg2_scanline_scroll_enabled=false;
+    std::array<uint8_t,224> ink{};
+    for(unsigned row=0;row<224;++row) ink[row]=render::tunnel_border_index(ppu,row,128);
+    // The far wall: the band through the centre row. Its edges are where the
+    // painting's ceiling and floor meet it; with the panels' real heights
+    // above and below the eye they give the art's vanishing row.
+    constexpr unsigned middle=118;
+    unsigned first=middle,last=middle;
+    while(first>0 && ink[first-1]==ink[middle]) --first;
+    while(last<223 && ink[last+1]==ink[middle]) ++last;
+    if(first==0 || last==223) return {};
+    const double above=eye_y-top,below=bottom-eye_y;
+    const double vanishing=first+double(last+1-first)*above/(above+below);
+    const auto colour=[&](uint8_t index){return source_backdrop_colour(source.cgram[index],brightness,srgb);};
+    const double depth_z=2.*radius;
+    NucleusSurfaces result;
+    result.wall=colour(ink[middle]);
+    result.y={-top,-bottom};
+    // One band per run of equal rows, from the distance its nearest row
+    // paints to its farthest; the nearest extends to the room's back and the
+    // farthest to the wall. The art's wall edge is nearer than the ring
+    // straight ahead; stretch its bands so that edge lands on the real wall.
+    const double painted_wall=(above+below)*256./double(last+1-first);
+    const double stretch=std::max(1.,(camera_offset+depth_z)/painted_wall);
+    for(const bool ceiling:{true,false}) {
+        const double height=ceiling?above:below;
+        struct Run {double near,far;uint8_t index;};
+        std::vector<Run> runs;
+        const auto distance=[&](double row) {
+            const double rows=ceiling?vanishing-row:row-vanishing;
+            return rows>0?stretch*height*256./rows:1e9;
+        };
+        if(ceiling) for(int row=0;row<int(first);) {
+            int end=row;while(end+1<int(first) && ink[size_t(end+1)]==ink[size_t(row)]) ++end;
+            runs.push_back({distance(row),distance(end+1),ink[size_t(row)]});row=end+1;
+        } else for(int row=223;row>int(last);) {
+            int end=row;while(end-1>int(last) && ink[size_t(end-1)]==ink[size_t(row)]) --end;
+            runs.push_back({distance(row+1),distance(end),ink[size_t(row)]});row=end-1;
+        }
+        if(runs.empty()) continue;
+        runs.front().near=-1e9;runs.back().far=1e9;
+        for(const auto& run:runs) {
+            // Model Z is camera_offset - distance ahead of the eye.
+            const double z0=std::clamp(camera_offset-run.far,-depth_z,depth_z),z1=std::clamp(camera_offset-run.near,-depth_z,depth_z);
+            if(z1>z0) result.bands[ceiling?0:1].push_back({z0,z1,colour(run.index)});
+        }
+    }
+    return result;
+}
+void push_flat(DrawPacket& packet,std::span<const std::array<float,3>> polygon,const std::array<float,4>& rgba) {
+    for(std::size_t i=1;i+1<polygon.size();++i) for(const auto* corner:{&polygon[0],&polygon[i],&polygon[i+1]}) {
+        SceneVertex vertex{};
+        std::copy(corner->begin(),corner->end(),vertex.position);
+        std::copy(rgba.begin(),rgba.end(),vertex.color);vertex.color[3]=1;
+        packet.geometry.vertices.push_back(vertex);
+    }
+}
+}
+DrawPacket nucleus_room_packet(const simulation::SnesPpuState& source,unsigned brightness,bool srgb,
+    float radius,float top,float bottom,float eye_y,float camera_offset) {
+    DrawPacket packet;
+    const auto surfaces=nucleus_surfaces(source,brightness,srgb,radius,top,bottom,eye_y,camera_offset);
+    if(!surfaces) return packet;
+    packet.geometry.texels.assign(nucleus_texels,0);
+    packet.geometry.texels[7]=nucleus_marker;
+    packet.model=nucleus_room_model(0,eye_y,-camera_offset,0);
+    // Layers rebuild every tick while the entry scrolls: reuse the geometry
+    // (shared, so the GPU upload is skipped too) until its inputs change.
+    std::vector<float> key{radius};
+    for(unsigned plane=0;plane<2;++plane) {
+        key.push_back(surfaces->y[plane]);
+        for(const auto& band:surfaces->bands[plane]) {
+            key.push_back(float(band.z0));key.push_back(float(band.z1));
+            key.insert(key.end(),band.rgba.begin(),band.rgba.end());
+        }
+    }
+    key.insert(key.end(),surfaces->wall.begin(),surfaces->wall.end());
+    thread_local std::vector<float> cached_key;
+    thread_local std::shared_ptr<const std::vector<SceneVertex>> cached;
+    if(cached && key==cached_key) {packet.geometry.shared_vertices=cached;return packet;}
+    const double depth_x=radius,depth_z=2.*radius;
+    constexpr unsigned segments=128;
+    // The wall, all round the ring.
+    for(unsigned i=0;i<segments;++i) {
+        const double a0=2*std::numbers::pi*i/segments,a1=2*std::numbers::pi*(i+1)/segments;
+        const float x0=float(depth_x*std::sin(a0)),z0=float(depth_z*std::cos(a0));
+        const float x1=float(depth_x*std::sin(a1)),z1=float(depth_z*std::cos(a1));
+        const std::array<std::array<float,3>,4> quad{{{x0,-bottom,z0},{x1,-bottom,z1},{x1,-top,z1},{x0,-top,z0}}};
+        push_flat(packet,quad,surfaces->wall);
+    }
+    cached=std::make_shared<const std::vector<SceneVertex>>(std::move(packet.geometry.vertices));
+    cached_key=std::move(key);
+    packet.geometry.vertices.clear();
+    packet.geometry.shared_vertices=cached;
+    return packet;
+}
+DrawPacket nucleus_floor_packet(const simulation::SnesPpuState& source,unsigned brightness,bool srgb,
+    float radius,float top,float bottom,float eye_y,float camera_offset,float reactor_x,float reactor_z,double turn,unsigned sectors) {
+    DrawPacket packet;
+    if(sectors<2 || sectors%2 || !std::isfinite(reactor_x) || !std::isfinite(reactor_z) || !std::isfinite(turn))
+        throw std::invalid_argument("Invalid nucleus floor");
+    const auto surfaces=nucleus_surfaces(source,brightness,srgb,radius,top,bottom,eye_y,camera_offset);
+    if(!surfaces || surfaces->bands[0].empty() || surfaces->bands[1].empty()) return packet;
+    // The painting's nearest (lightest) band and the same shade a touch
+    // darker and greyer, alternating round the reactor like the Super FX
+    // ground stripes: a subtle flat-shaded pinwheel the drum turns.
+    constexpr unsigned arc=8;
+    for(unsigned plane=0;plane<2;++plane) {
+        const auto& bands=surfaces->bands[plane];
+        const auto& light=bands.front().rgba;
+        const float grey=(light[0]+light[1]+light[2])/3.F;
+        std::array<float,4> dark=light;
+        for(unsigned c=0;c<3;++c) dark[c]=std::clamp((light[c]+(grey-light[c])*.35F)*.92F,0.F,1.F);
+        const std::array<std::array<float,4>,2> shades{light,dark};
+        const float y=surfaces->y[plane];
+        // Wedges from the reactor (turned by its spin), clipped to the
+        // drum's ellipse on the unit circle (u = x / radius, v = z / 2 radius)
+        // so nothing shows outside the room (the entry looks in from outside).
+        using Point=std::array<double,2>;
+        constexpr unsigned rim=96;
+        const double reach=8.,c=std::cos(turn),s=std::sin(turn);
+        const Point centre{reactor_x/radius,reactor_z/(2.*radius)};
+        for(unsigned sector=0;sector<sectors;++sector) for(unsigned i=0;i<arc;++i) {
+            std::vector<Point> polygon{centre};
+            for(const unsigned k:{sector*arc+i,sector*arc+i+1}) {
+                const double a=2*std::numbers::pi*k/(sectors*arc);
+                const double dx=std::sin(a),dz=std::cos(a);
+                const double x=c*dx+s*dz,z=-s*dx+c*dz;
+                polygon.push_back({centre[0]+reach*x,centre[1]+reach*z/2.});
+            }
+            for(unsigned edge=0;edge<rim && polygon.size()>=3;++edge) {
+                // Keep the side of this rim edge towards the circle's centre.
+                const double a0=2*std::numbers::pi*edge/rim,a1=2*std::numbers::pi*(edge+1)/rim;
+                const Point p{std::sin(a0),std::cos(a0)},q{std::sin(a1),std::cos(a1)};
+                const auto side=[&](const Point& t){return (q[0]-p[0])*(t[1]-p[1])-(q[1]-p[1])*(t[0]-p[0]);};
+                const double inside=side({0,0});
+                std::vector<Point> out;
+                for(std::size_t j=0;j<polygon.size();++j) {
+                    const auto& a=polygon[j];const auto& b=polygon[(j+1)%polygon.size()];
+                    const double sa=side(a)*inside,sb=side(b)*inside;
+                    if(sa>=0) out.push_back(a);
+                    if((sa>=0)!=(sb>=0)) {const double t=sa/(sa-sb);out.push_back({a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t});}
+                }
+                polygon=std::move(out);
+            }
+            if(polygon.size()<3) continue;
+            std::vector<std::array<float,3>> points;
+            for(const auto& point:polygon) points.push_back({float(point[0]*radius),y,float(point[1]*2.*radius)});
+            push_flat(packet,points,shades[sector%2]);
+        }
+    }
+    packet.model=nucleus_room_model(0,eye_y,-camera_offset,0);
+    packet.geometry.texels.assign(nucleus_texels,0);
+    packet.geometry.texels[7]=nucleus_floor_marker;
+    return packet;
+}
+bool is_nucleus_floor(const DrawPacket& packet) noexcept {
+    const auto texels=packet.geometry.texel_view();
+    return texels.size()==nucleus_texels && texels[7]==nucleus_floor_marker && !packet.geometry.vertex_view().empty();
+}
+bool is_nucleus_room(const DrawPacket& packet) noexcept {
+    const auto texels=packet.geometry.texel_view();
+    return texels.size()==nucleus_texels && texels[7]==nucleus_marker && !packet.geometry.vertex_view().empty();
+}
+Matrix4 nucleus_room_model(double camera_x,double camera_y,double camera_z,double centre_z) noexcept {
+    // Source units to scene metres: 1/256. Source Y is down and scene Y up;
+    // model Z is minus world Z about the ring's centre (16-bit world Z wraps).
+    constexpr float scale=1.F/256.F;
+    const double offset=camera_z-centre_z,whole=std::round(offset);
+    const double z=double(int16_t(uint16_t(int32_t(whole)&0xffff)))+(offset-whole);
+    return {scale,0,0,0,0,scale,0,0,0,0,scale,0,float(-camera_x)*scale,float(camera_y)*scale,float(z)*scale,1};
+}
+Matrix4 tunnel_corridor_model(double camera_z,double camera_x,double camera_y,double centre_y,double centre_x) noexcept {
     // Model Z is minus world Z within one 256-unit band period; the eye sits
     // at model Z = -(camera Z mod 256). Source units to scene metres: 1/256.
     double phase=std::fmod(camera_z,256.);if(phase<0) phase+=256.;
     constexpr float scale=1.F/256.F;
-    // The corridor is centred on world X = 0 (the art's centred offsets).
-    return {scale,0,0,0,0,scale,0,0,0,0,scale,0,float(-camera_x)*scale,0,float(phase)*scale,1};
+    // The model's origin is the box's centre line. Source Y is down and
+    // scene Y up, so a camera resting 2 units below centre (Y -58) sees the
+    // box 2 units higher. Cameras far from the box (scripted views) keep the
+    // art's eye-centred placement.
+    const double y=std::abs(camera_y-centre_y)<32.?camera_y-centre_y:0.;
+    return {scale,0,0,0,0,scale,0,0,0,0,scale,0,float(centre_x-camera_x)*scale,float(y)*scale,float(phase)*scale,1};
 }
 DrawPacket tunnel_surround_packet(const std::array<float,4>& colour) {
     return tunnel_surround_packet(colour,colour,colour);
@@ -1056,7 +1297,9 @@ DrawPacket background_tile_packet(const simulation::SnesPpuState& ppu,
     const float right=float(options.guard_inset?std::min(bounds[1],256-int32_t(options.guard_inset)):bounds[1]);
     if(!(ppu.main_screen&enable) || right<=left) return packet;
     packet.geometry.texels=background_tile_payload(ppu,layer,options);
-    const float corners[4][2]{{left,0},{right,0},{right,224},{left,224}};
+    const float over=float(std::min(options.overscan,1024U));
+    const float corners[4][2]{{left-over,-over},{right+over,-over},{right+over,224+over},{left-over,224+over}};
+    if(options.overscan) packet.geometry.texels[7]|=8192U; // Clamp rows (scene.hlsl tile_background).
     for(unsigned corner:{0U,1U,2U,0U,2U,3U}) {
         SceneVertex vertex{};
         vertex.position[0]=vertex.uv[0]=corners[corner][0];

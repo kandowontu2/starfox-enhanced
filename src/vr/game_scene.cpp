@@ -1,6 +1,8 @@
 #include "starfox/vr/game_scene.hpp"
 #include "starfox/compat/bit_cast.hpp"
 #include "starfox/render/grid_projection.hpp"
+#include "starfox/assets/shape_decoder.hpp"
+#include <algorithm>
 #include <bit>
 #include <limits>
 #include <stdexcept>
@@ -133,6 +135,52 @@ GameSceneHistory::GameSceneHistory(const simulation::GameSimulation& game,
     constexpr std::array landscape_names{"BG_1_1C","BG_TRAINING","BG_2_3A","BG_1_6A","BG_3_7A","BG_3_3A","BG_3_5","BG_3_1C","BG_1_4","BG_7_1","BG_7_2","BG_7_3","BG_7_4","BG_5_4","BG_5_1","BG_6_1","BG_6_5","BG_6_2","BG_6_4","BG_5_5","BG_7_5","BG_6_6","BG_5_2","BG_1_14","BG_1_7B"};
     const auto& water=symbols.find("BG_2_3B");
     const auto corridors=source_corridors(symbols);
+    {
+        // The boss room's wall ring and panel height (see SourceNucleusRoom).
+        const auto first=[&](const char* name) {
+            const auto& value=symbols.find(name);return value.empty()?std::optional<uint32_t>{}:std::optional(value.front());
+        };
+        const auto circ=first("BOSS8_CIRC"),scale=first("BOSS8_SCALE"),height=first("NUCLEUSHEIGHT");
+        // Shape table entries, not their ROM data addresses.
+        std::optional<uint32_t> panel,reactor;
+        for(const auto value:symbols.find("BOSS_8_4")) if(value<0x10000U) {panel=value;break;}
+        for(const auto value:symbols.find("BOSS_8_1C")) if(value<0x10000U) {reactor=value;break;}
+        for(const auto address:symbols.find("PLAYER_POSZ"))
+            if((address>>16U)==0 || (address>>16U)==0x7eU) {player_posz_address_=address;break;}
+        bool found=false;
+        for(std::size_t i=0;const char* name:{"BG_1_3D","BG_1_3DA"}) {
+            const auto& value=symbols.find(name);
+            if(!value.empty() && !background_lists.empty() && (value.front()&0xff0000U)==(background_lists.front()&0xff0000U)
+                && value.front()>background_lists.front()) {
+                nucleus_backgrounds_[i]=static_cast<uint16_t>(value.front()-background_lists.front());found=true;
+            }
+            ++i;
+        }
+        // Not the entry (PSTRATS playerwashent), which looks in from outside
+        // the drum, where the cartridge's own painted layer is the right
+        // picture. The fight and the win after it (whatever strategy the
+        // clear gives the player) are inside.
+        for(std::size_t i=0;const char* name:{"PLAYERWASHENT_STRAT","PLAYERWASHENT_ISTRAT","PLAYERTOCSLOW_ISTRAT"})
+            if(const auto value=first(name)) nucleus_player_strategies_[i++]=*value;
+        for(std::size_t i=0;const char* name:{"PLAYERINTUNNEL_STRAT","PLAYERINTUNNEL_ISTRAT","PLAYERTOCSLOW_ISTRAT",
+                "PLAYERWASHENT_STRAT","PLAYERWASHENT_ISTRAT","PLAYERINNUCLEUS_STRAT","PLAYERINNUCLEUS_ISTRAT"})
+            if(const auto value=first(name)) inside_ship_strategies_[i++]=*value;
+        for(std::size_t i=0;const char* name:{"CRUISER1_STRAT","CRUISER1_ISTRAT","CRUISER1F_ISTRAT","CRUISER1FALL_STRAT"})
+            if(const auto value=first(name)) outside_cruiser_strategies_[i++]=*value;
+        if(found && circ && scale && height && panel && reactor && player_posz_address_ && *scale<8) {
+            // The reactor's cover rises from the floor (its origin) to the ceiling.
+            const auto shape=assets::ShapeDecoder(rom,symbols).decode(*reactor);
+            if(!shape.vertices.empty()) {
+                const auto low=std::min_element(shape.vertices.begin(),shape.vertices.end(),
+                    [](const auto& a,const auto& b){return a.y<b.y;});
+                const auto floor=int16_t(uint16_t(*height));
+                const auto ceiling=int16_t(int32_t(floor)+(low->y<<shape.header.shift));
+                nucleus_room_=SourceNucleusRoom{int16_t(160<<*scale),int16_t(uint16_t(*circ)),ceiling,floor,
+                    uint16_t(*panel),uint16_t(*reactor)};
+                if(nucleus_room_->radius<=0 || nucleus_room_->top>=nucleus_room_->bottom) nucleus_room_.reset();
+            }
+        }
+    }
     for(size_t i=0;i<corridors.size();++i) if(corridors[i]) {
         corridor_backgrounds_[i]=corridors[i]->background;
         corridor_bounds_[i]=corridors[i]->bounds;
@@ -253,6 +301,19 @@ void GameSceneHistory::capture() {
     for(size_t i=0;i<corridor_backgrounds_.size();++i)
         if(corridor_backgrounds_[i] && next->background_id==corridor_backgrounds_[i])
             next->background_corridor=corridor_bounds_[i];
+    const auto in_nucleus=[&] {
+        const auto handle=game_.player();
+        if(!game_.objects().is_active(handle)) return true;
+        const auto strategy=game_.objects().at(handle).strategy_address;
+        return std::find(nucleus_player_strategies_.begin(),nucleus_player_strategies_.end(),strategy)==nucleus_player_strategies_.end();
+    };
+    if(nucleus_room_ && next->background_id!=0
+        && std::find(nucleus_backgrounds_.begin(),nucleus_backgrounds_.end(),next->background_id)!=nucleus_backgrounds_.end()
+        && in_nucleus()) {
+        auto room=*nucleus_room_;
+        room.centre_z=int16_t(uint16_t(game_.map().peek_ram_word(player_posz_address_).value_or(0)+uint16_t(room.centre_z)));
+        next->background_nucleus=room;
+    }
     next->wipe=game_.window_wipe_state();
     if(next->ppu->background_mode==2) for(size_t i=0;i<unique_backgrounds_.size();++i)
         if(unique_backgrounds_[i]!=0 && game_.map().background()==unique_backgrounds_[i])
@@ -458,11 +519,44 @@ void GameSceneHistory::capture() {
     if(model_addresses_[10]) common.projected_points_address=static_cast<uint16_t>(model_addresses_[10]);
     const auto thresholds=model_word(2),colours=model_word(3);
     next->objects.reserve(game_.draw_order().size());
+    // Inside a walled corridor or the Space Armada boss room, objects lying
+    // wholly outside it (the armada's circling cruisers) are never on the
+    // cartridge's 4:3 screen; a wider view or headset would show them through
+    // the walls. Only while the player is itself inside.
+    const auto outside_enclosure=[&,player=game_.objects().is_active(next->player)
+            ?std::optional(game_.objects().at(next->player)):std::nullopt](simulation::ObjectHandle handle,const simulation::GameObject& object) {
+        if(!player || object.shape==0 || handle==next->player) return false;
+        // The pipe tunnel to the boss is no authored corridor, and a cruiser
+        // can pass right through it: hide those by what they are.
+        const auto listed=[](const auto& list,uint32_t strategy) {
+            return strategy!=0 && std::find(list.begin(),list.end(),strategy)!=list.end();
+        };
+        if(listed(outside_cruiser_strategies_,object.strategy_address)
+            && listed(inside_ship_strategies_,player->strategy_address)) return true;
+        const int reach=std::max(256,std::abs(int(rom_.read_i16(uint32_t(object.shape)+14U))));
+        if(const auto& corridor=next->background_corridor) {
+            const auto inside=[&](int x,int y,int margin) {
+                return (!(corridor->walls&1) || x>=corridor->left-margin) && (!(corridor->walls&2) || x<=corridor->right+margin)
+                    && (!(corridor->walls&4) || y>=corridor->top-margin) && (!(corridor->walls&8) || y<=corridor->bottom+margin);
+            };
+            return inside(player->world_x,player->world_y,0) && !inside(object.world_x,object.world_y,reach);
+        }
+        if(const auto& room=next->background_nucleus) {
+            const auto beyond=[&](int x,int z,int margin) {
+                const double a=double(room->radius)+margin,b=2.*room->radius+margin;
+                const double dz=double(int16_t(uint16_t(z-room->centre_z)));
+                return (x*x)/(a*a)+(dz*dz)/(b*b)>1.;
+            };
+            return !beyond(player->world_x,player->world_z,0) && beyond(object.world_x,object.world_z,reach);
+        }
+        return false;
+    };
     for(const auto handle:game_.draw_order()) {
         if(!game_.objects().is_active(handle)) continue;
         const auto pose=next->transforms.find(handle);
         if(pose==next->transforms.end()) continue; // Source invisible flag.
         const auto& object=game_.objects().at(handle);
+        if(outside_enclosure(handle,object)) continue;
         // EX's manual first-person view can spawn a separate animated cockpit
         // object even though its player ship is already invisible. Do not put
         // that flat shell in either headset eye or a reflected/ray model pass.

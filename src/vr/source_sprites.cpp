@@ -134,14 +134,15 @@ uint32_t source_portrait_address(const assets::SymbolMap& symbols,uint8_t frame,
 }
 DrawPacket source_portrait_packet(const assets::RomImage& rom,const assets::SymbolMap& symbols,
     uint8_t frame,bool alternate,const std::array<uint16_t,256>& cgram,unsigned brightness,bool srgb,
-    const render::TextureOverrides* portraits) {
+    const render::TextureOverrides* portraits,std::optional<std::array<int,2>> at) {
     const auto address=source_portrait_address(symbols,frame,alternate);
     // The same 32x40 placement as the native portrait below, corrected for
-    // SNES pixel aspect.
-    const auto corner_vertex=[](unsigned corner) {
+    // SNES pixel aspect (or square at `at`, as the tally draws them).
+    const auto corner_vertex=[at](unsigned corner) {
         const float u=(corner==1 || corner==2)?32.F:0.F,v=corner>=2?40.F:0.F;
         SceneVertex vertex{};
-        vertex.position[0]=80.F-(32.F-u)*7.F/6.F;vertex.position[1]=152.F+v;
+        if(at) {vertex.position[0]=float((*at)[0])+u;vertex.position[1]=float((*at)[1])+v;}
+        else {vertex.position[0]=80.F-(32.F-u)*7.F/6.F;vertex.position[1]=152.F+v;}
         vertex.uv[0]=u;vertex.uv[1]=v;
         return vertex;
     };
@@ -195,6 +196,36 @@ DrawPacket source_portrait_packet(const assets::RomImage& rom,const assets::Symb
         // portrait meaning is palette 112, supplied by this backing quad.
         vertex.texture[1]=ink?0U:112U;vertex.texture[3]=(ink?8U:32U)|(srgb?2U:0U);
         packet.geometry.vertices.push_back(vertex);
+    }
+    return packet;
+}
+DrawPacket source_indexed_ink_packet(const render::Framebuffer& ink,
+    const std::array<uint16_t,256>& cgram,unsigned brightness,bool srgb) {
+    if(brightness>15) throw std::invalid_argument("Invalid ink brightness");
+    DrawPacket packet;
+    const auto palette=render::decode_bgr555_palette(cgram);
+    // One 16x16 one-bit mask per colour per block, as the UI text quads.
+    for(unsigned top=0;top<ink.height();top+=16) for(unsigned left=0;left<ink.width();left+=16) {
+        std::array<bool,256> seen{};
+        for(unsigned row=0;row<16 && top+row<ink.height();++row) for(unsigned column=0;column<16 && left+column<ink.width();++column)
+            seen[ink.get(left+column,top+row)]=true;
+        for(unsigned index=1;index<256;++index) {
+            if(!seen[index]) continue;
+            std::array<uint32_t,8> rows{};
+            for(unsigned row=0;row<16 && top+row<ink.height();++row) for(unsigned column=0;column<16 && left+column<ink.width();++column)
+                if(ink.get(left+column,top+row)==index) rows[row/2]|=(0x8000U>>column)<<((row&1)*16);
+            const auto& colour=palette[index];
+            const uint32_t rgba=uint32_t(colour.r*brightness/15)|(uint32_t(colour.g*brightness/15)<<8)
+                |(uint32_t(colour.b*brightness/15)<<16)|0xff000000U;
+            const auto offset=uint32_t(packet.geometry.texels.size());packet.geometry.texels.push_back(rgba);
+            packet.geometry.texels.insert(packet.geometry.texels.end(),rows.begin(),rows.end());
+            for(unsigned corner:{0U,1U,2U,0U,2U,3U}) {
+                SceneVertex v{};const float dx=(corner==1 || corner==2)?16.f:0.f,dy=corner>=2?16.f:0.f;
+                v.position[0]=float(left)+dx;v.position[1]=float(top)+dy;v.uv[0]=dx;v.uv[1]=dy;
+                v.texture[0]=offset;v.texture[1]=v.texture[2]=15;v.texture[3]=1024U|(srgb?2U:0U);
+                packet.geometry.vertices.push_back(v);
+            }
+        }
     }
     return packet;
 }

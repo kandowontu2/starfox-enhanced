@@ -81,6 +81,12 @@ void SdlScenePipelines::release() noexcept {
     }
     pipelines_.clear();vertex_=fragment_=nullptr;device_=nullptr;
 }
+void SdlScenePipelines::set_sample_count(SDL_GPUSampleCount samples) noexcept {
+    if(samples==samples_) return;
+    // Callers change targets between frames, after the last pass using them.
+    if(device_) for(auto& [key,pipeline]:pipelines_) SDL_ReleaseGPUGraphicsPipeline(device_,pipeline);
+    pipelines_.clear();samples_=samples;
+}
 void SdlScenePipelines::set_line_brush(unsigned pixels,unsigned target_width,unsigned target_height) noexcept {
     brush_pixels_=std::clamp(pixels,1U,64U);
     // Clip-space offset per target pixel; SDL_GPU clip space is Y-up, so a
@@ -115,7 +121,7 @@ bool SdlScenePipelines::initialize(SDL_GPUDevice* device,SDL_GPUTextureFormat co
                 info.format=SDL_GPU_SHADERFORMAT_SPIRV;
             }
             info.entrypoint=vertex?shader::vertex_entry:shader::fragment_entry;
-            info.stage=stage;info.num_storage_buffers=1;info.num_uniform_buffers=vertex?2:1;
+            info.stage=stage;info.num_storage_buffers=1;info.num_uniform_buffers=2; // Fragment slot 1: fog.
             auto* created=SDL_CreateGPUShader(device,&info);
             require(created,sdl_error(vertex?"Create MODERN vertex shader":"Create MODERN fragment shader"));
             return created;
@@ -176,7 +182,7 @@ SDL_GPUGraphicsPipeline* SdlScenePipelines::get(SceneTopology topology,SceneBlen
     info.primitive_type=topology==SceneTopology::lines?SDL_GPU_PRIMITIVETYPE_LINELIST:SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
     info.rasterizer_state.fill_mode=SDL_GPU_FILLMODE_FILL;info.rasterizer_state.cull_mode=SDL_GPU_CULLMODE_NONE;
     info.rasterizer_state.enable_depth_clip=true; // Vulkan default: clip, never clamp.
-    info.multisample_state.sample_count=SDL_GPU_SAMPLECOUNT_1;
+    info.multisample_state.sample_count=samples_;
     info.depth_stencil_state.compare_op=painter?SDL_GPU_COMPAREOP_ALWAYS
         :reversed_depth_?SDL_GPU_COMPAREOP_GREATER:SDL_GPU_COMPAREOP_LESS;
     info.depth_stencil_state.enable_depth_test=depth_test;

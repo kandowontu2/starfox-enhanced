@@ -1,4 +1,5 @@
 #pragma once
+#include "starfox/modern/sdl_layer_filter.hpp"
 #include "starfox/modern/sdl_source_scene.hpp"
 #include "starfox/modern/texture_dump.hpp"
 #include "starfox/vr/frame_layers.hpp"
@@ -29,6 +30,14 @@ public:
     // depth (reversed_depth_camera) for uniform precision at every distance:
     // coplanar source surfaces resolve by draw order, not depth rounding.
     bool record(SDL_GPUCommandBuffer*,SDL_GPURenderPass*,const vr::EyeCamera&);
+    // After prepare(), before the frame's pass: draws the layers the 2D
+    // filter applies to at source resolution and filters them; record()
+    // then composites them in their place.
+    bool record_filtered_layers(SDL_GPUCommandBuffer*,const vr::EyeCamera&);
+    // The desktop's 2D FILTER (render::TwoDFilter value; 0 = off) for
+    // sprites, HUD and text, and for the backgrounds of 2D screens (title,
+    // map, briefing...). Replacement artwork is drawn unfiltered above them.
+    void set_two_d_filter(unsigned filter) noexcept {two_d_filter_=filter;}
     static constexpr float clear_depth() noexcept {return 0.F;}
     // Smooth (bilinear) filtering of sprites, HUD, flat backgrounds and model
     // textures; on by default (STARFOX_MODERN_FILTER=0 turns it off).
@@ -43,16 +52,25 @@ public:
     // Target size and pixels per source pixel for source line thickness.
     void set_target(unsigned width,unsigned height,unsigned source_pixel) noexcept {
         pipelines_.set_line_brush(source_pixel,width,height);
-        source_pixel_=float(height)/224.F;target_height_=float(height);
+        source_pixel_=float(height)/224.F;target_height_=float(height);target_width_=width;
     }
+    // Samples of the colour and depth targets record() draws into (MSAA).
+    void set_sample_count(SDL_GPUSampleCount samples) noexcept {pipelines_.set_sample_count(samples);samples_=samples;}
     const SdlSourceScene& world() const noexcept {return world_;}
     void release() noexcept;
     const std::string& status() const noexcept {return status_;}
 private:
+    // Fragment uniform slot 1: the frame's fog for the next draws (mode 0
+    // off, 1 everything, 2 the landscape ground only).
+    void push_fog(SDL_GPUCommandBuffer*,const vr::EyeCamera&,unsigned mode) const noexcept;
     SDL_GPUDevice* device_{};
     SdlScenePipelines pipelines_;
     SdlUploadBatch uploads_;
-    SdlDrawPackets stars_,backgrounds_,tunnel_,cockpit_,sprites_,reticle_,circle_,shutter_,textures_,colour_math_;
+    SdlDrawPackets stars_,backgrounds_,tunnel_,cockpit_,sprites_,reticle_,circle_,shutter_,textures_,colour_math_,replaced_sprites_;
+    SdlLayerFilter layer_filter_;
+    unsigned two_d_filter_{},target_width_{};
+    bool filter_backgrounds_{},filter_sprites_{},sprites_split_{};
+    SDL_GPUSampleCount samples_{SDL_GPU_SAMPLECOUNT_1};
     vr::ModernFrame frame_;
     std::string texture_directory_;
     TextureDump* texture_dump_{};

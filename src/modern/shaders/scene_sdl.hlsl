@@ -60,3 +60,33 @@ Fragment sdl_vertex_textured_main(SdlVertex input,uint instance : SV_InstanceID)
     return output;
 }
 #endif
+#if defined(STARFOX_SDL_FRAGMENT)
+// Fragment uniform slot 1 (SdlFrameRenderer): distance haze. colour in the
+// target encoding (a = strength); params x/y = start/end distance (source
+// units), z = near plane x 256 (reversed depth: distance = z / depth),
+// w = 0 off, 1 every fragment, 2 the landscape: its ground by distance and
+// its sky dome by height above the horizon (full at it, clear 56 art rows
+// up), so the haze hangs over the horizon as well as in front of it.
+cbuffer SdlFog : register(b1, space3) { float4 fog_colour; float4 fog_params; };
+float4 sdl_fragment_main(Fragment input) : SV_Target0 {
+    float4 colour=fragment_textured_main(input);
+    if(fog_params.w==0 || colour.a==0) return colour;
+    float amount;
+    if(fog_params.w==2) {
+        uint flags=texels[input.texture.x+7];
+        if((input.texture.w&8U)==0 || (flags&4096U)==0) return colour;
+        if((flags&16384U)==0) {
+            // The sky dome (landscape_world_sample's art rows above the horizon).
+            float3 d=input.surface_position;
+            float rows=d.y/max(-d.z,length(d)*.02)*256.;
+            amount=pow(1.-saturate(rows/56.),1.5)*fog_colour.a;
+            colour.rgb=lerp(colour.rgb,fog_colour.rgb,amount);
+            return colour;
+        }
+    }
+    float distance=fog_params.z/max(input.position.z,1e-9);
+    amount=saturate((distance-fog_params.x)/max(fog_params.y-fog_params.x,1.))*fog_colour.a;
+    colour.rgb=lerp(colour.rgb,fog_colour.rgb,amount);
+    return colour;
+}
+#endif

@@ -10,8 +10,40 @@ SceneObjectInterpolation interpolate_scene_object(const GameSceneSnapshot& previ
     auto before=item.presentation,now=item.presentation;
     const auto old=previous.transforms.find(item.handle);
     if(old!=previous.transforms.end() && old->second.generation==now.generation
-        && old->second.shape==now.shape && old->second.type==now.type && old->second.strategy_address==now.strategy_address)
-        before=old->second;
+        && old->second.shape==now.shape && old->second.type==now.type && old->second.strategy_address==now.strategy_address) {
+        // A recycled object (Space Armada's pipe sections jump from behind
+        // the camera to the far end) is repositioned, not moving: blending
+        // would draw it for a frame across the tunnel. Snap a jump of more
+        // than 1500 source units relative to the camera within one tick.
+        const auto wrap=[](double d) {d=std::fmod(d,65536.);if(d>32767.) d-=65536.;else if(d< -32768.) d+=65536.;return d;};
+        const double dx=wrap(double(now.transform.x)-old->second.transform.x)-wrap(double(current.camera.x)-previous.camera.x);
+        const double dy=wrap(double(now.transform.y)-old->second.transform.y)-wrap(double(current.camera.y)-previous.camera.y);
+        const double dz=wrap(double(now.transform.z)-old->second.transform.z)-wrap(double(current.camera.z)-previous.camera.z);
+        if(dx*dx+dy*dy+dz*dz<=1500.*1500.) before=old->second;
+    } else if(item.object.flags&1U) {
+        // A newly born explosion piece (makeMEDexpobj and friends, spawned on
+        // a ship at its newest position) has no previous pose, so it would
+        // sit up to a tick ahead of the ship it was born on, which is drawn
+        // between ticks. Give it that ship's motion: the nearest object that
+        // existed last tick (its attached parent when it has one).
+        const GameSceneObject* owner{};double best=1500.*1500.;
+        for(const auto& other:current.objects) {
+            if(other.handle==item.handle || (other.object.flags&1U)) continue;
+            const auto was=previous.transforms.find(other.handle);
+            if(was==previous.transforms.end() || was->second.generation!=other.presentation.generation) continue;
+            if(item.object.attached && other.handle==item.object.attached) {owner=&other;break;}
+            const double dx=double(int16_t(uint16_t(other.presentation.transform.x-now.transform.x)));
+            const double dy=double(int16_t(uint16_t(other.presentation.transform.y-now.transform.y)));
+            const double dz=double(int16_t(uint16_t(other.presentation.transform.z-now.transform.z)));
+            const double d=dx*dx+dy*dy+dz*dz;
+            if(d<best) {best=d;owner=&other;}
+        }
+        if(owner) {
+            const auto birth=timing::relative_birth_snapshot(now.transform,
+                previous.transforms.at(owner->handle).transform,owner->presentation.transform);
+            before.transform.x=birth.x;before.transform.y=birth.y;before.transform.z=birth.z;
+        }
+    }
     if(rules.crosshair && item.object.strategy_address==rules.crosshair) {
         const auto* station=render::reticle_previous_snapshot(now,current.transforms,previous.transforms,current.player);
         if(station) before=*station;

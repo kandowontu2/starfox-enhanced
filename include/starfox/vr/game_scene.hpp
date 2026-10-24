@@ -34,6 +34,21 @@ struct SourceCorridor {
     SourceCorridorBounds bounds;
 };
 inline constexpr std::size_t source_corridor_count=11;
+
+// Space Armada's boss room (BG_1_3D/DA while the player is in it). The cartridge
+// paints the room as a fixed BG2 picture; its real wall is the ring the
+// BOSS_8_4 wall panels rotate on (GASTRATS nucleuswallrot): x = r sin a,
+// z = 2r cos a + PLAYER_POSZ + (160 << BOSS8_SCALE), r = BOSS8_CIRC. Cartridge
+// world axes (Y down). The reactor (BOSS_8_1 cover, GB3STRAT boss8) stands
+// on the floor at NUCLEUSHEIGHT and reaches the ceiling: top..bottom.
+struct SourceNucleusRoom {
+    std::int16_t centre_z{}; // World Z of the ring's centre this tick.
+    std::int16_t radius{};   // Ring X radius; its Z radius is twice this.
+    std::int16_t top{},bottom{};
+    std::uint16_t panel_shape{};   // BOSS_8_4 wall panels.
+    std::uint16_t reactor_shape{}; // BOSS_8_1C: the spinning reactor cover.
+    bool operator==(const SourceNucleusRoom&) const=default;
+};
 // Resolve only source-linked background/flight-mode pairs. In particular,
 // unused KTUNNEL constants do not describe EX's Gekkou tunnel artwork.
 [[nodiscard]] std::array<std::optional<SourceCorridor>,source_corridor_count>
@@ -92,6 +107,7 @@ struct GameSceneSnapshot {
     uint16_t landscape_atlas_origin{232};
     bool background_water_surround{};
     std::optional<SourceCorridorBounds> background_corridor;
+    std::optional<SourceNucleusRoom> background_nucleus;
     bool background_space_horizon{};
     bool background_unique_space{};
     std::array<unsigned,4> background_planet_rect{};
@@ -223,6 +239,15 @@ private:
     uint16_t colony_background_{};
     std::array<uint16_t,source_corridor_count> corridor_backgrounds_{};
     std::array<std::optional<SourceCorridorBounds>,source_corridor_count> corridor_bounds_{};
+    std::array<uint16_t,2> nucleus_backgrounds_{}; // BG_1_3D, BG_1_3DA
+    std::array<uint32_t,3> nucleus_player_strategies_{}; // Entry, outside the room: PLAYERWASHENT_STRAT/_ISTRAT, PLAYERTOCSLOW_ISTRAT
+    // Space Armada: the player inside the carrier (tunnels, the pipe tunnel
+    // to the boss, the boss room) and the open-space cruisers that circle
+    // with it (GA2STRAT cruiser1), hidden while it is inside.
+    std::array<uint32_t,7> inside_ship_strategies_{};
+    std::array<uint32_t,4> outside_cruiser_strategies_{};
+    std::optional<SourceNucleusRoom> nucleus_room_; // centre_z holds the ring's offset ahead of PLAYER_POSZ
+    uint32_t player_posz_address_{};
     std::array<uint32_t,3> dust_addresses_{};
     std::array<uint32_t,3> cockpit_hud_addresses_{}; // HUDROT, M_HUDCOLOUR, M_HUDFLAGS (optional)
     std::shared_ptr<const GameSceneSnapshot> older_,previous_,current_;

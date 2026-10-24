@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <cstdlib>
 #include <stdexcept>
 #include <unordered_map>
 namespace starfox::modern {

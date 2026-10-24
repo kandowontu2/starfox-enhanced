@@ -102,8 +102,16 @@ public:
     // with the ground (16ths of a source column, mod 4096 | 1<<17); zero
     // with STARFOX_MODERN_FIXED_SKY=0 (the cartridge's own screen art).
     uint32_t sky_turn{};
-    // Flat first person: MHUD wing lines. Reticle as geometry.
-    std::optional<DrawPacket> cockpit,reticle;
+    // Venom's surfaces: a haze in the colour of their cloud band that is
+    // full where the cartridge's objects appear (about 3,000 source units
+    // ahead), hiding the pop-in. Colour in the target encoding, faded with
+    // the display; distances in source units. Unset elsewhere.
+    struct Fog {std::array<float,4> colour{};float start{},end{};};
+    std::optional<Fog> fog;
+    // Flat first person: MHUD wing lines. Reticle as geometry, blended as
+    // the cartridge's OBJ colour math blends it.
+    std::optional<DrawPacket> cockpit;
+    std::optional<Overlay> reticle;
     std::optional<Overlay> circle,colour_math;
     // Head-locked normalized-device shutter (identity camera).
     std::optional<DrawPacket> shutter;
@@ -121,5 +129,7 @@ private:
     std::map<int,unsigned> horizon_votes_;
     uint16_t level_background_{};
     bool background_interpolated_{};
+    std::optional<uint16_t> fog_background_;
+    std::optional<std::array<float,3>> fog_colour_;
 };
 }

@@ -3,6 +3,7 @@
 #include "starfox/vr/modern_frame.hpp"
 #include "starfox/compat/bit_cast.hpp"
 #include "starfox/vr/background_tiles.hpp"
+#include "starfox/render/palette.hpp"
 #include "starfox/vr/game_model_pose.hpp"
 #include "starfox/vr/presentation.hpp"
 #include "starfox/vr/scene_interpolation.hpp"
@@ -143,11 +144,45 @@ std::vector<bool> painter_scenery(const SourceModelPackets& source,std::span<con
     for(const auto& request:source.compute_models)
         if(request.packet_index<requests.size()) requests[request.packet_index]=&request;
     std::vector<bool> painter(source.packets.size(),false);
-    for(std::size_t index=0;index<source.packets.size() && index<source.handles.size();++index) {
-        // Bounding radius in model space times the placement scale.
+    // The ships the camera follows: the player's and the zoom Arwing.
+    std::vector<std::size_t> ships;
+    for(std::size_t index=0;index<source.packets.size() && index<source.handles.size();++index)
+        if(!is_source_shadow_pass(source.handles[index]) && ((source.player && source.handles[index]==source.player)
+            || std::find(source.ships.begin(),source.ships.end(),uint16_t(source.handles[index]&0xffffU))!=source.ships.end()))
+            ships.push_back(index);
+    // Each object's centre and bounding radius in scene metres. Compute
+    // models keep their placement in the projection pose (source units, Y
+    // down, +Z forward; rows carry the vertex scale), not the packet matrix.
+    struct Bounds {std::array<double,3> centre{};double radius{};};
+    const auto bounds=[&](std::size_t index) {
+        Bounds result;
+        if(const auto* request=requests[index]) {
+            const auto& poses=request->model.projection.continuous_poses;
+            const double units=double(request->units);
+            const auto& t=poses[0].translation;
+            result.centre={double(t[0])/units,-double(t[1])/units,-double(t[2])/units};
+            for(const auto& v:request->model.projection.continuous_vertices) {
+                const auto& row=poses[std::min<std::size_t>(v.pose,1)].row0;
+                const double scale=std::sqrt(double(row[0])*row[0]+double(row[1])*row[1]+double(row[2])*row[2]);
+                result.radius=std::max(result.radius,std::sqrt(double(v.x)*v.x+double(v.y)*v.y+double(v.z)*v.z)*scale/units);
+            }
+        } else {
+            const auto& model=source.packets[index].model;
+            result.centre={double(model[12]),double(model[13]),double(model[14])};
+            const double scale=std::sqrt(double(model[0])*model[0]+double(model[1])*model[1]+double(model[2])*model[2]);
+            for(const auto& v:source.packets[index].geometry.vertex_view())
+                result.radius=std::max(result.radius,scale*std::sqrt(double(v.position[0])*v.position[0]
+                    +double(v.position[1])*v.position[1]+double(v.position[2])*v.position[2]));
+        }
+        return result;
+    };
+    const auto length=[](const std::array<double,3>& v){return std::sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]);};
+    std::vector<bool> solid(source.packets.size(),false);
+    // Bounding radius in model space times the placement scale.
+    std::vector<double> reach(source.packets.size());
+    for(std::size_t index=0;index<source.packets.size();++index) {
         const auto& model=source.packets[index].model;
         const double scale=std::sqrt(double(model[0])*model[0]+double(model[1])*model[1]+double(model[2])*model[2]);
-        const double distance=std::sqrt(double(model[12])*model[12]+double(model[13])*model[13]+double(model[14])*model[14]);
         double radius=0;
         if(const auto* request=requests[index]) {
             for(const auto& v:request->model.projection.continuous_vertices)
@@ -155,6 +190,11 @@ std::vector<bool> painter_scenery(const SourceModelPackets& source,std::span<con
         } else for(const auto& v:source.packets[index].geometry.vertex_view())
             radius=std::max(radius,std::sqrt(double(v.position[0])*v.position[0]+double(v.position[1])*v.position[1]
                 +double(v.position[2])*v.position[2]));
+        reach[index]=radius*scale;
+    }
+    for(std::size_t index=0;index<source.packets.size() && index<source.handles.size();++index) {
+        const auto& model=source.packets[index].model;
+        const double distance=std::sqrt(double(model[12])*model[12]+double(model[13])*model[13]+double(model[14])*model[14]);
         // A camera-only test flips between frames as sections pass and swaps
         // winners. Moving objects (ships) never paint over scenery.
         const auto handle=uint16_t(source.handles[index]&0xffffU);
@@ -165,9 +205,40 @@ std::vector<bool> painter_scenery(const SourceModelPackets& source,std::span<con
             lines_only=std::all_of(request->model.faces.primitives.begin(),request->model.faces.primitives.end(),
                 [](auto primitive){return primitive==render::PackedPrimitive::line;});
         else lines_only=source.packets[index].geometry.vertex_view().empty();
-        painter[index]=!lines_only && (radius*scale>2. || radius*scale>distance)
+        painter[index]=!lines_only && (reach[index]>2. || reach[index]>distance)
             && handle!=0 && source.handles[index]<surrounding_stars_key
             && std::find(moving.begin(),moving.end(),handle)==moving.end();
+        solid[index]=!lines_only && handle!=0 && source.handles[index]<surrounding_stars_key
+            && !is_source_shadow_pass(source.handles[index]);
+    }
+    // The Super FX draws whole objects in its sorted draw list (view Z plus
+    // the shape's and object's sort offsets, MDRAWLIS.MC) with no depth
+    // buffer, the list this native order keeps. An object a followed ship's
+    // bounds overlap that the cartridge draws before that ship (the Space
+    // Armada carrier's mouth and the blocks inside it, whose sort offsets put
+    // them behind it) stays under the ship. Paint both.
+    for(const auto ship_index:ships) {
+        const auto ship=bounds(ship_index);
+        bool overlapped=false;
+        for(std::size_t index=0;index<ship_index;++index) if(solid[index]) {
+            const auto object=bounds(index);
+            const double gap=length({object.centre[0]-ship.centre[0],object.centre[1]-ship.centre[1],object.centre[2]-ship.centre[2]});
+            if(gap<object.radius+ship.radius) painter[index]=overlapped=true;
+        }
+        if(overlapped) painter[ship_index]=true;
+    }
+    // Parts on a hull (SHIP_5's three HOU_3 turrets) sit on or just inside
+    // it; the cartridge draws them after the hull. Paint the pair in its order.
+    for(const auto& [part,parent]:source.attachments) {
+        std::optional<std::size_t> a,b;
+        for(std::size_t index=0;index<source.packets.size() && index<source.handles.size();++index) if(solid[index]) {
+            const auto handle=uint16_t(source.handles[index]&0xffffU);
+            if(handle==part) a=index;else if(handle==parent) b=index;
+        }
+        if(!a || !b) continue;
+        const auto x=bounds(*a),y=bounds(*b);
+        const double gap=length({x.centre[0]-y.centre[0],x.centre[1]-y.centre[1],x.centre[2]-y.centre[2]});
+        if(gap<x.radius+y.radius) painter[*a]=painter[*b]=true;
     }
     return painter;
 }
@@ -203,6 +274,39 @@ void ModernFrame::prepare(const GameSceneSnapshot& previous,const GameSceneSnaps
     if(landscape_world && !current.grid_lines && !native_dots)
         if(const auto grid=std::find(world.handles.begin(),world.handles.end(),0x30000U);grid!=world.handles.end())
             erase_world_packet(world,std::size_t(grid-world.handles.begin()),"Grid pass");
+    // Twisting pipe sections (SourceModelPackets::depth_enclosures): keep
+    // their draw-list slots but fill them far to near by real distance, so
+    // the painter puts the section around the camera last.
+    {
+        std::vector<std::size_t> slots;std::vector<std::pair<double,std::size_t>> order;
+        std::vector<std::size_t> compute(world.packets.size(),SIZE_MAX);
+        for(std::size_t i=0;i<world.compute_models.size();++i)
+            if(world.compute_models[i].packet_index<compute.size()) compute[world.compute_models[i].packet_index]=i;
+        for(std::size_t index=0;index<world.packets.size() && index<world.handles.size();++index) {
+            const auto handle=world.handles[index];
+            if(is_source_shadow_pass(handle) || std::find(world.depth_enclosures.begin(),world.depth_enclosures.end(),
+                uint16_t(handle&0xffffU))==world.depth_enclosures.end()) continue;
+            std::array<double,3> centre{};
+            if(compute[index]!=SIZE_MAX) {
+                const auto& request=world.compute_models[compute[index]];
+                const auto& t=request.model.projection.continuous_poses[0].translation;
+                centre={double(t[0]),double(t[1]),double(t[2])};
+            } else {
+                const auto& model=world.packets[index].model;
+                centre={double(model[12]),double(model[13]),double(model[14])};
+            }
+            slots.push_back(index);order.push_back({std::sqrt(centre[0]*centre[0]+centre[1]*centre[1]+centre[2]*centre[2]),index});
+        }
+        if(slots.size()>1) {
+            std::stable_sort(order.begin(),order.end(),[](const auto& a,const auto& b){return a.first>b.first;});
+            auto packets=world.packets;auto handles=world.handles;
+            for(std::size_t k=0;k<slots.size();++k) {
+                const auto from=order[k].second,to=slots[k];
+                world.packets[to]=packets[from];world.handles[to]=handles[from];
+                if(compute[from]!=SIZE_MAX) world.compute_models[compute[from]].packet_index=to;
+            }
+        }
+    }
     // The cartridge paints objects in its own sorted list order (the native
     // draw list), so where two objects share a surface the later one
     // wins. With a depth buffer those surfaces z-fight. Scale each
@@ -267,6 +371,63 @@ void ModernFrame::prepare(const GameSceneSnapshot& previous,const GameSceneSnaps
                 if(votes>=horizon_votes_[int(std::lround(*level_horizon_*4.F))]) level_horizon_=float(key)/4.F;
             }
             background_inputs.landscape_horizon=level_horizon_;
+            // Venom haze colour from this background's own sky art: half
+            // its mean, half its brightest third (the glowing clouds). Once
+            // per background, retried until the level has loaded the art.
+            if(fog_background_!=scene.background_id) {
+                fog_colour_.reset();
+                bool venom=false;
+                if(inputs.symbols) {
+                    const auto& lists=inputs.symbols->find("BGLISTS");
+                    for(const char* name:{"BG_1_6A","BG_3_7A"})
+                        for(const auto value:inputs.symbols->find(name))
+                            if(!lists.empty() && value>lists.front() && (value&0xff0000U)==(lists.front()&0xff0000U)
+                                && uint16_t(value-lists.front())==scene.background_id) venom=true;
+                }
+                if(venom) {
+                    // Every opaque pixel of the BG2 sky art (tile map ->
+                    // 4bpp characters -> CGRAM); 16-pixel tiles use their
+                    // four characters.
+                    const auto& ppu=*scene.ppu;
+                    const auto palette=render::decode_bgr555_palette(ppu.cgram);
+                    const auto word=[&](uint32_t address) {
+                        const auto offset=(address&0x7fffU)*2U;
+                        return uint16_t(ppu.vram[offset]|(ppu.vram[offset+1U]<<8U));
+                    };
+                    const unsigned entries=((ppu.bg2_screen_size&1U)?2U:1U)*((ppu.bg2_screen_size&2U)?2U:1U)*1024U;
+                    std::vector<std::array<float,4>> band; // r, g, b, luminance
+                    for(unsigned entry=0;entry<entries;++entry) {
+                        const auto tile=word(ppu.bg2_screen_base+entry);
+                        const unsigned characters=ppu.bg2_tile_size_16?4U:1U;
+                        for(unsigned part=0;part<characters;++part) {
+                            const uint32_t number=((tile&0x3ffU)+(part&1U)+(part>>1)*16U)&0x3ffU;
+                            for(unsigned y=0;y<8;++y) {
+                                const auto base=(uint32_t(ppu.bg2_character_base)*2U+number*32U+y*2U)&0xffffU;
+                                const unsigned p0=ppu.vram[base],p1=ppu.vram[(base+1U)&0xffffU];
+                                const unsigned p2=ppu.vram[(base+16U)&0xffffU],p3=ppu.vram[(base+17U)&0xffffU];
+                                for(unsigned x=0;x<8;++x) {
+                                    const unsigned mask=0x80U>>x;
+                                    const unsigned ink=((p0&mask)?1U:0U)|((p1&mask)?2U:0U)|((p2&mask)?4U:0U)|((p3&mask)?8U:0U);
+                                    if(!ink) continue;
+                                    const auto& c=palette[((tile>>10)&7U)*16U+ink];
+                                    band.push_back({float(c.r),float(c.g),float(c.b),.2126F*c.r+.7152F*c.g+.0722F*c.b});
+                                }
+                            }
+                        }
+                    }
+                    if(band.size()>256) {
+                        std::sort(band.begin(),band.end(),[](const auto& a,const auto& b){return a[3]>b[3];});
+                        std::array<float,3> mean{},bright{};
+                        const std::size_t top=band.size()/3;
+                        for(std::size_t i=0;i<band.size();++i) for(unsigned c=0;c<3;++c) {
+                            mean[c]+=band[i][c]/float(band.size());
+                            if(i<top) bright[c]+=band[i][c]/float(top);
+                        }
+                        fog_colour_=std::array<float,3>{(mean[0]+bright[0])/510.F,(mean[1]+bright[1])/510.F,(mean[2]+bright[2])/510.F};
+                    }
+                }
+                if(!venom || fog_colour_) fog_background_=scene.background_id;
+            }
             static const bool trace_horizon=std::getenv("STARFOX_TRACE_MODERN")!=nullptr;
             if(trace_horizon && layers_rebuilt) std::fprintf(stderr,"horizon-level tick=%llu level=%.2f art=%.2f implied=%.2f pitch=%d camy=%d shadow=%d vp=%d\n",
                 static_cast<unsigned long long>(scene.revision),*level_horizon_,art,float(art+std::tan(pitch)*256.),
@@ -280,9 +441,27 @@ void ModernFrame::prepare(const GameSceneSnapshot& previous,const GameSceneSnaps
                 if(is_landscape_world(packet) || is_landscape_ground(packet) || is_tunnel_corridor(packet)) set_headset_mapping(packet);
         background_interpolated_=interpolated;
     }
+    fog.reset();
+    if(fog_colour_ && !settings_.headset && landscape_world && fog_background_==current.background_id
+        && gameplay_flow(current)) {
+        static const auto distances=[] {
+            std::array<float,2> d{1500.F,3300.F};
+            if(const char* text=std::getenv("STARFOX_MODERN_FOG")) std::sscanf(text,"%f,%f",&d[0],&d[1]);
+            return d;
+        }();
+        Fog haze;haze.start=distances[0];haze.end=distances[1];
+        const float fade=float(std::min(unsigned(current.display_brightness),15U))/15.F;
+        for(unsigned c=0;c<3;++c) {
+            float v=(*fog_colour_)[c]*fade;
+            if(inputs.srgb) v=v<=.04045F?v/12.92F:std::pow((v+.055F)/1.055F,2.4F);
+            haze.colour[c]=v;
+        }
+        haze.colour[3]=haze.end>haze.start?1.F:0.F;
+        if(haze.colour[3]>0) fog=haze;
+    }
     static const bool trace=std::getenv("STARFOX_TRACE_MODERN")!=nullptr;
-    if(trace) std::fprintf(stderr,"modern-frame tick=%llu alpha=%.3f background=%s vp=%d,%d bg2=%d,%d vscroll=%d grid=%d atlas=%u hudrot=%04x mode=%u flags=%s%s%s%s%s%s roll=%d math=%d:%02x:%u,%u,%u%s%s bright=%u\n",
-        static_cast<unsigned long long>(current.revision),alpha,
+    if(trace) std::fprintf(stderr,"modern-frame tick=%llu alpha=%.3f bgid=%x corridor=%d nucleus=%d background=%s vp=%d,%d bg2=%d,%d vscroll=%d grid=%d atlas=%u hudrot=%04x mode=%u flags=%s%s%s%s%s%s roll=%d math=%d:%02x:%u,%u,%u%s%s bright=%u\n",
+        static_cast<unsigned long long>(current.revision),alpha,unsigned(current.background_id),int(current.background_corridor.has_value()),int(current.background_nucleus.has_value()),
         presentation.ppu?"interpolated":layers_rebuilt?"tick":"retained",
         int(current.source_vanishing_point[0]),int(current.source_vanishing_point[1]),
         int(current.ppu->bg2_scroll_x),int(current.ppu->bg2_scroll_y),
@@ -411,8 +590,25 @@ void ModernFrame::prepare(const GameSceneSnapshot& previous,const GameSceneSnaps
                 const double from=continuous?double(before):double(now);
                 return from+double(int16_t(uint16_t(now-int32_t(from))))*(continuous?alpha:1.);
             };
+            // The authored box's middle (MTUNNEL: x 0, y -60).
+            double centre_x=0,centre_y=-60;
+            if(const auto& bounds=current.background_corridor; bounds && bounds->right>bounds->left && bounds->bottom>bounds->top) {
+                centre_x=(double(bounds->left)+bounds->right)*.5;centre_y=(double(bounds->top)+bounds->bottom)*.5;
+            }
             model=multiply_matrix(seat,tunnel_corridor_model(blend(previous.camera.z,current.camera.z),
-                blend(previous.camera.x,current.camera.x)));
+                blend(previous.camera.x,current.camera.x),blend(previous.camera.y,current.camera.y),centre_y,centre_x));
+        }
+        if((is_nucleus_room(packet) || is_nucleus_floor(packet)) && current.background_nucleus) {
+            const bool continuous=!timing::camera_transform_is_discontinuous(previous.camera,current.camera);
+            const auto blend=[&](int32_t before,int32_t now) {
+                const double from=continuous?double(before):double(now);
+                return from+double(int16_t(uint16_t(now-int32_t(from))))*(continuous?alpha:1.);
+            };
+            // The ring moves with PLAYER_POSZ, as the panels on it do.
+            const int32_t centre=current.background_nucleus->centre_z;
+            const int32_t before=previous.background_nucleus?previous.background_nucleus->centre_z:centre;
+            model=multiply_matrix(seat,nucleus_room_model(blend(previous.camera.x,current.camera.x),
+                blend(previous.camera.y,current.camera.y),blend(previous.camera.z,current.camera.z),blend(before,centre)));
         }
         ++model_index;
     }
@@ -461,7 +657,16 @@ void ModernFrame::prepare(const GameSceneSnapshot& previous,const GameSceneSnaps
         if(!packet.geometry.vertex_view().empty()) {
             packet.model=source_ui_layer_matrix(float(current.source_vanishing_point[0]),
                 float(current.source_vanishing_point[1]),false).value();
-            reticle=std::move(packet);
+            // Gameplay leaves CGSWSEL %10 / CGADSUB %01010000 (IRQ.ASM
+            // setwindowpri .noreq): OBJ palettes 4-7 are averaged with the
+            // subscreen, so retail's reticle is see-through. A window
+            // request (current.colour_math) replaces that setting.
+            auto blend=SceneBlend::opaque;
+            if(!current.colour_math.active && packet.geometry.vertices.front().texture[1]>=128U+4U*16U) {
+                blend=SceneBlend::half_add;
+                for(auto& colour:packet.geometry.texels) if(colour>>24) colour=(colour&0xffffffU)|0x80000000U;
+            }
+            reticle=Overlay{std::move(packet),blend,true};
         }
     }
     circle.reset();

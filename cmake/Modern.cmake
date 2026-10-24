@@ -13,7 +13,7 @@ endif()
 if(NOT TARGET starfox_scene)
     include("${CMAKE_CURRENT_LIST_DIR}/Scene.cmake")
 endif()
-add_library(starfox_modern STATIC src/modern/sdl_scene_packets.cpp src/modern/sdl_source_scene.cpp src/modern/sdl_frame.cpp src/modern/modern_runtime.cpp
+add_library(starfox_modern STATIC src/modern/sdl_scene_packets.cpp src/modern/sdl_layer_filter.cpp src/modern/sdl_source_scene.cpp src/modern/sdl_frame.cpp src/modern/modern_runtime.cpp
     src/modern/texture_dump.cpp)
 target_include_directories(starfox_modern PUBLIC include PRIVATE src)
 target_compile_features(starfox_modern PUBLIC cxx_std_20)

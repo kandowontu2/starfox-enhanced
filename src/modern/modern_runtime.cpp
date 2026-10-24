@@ -25,6 +25,10 @@ vr::EyeCamera flat_scene_camera(const vr::GameSceneSnapshot& scene,float aspect)
     const float half_width=112.F*aspect;
     camera.projection[0]=256.F/half_width;
     camera.projection[8]=(128.F-(float(scene.source_vanishing_point[0])+16.F))/half_width;
+    // The Super FX clips polygons at z = 0, so the cockpit shell's struts a
+    // few units from the eye stay on screen. Near one source unit (1/256 m),
+    // not 0.05 m: reversed infinite depth keeps D32F precision.
+    camera.projection[14]=-1.F/256.F;
     return camera;
 }
 namespace {
@@ -135,16 +139,22 @@ struct ModernRuntime::State {
     SDL_Renderer* renderer{};
     SDL_Texture* target{};
     SDL_Texture* overlay{};
+    SDL_Texture* dialog{};
     std::vector<uint8_t> overlay_pixels;
     SDL_GPUTexture* depth{};
+    // ANTI-ALIASING: multisampled colour, resolved into target's texture.
+    SDL_GPUTexture* multisample{};
+    SDL_GPUSampleCount samples{SDL_GPU_SAMPLECOUNT_1};
     SDL_GPUTextureFormat depth_format{};
     int width{},height{};
     bool captured{};
     void release_targets() noexcept {
         if(target) SDL_DestroyTexture(target);
         if(overlay) SDL_DestroyTexture(overlay);
+        if(dialog) SDL_DestroyTexture(dialog);
         if(depth && device) SDL_ReleaseGPUTexture(device,depth);
-        target=overlay=nullptr;depth=nullptr;width=height=0;
+        if(multisample && device) SDL_ReleaseGPUTexture(device,multisample);
+        target=overlay=dialog=nullptr;depth=multisample=nullptr;width=height=0;
     }
     ~State() {release_targets();frame.release();}
 };
@@ -165,7 +175,7 @@ bool ModernRuntime::draws(const simulation::GameSimulation& game) noexcept {
     return flat_frame_supported(game.in_setup_menu(),game.runtime_options_open(),game.stereo_output());
 }
 bool ModernRuntime::present(SDL_Renderer* renderer,double alpha,int requested_width,int requested_height,const char* capture_path,
-    const HostOverlay& overlay) {
+    const HostOverlay& overlay,const HostOverlay& dialog,const vr::StageTallyLayer* tally) {
     auto& s=*state_;
     try {
         require(renderer!=nullptr,"MODERN needs a renderer");
@@ -192,7 +202,23 @@ bool ModernRuntime::present(SDL_Renderer* renderer,double alpha,int requested_wi
         // Default: the window's output, not whatever intermediate target is bound.
         if(width<=0 || height<=0)
             require(SDL_GetRenderOutputSize(renderer,&width,&height) && width>0 && height>0,"Read MODERN output size");
-        if(width!=s.width || height!=s.height) {
+        // ANTI-ALIASING (any type) is hardware MSAA here: LIGHT 2x, MEDIUM 4x,
+        // HEAVY 8x, capped at what the device supports for both formats.
+        SDL_GPUSampleCount samples=SDL_GPU_SAMPLECOUNT_1;
+        {
+            using Mode=simulation::AntiAliasingMode;
+            const auto mode=s.history.game().anti_aliasing_mode();
+            samples=mode==Mode::heavy?SDL_GPU_SAMPLECOUNT_8:mode==Mode::medium?SDL_GPU_SAMPLECOUNT_4
+                :mode==Mode::light?SDL_GPU_SAMPLECOUNT_2:SDL_GPU_SAMPLECOUNT_1;
+            if(const auto* forced=std::getenv("STARFOX_MODERN_MSAA")) {
+                const int count=std::atoi(forced);
+                samples=count>=8?SDL_GPU_SAMPLECOUNT_8:count>=4?SDL_GPU_SAMPLECOUNT_4:count>=2?SDL_GPU_SAMPLECOUNT_2:SDL_GPU_SAMPLECOUNT_1;
+            }
+            while(samples!=SDL_GPU_SAMPLECOUNT_1 && !(SDL_GPUTextureSupportsSampleCount(device,target_format,samples)
+                && SDL_GPUTextureSupportsSampleCount(device,s.depth_format,samples)))
+                samples=static_cast<SDL_GPUSampleCount>(int(samples)-1);
+        }
+        if(width!=s.width || height!=s.height || samples!=s.samples) {
             if(std::getenv("STARFOX_TRACE_MODERN")) {
                 int window_w=0,window_h=0,current_w=0,current_h=0;
                 SDL_GetWindowSizeInPixels(SDL_GetRenderWindow(renderer),&window_w,&window_h);
@@ -207,8 +233,17 @@ bool ModernRuntime::present(SDL_Renderer* renderer,double alpha,int requested_wi
             SDL_GPUTextureCreateInfo depth{};
             depth.type=SDL_GPU_TEXTURETYPE_2D;depth.format=s.depth_format;depth.usage=SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
             depth.width=uint32_t(width);depth.height=uint32_t(height);depth.layer_count_or_depth=1;depth.num_levels=1;
+            depth.sample_count=samples;
             s.depth=SDL_CreateGPUTexture(device,&depth);
             require(s.depth!=nullptr,"Create MODERN depth");
+            if(samples!=SDL_GPU_SAMPLECOUNT_1) {
+                SDL_GPUTextureCreateInfo multisample=depth;
+                multisample.format=target_format;multisample.usage=SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
+                s.multisample=SDL_CreateGPUTexture(device,&multisample);
+                require(s.multisample!=nullptr,"Create MODERN multisample target");
+            }
+            s.samples=samples;
+            s.frame.set_sample_count(samples);
             s.width=width;s.height=height;
         }
         auto* colour=static_cast<SDL_GPUTexture*>(SDL_GetPointerProperty(
@@ -227,21 +262,30 @@ bool ModernRuntime::present(SDL_Renderer* renderer,double alpha,int requested_wi
         auto* command=SDL_AcquireGPUCommandBuffer(device);
         require(command!=nullptr,"Acquire MODERN command buffer");
         s.inputs.hud_edge_shift=s.preview?0:hud_edge_shift(float(width)/float(height));
+        if(tally && !s.preview) s.inputs.stage_tally=*tally;else s.inputs.stage_tally.reset();
+        // flat_scene_camera fills the height with the 224 source rows.
+        s.frame.set_target(unsigned(width),unsigned(height),unsigned(std::max(1L,std::lround(height/224.))));
+        s.frame.set_two_d_filter(unsigned(s.history.game().two_d_filter()));
         if(!s.frame.prepare(command,*previous,*current,alpha,std::move(world),s.inputs)) {
+            SDL_CancelGPUCommandBuffer(command);throw std::runtime_error(s.frame.status());
+        }
+        const auto camera=s.preview?headset_preview_camera(*s.preview,float(width)/float(height))
+            :flat_scene_camera(*current,float(width)/float(height));
+        if(!s.frame.record_filtered_layers(command,camera)) {
             SDL_CancelGPUCommandBuffer(command);throw std::runtime_error(s.frame.status());
         }
         const auto clear=vr::frame_clear_colour(*current,s.inputs.srgb);
         SDL_GPUColorTargetInfo target{};target.texture=colour;target.load_op=SDL_GPU_LOADOP_CLEAR;
         target.store_op=SDL_GPU_STOREOP_STORE;target.clear_color={clear[0],clear[1],clear[2],1};
+        if(s.multisample) {
+            target.texture=s.multisample;target.store_op=SDL_GPU_STOREOP_RESOLVE;target.resolve_texture=colour;
+        }
         SDL_GPUDepthStencilTargetInfo depth_target{};depth_target.texture=s.depth;depth_target.clear_depth=SdlFrameRenderer::clear_depth();
         depth_target.load_op=SDL_GPU_LOADOP_CLEAR;depth_target.store_op=SDL_GPU_STOREOP_DONT_CARE;
         depth_target.stencil_load_op=SDL_GPU_LOADOP_DONT_CARE;depth_target.stencil_store_op=SDL_GPU_STOREOP_DONT_CARE;
         auto* pass=SDL_BeginGPURenderPass(command,&target,1,&depth_target);
         if(!pass) {SDL_CancelGPUCommandBuffer(command);throw std::runtime_error("Begin MODERN render pass");}
-        // flat_scene_camera fills the height with the 224 source rows.
-        s.frame.set_target(unsigned(width),unsigned(height),unsigned(std::max(1L,std::lround(height/224.))));
-        const bool recorded=s.frame.record(command,pass,s.preview?headset_preview_camera(*s.preview,float(width)/float(height))
-            :flat_scene_camera(*current,float(width)/float(height)));
+        const bool recorded=s.frame.record(command,pass,camera);
         SDL_EndGPURenderPass(pass);
         require(SDL_SubmitGPUCommandBuffer(command),"Submit MODERN frame");
         require(recorded,s.frame.status());
@@ -289,36 +333,44 @@ bool ModernRuntime::present(SDL_Renderer* renderer,double alpha,int requested_wi
                 SDL_ReleaseGPUTransferBuffer(device,download);
             }
         }
-        if(overlay.ink && overlay.canvas_width>0 && overlay.canvas_height>0) {
+        // Host text (FPS counter; the EXIT GAME? / save-slot dialog on a dark
+        // panel) drawn over the frame, so those screens need no fallback.
+        const auto draw_overlay=[&](const HostOverlay& layer,SDL_Texture*& texture,const char* what) {
+            if(!layer.ink || layer.canvas_width<=0 || layer.canvas_height<=0) return;
             // One source pixel wider and taller for the shadow.
-            const int ow=int(overlay.ink->width())+1,oh=int(overlay.ink->height())+1;
-            if(s.overlay && (s.overlay->w!=ow || s.overlay->h!=oh)) {SDL_DestroyTexture(s.overlay);s.overlay=nullptr;}
-            if(!s.overlay) {
-                s.overlay=SDL_CreateTexture(renderer,SDL_PIXELFORMAT_ABGR8888,SDL_TEXTUREACCESS_STREAMING,ow,oh);
-                require(s.overlay!=nullptr,"Create MODERN overlay");
-                SDL_SetTextureBlendMode(s.overlay,SDL_BLENDMODE_BLEND);
-                SDL_SetTextureScaleMode(s.overlay,SDL_SCALEMODE_NEAREST);
+            const int ow=int(layer.ink->width())+1,oh=int(layer.ink->height())+1;
+            if(texture && (texture->w!=ow || texture->h!=oh)) {SDL_DestroyTexture(texture);texture=nullptr;}
+            if(!texture) {
+                texture=SDL_CreateTexture(renderer,SDL_PIXELFORMAT_ABGR8888,SDL_TEXTUREACCESS_STREAMING,ow,oh);
+                require(texture!=nullptr,std::string("Create MODERN ")+what);
+                SDL_SetTextureBlendMode(texture,SDL_BLENDMODE_BLEND);
+                SDL_SetTextureScaleMode(texture,SDL_SCALEMODE_NEAREST);
             }
             s.overlay_pixels.assign(std::size_t(ow)*std::size_t(oh)*4U,0);
             const auto ink=[&](int x,int y) {
-                return x>=0 && y>=0 && x<ow-1 && y<oh-1 && overlay.ink->get(uint32_t(x),uint32_t(y))!=0;
+                return x>=0 && y>=0 && x<ow-1 && y<oh-1 && layer.ink->get(uint32_t(x),uint32_t(y))!=0;
             };
             for(int y=0;y<oh;++y) for(int x=0;x<ow;++x) {
                 const bool white=ink(x,y),shadow=!white && ink(x-1,y-1);
-                if(!white && !shadow) continue;
                 auto* p=&s.overlay_pixels[(std::size_t(y)*std::size_t(ow)+std::size_t(x))*4U];
+                if(!white && !shadow) {
+                    if(layer.panel) {p[0]=p[1]=p[2]=0;p[3]=200;}
+                    continue;
+                }
                 p[0]=p[1]=p[2]=white?255:0;p[3]=255;
             }
-            require(SDL_UpdateTexture(s.overlay,nullptr,s.overlay_pixels.data(),ow*4),"Update MODERN overlay");
+            require(SDL_UpdateTexture(texture,nullptr,s.overlay_pixels.data(),ow*4),std::string("Update MODERN ")+what);
             SDL_FRect frame=destination;
             if(!letterbox) {
                 int full_w=0,full_h=0;SDL_GetCurrentRenderOutputSize(renderer,&full_w,&full_h);
                 frame={0,0,float(full_w),float(full_h)};
             }
-            const float sx=frame.w/float(overlay.canvas_width),sy=frame.h/float(overlay.canvas_height);
-            const SDL_FRect at{frame.x+float(overlay.x)*sx,frame.y+float(overlay.y)*sy,float(ow)*sx,float(oh)*sy};
-            require(SDL_RenderTexture(renderer,s.overlay,nullptr,&at),"Draw MODERN overlay");
-        }
+            const float sx=frame.w/float(layer.canvas_width),sy=frame.h/float(layer.canvas_height);
+            const SDL_FRect at{frame.x+float(layer.x)*sx,frame.y+float(layer.y)*sy,float(ow)*sx,float(oh)*sy};
+            require(SDL_RenderTexture(renderer,texture,nullptr,&at),std::string("Draw MODERN ")+what);
+        };
+        draw_overlay(overlay,s.overlay,"overlay");
+        draw_overlay(dialog,s.dialog,"dialog");
         const bool presented=SDL_RenderPresent(renderer);
         require(presented,"Present MODERN frame");
         status_.clear();return true;

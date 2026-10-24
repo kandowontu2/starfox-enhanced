@@ -1,6 +1,7 @@
 #include "starfox/vr/source_models.hpp"
 #include "starfox/compat/bit_cast.hpp"
 #include <stdexcept>
+#include <cstdlib>
 #include <bit>
 #include <cmath>
 #include "starfox/render/grid_projection.hpp"
@@ -145,6 +146,10 @@ SourceModels::SourceModels(const assets::RomImage& rom,const assets::SymbolMap& 
     intro_laser_shape_=static_cast<uint16_t>(symbol("RELFASTELASER"));
     pilot_shape_=static_cast<uint16_t>(symbol("MY_DEMOS"));
     for(unsigned i=0;const char* name:{"MYSHIP_4","MYSHIP_L","MYSHIP_R","MYSHIP_B"}) flight_shapes_[i++]=static_cast<uint16_t>(symbol(name));
+    for(unsigned i=0;const char* name:{"MYZOOM_4","MYZOOM_L","MYZOOM_R","MYZOOM_B"})
+        pass_through_shapes_[i++]=static_cast<uint16_t>(symbol(name));
+    for(unsigned i=0;const char* name:{"PIPE_0","PIPE_1","PIPE_2","PIPE_3","PIPE_4","PIPE_5","PIPE_6","PIPE_8","PIPE_8_0","PIPE_9","PIPE_9_0"})
+        depth_enclosure_shapes_[i++]=static_cast<uint16_t>(symbol(name));
     intro_showcase_strategies_={symbol("ZACOINTRO_ISTRAT"),symbol("ZACO2INTRO_ISTRAT"),
         symbol("ZACOINTRO_STRAT"),symbol("ZACO2INTRO_STRAT")};
     if(symbol("M_NANMODE")) interpolation_.crosshair=symbol("TEST_ISTRAT");
@@ -513,6 +518,7 @@ SourceModelPackets SourceModels::assemble_interpolated(const GameSceneSnapshot& 
 }
 SourceModelPackets SourceModels::assemble_poses(const GameSceneSnapshot& scene,std::span<const render::RenderPose> poses,std::span<const render::RenderPose> shadows,bool srgb,float units,double alpha,bool cpu_pilot_rig) {
     SourceModelPackets result;
+    result.player=uint16_t(scene.player);
     ++cache_epoch_;
     auto words=scene.cgram;
     std::copy(scene.model_palette.begin(),scene.model_palette.end(),words.begin()+112);
@@ -572,6 +578,17 @@ SourceModelPackets SourceModels::assemble_poses(const GameSceneSnapshot& scene,s
                 render::source_sprite_colour_count(object))).first;
             DrawPacket packet;std::string error;
             auto pose=shadow?shadows[i]:poses.empty()?item.source_pose:poses[i];
+            // playeroutofcock_strat (cockpit -> chase view) flies a 16x zoom
+            // Arwing (MYZOOM_*, shift 4) out from the camera. Like the player's
+            // ship it stays on top of what the cartridge draws before it
+            // (vr::painter_scenery); the Super FX clips it at z = 0 and never
+            // hides it, so neither does this.
+            if(!shadow && std::find(pass_through_shapes_.begin(),pass_through_shapes_.end(),object.shape)!=pass_through_shapes_.end())
+                result.ships.push_back(uint16_t(item.handle));
+            if(!shadow && object.attached) result.attachments.push_back({uint16_t(item.handle),uint16_t(object.attached)});
+            if(!shadow && object.shape && std::find(depth_enclosure_shapes_.begin(),depth_enclosure_shapes_.end(),object.shape)
+                    !=depth_enclosure_shapes_.end())
+                result.depth_enclosures.push_back(uint16_t(item.handle));
             // EX's aiming marks use their dedicated HUD palette entry, not
             // the active model colour table or the scene's warp animation.
             if(crosshair) {

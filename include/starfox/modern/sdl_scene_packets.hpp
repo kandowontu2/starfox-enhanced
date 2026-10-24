@@ -63,6 +63,8 @@ public:
     // every fragment (compare ALWAYS) and still write depth, so later draws
     // cover earlier ones exactly as the cartridge's painter does.
     void set_painter(bool enabled) noexcept {painter_=enabled;}
+    // Target sample count (MSAA); a change drops the cached pipelines.
+    void set_sample_count(SDL_GPUSampleCount samples) noexcept;
     void release() noexcept;
     const std::string& status() const noexcept {return status_;}
 private:
@@ -70,6 +72,7 @@ private:
     SDL_GPUShader* vertex_{};SDL_GPUShader* fragment_{};
     SDL_GPUTextureFormat colour_{},depth_{};
     bool reversed_depth_{},painter_{};
+    SDL_GPUSampleCount samples_{SDL_GPU_SAMPLECOUNT_1};
     unsigned brush_pixels_{1};
     std::array<float,4> brush_{};
     std::map<unsigned,SDL_GPUGraphicsPipeline*> pipelines_;
