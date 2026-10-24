@@ -619,7 +619,7 @@ std::uint32_t effective_render_scale_factor(
 // The RENDERER row's value.
 std::string_view renderer_label(const starfox::simulation::GameSimulation& game) noexcept {
     if(game.renderer_mode()==starfox::simulation::RendererMode::software) return "SOFTWARE";
-    if(game.modern_renderer()) return "MODERN - EXPERIMENTAL, VERY FAST";
+    if(game.modern_renderer()) return "MODERN - VERY FAST";
     return game.gpu_fast()?"GPU FAST":"GPU";
 }
 
