@@ -590,7 +590,14 @@ int main() {
                 const std::size_t occupied=model_frame.vertices.size()+dot_frame.vertices.size()+math.vertices.size()
                     +mask.vertices.size()+label.vertices.size()+menu_frame.vertices.size();
                 const unsigned tile_budget=occupied<ctr::pica_vertex_limit?ctr::pica_vertex_limit-unsigned(occupied):0;
-                const auto artwork=[&] { STARFOX_3DS_FRAME_PHASE(layers);return layers->prepare(source,tile_budget); }();
+                unsigned texture_budget=ctr::pica_texture_budget-ctr::pica_texture_layout(
+                    {dashboard.pixels,dashboard.width,dashboard.height,dashboard.pitch,3}).bytes;
+                for(const auto& group:std::array{model_frame,dot_frame,math,mask,label,menu_frame})
+                    for(const auto& image:group.textures) {
+                        const auto bytes=ctr::pica_resident_texture_bytes(image);
+                        texture_budget=bytes<texture_budget?texture_budget-bytes:0;
+                    }
+                const auto artwork=[&] { STARFOX_3DS_FRAME_PHASE(layers);return layers->prepare(source,tile_budget,texture_budget); }();
                 const auto frame=[&] {
                     STARFOX_3DS_FRAME_PHASE(composite);
                     return composite.prepare_validated(source.plan,

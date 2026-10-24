@@ -36,7 +36,7 @@ add_library(starfox_3ds_source_geometry STATIC pica_shapes.cpp pica_source_spans
     ../../src/simulation/math.cpp ../../src/assets/rom.cpp)
 target_include_directories(starfox_3ds_source_geometry PUBLIC ../../include)
 target_compile_features(starfox_3ds_source_geometry PUBLIC cxx_std_20)
-add_library(starfox_3ds_raster STATIC pica_raster.cpp bg2_tile_plan.cpp bg2_rolled_tile_plan.cpp pica_bg2_tiles.cpp
+add_library(starfox_3ds_raster STATIC pica_raster.cpp bg2_tile_plan.cpp bg2_rolled_tile_plan.cpp pica_bg2_tiles.cpp pica_bg2_map.cpp
     ../../src/render/background_renderer.cpp ../../src/render/sprite_renderer.cpp)
 target_include_directories(starfox_3ds_raster PUBLIC ../../include)
 target_compile_features(starfox_3ds_raster PUBLIC cxx_std_20)

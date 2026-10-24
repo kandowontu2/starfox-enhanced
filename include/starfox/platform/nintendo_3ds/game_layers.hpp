@@ -4,6 +4,7 @@
 #include "starfox/platform/nintendo_3ds/game_scenery.hpp"
 #include "starfox/platform/nintendo_3ds/pica_composite.hpp"
 #include "starfox/platform/nintendo_3ds/pica_bg2_tiles.hpp"
+#include "starfox/platform/nintendo_3ds/pica_bg2_map.hpp"
 
 namespace starfox::platform::nintendo_3ds {
 // Source-authored 2D painter groups around the native BG1 model stream.
@@ -29,12 +30,13 @@ public:
     // Borrowed views remain valid until the next prepare on this owner.
     // The caller supplies the remaining complete-scene vertex budget. Zero
     // keeps the reference raster path; budget failure never drops source tiles.
-    GameLayerFrames prepare(const GamePresentation&,unsigned tile_vertex_budget=0);
+    GameLayerFrames prepare(const GamePresentation&,unsigned tile_vertex_budget=0,unsigned texture_budget=0);
     [[nodiscard]] std::array<PpuRasterWork,2> work() const noexcept;
 private:
     bool indexed_mono_{};
     PicaRaster before_,after_;
     PicaBg2Tiles before_tiles_;
+    PicaBg2Map before_map_;
     GameScenery scenery_;
     // Mono landscape borrows the isolated BG2 raster directly. Only image
     // descriptors are owned here; no second pixel image or provenance upload.
@@ -42,12 +44,13 @@ private:
     struct PainterOwner {
         PicaRaster raster;
         PicaBg2Tiles tiles;
+        PicaBg2Map map;
         GameScenery receiver;
         std::vector<PicaImage> isolated_images;
     };
     using Owners=std::vector<std::unique_ptr<PainterOwner>>;
     PicaFrame prepare_groups(const GamePresentation&,std::span<const PpuBatch>,Owners&,
-        std::vector<PicaFrame>&,PicaComposite&,PpuRasterWork&,unsigned tile_vertex_budget=0);
+        std::vector<PicaFrame>&,PicaComposite&,PpuRasterWork&,unsigned tile_vertex_budget=0,unsigned texture_budget=0);
     Owners panorama_groups_,foreground_groups_;
     std::vector<PicaFrame> working_groups_,working_foreground_;
     PicaComposite panorama_,foreground_;

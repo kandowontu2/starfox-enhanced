@@ -1,4 +1,5 @@
 #include "starfox/platform/nintendo_3ds/pica_bg2_tiles.hpp"
+#include "starfox/platform/nintendo_3ds/pica_bg2_map.hpp"
 #include "starfox/platform/nintendo_3ds/pica_residency.hpp"
 #include "starfox/platform/nintendo_3ds/game_layers.hpp"
 #include <atomic>
@@ -22,14 +23,18 @@ std::vector<Pixel> sample(const PicaFrame& frame,unsigned width,int left) {
     std::vector<Pixel> result(std::size_t(width)*240);
     for(const auto& draw:frame.draws) {
         require((draw.space==PicaSpace::screen || draw.space==PicaSpace::scenery) && !draw.depth_test && !draw.depth_write
-            && draw.source_layer==2 && draw.texture!=pica_no_texture,"Tile draw changed BG2 painter ownership/depth");
-        const auto& image=frame.textures[draw.texture];
+            && draw.source_layer==2,"Tile draw changed BG2 painter ownership/depth");
         for(unsigned at=draw.first;at<draw.first+draw.count;at+=6) {
             const auto& a=frame.vertices[at];const auto& c=frame.vertices[at+2];
             const int x0=int(a.position[0]),y0=int(a.position[1]),x1=int(c.position[0]),y1=int(c.position[1]);
             require(x0<x1 && y0<y1,"Tile quad reversed its source rectangle");
             for(int y=y0;y<y1;++y) for(int x=x0;x<x1;++x) {
                 if(x<left || x>=left+int(width) || y<0 || y>=240) continue;
+                if(draw.texture==pica_no_texture) {
+                    Pixel pixel{};for(unsigned i=0;i<4;++i) pixel[i]=std::uint8_t(std::lround(a.colour[i]*255));
+                    if(pixel[3]) {pixel[4]=2;result[std::size_t(y)*width+unsigned(x-left)]=pixel;}continue;
+                }
+                const auto& image=frame.textures[draw.texture];
                 // Independent inverse nearest sampling at pixel centres.
                 const double u=a.uv[0]+(c.uv[0]-double(a.uv[0]))*(x+.5-x0)/(x1-x0);
                 const double v=a.uv[1]+(c.uv[1]-double(a.uv[1]))*(y+.5-y0)/(y1-y0);
@@ -352,6 +357,99 @@ void referenced_character_cache() {
         }
     }
 }
+void decoded_map_pipeline() {
+    unsigned accepted=0;
+    const auto plan=plan_frame(1,true,ScreenUse::world);
+    PpuBatch batch;batch.space=PicaSpace::scenery;batch.expand_horizontal=true;batch.passes.push_back({PpuLayer::bg2});
+    for(unsigned number=0;number<24;++number) {
+        auto ppu=fixture(number&~4U); // Map residency is bounded to 8x8 source banks.
+        const auto before=*ppu;
+        PicaBg2Tiles baseline;PicaBg2Map owner;
+        const auto reference=baseline.prepare(ppu,batch,plan,15,0,pica_vertex_limit,32,true);
+        const auto actual=owner.prepare(ppu,batch,plan,15,0,pica_vertex_limit,pica_texture_budget-512*256*4,32);
+        if(!actual) continue;
+        ++accepted;require(reference.has_value(),"Map fixture has no complete tile oracle");
+        require(sample(*actual,464,-32)==sample(*reference,464,-32),"Decoded-map coalescing changed source pixels, flips, alpha, margins or palette");
+        require(actual->vertices.size()<reference->vertices.size(),"Decoded map did not reduce geometry");
+        const auto* vertices=actual->vertices.data();const auto* pixels=actual->textures[0].pixels.data();
+        allocations=0;count_allocations=true;bool stable=true;
+        for(unsigned i=0;i<64;++i) {
+            const auto same=owner.prepare(ppu,batch,plan,15,0,pica_vertex_limit,pica_texture_budget,32);
+            stable&=same && same->vertices.data()==vertices && same->textures[0].pixels.data()==pixels;
+        }
+        count_allocations=false;
+        require(stable && allocations==0,"Warmed decoded map allocated, rebuilt or copied its atlas");
+        const auto saved=sample(*actual,464,-32);
+        require(!owner.prepare(ppu,batch,plan,15,0,1,pica_texture_budget,32)
+            && !owner.prepare(ppu,batch,plan,15,0,pica_vertex_limit,1,32),"Map exceeded vertex/texture budget");
+        require(sample(*actual,464,-32)==saved,"Declined map replaced the last complete borrowed frame");
+        require(*ppu==before,"Decoded map modified source PPU");
+        auto faded=std::make_shared<simulation::SnesPpuState>(*ppu);faded->cgram[17]^=32767;
+        const auto a=baseline.prepare(faded,batch,plan,8,2,pica_vertex_limit,32,true);
+        const auto b=owner.prepare(faded,batch,plan,8,2,pica_vertex_limit,pica_texture_budget,32);
+        require(a && b && b->vertices.data()==vertices && sample(*a,464,-32)==sample(*b,464,-32),
+            "Map palette fade/subtraction changed geometry or source colors");
+    }
+    require(accepted>=4,"Decoded-map optimization was not exercised");
+}
+void decoded_map_panorama() {
+    const auto plan=plan_frame(1,true,ScreenUse::world);
+    for(unsigned scenario=0;scenario<48;++scenario) {
+        // Include large/flipped tiles, both map pages, register wrap, slopes,
+        // constant replacement tables and per-row horizontal HDMA. The
+        // independent pixel renderer retains one unique planet occurrence.
+        auto ppu=fixture(scenario&~32U);ppu->bg2_screen_size=std::uint8_t((scenario&4)?0:scenario%4);
+        ppu->bg2_scroll_x=std::int16_t(std::array{-513,-17,0,31,511}[scenario%5]);
+        ppu->bg2_vertical_offsets_enabled=true;
+        for(unsigned i=0;i<32;++i) {
+            const unsigned offset=(scenario%3==0?511:scenario%3==1?int(i)*3-7:24)&8191;
+            ppu->vram[0x5f40+2*i]=std::uint8_t(offset);ppu->vram[0x5f41+2*i]=std::uint8_t((offset>>8)|64);
+        }
+        PpuBatch batch{{{PpuLayer::bg2,int(scenario%3)-1}},PicaSpace::scenery,true};
+        batch.visible_scenery_only=true;batch.continue_ground=false;
+        batch.passes[0].single_occurrence_top_rows=std::array{112U,224U,512U}[scenario%3];
+        PicaBg2Map owner;PicaRaster oracle;
+        const auto compare=[&](unsigned brightness,unsigned subtract) {
+            const auto map=owner.prepare(ppu,batch,plan,brightness,subtract,pica_vertex_limit,pica_texture_budget,32);
+            require(bool(map),"Bounded unique panorama map unexpectedly declined");
+            const auto reference=oracle.prepare(ppu,batch,plan,brightness,subtract,32,true);
+            require(sample(*map,464,-32)==sample(reference,464,-32),"Decoded panorama changed source roll, unique margins, priority, transparency or opaque black");
+            return map->textures.front();
+        };
+        auto image=compare(15,0);PicaTextureResidency cache;unsigned uploads=0;
+        const auto colour=[&](auto,auto){++uploads;};const auto layers=[](auto,auto,auto){};
+        require(cache.prepare(image,colour,layers),"Map missed its initial certified upload");
+        const auto work=owner.work();
+        ppu=std::make_shared<simulation::SnesPpuState>(*ppu);ppu->bg2_scroll_x+=1;
+        image=compare(15,0);
+        require(owner.work().decodes==work.decodes+1 && owner.work().colour_updates==work.colour_updates
+            && !cache.prepare(image,colour,layers) && uploads==1,"Scrolling panorama uploaded/recoloured its unchanged map");
+        ppu=std::make_shared<simulation::SnesPpuState>(*ppu);ppu->cgram[0]=32767;ppu->cgram[17]=0;
+        image=compare(8,2);
+        require(cache.prepare(image,colour,layers),"Map fade retained stale certified colour");
+        PicaBg2Map moved=std::move(owner);
+        require(!image.content.colour_valid(image),"Moved map retained its old owner certificate");
+        const auto ready=moved.prepare(ppu,batch,plan,8,2,pica_vertex_limit,pica_texture_budget,32);
+        require(ready && ready->textures.front().content.colour_valid(ready->textures.front())
+            && !cache.prepare(ready->textures.front(),colour,layers),"Moved map lost complete source/residency reuse");
+        if(scenario%8==0) {
+            auto scene=std::make_shared<vr::GameSceneSnapshot>();scene->flow=simulation::GameFlowState::intro;
+            scene->background_unique_top_rows=batch.passes[0].single_occurrence_top_rows;
+            auto raster=std::make_shared<GameRasterSnapshot>();raster->ppu=ppu;raster->brightness=8;
+            scene->background_colour_subtract=2;
+            GamePresentation frame;frame.current=frame.previous=scene;frame.raster=raster;frame.plan=plan;
+            GameLayers native,reference;Canvas dashboard;
+            const auto expected=reference.prepare(frame);
+            const auto pixels=sample(expected.before_models,400,0);
+            for(unsigned budget:{1U,512U*1024U,pica_texture_budget-512*256*4}) {
+                const auto joined=native.prepare(frame,pica_vertex_limit,budget);
+                require(sample(joined.before_models,400,0)==pixels,"Grouped panorama map/fallback changed painter order or unique artwork");
+                validate_pica_frame(joined.before_models,dashboard.view());
+                validate_pica_frame(joined.after_models,dashboard.view());
+            }
+        }
+    }
+}
 void indexed_atlas_pipeline() {
     auto ppu=fixture(0);PpuBatch batch;batch.expand_horizontal=true;batch.space=PicaSpace::scenery;
     batch.passes.push_back({PpuLayer::bg2});
@@ -471,7 +569,7 @@ int main(int argc,char** argv) try {
         }
         require(ppu->vram==unchanged.vram && ppu->cgram==unchanged.cgram && ppu->oam==unchanged.oam,"Native tile planning mutated cartridge memory");
     }
-    rejection_and_reuse();painter_integration();constant_vertical_offsets();rolled_offsets_and_carry();water_offsets_and_edges();mode1_panorama_atlas();complete_palette_sweep();referenced_character_cache();indexed_atlas_pipeline();atlas_content_certificates();
+    rejection_and_reuse();painter_integration();constant_vertical_offsets();rolled_offsets_and_carry();water_offsets_and_edges();mode1_panorama_atlas();complete_palette_sweep();referenced_character_cache();decoded_map_pipeline();decoded_map_panorama();indexed_atlas_pipeline();atlas_content_certificates();
     std::cout<<"Native BG2 tile planner/atlas: "<<checks<<" exact pixel, palette, ownership, HDMA, flips, budget and fallback checks PASS\n";
     return 0;
 } catch(const std::exception& error) {count_allocations=false;std::cerr<<error.what()<<'\n';return 1;}

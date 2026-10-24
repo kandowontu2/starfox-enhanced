@@ -97,6 +97,16 @@ int main() try {
     compose_native_canvas(invalid, world, actual, ppu, NativeCanvasStyle::gameplay);
     require(std::all_of(actual.pixels().begin(), actual.pixels().end(), [](auto p) { return p == 173; }),
         "Invalid canvas size wrote output");
+    Framebuffer mode2(400,224);
+    for(unsigned y=0;y<224;++y) for(unsigned x=0;x<400;++x)
+        mode2.pixels()[y*400+x]=std::uint8_t((y*7+x*3)%256);
+    starfox::platform_3ds::compose_mode2_background(mode2,actual);
+    for(unsigned y=0;y<240;++y) for(unsigned x=0;x<400;++x)
+        require(actual.get(x,y)==mode2.get(x,unsigned(std::clamp(int(y)-8,0,223))),
+            "Mode-2 source background was shifted, stretched or replaced by ending stars");
+    const auto preserved=actual.pixels();
+    starfox::platform_3ds::compose_mode2_background(invalid,actual);
+    require(actual.pixels()==preserved,"Invalid Mode-2 extent modified native background");
     std::cout << comparisons << " independent whole-image canvas comparisons passed\n";
     return 0;
 } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }

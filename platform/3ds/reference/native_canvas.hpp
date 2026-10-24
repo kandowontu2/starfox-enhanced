@@ -35,4 +35,10 @@ void compose_native_canvas(const render::Framebuffer& source,
 void overlay_source_coverage_on_native(const render::Framebuffer& source,
     render::Framebuffer& target) noexcept;
 
+// The shared tile renderer addresses 224 logical rows. Place those rows at
+// native y=8, holding the first/last source row in the LCD's extra margins.
+// No resampling, source-palette change or synthetic ending-star extension.
+void compose_mode2_background(const render::Framebuffer& source,
+    render::Framebuffer& target) noexcept;
+
 } // namespace starfox::platform_3ds

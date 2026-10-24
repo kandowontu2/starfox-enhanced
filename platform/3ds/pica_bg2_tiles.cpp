@@ -67,7 +67,7 @@ std::optional<PicaFrame> PicaBg2Tiles::prepare(std::shared_ptr<const simulation:
     // but keeps the existing infinity projection; it is not a water plane.
     const auto planner=complete_plan?plan_rolled_bg2_tiles:plan_bg2_tiles;
     if(decode && !planner(*source,scroll[0],scroll[1],width,int((width-256)/2),pass.priority,
-        rectangles,std::min(4096U,vertex_budget/6))) return {};
+        rectangles,std::min(4096U,vertex_budget/6),batch.continue_ground)) return {};
     const auto& rects=decode?rectangles:rectangles_;
     const unsigned edge_quads=batch.space==PicaSpace::scenery?unsigned(std::count_if(rects.begin(),rects.end(),
         [](const auto& rect){return rect.y==0 || rect.y+rect.height==224;})):0;

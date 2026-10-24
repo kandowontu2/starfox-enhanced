@@ -11,7 +11,7 @@ std::uint16_t word(const simulation::SnesPpuState& ppu,unsigned address) {
 }
 }
 bool plan_bg2_tiles(const simulation::SnesPpuState& ppu,int scroll_x,int scroll_y,
-    unsigned width,int origin,int priority,std::vector<Bg2TileRect>& output,unsigned capacity) {
+    unsigned width,int origin,int priority,std::vector<Bg2TileRect>& output,unsigned capacity,bool continue_ground) {
     output.clear();
     if(ppu.background_mode!=2 || (ppu.mosaic&2)
         || ppu.tunnel_scene || !width || width>4096 || origin<0 || origin>4096
@@ -34,7 +34,7 @@ bool plan_bg2_tiles(const simulation::SnesPpuState& ppu,int scroll_x,int scroll_
         flat_y=first&0x1fff;
         // Expanded Mode 2 carries the last ground colour through a lower
         // tilemap wrap. Do not bypass that rule, even for a constant table.
-        if(width>256 && (unsigned(flat_y)&y_mask)+223>y_mask) return false;
+        if(continue_ground && width>256 && (unsigned(flat_y)&y_mask)+223>y_mask) return false;
     }
     const auto row_x=[&](unsigned y){return ppu.bg2_horizontal_offsets_enabled
         ?int(ppu.bg2_horizontal_offsets[y]):scroll_x;};
@@ -65,7 +65,7 @@ bool plan_bg2_tiles(const simulation::SnesPpuState& ppu,int scroll_x,int scroll_
                 const unsigned entry=((tx>>5)+(ty>>5)*pages_wide)*1024+(ty&31)*32+(tx&31);
                 const auto tile=word(ppu,unsigned(ppu.bg2_screen_base)+entry);
                 const bool selected=priority<0 || bool(tile&0x2000)==bool(priority);
-                if(width>256 && ppu.bg2_vertical_offsets_enabled && y+height>144 && !selected) return false;
+                if(continue_ground && width>256 && ppu.bg2_vertical_offsets_enabled && y+height>144 && !selected) return false;
                 if(selected) {
                     if(next.size()==capacity) return false;
                     const bool flip_x=(tile&0x4000)!=0,flip_y=(tile&0x8000)!=0;
@@ -78,9 +78,10 @@ bool plan_bg2_tiles(const simulation::SnesPpuState& ppu,int scroll_x,int scroll_
                     // The reference also carries opaque colour through zero
                     // texels below row 144. Accept only fully opaque referenced
                     // lower characters; reject before publishing any atlas.
-                    if(width>256 && ppu.bg2_vertical_offsets_enabled && y+height>144 && !opaque(character)) return false;
+                    if(continue_ground && width>256 && ppu.bg2_vertical_offsets_enabled && y+height>144 && !opaque(character)) return false;
                     next.push_back({x,y,span,height,std::uint16_t(character),std::uint8_t((tile>>10)&7),
-                        std::uint8_t(flip_x?7-(sx&7):(sx&7)),std::uint8_t(flip_y?7-(sy&7):(sy&7)),flip_x,flip_y});
+                        std::uint8_t(flip_x?7-(sx&7):(sx&7)),std::uint8_t(flip_y?7-(sy&7):(sy&7)),flip_x,flip_y,
+                        0,false,std::uint16_t(sx),std::uint16_t(sy)});
                 }
                 y+=height;
             }

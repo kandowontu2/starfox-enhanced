@@ -13,6 +13,9 @@ struct Bg2TileRect {
     bool reverse_x{},reverse_y{};
     std::uint8_t solid_index{}; // Nonzero source CGRAM index; merged uniform/carry colour.
     bool constant_x{}; // Mode-1 water margin repeats one authored edge texel, not the bridge.
+    // Unflipped tilemap texel coordinates, before palette/character decoding.
+    // A decoded map atlas can join adjacent tiles without changing samples.
+    std::uint16_t map_x{},map_y{};
 };
 // The first integration accepts ordinary Mode-2 artwork, including complete
 // constant offset tables whose lower source characters need no ground carry.
@@ -20,10 +23,10 @@ struct Bg2TileRect {
 // not the upstream flat-screen approximation. Failure publishes no rectangles.
 bool plan_bg2_tiles(const simulation::SnesPpuState&,int scroll_x,int scroll_y,
     unsigned width,int origin,int priority,std::vector<Bg2TileRect>&,
-    unsigned capacity);
+    unsigned capacity,bool continue_ground=true);
 // Full fitted Mode-2 roll/HDMA and isolated Mode-1 scenery's source-clamped
 // single-cross-section margins. Uniform source characters become merged
 // colour rectangles, not an invented smooth floor.
 bool plan_rolled_bg2_tiles(const simulation::SnesPpuState&,int scroll_x,int scroll_y,
-    unsigned width,int origin,int priority,std::vector<Bg2TileRect>&,unsigned capacity);
+    unsigned width,int origin,int priority,std::vector<Bg2TileRect>&,unsigned capacity,bool continue_ground=true);
 } // namespace starfox::platform::nintendo_3ds

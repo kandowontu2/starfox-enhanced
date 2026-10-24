@@ -179,7 +179,7 @@ PicaFrame PicaRaster::prepare(std::shared_ptr<const simulation::SnesPpuState> so
                     unique={&region,1};
                 }
                 backgrounds.draw_bg2(*source,scroll[0],scroll[1],*next,priority,origin,extend,
-                    pass.wrap_horizontal,pass.transparent_black,pass.single_occurrence_top_rows,unique);break;
+                    pass.wrap_horizontal,pass.transparent_black,pass.single_occurrence_top_rows,unique,false,false,0,batch.continue_ground);break;
             }
             case PpuLayer::bg3: backgrounds.draw_bg3(*source,*next,priority,origin,extend);break;
             case PpuLayer::objects:

@@ -1250,13 +1250,11 @@ const render::Framebuffer& Frame3ds::draw(
 #endif
             if (same_background) ++background_cache_hits_;
             else ++background_cache_misses_;
-            if (same_background) {
-                wide_frame_.copy_pixels_from(mode2_background_cache_);
-            } else {
+            if (!same_background) {
+                mode2_background_cache_.clear(0U);
                 backgrounds_.draw_bg2(ppu, background_x, background_y,
-                    wide_frame_, render::TilePriorityPass::all,
-                    72, true, true, false, 0U, {}, 8);
-                mode2_background_cache_.copy_pixels_from(wide_frame_);
+                    mode2_background_cache_, render::TilePriorityPass::all,
+                    72, true, true, false);
                 capture_ppu_metadata(mode2_background_ppu_, ppu);
                 mode2_background_cgram_ = ppu.cgram;
                 mode2_background_ppu_vram_revision_
@@ -1266,6 +1264,11 @@ const render::Framebuffer& Frame3ds::draw(
                 mode2_background_y_ = background_y;
                 mode2_background_valid_ = true;
             }
+            // Shared BackgroundRenderer has no vertical-origin argument.
+            // The imported trailing `8` selected ending-star extension, not
+            // the native LCD inset. Render the 224 source rows unchanged,
+            // then place them at y=8 just like the GPU tile foreground.
+            compose_mode2_background(mode2_background_cache_, wide_frame_);
         }
         if (stereo && !gpu_bg2) right_frame_.copy_pixels_from(wide_frame_);
         render::composite_transparent_layer(world_, wide_frame_, {});

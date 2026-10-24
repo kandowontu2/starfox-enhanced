@@ -225,6 +225,7 @@ private:
     std::shared_ptr<PicaImageContent::State> state_;
     friend class PicaRaster;
     friend class PicaBg2Tiles;
+    friend class PicaBg2Map;
 };
 struct PicaTextureLayout {
     unsigned width{},height{},bytes{};

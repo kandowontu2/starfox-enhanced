@@ -195,7 +195,7 @@ private:
     std::uint64_t background_cache_hits_{};
     std::uint64_t background_cache_misses_{};
     DrawBreakdown last_draw_breakdown_{};
-    render::Framebuffer mode2_background_cache_{400U, 240U};
+    render::Framebuffer mode2_background_cache_{400U, 224U};
     // With PICA BG2 this existing allocation is otherwise unused. Its CPU-BG2
     // and EX-BG1 roles are mutually exclusive and invalidated at each handoff.
     platform::nintendo_3ds::IndexedOverlayRows ex_overlay_rows_{};

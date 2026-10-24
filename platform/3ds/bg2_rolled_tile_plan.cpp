@@ -43,7 +43,7 @@ bool emit_rows(const Rows& rows,std::vector<Bg2TileRect>& output,unsigned capaci
 }
 }
 bool plan_rolled_bg2_tiles(const simulation::SnesPpuState& ppu,int scroll_x,int scroll_y,
-    unsigned width,int origin,int priority,std::vector<Bg2TileRect>& output,unsigned capacity) {
+    unsigned width,int origin,int priority,std::vector<Bg2TileRect>& output,unsigned capacity,bool continue_ground) {
     output.clear();
     if((ppu.background_mode!=1 && ppu.background_mode!=2) || (ppu.mosaic&2) || ppu.tunnel_scene || !width || width>4096 || origin<0 || origin>4096
         || priority< -1 || priority>1 || scroll_x< -32768 || scroll_x>32767 || scroll_y< -32768 || scroll_y>32767
@@ -104,7 +104,7 @@ bool plan_rolled_bg2_tiles(const simulation::SnesPpuState& ppu,int scroll_x,int 
     };
     const auto source_y=[&](unsigned x,unsigned y){const auto& column_y=column_y_for(y);return unsigned(int(y)+(column_y[x]!=missing?column_y[x]:row_y(y)))&y_mask;};
     std::vector<unsigned> wrapped_at(width,224);
-    if(expanded) for(unsigned x=0;x<width;++x) {
+    if(expanded && continue_ground) for(unsigned x=0;x<width;++x) {
         auto previous=source_y(x,143);
         for(unsigned y=144;y<224;++y) {const auto next=source_y(x,y);if(next<previous && previous-next>(y_mask+1)/2) {wrapped_at[x]=y;break;}previous=next;}
     }
@@ -177,7 +177,8 @@ bool plan_rolled_bg2_tiles(const simulation::SnesPpuState& ppu,int scroll_x,int 
                     } else if(ink<0) {
                         if(next.size()==capacity) return false;
                         next.push_back({x,y,width_here,height,std::uint16_t(sample[0]),std::uint8_t(sample[1]),
-                            std::uint8_t(sample[2]),std::uint8_t(sample[3]),bool(sample[4]),bool(sample[5]),0,constant_x});
+                            std::uint8_t(sample[2]),std::uint8_t(sample[3]),bool(sample[4]),bool(sample[5]),0,constant_x,
+                            std::uint16_t(sx_value),std::uint16_t(sy_value)});
                     }
                 }
                 y+=height;
@@ -186,7 +187,7 @@ bool plan_rolled_bg2_tiles(const simulation::SnesPpuState& ppu,int scroll_x,int 
         }
         band_top=band_end;
     }
-    if(expanded) for(unsigned x=0;x<width;++x) {
+    if(expanded && continue_ground) for(unsigned x=0;x<width;++x) {
         std::uint8_t last_opaque{};bool prior_resolved=false;
         const auto recover_prior=[&](unsigned y) {
             if(prior_resolved) return;

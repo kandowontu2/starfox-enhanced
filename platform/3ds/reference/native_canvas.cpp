@@ -155,6 +155,19 @@ bool is_isolated_map_artifact(const render::Framebuffer& source,
 
 } // namespace
 
+void compose_mode2_background(const render::Framebuffer& source,
+    render::Framebuffer& target) noexcept {
+    if(source.width()!=400U || source.height()!=224U || source.draw_scale()!=1U
+        || target.width()!=400U || target.height()!=240U || target.draw_scale()!=1U) return;
+    const auto* pixels=source.pixels().data();auto* output=target.pixels().data();
+    std::copy_n(pixels,400U*224U,output+400U*8U);
+    for(unsigned y=0;y<8;++y) {
+        std::copy_n(pixels,400U,output+y*400U);
+        std::copy_n(pixels+223U*400U,400U,output+(232U+y)*400U);
+    }
+    target.mark_written(0,400U*240U);
+}
+
 void compose_native_canvas(const render::Framebuffer& source,
     const render::Framebuffer& world, render::Framebuffer& target,
     const simulation::SnesPpuState& ppu, NativeCanvasStyle style,

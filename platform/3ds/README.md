@@ -41,7 +41,25 @@ CPU speedup alone does not establish stable 60 FPS; measure New-model mono
 and stereo separately before claiming playable performance. Historical
 old-model test results below do not restore support for those devices.
 
-## Current source candidate R407 (October 11)
+## Current source-only follow-up (October 23)
+
+The mono background fallback now decodes its actual 224 source rows and places
+them at LCD y=8, matching native tile presentation; the old trailing `8` was
+being interpreted as the shared renderer's ending-star flag instead of an inset.
+The finite stereo landscape can use a bounded decoded tilemap atlas: adjacent
+source-map regions coalesce without changing roll, palette, priority or depth.
+It declines to the complete existing path when vertex or padded-texture residency
+cannot fit. Distant space panoramas no longer continue transparent stars as ground.
+Their map texture can survive scroll/roll-only changes without pixel expansion or
+upload; unique planet margins still retain the original source painter order.
+
+Validation is currently headless (source replays, pixel oracles and source-only
+ARM CI), without desktop focus changes or input injection. The latest tester
+reports regular 60 FPS mono gameplay but intro slowdown and about 25 FPS stereo.
+Those hardware results predate this follow-up. No stable console stereo-FPS or
+complete moving SCRAMBLE acceptance is claimed, and no new tester handoff is requested.
+
+## Earlier source candidate R407 (October 11)
 
 Commit `fc699b65bf72d3d0a02744b3cac52c92e8460ad9` passes
 [source-only ARM CI 38195209076](https://github.com/kandowontu2/starfox-enhanced/actions/runs/38195209076),

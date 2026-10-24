@@ -50,6 +50,16 @@ exercise 2/4/8-bpp banks, all map sizes, address wrapping and uniform-merging
 invalidation. This does not establish how often a real stage benefits or its
 console frame rate.
 
+The decoded-map path separates source map texels from scroll/roll geometry.
+For bounded eligible layers it retains palette-expanded map pixels while
+coalescing contiguous map-coordinate rectangles. A geometry-only update does
+not enter `bg_decode`/`bg_colour` or invalidate the native colour-content
+certificate. `PpuRasterWork::decodes` still counts changed geometry preparation
+as it does for compact character atlases; it is not a count of whole-image
+decodes or GPU uploads. Panorama margins and ordinary ground continuation are
+distinct policies, with the independent indexed renderer as their pixel oracle.
+GPU/ARM measurements remain necessary: host work counts are not console FPS.
+
 The original twenty-five phase names and enum indices stay unchanged. The
 source/audio/raster detail phases and five appended GPU phases distinguish
 the following work:
