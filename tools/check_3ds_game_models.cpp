@@ -643,6 +643,11 @@ void fixture(const assets::RomImage& rom,const assets::SymbolMap& symbols,const 
         orbital_frames+=source.current->background_orbital_planet;
         intro_frames+=source.current->flow==simulation::GameFlowState::intro;
         const auto frame=models.prepare(source);validate_pica_frame(frame,source.dashboard);
+        if(source.current->flow==simulation::GameFlowState::intro) {
+            for(const auto& draw:frame.draws) require(draw.space==PicaSpace::world
+                && !draw.depth_test && !draw.depth_write,
+                "Intro BSP/panel painter order was replaced by hardware Z ordering or flat screen geometry");
+        }
         const auto dot_frame=dots.prepare(source);validate_pica_frame(dot_frame,source.dashboard);
         // Resource/ordering bridge check, NOT the final all-flow compositor:
         // native ground, EX spans and menu host UI still remain.

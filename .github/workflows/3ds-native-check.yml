@@ -101,6 +101,7 @@ jobs:
           python3 tools/check_3ds_spc_output.py "$RUNNER_TEMP/starfox-3ds-core-host"
           python3 tests/test_3ds_stack.py
           python3 tests/test_3ds_shader.py
+          python3 tests/test_3ds_display_state.py
   native-diagnostics:
     name: New Nintendo 3DS-family native checks and test package
     runs-on: ubuntu-24.04

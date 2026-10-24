@@ -2,10 +2,13 @@
 #include "starfox/platform/nintendo_3ds/bg1_overlay_dependencies.hpp"
 #include "starfox/platform/nintendo_3ds/mode2_foreground_upload.hpp"
 #include "starfox/render/palette.hpp"
+#include "starfox/platform/nintendo_3ds/game_assets.hpp"
+#include "companion_manifest.hpp"
 #include "../platform/3ds/reference/frame_3ds.hpp"
 #include <algorithm>
 #include <chrono>
 #include <iostream>
+#include <fstream>
 #include <memory>
 #include <stdexcept>
 #include <string_view>
@@ -22,12 +25,26 @@ struct ObjectBridgeTestAccess {
 };
 }
 int main(int argc,char** argv) try {
-    const bool bridge_parity=argc==5 && std::string_view{argv[4]}=="--bridge-parity";
-    const bool foreground_parity=argc==5 && std::string_view{argv[4]}=="--foreground-parity";
-    if(argc!=4 && !bridge_parity && !foreground_parity) throw std::invalid_argument("Use ROM SYMBOLS MAP [--bridge-parity|--foreground-parity]; host component test, not hardware FPS");
+    const bool companion=argc>=5 && std::string_view{argv[1]}=="--companion";
+    const unsigned option=companion?5:4;
+    const auto mode=unsigned(argc)>option?std::string_view{argv[option]}:std::string_view{};
+    const bool bridge_parity=mode=="--bridge-parity";
+    const bool foreground_parity=mode=="--foreground-parity";
+    const bool scenery_parity=mode=="--scenery-parity";
+    if(unsigned(argc)!=option && !(unsigned(argc)==option+1 && (bridge_parity || foreground_parity)))
+        throw std::invalid_argument("Use ROM SYMBOLS MAP or --companion EXISTING_BIN original|ex MAP [--bridge-parity|--foreground-parity]; host component test, not hardware FPS");
+    auto cartridge=[&]() -> GameCartridge {
+        if(!companion) return {assets::RomImage::load(argv[1]),assets::SymbolMap::load(argv[2])};
+        const std::string_view experience{argv[3]};
+        if(experience!="original" && experience!="ex") throw std::invalid_argument("Expected original or ex");
+        std::ifstream input(argv[2],std::ios::binary);
+        return read_game_cartridge(input,companion_manifest,experience=="ex"?simulation::Experience::starfox_ex:simulation::Experience::original);
+    }();
     std::uint64_t blocks=0;
-    GameSession session(assets::RomImage::load(argv[1]),assets::SymbolMap::load(argv[2]),
-        [&](auto){++blocks;},argv[3]);
+    GameSessionOptions options;
+    if(scenery_parity) {options.preferences=GamePreferences{};options.preferences->level=11;options.preferences->god=true;}
+    GameSession session(std::move(cartridge.rom),std::move(cartridge.symbols),
+        [&](auto){++blocks;},argv[companion?4:3]);
     const auto symbol = [&](const char* name, bool rom) {
         for (const auto address : session.symbols().find(name)) {
             const auto bank = address >> 16U;
@@ -134,7 +151,9 @@ int main(int argc,char** argv) try {
         else ++bg1_mosaic_large;
         if(!session.game().draw_order().empty()) ++world_frames;
         renderer.set_sprite_selection(source.sprites);
-        const bool gpu_bg2=source.raster->ppu->background_mode==2;
+        const bool gpu_bg2=source.raster->ppu->background_mode==2
+            && (session.game().flow_state()==simulation::GameFlowState::gameplay
+                || session.game().flow_state()==simulation::GameFlowState::training);
         const auto before=frame%30==0?session.game().save_state():std::vector<std::uint8_t>{};
         const auto render_begin=std::chrono::steady_clock::now();
         const bool reuse=renderer.can_reuse_presentation(session.game(),gpu_bg2,source.interpolation_alpha);

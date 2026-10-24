@@ -302,8 +302,15 @@ bool Display3ds::activate() {
 }
 
 void Display3ds::prepare_draw_state() {
-    // C2D_Prepare does not restore stencil, early-depth, alpha-test or scissor.
+    // C2D_Prepare does not restore blending, stencil, early-depth, alpha-test
+    // or scissor. Native PICA's opaque pass leaves ONE/ZERO replacement in
+    // the shared context. Without restoring straight-alpha blending here,
+    // the transparent foreground erases every BG2 tile with black; bomb
+    // frames temporarily look correct only on the other presentation path.
     // This is also required on first construction after a native-effects frame.
+    C3D_AlphaBlend(GPU_BLEND_ADD, GPU_BLEND_ADD,
+        GPU_SRC_ALPHA, GPU_ONE_MINUS_SRC_ALPHA,
+        GPU_SRC_ALPHA, GPU_ONE_MINUS_SRC_ALPHA);
     C3D_StencilTest(false, GPU_ALWAYS, 0, 63, 0);
     C3D_StencilOp(GPU_STENCIL_KEEP, GPU_STENCIL_KEEP, GPU_STENCIL_KEEP);
     C3D_EarlyDepthTest(false, GPU_EARLYDEPTH_GREATER, 0);

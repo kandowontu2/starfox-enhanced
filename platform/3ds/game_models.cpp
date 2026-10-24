@@ -134,7 +134,13 @@ PicaFrame GameModels::prepare(const GamePresentation& frame) {
         const bool shadow=(pass&1)==0,late=pass>=2;
         const auto& item=scene.objects[i];const auto& object=item.object;
         if(controls && (item.handle==scene.player)!=late) continue;
-        const auto order=late?PicaShapeOrder::painter:PicaShapeOrder::depth;
+        // The intro's carrier/Arwing panels are authored for the cartridge's
+        // object/BSP painter, including intersecting and coplanar faces.
+        // A second depth decision makes these panels fight as the stereo
+        // cameras move. Keep finite camera vertices and the two eye matrices;
+        // only the source ordering, not stereoscopic projection, changes.
+        const auto order=(late || scene.flow==simulation::GameFlowState::intro)
+            ?PicaShapeOrder::painter:PicaShapeOrder::depth;
         const auto flags=object.strategy_flags[0];
         const bool reticle=rules_.crosshair && object.strategy_address==rules_.crosshair;
         if(reticle && scene.flow!=simulation::GameFlowState::gameplay && scene.flow!=simulation::GameFlowState::training) continue;
