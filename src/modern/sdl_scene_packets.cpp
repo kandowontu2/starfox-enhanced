@@ -78,8 +78,13 @@ void SdlScenePipelines::release() noexcept {
         for(auto& [key,pipeline]:pipelines_) SDL_ReleaseGPUGraphicsPipeline(device_,pipeline);
         if(vertex_) SDL_ReleaseGPUShader(device_,vertex_);
         if(fragment_) SDL_ReleaseGPUShader(device_,fragment_);
+        if(placeholder_) SDL_ReleaseGPUBuffer(device_,placeholder_);
     }
-    pipelines_.clear();vertex_=fragment_=nullptr;device_=nullptr;
+    pipelines_.clear();vertex_=fragment_=nullptr;placeholder_=shadow_triangles_=shadow_objects_=nullptr;device_=nullptr;
+}
+void SdlScenePipelines::bind_fragment_storage(SDL_GPURenderPass* pass,SDL_GPUBuffer* texels) const noexcept {
+    SDL_GPUBuffer* buffers[]{texels,shadow_triangles_?shadow_triangles_:placeholder_,shadow_objects_?shadow_objects_:placeholder_};
+    SDL_BindGPUFragmentStorageBuffers(pass,0,buffers,3);
 }
 void SdlScenePipelines::set_sample_count(SDL_GPUSampleCount samples) noexcept {
     if(samples==samples_) return;
@@ -121,7 +126,8 @@ bool SdlScenePipelines::initialize(SDL_GPUDevice* device,SDL_GPUTextureFormat co
                 info.format=SDL_GPU_SHADERFORMAT_SPIRV;
             }
             info.entrypoint=vertex?shader::vertex_entry:shader::fragment_entry;
-            info.stage=stage;info.num_storage_buffers=1;info.num_uniform_buffers=2; // Fragment slot 1: fog.
+            // Fragment: slot 0 texels, 1-2 shadow casters; uniform slot 1 fog and shadow.
+            info.stage=stage;info.num_storage_buffers=vertex?1:3;info.num_uniform_buffers=2;
             auto* created=SDL_CreateGPUShader(device,&info);
             require(created,sdl_error(vertex?"Create MODERN vertex shader":"Create MODERN fragment shader"));
             return created;
@@ -129,6 +135,7 @@ bool SdlScenePipelines::initialize(SDL_GPUDevice* device,SDL_GPUTextureFormat co
         device_=device;colour_=colour;depth_=depth;
         vertex_=create(SDL_GPU_SHADERSTAGE_VERTEX);
         fragment_=create(SDL_GPU_SHADERSTAGE_FRAGMENT);
+        placeholder_=create_buffer(device,SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ,64);
         status_="MODERN scene pipelines ready";return true;
     } catch(const std::exception& error) {status_=error.what();release();return false;}
 }
@@ -336,7 +343,7 @@ bool SdlDrawPackets::record_range(SDL_GPUCommandBuffer* command,SDL_GPURenderPas
             SDL_GPUBufferBinding binding{vertices.get(),0};
             SDL_BindGPUVertexBuffers(pass,0,&binding,1);
             SDL_BindGPUVertexStorageBuffers(pass,0,&texels,1);
-            SDL_BindGPUFragmentStorageBuffers(pass,0,&texels,1);
+            pipelines.bind_fragment_storage(pass,texels);
             SDL_PushGPUVertexUniformData(command,0,&constants,sizeof(constants));
             SDL_PushGPUFragmentUniformData(command,0,&constants,sizeof(constants));
             pipelines.push_line_brush(command,topology);

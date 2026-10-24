@@ -1,5 +1,7 @@
 #include "starfox/modern/sdl_frame.hpp"
+#include "starfox/vr/background_tiles.hpp"
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -58,8 +60,8 @@ bool SdlFrameRenderer::initialize(SDL_GPUDevice* device,SDL_GPUTextureFormat col
     device_=device;status_="MODERN frame ready";return true;
 }
 void SdlFrameRenderer::release() noexcept {
-    for(auto* packets:{&stars_,&backgrounds_,&tunnel_,&cockpit_,&sprites_,&reticle_,&circle_,&shutter_,&textures_,&colour_math_,&replaced_sprites_}) packets->release();
-    layer_filter_.release();
+    for(auto* packets:{&stars_,&backgrounds_,&tunnel_,&cockpit_,&sprites_,&reticle_,&circle_,&shutter_,&textures_,&colour_math_,&replaced_sprites_,&engine_glow_}) packets->release();
+    layer_filter_.release();ray_shadows_.release();shadows_active_=false;
     frame_.reset();world_.release();uploads_.release();pipelines_.release();device_=nullptr;
 }
 bool SdlFrameRenderer::prepare(SDL_GPUCommandBuffer* command,const vr::GameSceneSnapshot& previous,
@@ -112,6 +114,8 @@ bool SdlFrameRenderer::prepare(SDL_GPUCommandBuffer* command,const vr::GameScene
             sdl_blend(f.circle->blend)),circle_.status());
         if(f.colour_math) require(colour_math_.initialize(device_,uploads_,std::span(&f.colour_math->packet,1),{},false,false,
             sdl_blend(f.colour_math->blend)),colour_math_.status());
+        if(f.engine_glow) require(engine_glow_.initialize(device_,uploads_,std::span(&f.engine_glow->packet,1),{},true,false,
+            sdl_blend(f.engine_glow->blend)),engine_glow_.status());
         if(f.shutter) require(shutter_.initialize(device_,uploads_,std::span(&*f.shutter,1),{},false),shutter_.status());
         require(uploads_.flush(device_,command),uploads_.status());
         require(world_.initialize(device_,command,f.world,f.moving),world_.status());
@@ -119,14 +123,71 @@ bool SdlFrameRenderer::prepare(SDL_GPUCommandBuffer* command,const vr::GameScene
         status_="MODERN frame prepared";return true;
     } catch(const std::exception& error) {uploads_.clear();status_=error.what();return false;}
 }
+bool SdlFrameRenderer::record_shadows(SDL_GPUCommandBuffer* command,const vr::EyeCamera& camera,
+    std::optional<render::shadows::Vec3> toward_light,const std::function<bool(uint32_t)>& caster,const ShadowSettings& settings,
+    const LightInputs* lights) {
+    shadows_active_=sun_active_=false;shadow_settings_=settings;point_lights_.clear();
+    shadow_settings_.brightness=std::clamp(settings.brightness,0.F,1.F);
+    shadow_settings_.samples=std::clamp(settings.samples,1U,16U);
+    const bool receiver=std::any_of(frame_.backgrounds.begin(),frame_.backgrounds.end(),[&](const auto& packet) {
+        // The landscape ground where the cartridge draws shadows; the 3D
+        // corridor and the boss room always.
+        return (settings.cartridge_shadows && vr::is_landscape_ground(packet)) || vr::is_tunnel_corridor(packet)
+            || vr::is_nucleus_room(packet) || vr::is_nucleus_floor(packet);
+    });
+    const bool sun=toward_light && receiver && !settings.no_shadows;
+    const auto eye=reversed_depth_camera(camera);
+    if(sun || lights) {
+        // Emissive lights need the casters for their own shadow rays, sun
+        // or not (space has no sun shadows); any direction serves the
+        // casters' sun-plane bounds then.
+        if(!ray_shadows_.record(device_,command,world_,eye,sun?*toward_light:render::shadows::Vec3{0,-1,0},caster)) {
+            status_=ray_shadows_.status();world_.set_hide_source_shadows(false);return false;
+        }
+        sun_active_=sun;
+        if(lights) point_lights_=ray_shadows_.lights(eye,frame_.world.compute_models,frame_.world.packets,frame_.world.handles,
+            lights->emitter,lights->bomb,max_point_lights,shadow_settings_.light_reach,lights->tick);
+        shadows_active_=sun_active_ || !point_lights_.empty();
+    }
+    // Ray-traced shadows replace the cartridge's polygons, never both.
+    world_.set_hide_source_shadows(sun_active_ || settings.no_shadows);
+    pipelines_.set_shadow_buffers(shadows_active_?ray_shadows_.triangles():nullptr,shadows_active_?ray_shadows_.objects():nullptr);
+    return true;
+}
 void SdlFrameRenderer::push_fog(SDL_GPUCommandBuffer* command,const vr::EyeCamera& camera,unsigned mode) const noexcept {
-    std::array<float,8> data{};
+    // scene_sdl.hlsl SdlFog: fog colour, fog params, the shadow block, then
+    // the emissive point lights.
+    std::array<float,40+16*max_point_lights> data{};
     if(mode && frame_.fog) {
         const auto& fog=*frame_.fog;
         for(unsigned c=0;c<4;++c) data[c]=fog.colour[c];
         // Reversed depth: normalized depth = near / distance (metres, 256
         // source units each).
         data[4]=fog.start;data[5]=fog.end;data[6]=std::abs(camera.projection[14])*256.F;data[7]=float(mode);
+    }
+    // Receivers: the landscape's ground (mode 2) and the world's models (mode 1).
+    // Sun shadows (light_params.w) and point lights choose them separately.
+    const bool sun=sun_active_ && ray_shadows_.object_count() && (mode==2 || (mode==1 && shadow_settings_.models));
+    const bool lit=!point_lights_.empty() && (mode==1 || mode==2);
+    if(shadows_active_ && (sun || lit)) {
+        const auto& light=ray_shadows_.light();
+        data[8]=mode==2?2.F:1.F;data[9]=float(ray_shadows_.object_count());data[10]=shadow_settings_.brightness;
+        data[11]=float(shadow_settings_.samples);
+        data[12]=float(light.x);data[13]=float(light.y);data[14]=float(light.z);data[15]=2e-4F;
+        data[16]=float(target_width_);data[17]=target_height_;data[18]=shadow_settings_.radius;
+        std::copy(shadow_unproject_.begin(),shadow_unproject_.end(),data.begin()+20);
+        // light_params: point light count, brightness steps, strength, sun on.
+        data[36]=lit?float(point_lights_.size()):0.F;data[37]=float(shadow_settings_.light_steps);
+        data[38]=shadow_settings_.light_strength;data[39]=sun?1.F:0.F;
+        for(std::size_t i=0;lit && i<point_lights_.size();++i) {
+            const auto& point=point_lights_[i];
+            float* out=data.data()+40+i*16;
+            out[0]=point.position[0];out[1]=point.position[1];out[2]=point.position[2];out[3]=point.radius;
+            out[4]=point.colour[0];out[5]=point.colour[1];out[6]=point.colour[2];out[7]=std::bit_cast<float>(point.object);
+            out[8]=point.axis[0];out[9]=point.axis[1];out[10]=point.axis[2];out[11]=point.aspect;
+            out[12]=point.hardness;out[13]=point.projected?1.F:0.F;out[14]=point.fade_height;
+            out[15]=point.background_only?1.F:0.F;
+        }
     }
     SDL_PushGPUFragmentUniformData(command,1,data.data(),sizeof(data));
 }
@@ -159,6 +220,31 @@ bool SdlFrameRenderer::record(SDL_GPUCommandBuffer* command,SDL_GPURenderPass* p
     const auto& f=frame_;
     auto camera=reversed_depth_camera(source_camera);
     if(filter_2d_) camera.effects[3]|=1U;
+    if(shadows_active_) {
+        // Rows of the inverse of the projection the scene shader draws with
+        // (sdl_scene_constants: Y negated), for receiver positions.
+        std::array<double,32> m{};
+        for(unsigned row=0;row<4;++row) for(unsigned column=0;column<4;++column) {
+            m[row*8+column]=camera.projection[column*4+row]*(row==1?-1.:1.);
+            m[row*8+4+column]=row==column?1.:0.;
+        }
+        bool invertible=true;
+        for(unsigned column=0;column<4 && invertible;++column) {
+            unsigned pivot=column;
+            for(unsigned row=column+1;row<4;++row) if(std::abs(m[row*8+column])>std::abs(m[pivot*8+column])) pivot=row;
+            if(std::abs(m[pivot*8+column])<1e-30) {invertible=false;break;}
+            for(unsigned k=0;k<8;++k) std::swap(m[column*8+k],m[pivot*8+k]);
+            const double scale=1/m[column*8+column];
+            for(unsigned k=0;k<8;++k) m[column*8+k]*=scale;
+            for(unsigned row=0;row<4;++row) if(row!=column) {
+                const double factor=m[row*8+column];
+                for(unsigned k=0;k<8;++k) m[row*8+k]-=factor*m[column*8+k];
+            }
+        }
+        if(!invertible) shadows_active_=false;
+        else for(unsigned row=0;row<4;++row) for(unsigned column=0;column<4;++column)
+            shadow_unproject_[row*4+column]=float(m[row*8+4+column]);
+    }
     // Output pixels per source pixel, 4.4 fixed point (bits 8-19): ground dots.
     // A headset view measures it like the PCVR app: the native 1/256 tangent.
     const float source_pixel=f.settings().headset?target_height_*std::abs(camera.projection[5])/512.F:source_pixel_;
@@ -185,6 +271,7 @@ bool SdlFrameRenderer::record(SDL_GPUCommandBuffer* command,SDL_GPURenderPass* p
     push_fog(command,camera,1);
     if(!world_.record(command,pass,pipelines_,camera)) return fail("world");
     push_fog(command,camera,0);
+    if(f.engine_glow && !engine_glow_.record(command,pass,pipelines_,camera)) return fail("engine glow");
     if(f.cockpit && !cockpit_.record(command,pass,pipelines_,camera)) return fail("cockpit HUD");
     if(f.circle && !f.circle->over_hud && !circle_.record(command,pass,pipelines_,camera)) return fail("circle");
     const vr::Matrix4 ndc{1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};

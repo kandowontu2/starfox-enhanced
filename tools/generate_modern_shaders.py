@@ -21,6 +21,7 @@ shaders = [
                       ('vertex', 'vs_6_0', 'composite_vertex', []),
                       ('fragment', 'ps_6_0', 'composite_fragment', [])],
      'starfox::modern::layer_filter_shader', ''),
+    ('ray_shadow', [('compute', 'cs_6_0', 'main', [])], 'starfox::modern::ray_shadow_shader', ''),
 ]
 for name, stages, namespace, extra in shaders:
     source = root / f'src/modern/shaders/{name}.hlsl'

@@ -2,6 +2,7 @@
 #include "starfox/modern/frame_policy.hpp"
 #include "starfox/vr/modern_frame.hpp"
 #include "starfox/vr/source_span_model.hpp"
+#include "starfox/vr/source_ray_topology.hpp"
 #include "render/shaders/generated/spans_portable.hpp"
 #include "render/shaders/generated/clip_continuous_portable.hpp"
 #include "render/shaders/generated/continuous_portable.hpp"
@@ -92,6 +93,10 @@ struct SdlSourceModel::State {
     std::array<SDL_GPUBuffer*,size_t(R::count)> regions{};
     SDL_GPUBuffer* arena{};
     SDL_GPUBuffer* triangles{};SDL_GPUBuffer* lines{};
+    // Shadow caster topology (vr::source_ray_topology), uploaded on change.
+    SDL_GPUBuffer* ray_topology{};uint32_t ray_capacity{};
+    std::vector<std::array<uint32_t,4>> ray_triangles;
+    uint32_t ray_points{},ray_corners{},ray_mode{};
     uint32_t triangle_count{},line_count{};
     std::array<uint32_t,5> counts{};
     uint32_t corner_capacity{3};
@@ -101,9 +106,25 @@ struct SdlSourceModel::State {
     ~State() {
         if(!device) return;
         for(auto* buffer:regions) if(buffer) SDL_ReleaseGPUBuffer(device,buffer);
-        for(auto* buffer:{arena,triangles,lines}) if(buffer) SDL_ReleaseGPUBuffer(device,buffer);
+        for(auto* buffer:{arena,triangles,lines,ray_topology}) if(buffer) SDL_ReleaseGPUBuffer(device,buffer);
     }
     bool active(unsigned stage) const noexcept {return !unclipped || stage>=2;}
+    // A model without polygons (or with unusable topology) casts nothing.
+    void update_ray_topology(SdlUploadBatch& uploads,const vr::SourceSpanModel& model) {
+        std::vector<std::array<uint32_t,4>> next;std::string error;
+        ray_points=model.projection_settings[0];ray_corners=uint32_t(model.faces.corners.size());
+        ray_mode=model.projection_settings[2];
+        if(!vr::source_ray_topology(model.faces,ray_points,next,error)) next.clear();
+        if(next==ray_triangles) return;
+        ray_triangles=std::move(next);
+        if(ray_triangles.empty()) return;
+        const auto bytes=uint32_t(ray_triangles.size()*sizeof(ray_triangles[0]));
+        if(bytes>ray_capacity) {
+            if(ray_topology) SDL_ReleaseGPUBuffer(device,ray_topology);
+            ray_topology=create_buffer(device,SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ,bytes);ray_capacity=bytes;
+        }
+        uploads.add(ray_topology,0,ray_triangles.data(),bytes,true);
+    }
 };
 SdlSourceModel::SdlSourceModel()=default;
 SdlSourceModel::~SdlSourceModel()=default;
@@ -132,7 +153,7 @@ bool SdlSourceModel::initialize(SDL_GPUDevice* device,SdlUploadBatch& uploads,co
         next->mixed=!next->unclipped && vr::source_span_has_ordinary_faces(model);
         next->corner_capacity=vr::source_span_corner_capacity(model);
         require(!next->unclipped || next->corner_capacity<=32,"Source polygon template exceeds corner limit");
-        next->arena=create_buffer(device,SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ,next->layout.bytes);
+        next->arena=create_buffer(device,SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ|SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ,next->layout.bytes);
         uploads.add(next->arena,0,next->image.data(),uint32_t(next->image.size()));
         for(unsigned stage=0;stage<5;++stage) if(next->active(stage))
             for(unsigned binding=0;binding+1<stage_counts[stage];++binding) {
@@ -170,6 +191,7 @@ bool SdlSourceModel::initialize(SDL_GPUDevice* device,SdlUploadBatch& uploads,co
             next->lines=create_buffer(device,SDL_GPU_BUFFERUSAGE_VERTEX,lines.size()*sizeof(vr::SceneVertex));
             uploads.add(next->lines,0,lines.data(),uint32_t(lines.size()*sizeof(vr::SceneVertex)));
         }
+        next->update_ray_topology(uploads,model);
         state_=std::move(next);status_="MODERN source model ready";return true;
     } catch(const std::exception& error) {status_=error.what();return false;}
 }
@@ -209,8 +231,16 @@ bool SdlSourceModel::update(SdlUploadBatch& uploads,const vr::SourceSpanModel& m
             }
         }
         if(changed) s.compute_dirty=true;
+        s.update_ray_topology(uploads,model);
         status_="MODERN source model updated";return true;
     } catch(const std::exception& error) {status_=error.what();s.inputs.clear();s.scratch.clear();return false;}
+}
+bool SdlSourceModel::ray_source(RaySource& output) const noexcept {
+    if(!state_ || state_->ray_triangles.empty() || !state_->ray_topology) return false;
+    const auto& s=*state_;
+    output={s.arena,s.ray_topology,uint32_t(s.ray_triangles.size()),s.ray_points,s.ray_corners,s.ray_mode,
+        uint32_t(s.layout[R::points].offset/4),uint32_t(s.layout[R::residuals].offset/4),uint32_t(s.layout[R::corners].offset/4)};
+    return true;
 }
 bool SdlSourceModel::record_compute(SDL_GPUCommandBuffer* command,SdlSourceStages& stages,bool& publish) {
     publish=false;
@@ -265,7 +295,7 @@ bool SdlSourceModel::record_graphics(SDL_GPUCommandBuffer* command,SDL_GPURender
         SDL_BindGPUVertexBuffers(pass,0,&binding,1);
         SDL_GPUBuffer* arena=s.arena;
         SDL_BindGPUVertexStorageBuffers(pass,0,&arena,1);
-        SDL_BindGPUFragmentStorageBuffers(pass,0,&arena,1);
+        pipelines.bind_fragment_storage(pass,arena);
         SDL_PushGPUVertexUniformData(command,0,&constants,sizeof(constants));
         SDL_PushGPUFragmentUniformData(command,0,&constants,sizeof(constants));
         pipelines.push_line_brush(command,pipeline==lines?SceneTopology::lines:SceneTopology::triangles);
@@ -351,6 +381,14 @@ bool SdlSourceScene::initialize(SDL_GPUDevice* device,SDL_GPUCommandBuffer* comm
         state_=std::move(next);status_="MODERN ordered source scene ready";return true;
     } catch(const std::exception& error) {uploads_.clear();status_=error.what();return false;}
 }
+std::vector<SdlSourceScene::RayCaster> SdlSourceScene::ray_casters() const {
+    std::vector<RayCaster> casters;
+    if(!state_) return casters;
+    for(const auto& draw:state_->draws) if(draw.model)
+        casters.push_back({state_->handles[draw.packet_index],draw.placement,draw.model->units(),draw.model.get(),
+            draw.packet_index<state_->enclosing.size() && state_->enclosing[draw.packet_index]});
+    return casters;
+}
 bool SdlSourceScene::record_compute(SDL_GPUCommandBuffer* command) {
     if(!state_ || !command) return false;
     std::vector<const SdlSourceModel*> published;
@@ -388,12 +426,15 @@ bool SdlSourceScene::record(SDL_GPUCommandBuffer* command,SDL_GPURenderPass* pas
                     ++legacy_packet;
                 }
                 const bool enclosing=legacy_packet<state_->enclosing.size() && state_->enclosing[legacy_packet];
-                if(enclosing==painter && !state_->packets->record_range(command,pass,pipelines,camera,draw.legacy_first+item,1))
+                const bool hidden=hide_source_shadows_ && legacy_packet<state_->handles.size()
+                    && vr::is_source_shadow_pass(state_->handles[legacy_packet]);
+                if(enclosing==painter && !hidden && !state_->packets->record_range(command,pass,pipelines,camera,draw.legacy_first+item,1))
                     return false;
                 ++legacy_packet;
             }
             if(!draw.model) continue;
             if(state_->enclosing[draw.packet_index]!=painter) continue;
+            if(hide_source_shadows_ && vr::is_source_shadow_pass(state_->handles[draw.packet_index])) continue;
             auto draw_camera=camera;
             if(state_->source_packets[draw.packet_index].preserve_native_colour
                 || vr::is_source_shadow_pass(state_->handles[draw.packet_index])) draw_camera.effects={0,0,0,camera.effects[3]};

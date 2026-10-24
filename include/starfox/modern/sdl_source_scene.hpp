@@ -48,6 +48,16 @@ public:
     bool record_graphics(SDL_GPUCommandBuffer*,SDL_GPURenderPass*,SdlScenePipelines&,const vr::EyeCamera&) const;
     float units() const noexcept;
     bool unclipped() const noexcept;
+    // Ray-traced shadow caster input (SdlRayShadows): the arena with this
+    // frame's projected points, the static triangle topology (three corner
+    // indices per triangle, vr::source_ray_topology) and the arena word
+    // offsets ray_shadow.hlsl reads. False when the model has no polygons.
+    struct RaySource {
+        SDL_GPUBuffer* arena{};SDL_GPUBuffer* topology{};
+        uint32_t triangles{},points{},corners{},mode{};
+        uint32_t points_word{},residuals_word{},corners_word{};
+    };
+    bool ray_source(RaySource&) const noexcept;
     const std::string& status() const noexcept {return status_;}
 private:
     struct State;
@@ -72,6 +82,14 @@ public:
         std::span<const uint16_t> moving={});
     bool record_compute(SDL_GPUCommandBuffer*);
     bool record(SDL_GPUCommandBuffer*,SDL_GPURenderPass*,SdlScenePipelines&,const vr::EyeCamera&) const;
+    // While ray-traced shadows replace them, record() skips the cartridge's
+    // own shadow polygons (vr::is_source_shadow_pass), as GPU FAST and VR do.
+    void set_hide_source_shadows(bool hide) noexcept {hide_source_shadows_=hide;}
+    // Every compute-route world model this frame, with its object key and
+    // placement (model -> frame eye space before the eye view). `enclosing`
+    // marks scenery around the camera (tunnel sections, hangars).
+    struct RayCaster {uint32_t key{};vr::Matrix4 placement{};float units{};const SdlSourceModel* model{};bool enclosing{};};
+    std::vector<RayCaster> ray_casters() const;
     // Compute models this frame that the SDL path cannot draw yet (warp/axis).
     std::size_t unsupported_models() const noexcept {return unsupported_;}
     std::size_t compute_models() const noexcept {return compute_models_;}
@@ -83,6 +101,7 @@ private:
     SdlSourceStages stages_;
     SdlUploadBatch uploads_;
     std::size_t unsupported_{},compute_models_{};
+    bool hide_source_shadows_{};
     std::string status_{"Source scene not initialized"};
 };
 }

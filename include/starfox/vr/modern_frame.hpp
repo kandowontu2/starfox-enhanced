@@ -57,6 +57,12 @@ public:
     // A full-screen or layer effect drawn with a blend, below or above OBJ.
     struct Overlay {DrawPacket packet;SceneBlend blend{SceneBlend::opaque};bool over_hud{};};
     void set_settings(Settings settings) noexcept {settings_=settings;}
+    // The player's engine glow (optional, off unless set each frame): a soft
+    // pool of the engine's red/yellow flicker on the landscape ground at its
+    // shadow. `toward_light` is the direction to the sun in scene axes
+    // (+Y up, -Z forward, before the eye's view); unset = straight above the ground.
+    struct EngineGlowSettings {bool enabled{};std::optional<std::array<float,3>> toward_light;};
+    void set_engine_glow(EngineGlowSettings glow) noexcept {engine_glow_settings_=glow;}
     const Settings& settings() const noexcept {return settings_;}
     // Replacement landscape art by file name (bg_XXXX_sky.png, ...); empty
     // when absent. Unset = none.
@@ -113,10 +119,14 @@ public:
     std::optional<DrawPacket> cockpit;
     std::optional<Overlay> reticle;
     std::optional<Overlay> circle,colour_math;
+    // The engine glow: drawn after the world, depth-tested without writing
+    // depth, added (Overlay::blend), so objects in front cover it.
+    std::optional<Overlay> engine_glow;
     // Head-locked normalized-device shutter (identity camera).
     std::optional<DrawPacket> shutter;
 private:
     Settings settings_;
+    EngineGlowSettings engine_glow_settings_;
     std::function<std::optional<ModernImage>(const std::string&)> load_image_;
     std::function<void(uint16_t,const simulation::SnesPpuState&,float,std::span<const uint32_t>)> observe_landscape_;
     std::optional<uint64_t> layer_revision_;

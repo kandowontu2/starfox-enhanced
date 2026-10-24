@@ -154,7 +154,16 @@ Fragment vertex_main(Vertex input) {
 float4 styled_colour(float4 colour) {return scene_styled_colour(colour,camera.effects);}
 float4 fragment_solid_raw(Fragment input) {
     if(input.visible==0) discard;
-    if((input.texture.w&4096)!=0 && dot(input.perspective_uv,input.perspective_uv)>1.) discard;
+    if((input.texture.w&4096)!=0) {
+        float radius=dot(input.perspective_uv,input.perspective_uv);
+        if(radius>1.) discard;
+        // A glow decal (vr::ModernFrame::engine_glow): texture.y = 1 + the
+        // edge's start (fraction of the radius) x 65534, fading to the rim.
+        if(input.texture.y!=0) {
+            float edge=1.-smoothstep(float(input.texture.y-1)/65534.,1.,sqrt(radius));
+            return float4(input.color.rgb*edge*edge,input.color.a);
+        }
+    }
     if(input.dither_scale!=0) {
 #if defined(STARFOX_CALIBRATED_MSAA)
         // Smooth flat-model authored colour pairs, not framebuffer checkerboard
