@@ -40,7 +40,6 @@ bool plan_bg2_rects(const simulation::SnesPpuState& ppu,
     const auto tile_shift = ppu.bg2_tile_size_16 ? 4U : 3U;
     const auto x_mask = width_tiles * tile_edge - 1U;
     const auto y_mask = height_tiles * tile_edge - 1U;
-    const auto offset_phase = static_cast<std::uint32_t>(scroll_x) & 7U;
     std::array<std::uint16_t, 32U> vertical_offsets{};
     if (ppu.bg2_vertical_offsets_enabled) {
         for (std::uint32_t index = 0U; index < vertical_offsets.size(); ++index)
@@ -75,9 +74,10 @@ bool plan_bg2_rects(const simulation::SnesPpuState& ppu,
         for (std::size_t index = 0U; index < vertical_offsets.size(); ++index) {
             const auto entry = vertical_offsets[index];
             if ((entry & 0x4000U) == 0U) continue;
-            const auto raw = static_cast<std::int32_t>(entry & 0x1fffU);
-            auto difference = (raw - previous_raw) & 0x1fff;
-            if (difference > 4095) difference -= 8192;
+            const auto period = ppu.tunnel_scene ? 8192 : static_cast<int>(y_mask + 1U);
+            const auto raw = static_cast<std::int32_t>(entry & (period - 1));
+            auto difference = (raw - previous_raw) & (period - 1);
+            if (difference > period / 2 - 1) difference -= period;
             const auto unwrapped = have_previous
                 ? previous_unwrapped + difference : raw;
             const auto column = static_cast<double>(index + 1U);
@@ -100,20 +100,34 @@ bool plan_bg2_rects(const simulation::SnesPpuState& ppu,
         fitted_intercept = (sum_y - fitted_slope * sum_x) / count;
     }
     constexpr auto no_column_offset = std::numeric_limits<std::int32_t>::min();
-    std::array<std::int32_t, 400U> column_offsets{};
-    column_offsets.fill(no_column_offset);
-    if (fitted_samples != 0U) {
+    // The shared renderer resolves offsets at each scanline's fine horizontal
+    // phase. A frame-wide phase and signed lround disagree at rolled map seams.
+    // Lazily resolve only phases actually requested, retaining bounded scratch.
+    std::array<std::array<std::int32_t, 400U>,8> phase_columns;
+    std::array<bool,8> phase_ready{};
+    const auto columns_for = [&](int row_scroll_x) -> const std::array<std::int32_t,400U>& {
+        const auto phase=unsigned(row_scroll_x)&7U;
+        auto& column_offsets=phase_columns[phase];
+        if(phase_ready[phase]) return column_offsets;
+        phase_ready[phase]=true;column_offsets.fill(no_column_offset);
+        if (fitted_samples != 0U) {
         for (std::uint32_t x = 0U; x < target_width; ++x) {
             const auto logical_x = static_cast<std::int32_t>(x) - origin_x;
             const auto visible_column = static_cast<double>(logical_x
-                + (scroll_x & 7)) / 8.0;
-            auto offset = static_cast<std::int32_t>(std::lround(
-                fitted_intercept + fitted_slope * visible_column));
+                + int(phase)) / 8.0;
+            const auto fitted=fitted_intercept+fitted_slope*visible_column;
+            const auto magnitude=std::abs(fitted);
+            auto rounded=static_cast<std::int32_t>(magnitude);
+            const auto fraction=magnitude-rounded;
+            rounded+=!ppu.tunnel_scene && fitted<0 ? fraction>.5 : fraction>=.5;
+            auto offset=fitted<0 ? -rounded : rounded;
             offset %= 8192;
             if (offset < 0) offset += 8192;
             column_offsets[x] = offset;
         }
-    }
+        }
+        return column_offsets;
+    };
 
     auto& planned = output;
     planned.reserve(std::min<std::size_t>(capacity, 16384U));
@@ -148,6 +162,8 @@ bool plan_bg2_rects(const simulation::SnesPpuState& ppu,
     for (std::uint32_t band_top = 0U; band_top < target_height;) {
         const auto band_scroll_x = row_scroll_x_values[band_top];
         const auto band_scroll_y = row_scroll_y_values[band_top];
+        const auto offset_phase=unsigned(band_scroll_x)&7U;
+        const auto& column_offsets=columns_for(band_scroll_x);
         auto band_end = band_top + 1U;
         while (band_end < target_height
             && (!ppu.bg2_horizontal_offsets_enabled
@@ -423,8 +439,12 @@ bool plan_bg2_rects(const simulation::SnesPpuState& ppu,
         const auto first_ground_y = std::min(target_height,
             static_cast<std::uint32_t>(std::max<std::int32_t>(
                 origin_y + 144, 0)));
+        const bool constant_phase=std::all_of(row_scroll_x_values.begin(),row_scroll_x_values.begin()+target_height,
+            [&](int value){return (unsigned(value)&7U)==(unsigned(row_scroll_x_values[0])&7U);});
         for (std::uint32_t x = 0U; x < target_width; ++x) {
             const auto logical_x = static_cast<std::int32_t>(x) - origin_x;
+            const auto offset_phase=unsigned(row_scroll_x_values[0])&7U;
+            const auto& column_offsets=columns_for(row_scroll_x_values[0]);
             const auto column = logical_x >= 0
                 ? (static_cast<std::uint32_t>(logical_x) + offset_phase) / 8U
                 : 33U;
@@ -433,8 +453,8 @@ bool plan_bg2_rects(const simulation::SnesPpuState& ppu,
                 column_offsets[x] != no_column_offset;
             const bool table_column = index < vertical_offsets.size()
                 && (vertical_offsets[index] & 0x4000U) != 0U;
-            const bool fixed_vertical_scroll = fitted_column || table_column
-                || !ppu.bg2_scanline_scroll_enabled;
+            const bool fixed_vertical_scroll = constant_phase && (fitted_column || table_column
+                || !ppu.bg2_scanline_scroll_enabled);
             const auto fixed_scroll_y = fitted_column
                 ? column_offsets[x]
                 : table_column
@@ -442,7 +462,8 @@ bool plan_bg2_rects(const simulation::SnesPpuState& ppu,
                         & 0x1fffU)
                     : scroll_y;
             const auto scroll_at = [&](std::uint32_t y) {
-                if (fitted_column) return column_offsets[x];
+                const auto& columns=columns_for(row_scroll_x_values[y]);
+                if (columns[x]!=no_column_offset) return columns[x];
                 if (table_column) return fixed_scroll_y;
                 return row_scroll_y_values[y];
             };

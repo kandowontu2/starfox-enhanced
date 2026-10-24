@@ -52,6 +52,9 @@ It declines to the complete existing path when vertex or padded-texture residenc
 cannot fit. Distant space panoramas no longer continue transparent stars as ground.
 Their map texture can survive scroll/roll-only changes without pixel expansion or
 upload; unique planet margins still retain the original source painter order.
+The reference mono atlas also follows each row's fine-scroll phase and the shared
+renderer’s periodic fit/tie rules. Its separate pixel oracle now checks folded
+maps and all eight HDMA phases, rather than only comparing compacted/raw plans.
 
 Validation is currently headless (source replays, pixel oracles and source-only
 ARM CI), without desktop focus changes or input injection. The latest tester
