@@ -70,7 +70,7 @@ class PackageTests(unittest.TestCase):
                             instructions.index(b"## Current build and validation"))
             self.assertIn(b"/3ds/starfox-enhanced/Starfox-Assets.BIN", instructions)
             self.assertIn(b"pre-game menu", instructions)
-            self.assertIn(b"Original\n3DS/3DS XL/2DS are unsupported", instructions)
+            self.assertIn(b"Original\n3DS/3DS XL/2DS are unsupported", instructions.replace(b"\r\n", b"\n"))
             for line in archive.read("SHA256SUMS.txt").decode().splitlines():
                 digest, name = line.split("  ", 1)
                 self.assertEqual(hashlib.sha256(archive.read(name)).hexdigest(), digest)
