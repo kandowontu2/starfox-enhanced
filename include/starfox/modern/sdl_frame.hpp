@@ -30,7 +30,12 @@ public:
     // depth target cleared to clear_depth(). The frame draws with reversed
     // depth (reversed_depth_camera) for uniform precision at every distance:
     // coplanar source surfaces resolve by draw order, not depth rounding.
-    bool record(SDL_GPUCommandBuffer*,SDL_GPURenderPass*,const vr::EyeCamera&);
+    // Stereo eyes (modern::stereo_eye_cameras): the camera passed to
+    // record() draws the 3D world, ground, corridor and boss room; flat
+    // background art and the sky use `backdrop`, the reticle `reticle`, and
+    // the HUD, sprites and wipes `screen` (the mono camera).
+    struct LayerCameras {vr::EyeCamera backdrop,reticle,screen;};
+    bool record(SDL_GPUCommandBuffer*,SDL_GPURenderPass*,const vr::EyeCamera&,const LayerCameras* stereo=nullptr);
     // After prepare(), before the frame's pass: draws the layers the 2D
     // filter applies to at source resolution and filters them; record()
     // then composites them in their place.

@@ -216,7 +216,8 @@ bool SdlFrameRenderer::record_filtered_layers(SDL_GPUCommandBuffer* command,cons
     }
     return true;
 }
-bool SdlFrameRenderer::record(SDL_GPUCommandBuffer* command,SDL_GPURenderPass* pass,const vr::EyeCamera& source_camera) {
+bool SdlFrameRenderer::record(SDL_GPUCommandBuffer* command,SDL_GPURenderPass* pass,const vr::EyeCamera& source_camera,
+    const LayerCameras* stereo) {
     const auto& f=frame_;
     auto camera=reversed_depth_camera(source_camera);
     if(filter_2d_) camera.effects[3]|=1U;
@@ -249,6 +250,14 @@ bool SdlFrameRenderer::record(SDL_GPUCommandBuffer* command,SDL_GPURenderPass* p
     // A headset view measures it like the PCVR app: the native 1/256 tangent.
     const float source_pixel=f.settings().headset?target_height_*std::abs(camera.projection[5])/512.F:source_pixel_;
     camera.effects[3]|=uint32_t(std::clamp(source_pixel*16.F,16.F,4095.F))<<8;
+    // A stereo layer's camera: its own projection, the world camera's
+    // effects and depth convention.
+    const auto layer=[&](const vr::EyeCamera& chosen) {
+        auto result=reversed_depth_camera(chosen);result.effects=camera.effects;return result;
+    };
+    const auto backdrop=stereo?layer(stereo->backdrop):camera;
+    const auto reticle=stereo?layer(stereo->reticle):camera;
+    const auto screen=stereo?layer(stereo->screen):camera;
     const auto fail=[&](const char* layer) {status_=std::string("MODERN ")+layer+" recording failed: "+pipelines_.status();return false;};
     push_fog(command,camera,0);
     if(!stars_.record(command,pass,pipelines_,camera)) return fail("star");
@@ -260,6 +269,19 @@ bool SdlFrameRenderer::record(SDL_GPUCommandBuffer* command,SDL_GPURenderPass* p
         else background_camera.effects[2]=f.sky_turn;
         if(filter_backgrounds_) {
             if(!layer_filter_.composite(command,pass,0,samples_)) {status_=layer_filter_.status();return false;}
+        } else if(stereo) {
+            // Per item (one per nonempty packet): real 3D receivers take the
+            // eye's world camera, flat art and the sky its backdrop.
+            auto backdrop_camera=backdrop;backdrop_camera.effects[2]=background_camera.effects[2];
+            std::size_t item=0;
+            for(const auto& packet:f.backgrounds) {
+                if(packet.geometry.vertex_view().empty() && packet.geometry.line_view().empty()) continue;
+                const bool solid=vr::is_landscape_ground(packet) || vr::is_tunnel_corridor(packet)
+                    || vr::is_nucleus_room(packet) || vr::is_nucleus_floor(packet);
+                if(!backgrounds_.record_range(command,pass,pipelines_,solid?background_camera:backdrop_camera,item,1))
+                    return fail("background");
+                ++item;
+            }
         } else if(!backgrounds_.record(command,pass,pipelines_,background_camera)) return fail("background");
     }
     if(!f.textures.empty()) {
@@ -267,22 +289,22 @@ bool SdlFrameRenderer::record(SDL_GPUCommandBuffer* command,SDL_GPURenderPass* p
         if(!textures_.record(command,pass,pipelines_,mapped)) return fail("landscape texture");
     }
     push_fog(command,camera,0);
-    if(!tunnel_.record(command,pass,pipelines_,camera)) return fail("tunnel surround");
+    if(!tunnel_.record(command,pass,pipelines_,backdrop)) return fail("tunnel surround");
     push_fog(command,camera,1);
     if(!world_.record(command,pass,pipelines_,camera)) return fail("world");
     push_fog(command,camera,0);
     if(f.engine_glow && !engine_glow_.record(command,pass,pipelines_,camera)) return fail("engine glow");
-    if(f.cockpit && !cockpit_.record(command,pass,pipelines_,camera)) return fail("cockpit HUD");
-    if(f.circle && !f.circle->over_hud && !circle_.record(command,pass,pipelines_,camera)) return fail("circle");
+    if(f.cockpit && !cockpit_.record(command,pass,pipelines_,screen)) return fail("cockpit HUD");
+    if(f.circle && !f.circle->over_hud && !circle_.record(command,pass,pipelines_,screen)) return fail("circle");
     const vr::Matrix4 ndc{1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
     if(f.colour_math && !f.colour_math->over_hud && !colour_math_.record(command,pass,pipelines_,vr::EyeCamera{ndc,ndc}))
         return fail("colour math");
     if(filter_sprites_) {
         if(!layer_filter_.composite(command,pass,1,samples_)) {status_=layer_filter_.status();return false;}
-    } else if(!sprites_.record(command,pass,pipelines_,camera)) return fail("sprite");
-    if(!replaced_sprites_.record(command,pass,pipelines_,camera)) return fail("replacement sprite");
-    if(f.reticle && !reticle_.record(command,pass,pipelines_,camera)) return fail("reticle");
-    if(f.circle && f.circle->over_hud && !circle_.record(command,pass,pipelines_,camera)) return fail("circle");
+    } else if(!sprites_.record(command,pass,pipelines_,screen)) return fail("sprite");
+    if(!replaced_sprites_.record(command,pass,pipelines_,screen)) return fail("replacement sprite");
+    if(f.reticle && !reticle_.record(command,pass,pipelines_,reticle)) return fail("reticle");
+    if(f.circle && f.circle->over_hud && !circle_.record(command,pass,pipelines_,screen)) return fail("circle");
     if(f.colour_math && f.colour_math->over_hud && !colour_math_.record(command,pass,pipelines_,vr::EyeCamera{ndc,ndc}))
         return fail("colour math");
     // Head-locked normalized-device shutter: identity view and projection.

@@ -1,6 +1,7 @@
 #include "starfox/modern/modern_runtime.hpp"
 #include "starfox/modern/frame_policy.hpp"
 #include "starfox/modern/sdl_render_state.hpp"
+#include "starfox/render/stereo_output.hpp"
 #include "starfox/vr/decal_surface.hpp"
 #include "starfox/vr/source_models.hpp"
 #include "starfox/vr/source_shadow_environment.hpp"
@@ -10,6 +11,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <cstdlib>
 #include <optional>
 #include <stdexcept>
@@ -208,6 +210,8 @@ struct ModernRuntime::State {
     SDL_GPUDevice* device{};
     SDL_Renderer* renderer{};
     SDL_Texture* target{};
+    // TV stereo's second eye (`target` is the first), the same size.
+    SDL_Texture* right_eye{};
     SDL_Texture* overlay{};
     SDL_Texture* dialog{};
     std::vector<uint8_t> overlay_pixels;
@@ -220,11 +224,12 @@ struct ModernRuntime::State {
     bool captured{};
     void release_targets() noexcept {
         if(target) SDL_DestroyTexture(target);
+        if(right_eye) SDL_DestroyTexture(right_eye);
         if(overlay) SDL_DestroyTexture(overlay);
         if(dialog) SDL_DestroyTexture(dialog);
         if(depth && device) SDL_ReleaseGPUTexture(device,depth);
         if(multisample && device) SDL_ReleaseGPUTexture(device,multisample);
-        target=overlay=dialog=nullptr;depth=multisample=nullptr;width=height=0;
+        target=right_eye=overlay=dialog=nullptr;depth=multisample=nullptr;width=height=0;
     }
     ~State() {release_targets();frame.release();}
 };
@@ -272,6 +277,15 @@ bool ModernRuntime::present(SDL_Renderer* renderer,double alpha,int requested_wi
         // Default: the window's output, not whatever intermediate target is bound.
         if(width<=0 || height<=0)
             require(SDL_GetRenderOutputSize(renderer,&width,&height) && width>0 && height>0,"Read MODERN output size");
+        // TV stereo (STEREOSCOPIC 3D OUTPUT): both eyes at width x height,
+        // packed as GPU FAST packs them; half formats need an even size.
+        using render::StereoOutput;
+        const auto stereo_mode=s.preview?StereoOutput::off:StereoOutput(s.history.game().stereo_output());
+        const bool stereo=stereo_mode!=StereoOutput::off;
+        if(stereo_mode==StereoOutput::half_sbs) width-=width%2;
+        if(stereo_mode==StereoOutput::half_top_bottom) height-=height%2;
+        const auto layout=render::stereo_output_layout(stereo_mode,uint32_t(width),uint32_t(height));
+        require(layout && (!stereo || layout->eye_count==2),"MODERN stereo format has no layout");
         // ANTI-ALIASING (any type) is hardware MSAA here: LIGHT 2x, MEDIUM 4x,
         // HEAVY 8x, capped at what the device supports for both formats.
         SDL_GPUSampleCount samples=SDL_GPU_SAMPLECOUNT_1;
@@ -288,7 +302,7 @@ bool ModernRuntime::present(SDL_Renderer* renderer,double alpha,int requested_wi
                 && SDL_GPUTextureSupportsSampleCount(device,s.depth_format,samples)))
                 samples=static_cast<SDL_GPUSampleCount>(int(samples)-1);
         }
-        if(width!=s.width || height!=s.height || samples!=s.samples) {
+        if(width!=s.width || height!=s.height || samples!=s.samples || stereo!=(s.right_eye!=nullptr)) {
             if(std::getenv("STARFOX_TRACE_MODERN")) {
                 int window_w=0,window_h=0,current_w=0,current_h=0;
                 SDL_GetWindowSizeInPixels(SDL_GetRenderWindow(renderer),&window_w,&window_h);
@@ -300,6 +314,11 @@ bool ModernRuntime::present(SDL_Renderer* renderer,double alpha,int requested_wi
             s.target=SDL_CreateTexture(renderer,SDL_PIXELFORMAT_ABGR8888,SDL_TEXTUREACCESS_TARGET,width,height);
             require(s.target!=nullptr,"Create MODERN target");
             SDL_SetTextureBlendMode(s.target,SDL_BLENDMODE_NONE);
+            if(stereo) {
+                s.right_eye=SDL_CreateTexture(renderer,SDL_PIXELFORMAT_ABGR8888,SDL_TEXTUREACCESS_TARGET,width,height);
+                require(s.right_eye!=nullptr,"Create MODERN right eye");
+                SDL_SetTextureBlendMode(s.right_eye,SDL_BLENDMODE_NONE);
+            }
             SDL_GPUTextureCreateInfo depth{};
             depth.type=SDL_GPU_TEXTURETYPE_2D;depth.format=s.depth_format;depth.usage=SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
             depth.width=uint32_t(width);depth.height=uint32_t(height);depth.layer_count_or_depth=1;depth.num_levels=1;
@@ -316,9 +335,14 @@ bool ModernRuntime::present(SDL_Renderer* renderer,double alpha,int requested_wi
             s.frame.set_sample_count(samples);
             s.width=width;s.height=height;
         }
-        auto* colour=static_cast<SDL_GPUTexture*>(SDL_GetPointerProperty(
-            SDL_GetTextureProperties(s.target),SDL_PROP_TEXTURE_GPU_TEXTURE_POINTER,nullptr));
+        const auto gpu_texture=[](SDL_Texture* texture) {
+            return static_cast<SDL_GPUTexture*>(SDL_GetPointerProperty(
+                SDL_GetTextureProperties(texture),SDL_PROP_TEXTURE_GPU_TEXTURE_POINTER,nullptr));
+        };
+        auto* colour=gpu_texture(s.target);
         require(colour!=nullptr,"MODERN target has no GPU texture");
+        auto* right_colour=stereo?gpu_texture(s.right_eye):nullptr;
+        require(!stereo || right_colour!=nullptr,"MODERN right eye has no GPU texture");
         const auto previous=s.history.previous(),current=s.history.current();
         require(previous && current && current->ppu,"MODERN scene history incomplete");
         if(s.dump) s.dump->sprites(*current->ppu);
@@ -463,18 +487,31 @@ bool ModernRuntime::present(SDL_Renderer* renderer,double alpha,int requested_wi
             }
         }
         const auto clear=vr::frame_clear_colour(*current,s.inputs.srgb);
-        SDL_GPUColorTargetInfo target{};target.texture=colour;target.load_op=SDL_GPU_LOADOP_CLEAR;
-        target.store_op=SDL_GPU_STOREOP_STORE;target.clear_color={clear[0],clear[1],clear[2],1};
-        if(s.multisample) {
-            target.texture=s.multisample;target.store_op=SDL_GPU_STOREOP_RESOLVE;target.resolve_texture=colour;
+        // One pass per eye. The prepared frame, its filtered layers and the
+        // ray-traced shadow and light data are shared: the eyes differ only
+        // in projection (modern::stereo_eye_cameras), never in world space.
+        bool recorded=true;
+        for(unsigned eye=0;eye<(stereo?2U:1U) && recorded;++eye) {
+            auto* eye_colour=eye?right_colour:colour;
+            SDL_GPUColorTargetInfo target{};target.texture=eye_colour;target.load_op=SDL_GPU_LOADOP_CLEAR;
+            target.store_op=SDL_GPU_STOREOP_STORE;target.clear_color={clear[0],clear[1],clear[2],1};
+            if(s.multisample) {
+                target.texture=s.multisample;target.store_op=SDL_GPU_STOREOP_RESOLVE;target.resolve_texture=eye_colour;
+            }
+            SDL_GPUDepthStencilTargetInfo depth_target{};depth_target.texture=s.depth;depth_target.clear_depth=SdlFrameRenderer::clear_depth();
+            depth_target.load_op=SDL_GPU_LOADOP_CLEAR;depth_target.store_op=SDL_GPU_STOREOP_DONT_CARE;
+            depth_target.stencil_load_op=SDL_GPU_LOADOP_DONT_CARE;depth_target.stencil_store_op=SDL_GPU_STOREOP_DONT_CARE;
+            auto* pass=SDL_BeginGPURenderPass(command,&target,1,&depth_target);
+            if(!pass) {SDL_CancelGPUCommandBuffer(command);throw std::runtime_error("Begin MODERN render pass");}
+            if(stereo) {
+                const auto& game=s.history.game();
+                const auto eyes=stereo_eye_cameras(camera,eye,game.stereo_separation(),game.stereo_convergence(),
+                    game.stereo_crosshair_depth());
+                const SdlFrameRenderer::LayerCameras layers{eyes.backdrop,eyes.reticle,camera};
+                recorded=s.frame.record(command,pass,eyes.world,&layers);
+            } else recorded=s.frame.record(command,pass,camera);
+            SDL_EndGPURenderPass(pass);
         }
-        SDL_GPUDepthStencilTargetInfo depth_target{};depth_target.texture=s.depth;depth_target.clear_depth=SdlFrameRenderer::clear_depth();
-        depth_target.load_op=SDL_GPU_LOADOP_CLEAR;depth_target.store_op=SDL_GPU_STOREOP_DONT_CARE;
-        depth_target.stencil_load_op=SDL_GPU_LOADOP_DONT_CARE;depth_target.stencil_store_op=SDL_GPU_STOREOP_DONT_CARE;
-        auto* pass=SDL_BeginGPURenderPass(command,&target,1,&depth_target);
-        if(!pass) {SDL_CancelGPUCommandBuffer(command);throw std::runtime_error("Begin MODERN render pass");}
-        const bool recorded=s.frame.record(command,pass,camera);
-        SDL_EndGPURenderPass(pass);
         if(std::getenv("STARFOX_TRACE_MODERN_GPU")) {
             // Test-only: wait for the frame's GPU work after submission and
             // report the mean every 120 frames (no timestamp queries in SDL_GPU).
@@ -494,34 +531,70 @@ bool ModernRuntime::present(SDL_Renderer* renderer,double alpha,int requested_wi
         SDL_SetRenderTarget(renderer,nullptr);SDL_SetRenderViewport(renderer,nullptr);
         // Same presentation as the existing renderer: letterboxed (or integer
         // scaled) at the frame's own aspect; only FIT SCREEN stretches.
+        // Stereo letterboxes the packed eyes (layout size) as one picture.
+        const int content_w=int(layout->width),content_h=int(layout->height);
         SDL_FRect destination{0,0,0,0};
         bool letterbox=mode!=SDL_LOGICAL_PRESENTATION_STRETCH;
         int output_w=0,output_h=0;
         if(letterbox && SDL_GetCurrentRenderOutputSize(renderer,&output_w,&output_h) && output_w>0 && output_h>0) {
-            double scale=std::min(double(output_w)/width,double(output_h)/height);
+            double scale=std::min(double(output_w)/content_w,double(output_h)/content_h);
             if(mode==SDL_LOGICAL_PRESENTATION_INTEGER_SCALE && scale>=1) scale=std::floor(scale);
-            destination.w=float(std::round(width*scale));destination.h=float(std::round(height*scale));
+            destination.w=float(std::round(content_w*scale));destination.h=float(std::round(content_h*scale));
             destination.x=float(std::floor((output_w-destination.w)/2));destination.y=float(std::floor((output_h-destination.h)/2));
             SDL_SetRenderDrawColor(renderer,0,0,0,255);SDL_RenderClear(renderer);
         } else letterbox=false;
-        require(SDL_RenderTexture(renderer,s.target,nullptr,letterbox?&destination:nullptr),"Draw MODERN frame");
+        SDL_FRect content=destination;
+        if(!letterbox) {
+            int full_w=0,full_h=0;SDL_GetCurrentRenderOutputSize(renderer,&full_w,&full_h);
+            content={0,0,float(full_w),float(full_h)};
+        }
+        // Each eye's rectangle in the window: its layout viewport, scaled.
+        const auto eye_rect=[&](unsigned eye) {
+            const auto& viewport=layout->eyes[eye];
+            const float sx=content.w/float(content_w),sy=content.h/float(content_h);
+            return SDL_FRect{content.x+float(viewport.x)*sx,content.y+float(viewport.y)*sy,
+                float(viewport.width)*sx,float(viewport.height)*sy};
+        };
+        if(!stereo) require(SDL_RenderTexture(renderer,s.target,nullptr,letterbox?&destination:nullptr),"Draw MODERN frame");
+        else if(render::stereo_overlay(stereo_mode)) {
+            // Interlaced rows and anaglyph tints over the whole picture, in
+            // the window's physical pixels.
+            if(!letterbox) {SDL_SetRenderDrawColor(renderer,0,0,0,255);SDL_RenderClear(renderer);}
+            int full_w=0,full_h=0;SDL_GetCurrentRenderOutputSize(renderer,&full_w,&full_h);
+            require(render::render_stereo_overlay(renderer,s.target,s.right_eye,stereo_mode,uint32_t(full_w),uint32_t(full_h),
+                std::array<float,4>{content.x,content.y,content.w,content.h}),"Draw MODERN stereo overlay");
+        } else for(unsigned eye=0;eye<2;++eye) {
+            const auto at=eye_rect(eye);
+            SDL_SetTextureScaleMode(eye?s.right_eye:s.target,SDL_SCALEMODE_LINEAR);
+            require(SDL_RenderTexture(renderer,eye?s.right_eye:s.target,nullptr,&at),"Draw MODERN stereo eye");
+        }
         if(capture_path) {
             // Capture the GPU target that is blitted 1:1 to the window (never
             // a CPU buffer). SDL_RenderReadPixels returns nothing for hidden
-            // test windows, so download the texture itself.
+            // test windows, so download the texture itself. Stereo captures
+            // both eyes side by side, left first, at full size each.
             SDL_GPUTransferBufferCreateInfo info{};
-            info.usage=SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;info.size=uint32_t(width)*uint32_t(height)*4U;
+            const unsigned eyes=stereo?2U:1U;
+            info.usage=SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;info.size=uint32_t(width)*uint32_t(height)*4U*eyes;
             if(auto* download=SDL_CreateGPUTransferBuffer(device,&info)) {
                 auto* copy_command=SDL_AcquireGPUCommandBuffer(device);
                 auto* copy=copy_command?SDL_BeginGPUCopyPass(copy_command):nullptr;
                 if(copy) {
-                    SDL_GPUTextureRegion region{};region.texture=colour;region.w=uint32_t(width);region.h=uint32_t(height);region.d=1;
-                    SDL_GPUTextureTransferInfo destination{download,0,uint32_t(width),uint32_t(height)};
-                    SDL_DownloadFromGPUTexture(copy,&region,&destination);SDL_EndGPUCopyPass(copy);
+                    for(unsigned eye=0;eye<eyes;++eye) {
+                        SDL_GPUTextureRegion region{};region.texture=eye?right_colour:colour;
+                        region.w=uint32_t(width);region.h=uint32_t(height);region.d=1;
+                        SDL_GPUTextureTransferInfo destination{download,uint32_t(width)*uint32_t(height)*4U*eye,uint32_t(width),uint32_t(height)};
+                        SDL_DownloadFromGPUTexture(copy,&region,&destination);
+                    }
+                    SDL_EndGPUCopyPass(copy);
                     if(auto* fence=SDL_SubmitGPUCommandBufferAndAcquireFence(copy_command)) {
                         SDL_WaitForGPUFences(device,true,&fence,1);SDL_ReleaseGPUFence(device,fence);
                         if(auto* pixels=SDL_MapGPUTransferBuffer(device,download,false)) {
-                            if(auto* surface=SDL_CreateSurfaceFrom(width,height,SDL_PIXELFORMAT_ABGR8888,pixels,width*4)) {
+                            if(auto* surface=SDL_CreateSurface(width*int(eyes),height,SDL_PIXELFORMAT_ABGR8888)) {
+                                for(unsigned eye=0;eye<eyes;++eye) for(int y=0;y<height;++y)
+                                    std::memcpy(static_cast<uint8_t*>(surface->pixels)+std::size_t(y)*surface->pitch+std::size_t(width)*4U*eye,
+                                        static_cast<const uint8_t*>(pixels)+(std::size_t(width)*std::size_t(height)*eye+std::size_t(y)*std::size_t(width))*4U,
+                                        std::size_t(width)*4U);
                                 SDL_SaveBMP(surface,capture_path);SDL_DestroySurface(surface);
                             }
                             SDL_UnmapGPUTransferBuffer(device,download);
@@ -558,14 +631,14 @@ bool ModernRuntime::present(SDL_Renderer* renderer,double alpha,int requested_wi
                 p[0]=p[1]=p[2]=white?255:0;p[3]=255;
             }
             require(SDL_UpdateTexture(texture,nullptr,s.overlay_pixels.data(),ow*4),std::string("Update MODERN ")+what);
-            SDL_FRect frame=destination;
-            if(!letterbox) {
-                int full_w=0,full_h=0;SDL_GetCurrentRenderOutputSize(renderer,&full_w,&full_h);
-                frame={0,0,float(full_w),float(full_h)};
+            // At the screen plane: the same place in every eye's picture.
+            const bool per_eye=stereo && !render::stereo_overlay(stereo_mode);
+            for(unsigned eye=0;eye<(per_eye?2U:1U);++eye) {
+                const SDL_FRect frame=per_eye?eye_rect(eye):content;
+                const float sx=frame.w/float(layer.canvas_width),sy=frame.h/float(layer.canvas_height);
+                const SDL_FRect at{frame.x+float(layer.x)*sx,frame.y+float(layer.y)*sy,float(ow)*sx,float(oh)*sy};
+                require(SDL_RenderTexture(renderer,texture,nullptr,&at),std::string("Draw MODERN ")+what);
             }
-            const float sx=frame.w/float(layer.canvas_width),sy=frame.h/float(layer.canvas_height);
-            const SDL_FRect at{frame.x+float(layer.x)*sx,frame.y+float(layer.y)*sy,float(ow)*sx,float(oh)*sy};
-            require(SDL_RenderTexture(renderer,texture,nullptr,&at),std::string("Draw MODERN ")+what);
         };
         draw_overlay(overlay,s.overlay,"overlay");
         draw_overlay(dialog,s.dialog,"dialog");
