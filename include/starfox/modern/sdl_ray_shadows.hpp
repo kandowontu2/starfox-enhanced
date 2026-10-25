@@ -37,6 +37,13 @@ public:
         std::array<float,3> position{};float radius{};std::array<float,3> colour{};uint32_t object{~0U};
         std::array<float,3> axis{1,0,0};float aspect{1};float hardness{};bool projected{};float fade_height{};
         bool background_only{}; // An ordinary light that skips models (a boost flame on floor and walls).
+        // Its own object may block it (an engine's glow cut off by the hull).
+        bool self_shadowed{};
+        // Projected lights: traced from the ground to a point this far up
+        // the sun's rays from the light (native units). Larger = the cut
+        // follows the sun's shadow more closely; smaller = it shrinks
+        // toward the light, which then reaches into the shadow.
+        float lift{};
     };
     // Emitter classes from the game state (ModernRuntime), each with its
     // own authored colour and reach.

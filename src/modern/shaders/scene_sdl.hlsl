@@ -248,6 +248,11 @@ float3 point_lighting(float3 colour,float3 surface,float3 normal,bool ground,boo
             float distance=sqrt(dot(across,across)+along*along/(shape.w*shape.w));
             if(distance>=placed.w) continue;
             amount=point_light_edge(distance/placed.w,look.x)*(1.-height/look.z);
+            if(amount<=0) continue;
+            // Traced to the light itself: an engine's own hull cuts its pool.
+            float3 toward=placed.xyz-origin;
+            float reach=length(toward);
+            if(reach>1e-3 && light_blocked(origin,toward/reach,reach,asuint(tint.w),ground)) continue;
         } else {
             if(look.w!=0 && !background) continue;
             float3 offset=placed.xyz-origin;

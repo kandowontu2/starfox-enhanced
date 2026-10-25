@@ -207,12 +207,35 @@ std::vector<SdlRayShadows::PointLight> SdlRayShadows::lights(const vr::EyeCamera
             if(axis_length>1e-6) {for(auto& value:axis) value=float(value/axis_length);light.axis=axis;}
             else light.aspect=1;
         }
+        if(light.projected && light.lift>0) {
+            // The pool's centre (along the sun) stays put; the light is
+            // traced at the lifted point, its fade measured from there.
+            light.position={float(light.position[0]+light_.x*light.lift),float(light.position[1]+light_.y*light.lift),
+                float(light.position[2]+light_.z*light.lift)};
+            light.fade_height+=light.lift;
+        }
         light.radius*=radius_scale;
         for(auto& value:light.colour) value*=strength;
-        if(const auto own=object_index_.find(key);own!=object_index_.end()) light.object=own->second;
+        if(const auto own=object_index_.find(key);own!=object_index_.end() && !light.self_shadowed) light.object=own->second;
         const double distance=length(light.position);
         if(!std::isfinite(distance)) return;
         found.push_back({light,double(strength)*light.radius/(distance+light.radius)});
+    };
+    // A ship's half wingspan in native units (compute models: projected
+    // vertex X through the pose's X column), for its engine glow's size.
+    const auto half_span=[&](uint32_t key)->float {
+        for(const auto& model:models) if(model.key==key) {
+            const auto& projection=model.model.projection;
+            double widest=0;
+            for(const auto& vertex:projection.continuous_vertices) {
+                const auto& pose=projection.continuous_poses[std::min<std::size_t>(vertex.pose,projection.continuous_poses.size()-1)];
+                const double column=std::sqrt(double(pose.row0[0])*pose.row0[0]+double(pose.row1[0])*pose.row1[0]
+                    +double(pose.row2[0])*pose.row2[0]);
+                widest=std::max(widest,std::abs(double(vertex.x))*column);
+            }
+            return model.units>0?float(widest*256./model.units):0.F;
+        }
+        return 0.F;
     };
     const auto coloured=[](std::array<float,3> colour,float radius,float hardness) {
         PointLight light;light.colour=colour;light.radius=radius;light.hardness=hardness;return light;
@@ -237,8 +260,26 @@ std::vector<SdlRayShadows::PointLight> SdlRayShadows::lights(const vr::EyeCamera
             place(index,key,flame,1.4F);
             break;
         }
-        // EmitterEngine: the engine glow is vr::ModernFrame::engine_glow, a
-        // ground decal shared with the headset.
+        case EmitterEngine: {
+            // The engine's glow on the ground at the tail of the ship's
+            // shadow: round, soft from its centre, about the ship's width
+            // across, fading as the ship climbs (red/yellow flicker). Traced
+            // to the engine with the ship's own hull as an occluder, so the
+            // side toward the ship is cut off along the hull, a little
+            // differently from the sun's shadow (the light is much nearer).
+            // The headset, without ray tracing, draws vr::ModernFrame::engine_glow.
+            // The light sits just behind the tail (0.3 half spans behind the
+            // origin) and is traced 2 half spans up the sun's rays from there:
+            // the cut follows the fuselage's shadow, the wings' stays lit.
+            constexpr float engine_back=.3F,engine_lift=2.F;
+            const bool red=(tick/2U)%2U==0U;
+            const float span=half_span(key);
+            auto light=coloured(red?std::array<float,3>{1.F,.35F,.1F}:std::array<float,3>{1.F,.75F,.2F},
+                span>0?span*2.F:40.F,0.F);
+            light.projected=true;light.fade_height=700.F;light.self_shadowed=true;light.lift=span>0?span*engine_lift:40.F;
+            place(index,key,light,1.6F,span>0?span*engine_back:20.F);
+            break;
+        }
         case EmitterBomb: // the smart bomb and enemy bombs: blue-white
             place(index,key,coloured({.6F,.75F,1.F},2000.F,.5F),.8F);break;
         default: break;

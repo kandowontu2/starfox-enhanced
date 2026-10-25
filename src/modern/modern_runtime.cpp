@@ -361,10 +361,12 @@ bool ModernRuntime::present(SDL_Renderer* renderer,double alpha,int requested_wi
                 light=x*-across+y*-std::sin(angle)+z*-across;
             }
         }
-        // The engine glow comes with the coloured lights, at the sun's shadow.
+        // The engine glow comes with the coloured lights: ray traced on the
+        // flat view (SdlRayShadows), the shared ground decal in the headset
+        // preview, as PCVR draws it.
         {
             vr::ModernFrame::EngineGlowSettings glow;
-            glow.enabled=s.rt_lights && !s.preview && gameplay;
+            glow.enabled=s.rt_lights && s.preview && gameplay;
             if(light) glow.toward_light=std::array<float,3>{float(light->x),float(light->y),float(light->z)};
             s.frame.set_engine_glow(glow);
         }
