@@ -382,8 +382,33 @@ bool ModernRuntime::present(SDL_Renderer* renderer,double alpha,int requested_wi
             // Space Armada boss room, where that bit is off.
             s.rt_shadow.cartridge_shadows=current->shadows_enabled;
             s.rt_shadow.no_shadows=s.rt_shadows && s.intro_background && current->background_id==*s.intro_background;
+            // Coloured lights by object class.
+            const auto emitter_kind=[&](uint32_t key)->unsigned {
+                using E=SdlRayShadows::Emitter;
+                for(const auto& item:current->objects) if(item.handle==(key&65535)) {
+                    const auto shape=item.object.shape;
+                    const auto strategy=item.object.strategy_address;
+                    if(s.arwing_shot_strategies.contains(strategy)) return E::EmitterArwingLaser;
+                    if(s.bomb_shapes.contains(shape) || s.bomb_strategies.contains(strategy)) return E::EmitterBomb;
+                    if(s.plasma_shapes.contains(shape)) return E::EmitterPlasma;
+                    if(s.beam_shapes.contains(shape)) return E::EmitterLaser;
+                    if(s.boost_shapes.contains(shape)) return E::EmitterBoost; // the cartridge's boost flame
+                    if(item.handle==current->player || s.ship_shapes.contains(shape)) return E::EmitterEngine;
+                    return (item.object.flags&1U)!=0 && item.object.count>0?E::EmitterExplosion:E::EmitterNone;
+                }
+                return E::EmitterNone;
+            };
             const auto caster=[&](uint32_t key) {
                 if(key==0x20000 || key==0x30000) return false;
+                // Shots, plasma, bombs and the boost flame are light, not
+                // matter: they never shade anything, not even the light of
+                // the shot beside them (a twin laser, the next shot in a stream).
+                using E=SdlRayShadows::Emitter;
+                switch(emitter_kind(key)) {
+                case E::EmitterLaser: case E::EmitterArwingLaser: case E::EmitterPlasma:
+                case E::EmitterBomb: case E::EmitterBoost: return false;
+                default: break;
+                }
                 for(const auto& item:current->objects) if(item.handle==(key&65535))
                     return !((s.flash_strategy && item.object.strategy_address==s.flash_strategy)
                         || (s.reticle_shape && item.presentation.shape==s.reticle_shape));
@@ -402,21 +427,7 @@ bool ModernRuntime::present(SDL_Renderer* renderer,double alpha,int requested_wi
             std::optional<SdlFrameRenderer::LightInputs> lights;
             if(s.rt_lights && !s.preview && gameplay) {
                 lights.emplace();
-                lights->emitter=[&](uint32_t key)->unsigned {
-                    using E=SdlRayShadows::Emitter;
-                    for(const auto& item:current->objects) if(item.handle==(key&65535)) {
-                        const auto shape=item.object.shape;
-                        const auto strategy=item.object.strategy_address;
-                        if(s.arwing_shot_strategies.contains(strategy)) return E::EmitterArwingLaser;
-                        if(s.bomb_shapes.contains(shape) || s.bomb_strategies.contains(strategy)) return E::EmitterBomb;
-                        if(s.plasma_shapes.contains(shape)) return E::EmitterPlasma;
-                        if(s.beam_shapes.contains(shape)) return E::EmitterLaser;
-                        if(s.boost_shapes.contains(shape)) return E::EmitterBoost; // the cartridge's boost flame
-                        if(item.handle==current->player || s.ship_shapes.contains(shape)) return E::EmitterEngine;
-                        return (item.object.flags&1U)!=0 && item.object.count>0?E::EmitterExplosion:E::EmitterNone;
-                    }
-                    return E::EmitterNone;
-                };
+                lights->emitter=emitter_kind;
                 lights->tick=uint32_t(current->revision);
                 if(const auto& circle=current->circle;circle.active && circle.radius>0) {
                     // The smart bomb's detonation circle: its colour-math colour
