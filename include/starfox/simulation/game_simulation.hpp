@@ -143,6 +143,23 @@ inline constexpr std::array<std::uint8_t, 8> cheats_menu_order{0,1,2,3,4,5,7,6};
 // Keep BACK's saved selection 5 stable. Native Leia is a host-owned option 6.
 inline constexpr std::array<std::uint8_t, 7> stereo_menu_order{0,1,2,3,4,6,5};
 inline constexpr std::array<std::uint8_t, 4> updates_menu_order{0,1,2,3};
+// 2D/3D/GLOBAL rows MODERN draws without (GPU / GPU FAST effects,
+// materials, upscalers, AA types). The pre-game menu greys them while
+// MODERN is selected; the other rows on those pages apply to MODERN.
+inline constexpr bool modern_unsupported_row(unsigned row) noexcept {
+    switch(row) {
+    case 8: case 23:  // 2D FILTER, BACK
+    case 7: case 11: case 9: // AA QUALITY (as MSAA), VSYNC, RENDER UPSCALE
+    case 79: case 80: case 81: // 3D ASTEROIDS, HIGH POLY ARWINGS, DYNAMIC LIGHTING
+    case 29: case 72: // RAY TRACING (sun shadows), SHADOW SOFTNESS
+        return false;
+    default: break;
+    }
+    for(const auto id:two_d_menu_order) if(id==row) return true;
+    for(const auto id:three_d_menu_order) if(id==row) return true;
+    for(const auto id:global_menu_order) if(id==row) return true;
+    return false;
+}
 inline std::span<const std::uint8_t> pregame_menu_order(PregamePage page) {
     switch (page) {
     case PregamePage::two_d: return two_d_menu_order;
@@ -500,8 +517,9 @@ public:
     // HIGH POLY ARWINGS (MODERN): the ending model replaces the flight Arwings.
     [[nodiscard]] bool hipoly_arwings() const noexcept { return hipoly_arwings_; }
     void set_hipoly_arwings(bool value) noexcept { hipoly_arwings_ = value; }
-    // DYNAMIC LIGHTING (MODERN): ray-traced shadows, coloured lights from
-    // shots and explosions, and the engine glow on the ground.
+    // DYNAMIC LIGHTING (MODERN): ray-traced coloured lights from shots and
+    // explosions, and the engine glow on the ground. MODERN's ray-traced
+    // sun shadows follow RAY TRACING.
     [[nodiscard]] bool dynamic_lighting() const noexcept { return dynamic_lighting_; }
     void set_dynamic_lighting(bool value) noexcept { dynamic_lighting_ = value; }
     [[nodiscard]] std::uint8_t language() const noexcept { return language_; }

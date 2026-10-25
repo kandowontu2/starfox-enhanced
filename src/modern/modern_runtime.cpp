@@ -349,9 +349,10 @@ bool ModernRuntime::present(SDL_Renderer* renderer,double alpha,int requested_wi
         // The desktop's 3D ASTEROIDS setting (VR passes its own preference).
         s.models.set_asteroid_models(s.history.game().asteroid_models());
         s.models.set_hipoly_arwings(s.history.game().hipoly_arwings());
-        // DYNAMIC LIGHTING turns on the ray-traced shadows and lights; the
+        // RAY TRACING turns on the ray-traced sun shadows and DYNAMIC
+        // LIGHTING the coloured lights and engine glow; the
         // STARFOX_MODERN_RT_* switches still force them for testing.
-        s.rt_shadows=s.rt_shadows_forced || s.history.game().dynamic_lighting();
+        s.rt_shadows=s.rt_shadows_forced || s.history.game().ray_tracing_quality()!=0;
         s.rt_lights=s.rt_lights_forced || s.history.game().dynamic_lighting();
         auto world=s.models.assemble_world_interpolated(*previous,*current,alpha,s.inputs.srgb,true);
         require(world.pending.empty(),"MODERN world assembly pending");

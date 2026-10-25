@@ -5120,6 +5120,7 @@ public:
                     const auto colour = ink & 15U;
                     const auto rgb = colour == 14U ? std::array<std::uint8_t, 3>{255, 255, 255}
                         : colour == 10U ? std::array<std::uint8_t, 3>{255, 220, 64}
+                        : colour == 4U ? std::array<std::uint8_t, 3>{105, 124, 138}
                         : std::array<std::uint8_t, 3>{180, 200, 215};
                     for (unsigned c = 0; c < 3; ++c)
                         rgba_[i + c] = static_cast<std::uint8_t>(rgb[c] * effects.setup_brightness / 15U);
@@ -11707,12 +11708,21 @@ int main(int argc, char** argv) {
                         };
                         const auto draw_graphics_row =
                             [&text_renderer, &framebuffer, viewport_origin,
-                                menu_label_x, menu_value_right](
+                                menu_label_x, menu_value_right, &row_y, &game](
                                 std::string_view label, std::string_view value,
                                 std::int32_t y, bool selected) {
                                 if (y < 0) return;
+                                // MODERN draws without the GPU / GPU FAST
+                                // rows: grey (ink 4) and marked GPU ONLY.
+                                bool greyed=false;
+                                if(game.modern_renderer() && game.pregame_page()!=starfox::simulation::PregamePage::main)
+                                    for(unsigned row=0;row<row_y.size();++row)
+                                        if(row_y[row]==y && starfox::simulation::modern_unsupported_row(row)) {greyed=true;break;}
+                                // Long labels (MODEL EFFECT INTENSITY) leave room for "GPU" only.
+                                if(greyed) value=text_renderer.measure_ascii(label)+text_renderer.measure_ascii("GPU ONLY")+6
+                                    > menu_value_right-menu_label_x?"GPU":"GPU ONLY";
                                 const auto colour = static_cast<std::uint8_t>(
-                                    selected ? 14U : 7U);
+                                    selected ? 14U : greyed ? 4U : 7U);
                                 text_renderer.draw_ascii(label,
                                     menu_label_x + viewport_origin,
                                     y, framebuffer, colour);
@@ -11865,6 +11875,7 @@ int main(int argc, char** argv) {
                             || window.vulkan_hardware_ray_tracing_available());
                         draw_graphics_row(software?"ENHANCED SHADOWS":"RAY TRACING",
                             software?on_off(game.enhanced_shadows())
+                                : game.modern_renderer()?on_off(game.ray_tracing_quality()!=0)
                                 : !ray_hardware_available && !ray_compute_available
                                     ? std::string_view{"UNAVAILABLE"}
                                     : std::array<std::string_view,4>{"OFF","LOW","MEDIUM","HIGH"}[game.ray_tracing_quality()],
@@ -11906,7 +11917,8 @@ int main(int argc, char** argv) {
                 std::array<starfox::render::Rgba8,256> menu_palette{};
                 for(unsigned ink=1;ink<256;++ink) menu_palette[ink]=(ink&15)==14
                     ?starfox::render::Rgba8{255,255,255,255}:(ink&15)==10
-                        ?starfox::render::Rgba8{255,220,64,255}:starfox::render::Rgba8{180,200,215,255};
+                        ?starfox::render::Rgba8{255,220,64,255}:(ink&15)==4
+                        ?starfox::render::Rgba8{105,124,138,255}:starfox::render::Rgba8{180,200,215,255};
                 if(game.show_fps()) text_renderer.draw_ascii("FPS "+std::to_string(live_fps.fps()),
                     int(display_width)-76,2,setup_overlay,126,0);
                 if(exit_confirmation || state_slot_window) {
@@ -12047,7 +12059,8 @@ int main(int argc, char** argv) {
                         std::array<starfox::render::Rgba8,256> menu_palette{};
                         for(unsigned ink=1;ink<256;++ink) menu_palette[ink]=(ink&15)==14
                             ?starfox::render::Rgba8{255,255,255,255}:(ink&15)==10
-                                ?starfox::render::Rgba8{255,220,64,255}:starfox::render::Rgba8{180,200,215,255};
+                                ?starfox::render::Rgba8{255,220,64,255}:(ink&15)==4
+                                ?starfox::render::Rgba8{105,124,138,255}:starfox::render::Rgba8{180,200,215,255};
                         const auto origin=int((display_width-256)/2);
                         starfox::render::append_calibrated_host_ui(*frame,setup_overlay,menu_palette,
                             game.menu_preview()?15:game.map().display_brightness(),

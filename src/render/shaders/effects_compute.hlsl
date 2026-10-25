@@ -678,7 +678,7 @@ void main(uint3 id : SV_DispatchThreadID,uint3 group : SV_GroupID,uint lane : SV
             uint ink=(setupPixels.Load(i&~3u)>>((i&3u)*8))&255;
             if(ink!=0) {
                 uint c=ink&15;
-                uint3 rgb=c==14?uint3(255,255,255):c==10?uint3(255,220,64):uint3(180,200,215);
+                uint3 rgb=c==14?uint3(255,255,255):c==10?uint3(255,220,64):c==4?uint3(105,124,138):uint3(180,200,215);
                 result.rgb=rgb*uint(pad0)/15;
             }
         }

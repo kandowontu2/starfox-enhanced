@@ -1336,6 +1336,8 @@ GameTickResult GameSimulation::tick_pregame_menu(
         && (menu_input.pressed & (starfox::input::a | starfox::input::select
             | starfox::input::left | starfox::input::right))) {
         if (renderer_mode_ == RendererMode::software) set_enhanced_shadows(!enhanced_shadows_);
+        // MODERN's ray-traced shadows have no quality levels: OFF or ON.
+        else if (modern_renderer()) set_ray_tracing_quality(ray_tracing_quality() ? 0U : 2U);
         else set_ray_tracing_quality((ray_tracing_quality()+((menu_input.pressed & starfox::input::left)?3U:1U))%4U);
         queue_sound_effect(0x11U);
     }
