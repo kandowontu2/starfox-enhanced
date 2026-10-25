@@ -3,7 +3,7 @@
 namespace starfox::platform::nintendo_3ds {
 namespace {
 using simulation::PregamePage;
-constexpr std::array<std::string_view,80> labels{
+constexpr std::array<std::string_view,81> labels{
     "EXPERIENCE","PACE/SPEED","RENDER FPS","DISPLAY","RENDERER","MSU-1 MUSIC","RUMBLE",
     "AA QUALITY","2D FILTER","RENDER UPSCALE","ENHANCED LIGHTING","VSYNC","3D COLOR / STYLE",
     "2D COLOR / STYLE","OPTIONS","START GAME","PREVIEW","3D BLOOM","2D BLOOM","3D SMOOTHING",
@@ -17,7 +17,7 @@ constexpr std::array<std::string_view,80> labels{
     "EXPLOSION SHOCKWAVES","WEAPON LIGHTING","EXHAUST TRAILS","STAGE WEATHER","AMBIENT OCCLUSION",
     "DEPTH OF FIELD","IMPACT SPARKS / DEBRIS","EXHAUST HEAT DISTORTION","CRT PHOSPHOR PERSISTENCE",
     "ADAPTIVE EXPOSURE","WATER CAUSTICS","SHADOW SOFTNESS","IMPACT SHAKE","WEAPON RECOIL",
-    "CAMERA BANKING","VOLUMETRIC FOG","MOTION BLUR","DLSS 4.5","3D ASTEROIDS"};
+    "CAMERA BANKING","VOLUMETRIC FOG","MOTION BLUR","DLSS 4.5","3D ASTEROIDS","HIGH POLY ARWINGS"};
 std::string toggle(bool value) {return value?"ON":"OFF";}
 bool supported(PregamePage page,unsigned id,bool runtime) {
     switch(page) {

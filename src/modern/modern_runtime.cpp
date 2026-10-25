@@ -323,6 +323,7 @@ bool ModernRuntime::present(SDL_Renderer* renderer,double alpha,int requested_wi
         if(s.dump) s.dump->sprites(*current->ppu);
         // The desktop's 3D ASTEROIDS setting (VR passes its own preference).
         s.models.set_asteroid_models(s.history.game().asteroid_models());
+        s.models.set_hipoly_arwings(s.history.game().hipoly_arwings());
         auto world=s.models.assemble_world_interpolated(*previous,*current,alpha,s.inputs.srgb,true);
         require(world.pending.empty(),"MODERN world assembly pending");
         require(source_models_supported(world.compute_models),"MODERN warp/axis models require the complete fallback renderer");

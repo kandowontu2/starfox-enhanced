@@ -238,6 +238,7 @@ struct PregameSettings {
     std::uint8_t gpu_renderer{};
     // Optional desktop window size. Both zero retain automatic aspect sizing.
     std::uint16_t window_width{},window_height{};
+    bool hipoly_arwings{}; // Optional key HIPOLY_ARWINGS; MODERN draws the ending Arwing.
 
     [[nodiscard]] bool operator==(const PregameSettings&) const = default;
 };

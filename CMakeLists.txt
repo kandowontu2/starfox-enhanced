@@ -271,6 +271,7 @@ add_library(starfox_core
     src/assets/runtime_bundle.cpp
     src/assets/runtime_import.cpp
     src/assets/shape_decoder.cpp
+    src/assets/hipoly_arwing.cpp
     src/render/background_renderer.cpp
     src/render/dust_renderer.cpp
     src/render/dxr_shadows.cpp

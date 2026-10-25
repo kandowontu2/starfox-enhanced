@@ -2,6 +2,7 @@
 #include "starfox/vr/game_scene.hpp"
 #include "starfox/vr/draw_packet.hpp"
 #include "starfox/assets/shape_decoder.hpp"
+#include "starfox/assets/hipoly_arwing.hpp"
 #include "starfox/render/asteroid_models.hpp"
 #include "starfox/vr/scene_interpolation.hpp"
 #include "starfox/vr/source_span_model.hpp"
@@ -9,6 +10,7 @@
 #include <functional>
 #include <unordered_map>
 #include <memory>
+#include <optional>
 
 namespace starfox::vr {
 inline constexpr uint32_t source_shadow_pass=0x10000U;
@@ -83,6 +85,9 @@ public:
     SourceModelPackets assemble_world_interpolated(const GameSceneSnapshot& previous,
         const GameSceneSnapshot& current,double alpha,bool srgb_target=false,bool surround_stars=false,bool cpu_pilot_rig=false);
     void set_asteroid_models(render::AsteroidModels mode) noexcept {asteroid_models_=mode;}
+    // HIGH POLY ARWINGS: draw the ending model (and its broken-wing
+    // variants) for every player and teammate Arwing.
+    void set_hipoly_arwings(bool enabled) noexcept {hipoly_arwings_=enabled;}
     // Replacement artwork for model textures (compute route), owned by the caller.
     void set_texture_overrides(const render::TextureOverrides* overrides) noexcept {texture_overrides_=overrides;}
     // Called for each texture of every shape drawn, with the 16 live model
@@ -112,6 +117,7 @@ private:
     bool compute_solids_{};
     bool compute_shadows_{true};
     render::AsteroidModels asteroid_models_{};
+    bool hipoly_arwings_{};
     const render::TextureOverrides* texture_overrides_{};
     TextureObserver texture_observer_;
     DrawPacket connected_grid_pose(const GameSceneSnapshot&,const timing::RenderTransform&,
@@ -133,6 +139,8 @@ private:
     std::array<uint16_t,11> depth_enclosure_shapes_{};
     std::array<uint32_t,4> intro_showcase_strategies_{};
     assets::ShapeDecoder decoder_;
+    assets::HipolyArwings hipoly_;
+    std::optional<assets::ShapeDecoder> hipoly_decoder_;
     std::array<uint16_t,3> colours_{};
     std::unordered_map<uint64_t,assets::Shape> shapes_;
     mutable SceneVertex grid_material_{};

@@ -232,6 +232,7 @@ std::unique_ptr<GameSimulation> GameSimulation::restored_state(
     result->fsr1_menu_ = fsr1_menu_;
     result->reflective_surfaces_ = reflective_surfaces_;
     result->asteroid_models_ = asteroid_models_;
+    result->hipoly_arwings_ = hipoly_arwings_;
     result->modern_available_ = modern_available_;
     result->gpu_renderer_ = gpu_renderer_;
     result->set_renderer_mode(result->renderer_mode_);

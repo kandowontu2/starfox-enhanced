@@ -7372,6 +7372,14 @@ int main(int argc, char** argv) {
         require(boot_game.asteroid_models() == starfox::render::AsteroidModels::sprite,
                 "3D ASTEROIDS did not wrap to SPRITE");
         drive_boot({0, starfox::input::down, 0});
+        require(boot_game.pregame_selection() == 80U && !boot_game.hipoly_arwings(),
+                "HIGH POLY ARWINGS did not follow 3D ASTEROIDS or was not OFF");
+        drive_boot({0, starfox::input::a, 0});
+        require(boot_game.hipoly_arwings()
+                && boot_game.restored_state(boot_game.save_state())->hipoly_arwings(),
+                "HIGH POLY ARWINGS did not toggle or survive save-state restoration");
+        drive_boot({0, starfox::input::a, 0});
+        require(!boot_game.hipoly_arwings(), "HIGH POLY ARWINGS did not toggle back");
         select_menu_action(boot_game, starfox::simulation::PregamePage::global, 10U, &boot_audio);
         require(boot_game.pregame_selection() == 10U,
                 "pre-game cursor did not reach RTX LIGHTING");

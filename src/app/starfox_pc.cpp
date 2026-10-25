@@ -8242,6 +8242,7 @@ int main(int argc, char** argv) {
                 static_cast<std::uint8_t>(game.asteroid_models()),
                 static_cast<std::uint8_t>(game.gpu_renderer()),
                 window.fixed_window_size()[0],window.fixed_window_size()[1],
+                game.hipoly_arwings(),
             };
         };
         {
@@ -8455,6 +8456,7 @@ int main(int argc, char** argv) {
             game.set_bloom_2d(saved_pregame.bloom_2d);
             game.set_model_smoothing(saved_pregame.model_smoothing);
             game.set_asteroid_models(saved_pregame.asteroid_models);
+            game.set_hipoly_arwings(saved_pregame.hipoly_arwings);
             game.set_language(saved_pregame.language);
             if (const auto* language = std::getenv("STARFOX_TEST_LANGUAGE"))
                 game.set_language(static_cast<std::uint8_t>(std::atoi(language)));
@@ -8503,6 +8505,8 @@ int main(int argc, char** argv) {
                 game.set_model_smoothing(static_cast<std::uint8_t>(std::atoi(smoothing)));
             if (const auto* asteroids = std::getenv("STARFOX_TEST_ASTEROID_MODELS"))
                 game.set_asteroid_models(static_cast<std::uint8_t>(std::atoi(asteroids)));
+            if (const auto* hipoly = std::getenv("STARFOX_TEST_HIPOLY_ARWINGS"))
+                game.set_hipoly_arwings(std::atoi(hipoly) != 0);
             if (const auto* separated = std::getenv("STARFOX_TEST_SEPARATED_MODELS"))
                 game.set_smooth_polys(std::atoi(separated) != 0);
             if (saved_pregame.effect == static_cast<std::uint8_t>(starfox::render::Effect::bloom)
@@ -9921,6 +9925,19 @@ int main(int argc, char** argv) {
                         object.health=0U;object.strategy_flags[1]|=0x01U;object.strategy_address=strategy;++killed;break; // The body; its parts follow it.
                     }
                     std::cerr<<"scheduled-defeat frame="<<presented_frames<<" objects="<<killed<<'\n';
+                }
+            }
+            // STARFOX_TEST_BROKEN_WINGS=FLAGS,FRAME: from that presented frame
+            // on, set the cartridge's broken-wing bits in pshipflags (8 left,
+            // 16 right, 24 both), so the game picks its damaged ship shapes.
+            if(const auto* wings=std::getenv("STARFOX_TEST_BROKEN_WINGS"); test_frames && wings) {
+                const std::string spec{wings};
+                const auto comma=spec.find(',');
+                if(comma==std::string::npos) throw std::runtime_error("STARFOX_TEST_BROKEN_WINGS needs FLAGS,FRAME");
+                if(presented_frames>=std::stoull(spec.substr(comma+1))) {
+                    const auto flags=symbols.find("PSHIPFLAGS").at(0);
+                    game.map().write_native_byte(flags,static_cast<std::uint8_t>(game.map().read_native_byte(flags)
+                        |(std::stoul(spec.substr(0,comma))&0x18U)));
                 }
             }
             // Open EXIT GAME? mid-run, as Escape does (MODERN -> fallback hand-off).
@@ -11655,7 +11672,7 @@ int main(int argc, char** argv) {
                             : game.pregame_page() == starfox::simulation::PregamePage::two_d
                                 ? "2D OPTIONS" : game.pregame_page()==starfox::simulation::PregamePage::global
                                     ? "GLOBAL ENHANCEMENTS" : "3D OPTIONS", 27, 10U);
-                        std::array<std::int32_t, 80> row_y;
+                        std::array<std::int32_t, 81> row_y;
                         row_y.fill(-1);
                         const auto selected_row=std::size_t(std::find(visual_order.begin(),visual_order.end(),game.pregame_selection())-visual_order.begin());
                         const auto first_visible=!main_page && visual_order.size()>14
@@ -11733,6 +11750,10 @@ int main(int argc, char** argv) {
                         draw_graphics_row("3D ASTEROIDS", starfox::render::asteroid_model_names[
                             static_cast<std::size_t>(game.asteroid_models())], row_y[79],
                             game.pregame_selection()==79U);
+                        draw_graphics_row("HIGH POLY ARWINGS",
+                            !game.modern_renderer() ? std::string_view{"MODERN ONLY"}
+                                : on_off(game.hipoly_arwings()), row_y[80],
+                            game.pregame_selection()==80U);
                         draw_graphics_row("AA QUALITY",
                             !window.leia_active() && game.aa_type()>=4 && !window.native_gpu_enabled()?"GPU REQUIRED":
                                 !window.leia_active() && game.aa_type()==4 && game.stereo_output()!=0?"MONO REQUIRED":

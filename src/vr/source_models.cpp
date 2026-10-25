@@ -132,7 +132,9 @@ bool particle_packet(const GameSceneSnapshot& scene,simulation::ObjectHandle own
 }
 }
 SourceModels::SourceModels(const assets::RomImage& rom,const assets::SymbolMap& symbols,bool cache_geometry,bool compute_solids,bool compute_shadows)
-    :cache_geometry_(cache_geometry),compute_solids_(compute_solids),compute_shadows_(compute_shadows),rom_(&rom),decoder_(rom,symbols) {
+    :cache_geometry_(cache_geometry),compute_solids_(compute_solids),compute_shadows_(compute_shadows),rom_(&rom),decoder_(rom,symbols),
+    hipoly_(assets::build_hipoly_arwings(rom,symbols)) {
+    if(hipoly_.rom) hipoly_decoder_.emplace(*hipoly_.rom,symbols);
     const auto symbol=[&](const char* name) {const auto& values=symbols.find(name);return values.empty()?uint32_t{}:values.front();};
     const auto rom_symbol=[&](const char* name) {
         for(auto address:symbols.find(name)) if((address&0xffffU)>=0x8000U && (address>>16U)<0x70U) return address;
@@ -564,17 +566,19 @@ SourceModelPackets SourceModels::assemble_poses(const GameSceneSnapshot& scene,s
             || (interpolation_.flash_player && object.strategy_address==interpolation_.flash_player))
             && std::find(flight_shapes_.begin(),flight_shapes_.end(),object.shape)!=flight_shapes_.end();
         const uint32_t shape=pilot_hull?pilot_shape_:object.shape;
+        const bool hipoly=hipoly_arwings_ && hipoly_decoder_ && hipoly_.replaces(shape);
+        const auto& decoder=hipoly?*hipoly_decoder_:decoder_;
         try {
             const uint64_t base_key=(uint64_t(render::source_sprite_colour(object))<<56U)
-                |(uint64_t(shape)<<32U)|colour;
+                |(uint64_t(hipoly)<<48U)|(uint64_t(shape)<<32U)|colour;
             auto base=shapes_.find(base_key);
-            if(base==shapes_.end()) base=shapes_.emplace(base_key,decoder_.decode(shape,{},colour,
+            if(base==shapes_.end()) base=shapes_.emplace(base_key,decoder.decode(shape,{},colour,
                 render::source_sprite_colour_count(object))).first;
             const auto header=base->second.header;
             const auto selected=shadow?header.shadow_pointer:assets::ShapeDecoder::select_lod_pointer(header,item.source_pose.source_depth);
             const uint64_t lod_key=base_key|(uint64_t(selected)<<16U);
             auto lod=shapes_.find(lod_key);
-            if(lod==shapes_.end()) lod=shapes_.emplace(lod_key,decoder_.decode_lod(header,selected,colour,
+            if(lod==shapes_.end()) lod=shapes_.emplace(lod_key,decoder.decode_lod(header,selected,colour,
                 render::source_sprite_colour_count(object))).first;
             DrawPacket packet;std::string error;
             auto pose=shadow?shadows[i]:poses.empty()?item.source_pose:poses[i];

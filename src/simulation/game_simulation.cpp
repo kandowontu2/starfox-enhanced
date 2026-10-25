@@ -1354,6 +1354,12 @@ GameTickResult GameSimulation::tick_pregame_menu(
             + ((menu_input.pressed & starfox::input::left) ? count - 1U : 1U)) % count));
         queue_sound_effect(0x11U);
     }
+    if (graphics_page && pregame_selection_ == 80U
+        && (menu_input.pressed & (starfox::input::a | starfox::input::select
+            | starfox::input::left | starfox::input::right))) {
+        set_hipoly_arwings(!hipoly_arwings_);
+        queue_sound_effect(0x11U);
+    }
     if (graphics_page && pregame_selection_ == 28U
         && (menu_input.pressed & (starfox::input::a | starfox::input::select
             | starfox::input::left | starfox::input::right))) {
