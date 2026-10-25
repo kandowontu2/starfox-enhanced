@@ -612,10 +612,11 @@ void ModernFrame::prepare(const GameSceneSnapshot& previous,const GameSceneSnaps
         }
         ++model_index;
     }
-    // The engine glow on the landscape ground (set_engine_glow): a pool of
-    // the engine's colour where it would reflect, at the tail of the ship's
-    // shadow, 3x the engine's width (the engine: a fifth of the wingspan),
-    // a little longer along the flight path, fading as the ship climbs.
+    // The engine glow on the landscape ground (set_engine_glow): a round
+    // pool soft from its centre, like a laser's coloured light on the
+    // ground, about the ship's width across, from the engine at the tail of
+    // the ship's shadow; smaller and dimmer as the ship climbs, as a point
+    // light's pool would be.
     engine_glow.reset();
     if(engine_glow_settings_.enabled && landscape_world && current.shadows_enabled && world.player)
         for(const auto& request:world.compute_models) {
@@ -643,8 +644,8 @@ void ModernFrame::prepare(const GameSceneSnapshot& previous,const GameSceneSnaps
             const V up=unit({ground[4],ground[5],ground[6]});
             const V origin{ground[12],ground[13],ground[14]};
             const double height=dot({engine[0]-origin[0],engine[1]-origin[1],engine[2]-origin[2]},up);
-            constexpr double fade_height=700./256.;
-            if(!(height>0 && height<fade_height) || !(half_span>0)) break;
+            constexpr double reach=700./256.;
+            if(!(height>0 && height<reach) || !(half_span>0)) break;
             V toward=up;
             if(const auto& sun=engine_glow_settings_.toward_light) {
                 const V scene=unit({double((*sun)[0]),double((*sun)[1]),double((*sun)[2])});
@@ -657,24 +658,25 @@ void ModernFrame::prepare(const GameSceneSnapshot& previous,const GameSceneSnaps
             V along=unit({forward[0]-up[0]*dot(forward,up),forward[1]-up[1]*dot(forward,up),forward[2]-up[2]*dot(forward,up)});
             if(dot(along,along)<.5) break;
             const V across{up[1]*along[2]-up[2]*along[1],up[2]*along[0]-up[0]*along[2],up[0]*along[1]-up[1]*along[0]};
-            const double radius=half_span*.6;
+            const double radius=half_span*2.*std::sqrt(1.-(height/reach)*(height/reach));
+            const double fall=1.-height/reach;
             // Red and yellow on alternate pairs of ticks (the cartridge's flicker).
             const bool red=(current.revision/2U)%2U==0U;
             const std::array<float,3> tint=red?std::array<float,3>{1.F,.35F,.1F}:std::array<float,3>{1.F,.75F,.2F};
-            const float strength=float(.45*(1.-height/fade_height));
+            const float strength=float(.5*fall*fall);
             DrawPacket packet;
             const std::array<std::array<float,2>,4> corners{{{-1,-1},{1,-1},{1,1},{-1,1}}};
             for(const unsigned corner:{0U,1U,2U,0U,2U,3U}) {
                 SceneVertex vertex{};
                 const auto [u,v]=corners[corner];
                 for(unsigned c=0;c<3;++c)
-                    vertex.position[c]=float(centre[c]+along[c]*radius*1.4*v+across[c]*radius*u);
+                    vertex.position[c]=float(centre[c]+along[c]*radius*v+across[c]*radius*u);
                 for(unsigned c=0;c<3;++c) vertex.color[c]=tint[c]*strength;
                 vertex.color[3]=1;
                 vertex.uv[0]=u;vertex.uv[1]=v;
-                // A round decal (4096) with a soft edge from 55% of its
-                // radius (texture.y, scene.hlsl), biased onto the ground.
-                vertex.texture[1]=1U+uint32_t(.55*65534.);vertex.texture[3]=4096U|32768U;
+                // A round decal (4096) soft from its centre (texture.y = 1:
+                // edge start 0, scene.hlsl), biased onto the ground.
+                vertex.texture[1]=1U;vertex.texture[3]=4096U|32768U;
                 packet.geometry.vertices.push_back(vertex);
             }
             packet.model=seat;

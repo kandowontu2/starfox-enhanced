@@ -1283,6 +1283,23 @@ int main(int argc, char** argv) {
             && !loaded_pregame.hipoly_arwings, "settings without HIPOLY_ARWINGS did not load the retail ship");
     }
     {
+        // DYNAMIC_LIGHTING is optional: it round-trips, and a file without
+        // it loads with the lighting off.
+        auto lighting = saved_pregame;lighting.dynamic_lighting = true;
+        require(starfox::app::save_pregame_settings(pregame_test_path, lighting)
+            && starfox::app::load_pregame_settings(pregame_test_path, loaded_pregame)
+            && loaded_pregame == lighting, "dynamic lighting did not round-trip");
+        std::string kept;
+        {
+            std::ifstream saved{pregame_test_path};
+            for (std::string line; std::getline(saved, line);)
+                if (line.rfind("DYNAMIC_LIGHTING ", 0) != 0) kept += line + '\n';
+        }
+        std::ofstream{pregame_test_path} << kept;
+        require(starfox::app::load_pregame_settings(pregame_test_path, loaded_pregame)
+            && !loaded_pregame.dynamic_lighting, "settings without DYNAMIC_LIGHTING did not load with it off");
+    }
+    {
         // GPU_RENDERER is optional: older files lack it, and a value from a
         // newer build must not reset every other setting.
         auto fast = saved_pregame;fast.gpu_renderer = 1;

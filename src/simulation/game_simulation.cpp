@@ -1360,6 +1360,12 @@ GameTickResult GameSimulation::tick_pregame_menu(
         set_hipoly_arwings(!hipoly_arwings_);
         queue_sound_effect(0x11U);
     }
+    if (graphics_page && pregame_selection_ == 81U
+        && (menu_input.pressed & (starfox::input::a | starfox::input::select
+            | starfox::input::left | starfox::input::right))) {
+        set_dynamic_lighting(!dynamic_lighting_);
+        queue_sound_effect(0x11U);
+    }
     if (graphics_page && pregame_selection_ == 28U
         && (menu_input.pressed & (starfox::input::a | starfox::input::select
             | starfox::input::left | starfox::input::right))) {

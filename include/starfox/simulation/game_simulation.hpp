@@ -129,7 +129,7 @@ enum class PregamePage {
 inline constexpr std::array<std::uint8_t, 14> main_menu_order{
     0,1,2,3,43,4,5,6,20,21,47,14,15,16};
 inline constexpr std::array<std::uint8_t, 13> two_d_menu_order{8,18,36,37,38,39,40,41,13,24,44,46,23};
-inline constexpr std::array<std::uint8_t, 16> three_d_menu_order{42,7,11,9,30,78,17,79,80,12,22,35,33,34,45,23};
+inline constexpr std::array<std::uint8_t, 17> three_d_menu_order{42,7,11,9,30,78,17,79,80,81,12,22,35,33,34,45,23};
 inline constexpr std::array<std::uint8_t, 32> global_menu_order{
     29,72,32,71,76,77,10,65,66,28,70,27,73,74,61,62,67,63,68,48,49,50,52,53,54,55,56,57,69,59,60,23};
 #if defined(__3DS__)
@@ -500,6 +500,10 @@ public:
     // HIGH POLY ARWINGS (MODERN): the ending model replaces the flight Arwings.
     [[nodiscard]] bool hipoly_arwings() const noexcept { return hipoly_arwings_; }
     void set_hipoly_arwings(bool value) noexcept { hipoly_arwings_ = value; }
+    // DYNAMIC LIGHTING (MODERN): ray-traced shadows, coloured lights from
+    // shots and explosions, and the engine glow on the ground.
+    [[nodiscard]] bool dynamic_lighting() const noexcept { return dynamic_lighting_; }
+    void set_dynamic_lighting(bool value) noexcept { dynamic_lighting_ = value; }
     [[nodiscard]] std::uint8_t language() const noexcept { return language_; }
     [[nodiscard]] bool ray_tracing() const noexcept { return ray_tracing_; }
     [[nodiscard]] std::uint8_t ray_tracing_quality() const noexcept { return ray_tracing_?ray_tracing_quality_:0; }
@@ -1350,6 +1354,7 @@ private:
     std::uint8_t reflective_surfaces_{};
     render::AsteroidModels asteroid_models_{};
     bool hipoly_arwings_{};
+    bool dynamic_lighting_{};
     std::uint8_t dlss_mode_{}; // Host quality preference, not emulated game state.
     std::uint8_t dlss45_mode_{};
     std::uint8_t fsr1_mode_{}; // Host quality preference; preserve across state loads.

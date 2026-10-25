@@ -228,8 +228,8 @@ std::vector<SdlRayShadows::PointLight> SdlRayShadows::lights(const vr::EyeCamera
             place(index,key,coloured({1.F,.82F,.3F},1000.F,0.F),1.F);break;
         case EmitterArwingLaser: // every Arwing shot (laser, twin laser, plasma): blue
             place(index,key,coloured({.3F,.5F,1.F},1000.F,0.F),1.F);break;
-        case EmitterExplosion:
-            place(index,key,coloured({1.F,.5F,.15F},1400.F,.3F),.9F);break;
+        case EmitterExplosion: // a large dark orange/red light over everything near
+            place(index,key,coloured({.85F,.22F,.04F},3200.F,.2F),1.8F);break;
         case EmitterPlasma: // enemy ring shots and plasma balls: blue
             place(index,key,coloured({.3F,.5F,1.F},1000.F,0.F),1.F);break;
         case EmitterBoost: { // the boost flame: blue on the floor and walls (tunnels), never on ships

@@ -131,7 +131,7 @@ struct ModernRuntime::State {
         // Ray-traced sun shadows (experimental, off unless asked for):
         // STARFOX_MODERN_RT_SHADOWS=1; STARFOX_MODERN_RT_SHADOW_LEVEL = the
         // percentage of the ground colour kept in shadow (default 50).
-        if(const auto* rt=std::getenv("STARFOX_MODERN_RT_SHADOWS"); rt && std::string_view(rt)=="1") rt_shadows=true;
+        if(const auto* rt=std::getenv("STARFOX_MODERN_RT_SHADOWS"); rt && std::string_view(rt)=="1") rt_shadows_forced=true;
         if(const auto* level=std::getenv("STARFOX_MODERN_RT_SHADOW_LEVEL"))
             rt_shadow.brightness=std::clamp(float(std::atof(level))/100.F,0.F,1.F);
         // STARFOX_MODERN_RT_SHADOW_RECEIVERS=ground keeps shadows off the
@@ -154,7 +154,7 @@ struct ModernRuntime::State {
         // Ray-traced coloured lights (experimental, off unless asked for):
         // STARFOX_MODERN_RT_LIGHTS=1. Lasers are the existing renderer's
         // emissive beam shapes (starfox_pc.cpp emissive_beam_shapes).
-        if(const auto* rt=std::getenv("STARFOX_MODERN_RT_LIGHTS"); rt && std::string_view(rt)=="1") rt_lights=true;
+        if(const auto* rt=std::getenv("STARFOX_MODERN_RT_LIGHTS"); rt && std::string_view(rt)=="1") rt_lights_forced=true;
         // Look tuning: STARFOX_MODERN_RT_LIGHT_STRENGTH / _REACH (percent of
         // the defaults) and _STEPS (brightness bands, 0 = smooth).
         if(const auto* value=std::getenv("STARFOX_MODERN_RT_LIGHT_STRENGTH")) rt_shadow.light_strength*=std::clamp(float(std::atof(value)),0.F,1000.F)/100.F;
@@ -184,11 +184,12 @@ struct ModernRuntime::State {
         if(!lists.empty() && !intro.empty() && intro.front()>lists.front() && intro.front()-lists.front()<=0xffffU)
             intro_background=uint16_t(intro.front()-lists.front());
     }
-    bool rt_lights{};
+    // rt_*_forced: the STARFOX_MODERN_RT_* switches; rt_*: this frame (or DYNAMIC LIGHTING).
+    bool rt_lights{},rt_lights_forced{};
     std::unordered_set<uint16_t> beam_shapes,plasma_shapes,ship_shapes,bomb_shapes,boost_shapes;
     std::optional<uint16_t> intro_background;
     std::unordered_set<uint32_t> arwing_shot_strategies,bomb_strategies;
-    bool rt_shadows{};
+    bool rt_shadows{},rt_shadows_forced{};
     double rt_sun_elevation{75};
     SdlFrameRenderer::ShadowSettings rt_shadow;
     std::optional<int> rt_softness_override;
@@ -324,6 +325,10 @@ bool ModernRuntime::present(SDL_Renderer* renderer,double alpha,int requested_wi
         // The desktop's 3D ASTEROIDS setting (VR passes its own preference).
         s.models.set_asteroid_models(s.history.game().asteroid_models());
         s.models.set_hipoly_arwings(s.history.game().hipoly_arwings());
+        // DYNAMIC LIGHTING turns on the ray-traced shadows and lights; the
+        // STARFOX_MODERN_RT_* switches still force them for testing.
+        s.rt_shadows=s.rt_shadows_forced || s.history.game().dynamic_lighting();
+        s.rt_lights=s.rt_lights_forced || s.history.game().dynamic_lighting();
         auto world=s.models.assemble_world_interpolated(*previous,*current,alpha,s.inputs.srgb,true);
         require(world.pending.empty(),"MODERN world assembly pending");
         require(source_models_supported(world.compute_models),"MODERN warp/axis models require the complete fallback renderer");

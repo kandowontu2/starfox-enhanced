@@ -8243,6 +8243,7 @@ int main(int argc, char** argv) {
                 static_cast<std::uint8_t>(game.gpu_renderer()),
                 window.fixed_window_size()[0],window.fixed_window_size()[1],
                 game.hipoly_arwings(),
+                game.dynamic_lighting(),
             };
         };
         {
@@ -8457,6 +8458,7 @@ int main(int argc, char** argv) {
             game.set_model_smoothing(saved_pregame.model_smoothing);
             game.set_asteroid_models(saved_pregame.asteroid_models);
             game.set_hipoly_arwings(saved_pregame.hipoly_arwings);
+            game.set_dynamic_lighting(saved_pregame.dynamic_lighting);
             game.set_language(saved_pregame.language);
             if (const auto* language = std::getenv("STARFOX_TEST_LANGUAGE"))
                 game.set_language(static_cast<std::uint8_t>(std::atoi(language)));
@@ -8507,6 +8509,8 @@ int main(int argc, char** argv) {
                 game.set_asteroid_models(static_cast<std::uint8_t>(std::atoi(asteroids)));
             if (const auto* hipoly = std::getenv("STARFOX_TEST_HIPOLY_ARWINGS"))
                 game.set_hipoly_arwings(std::atoi(hipoly) != 0);
+            if (const auto* lighting = std::getenv("STARFOX_TEST_DYNAMIC_LIGHTING"))
+                game.set_dynamic_lighting(std::atoi(lighting) != 0);
             if (const auto* separated = std::getenv("STARFOX_TEST_SEPARATED_MODELS"))
                 game.set_smooth_polys(std::atoi(separated) != 0);
             if (saved_pregame.effect == static_cast<std::uint8_t>(starfox::render::Effect::bloom)
@@ -11672,7 +11676,7 @@ int main(int argc, char** argv) {
                             : game.pregame_page() == starfox::simulation::PregamePage::two_d
                                 ? "2D OPTIONS" : game.pregame_page()==starfox::simulation::PregamePage::global
                                     ? "GLOBAL ENHANCEMENTS" : "3D OPTIONS", 27, 10U);
-                        std::array<std::int32_t, 81> row_y;
+                        std::array<std::int32_t, 82> row_y;
                         row_y.fill(-1);
                         const auto selected_row=std::size_t(std::find(visual_order.begin(),visual_order.end(),game.pregame_selection())-visual_order.begin());
                         const auto first_visible=!main_page && visual_order.size()>14
@@ -11754,6 +11758,10 @@ int main(int argc, char** argv) {
                             !game.modern_renderer() ? std::string_view{"MODERN ONLY"}
                                 : on_off(game.hipoly_arwings()), row_y[80],
                             game.pregame_selection()==80U);
+                        draw_graphics_row("DYNAMIC LIGHTING",
+                            !game.modern_renderer() ? std::string_view{"MODERN ONLY"}
+                                : on_off(game.dynamic_lighting()), row_y[81],
+                            game.pregame_selection()==81U);
                         draw_graphics_row("AA QUALITY",
                             !window.leia_active() && game.aa_type()>=4 && !window.native_gpu_enabled()?"GPU REQUIRED":
                                 !window.leia_active() && game.aa_type()==4 && game.stereo_output()!=0?"MONO REQUIRED":
