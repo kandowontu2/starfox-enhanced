@@ -240,14 +240,20 @@ float3 point_lighting(float3 colour,float3 surface,float3 normal,bool ground,boo
         if(look.y!=0) {
             if(!background) continue;
             float3 offset=surface-placed.xyz;
-            float height=-dot(offset,shadow_light.xyz); // How far the light is above, along the sun.
-            if(height<=0 || height>=look.z) continue;
+            // How far the light is above, along the sun (the traced point
+            // sits look.w further up).
+            float height=-dot(offset,shadow_light.xyz);
+            float climb=(height-look.w)/look.z;
+            if(climb<=0 || climb>=1) continue;
             float3 lateral=offset+shadow_light.xyz*height;
             float along=dot(lateral,shape.xyz);
             float3 across=lateral-shape.xyz*along;
             float distance=sqrt(dot(across,across)+along*along/(shape.w*shape.w));
-            if(distance>=placed.w) continue;
-            amount=point_light_edge(distance/placed.w,look.x)*(1.-height/look.z);
+            // The pool widens (look.y times at the top) and fades as it climbs.
+            float radius=placed.w*lerp(1.,look.y,climb);
+            if(distance>=radius) continue;
+            float fade=1.-climb;
+            amount=point_light_edge(distance/radius,look.x)*fade*fade;
             if(amount<=0) continue;
             // Traced to the light itself: an engine's own hull cuts its pool.
             float3 toward=placed.xyz-origin;

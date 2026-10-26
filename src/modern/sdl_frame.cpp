@@ -185,8 +185,9 @@ void SdlFrameRenderer::push_fog(SDL_GPUCommandBuffer* command,const vr::EyeCamer
             out[0]=point.position[0];out[1]=point.position[1];out[2]=point.position[2];out[3]=point.radius;
             out[4]=point.colour[0];out[5]=point.colour[1];out[6]=point.colour[2];out[7]=std::bit_cast<float>(point.object);
             out[8]=point.axis[0];out[9]=point.axis[1];out[10]=point.axis[2];out[11]=point.aspect;
-            out[12]=point.hardness;out[13]=point.projected?1.F:0.F;out[14]=point.fade_height;
-            out[15]=point.background_only?1.F:0.F;
+            // Projected lights: look.y = spread (nonzero), look.w = lift.
+            out[12]=point.hardness;out[13]=point.projected?std::max(point.spread,1e-3F):0.F;out[14]=point.fade_height;
+            out[15]=point.projected?point.lift:(point.background_only?1.F:0.F);
         }
     }
     SDL_PushGPUFragmentUniformData(command,1,data.data(),sizeof(data));

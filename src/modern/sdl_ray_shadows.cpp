@@ -209,10 +209,10 @@ std::vector<SdlRayShadows::PointLight> SdlRayShadows::lights(const vr::EyeCamera
         }
         if(light.projected && light.lift>0) {
             // The pool's centre (along the sun) stays put; the light is
-            // traced at the lifted point, its fade measured from there.
+            // traced at the lifted point (the shader measures the height
+            // from the real light, `lift` below it).
             light.position={float(light.position[0]+light_.x*light.lift),float(light.position[1]+light_.y*light.lift),
                 float(light.position[2]+light_.z*light.lift)};
-            light.fade_height+=light.lift;
         }
         light.radius*=radius_scale;
         for(auto& value:light.colour) value*=strength;
@@ -276,7 +276,10 @@ std::vector<SdlRayShadows::PointLight> SdlRayShadows::lights(const vr::EyeCamera
             const float span=half_span(key);
             auto light=coloured(red?std::array<float,3>{1.F,.35F,.1F}:std::array<float,3>{1.F,.75F,.2F},
                 span>0?span*2.F:40.F,0.F);
-            light.projected=true;light.fade_height=700.F;light.self_shadowed=true;light.lift=span>0?span*engine_lift:40.F;
+            // Its present size near the ground, three times as wide and
+            // gone 900 units up.
+            light.projected=true;light.fade_height=900.F;light.spread=3.F;
+            light.self_shadowed=true;light.lift=span>0?span*engine_lift:40.F;
             place(index,key,light,1.6F,span>0?span*engine_back:20.F);
             break;
         }

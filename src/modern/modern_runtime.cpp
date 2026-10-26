@@ -381,7 +381,10 @@ bool ModernRuntime::present(SDL_Renderer* renderer,double alpha,int requested_wi
                 const render::shadows::Vec3 x{view[0]/32768.,-view[1]/32768.,-view[2]/32768.};
                 const render::shadows::Vec3 y{view[3]/32768.,-view[4]/32768.,-view[5]/32768.};
                 const render::shadows::Vec3 z{view[6]/32768.,-view[7]/32768.,-view[8]/32768.};
-                const double angle=s.rt_sun_elevation*3.14159265358979/180.;
+                // Corridors, tunnels and the boss room: straight overhead,
+                // as the cartridge drops shadows directly under the ship.
+                const bool enclosed=current->ppu->tunnel_scene || current->background_corridor || current->background_nucleus;
+                const double angle=(enclosed?90.:s.rt_sun_elevation)*3.14159265358979/180.;
                 const double across=std::cos(angle)/std::sqrt(2.);
                 light=x*-across+y*-std::sin(angle)+z*-across;
             }

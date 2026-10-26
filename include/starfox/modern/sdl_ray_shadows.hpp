@@ -44,6 +44,9 @@ public:
         // follows the sun's shadow more closely; smaller = it shrinks
         // toward the light, which then reaches into the shadow.
         float lift{};
+        // Projected lights: the pool's radius at fade_height, as a multiple
+        // of its radius on the ground (it widens and dims as the light climbs).
+        float spread{1};
     };
     // Emitter classes from the game state (ModernRuntime), each with its
     // own authored colour and reach.
