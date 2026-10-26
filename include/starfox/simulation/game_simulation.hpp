@@ -631,8 +631,13 @@ public:
     }
     [[nodiscard]] static constexpr std::pair<RendererMode,GpuRenderer> next_renderer_selection(
         RendererMode mode,GpuRenderer gpu,bool backward,bool hardware_only,bool modern=false) noexcept {
-        if(hardware_only) return {RendererMode::gpu,
-            gpu==GpuRenderer::fast?GpuRenderer::accurate:GpuRenderer::fast};
+        if(hardware_only) {
+            // GPU ACCURATE -> GPU FAST [-> MODERN], wrapping.
+            const unsigned count=modern?3U:2U;
+            const unsigned position=gpu==GpuRenderer::fast?1U:gpu==GpuRenderer::modern && modern?2U:0U;
+            const unsigned next=(position+(backward?count-1U:1U))%count;
+            return {RendererMode::gpu,next==2U?GpuRenderer::modern:next==1U?GpuRenderer::fast:GpuRenderer::accurate};
+        }
         // SOFTWARE -> GPU -> GPU FAST [-> MODERN], wrapping.
         const unsigned count=modern?4U:3U;
         const unsigned position=mode==RendererMode::software?0U

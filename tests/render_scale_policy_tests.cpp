@@ -19,6 +19,19 @@ int main() try {
             throw std::runtime_error("Hardware-only GPU menu failed to wrap");
     }
     for(bool backward:{false,true}) {
+        // Hardware-only hosts with MODERN (PS5): GPU, GPU FAST and MODERN.
+        auto gpu=GpuRenderer::accurate;
+        unsigned accurate=0,fast=0,modern=0;
+        for(unsigned step=0;step<3;++step) {
+            const auto selected=GameSimulation::next_renderer_selection(RendererMode::gpu,gpu,backward,true,true);
+            if(selected.first!=RendererMode::gpu) throw std::runtime_error("Hardware-only MODERN menu selected software");
+            gpu=selected.second;
+            accurate+=gpu==GpuRenderer::accurate;fast+=gpu==GpuRenderer::fast;modern+=gpu==GpuRenderer::modern;
+        }
+        if(accurate!=1 || fast!=1 || modern!=1 || gpu!=GpuRenderer::accurate)
+            throw std::runtime_error("Hardware-only renderer menu failed its MODERN cycle");
+    }
+    for(bool backward:{false,true}) {
         auto mode=RendererMode::software;auto gpu=GpuRenderer::accurate;
         unsigned software=0,accurate=0,fast=0;
         for(unsigned step=0;step<3;++step) {
