@@ -276,9 +276,10 @@ std::vector<SdlRayShadows::PointLight> SdlRayShadows::lights(const vr::EyeCamera
             const float span=half_span(key);
             auto light=coloured(red?std::array<float,3>{1.F,.35F,.1F}:std::array<float,3>{1.F,.75F,.2F},
                 span>0?span*2.F:40.F,0.F);
-            // Its present size near the ground, three times as wide and
-            // gone 900 units up.
-            light.projected=true;light.fade_height=900.F;light.spread=3.F;
+            // Its present size near the ground (low flight is 30-55 units
+            // up; a half span is 35), three times as wide and gone by about
+            // two wingspans up (4.5 half spans).
+            light.projected=true;light.fade_height=span>0?span*4.5F:160.F;light.spread=3.F;
             light.self_shadowed=true;light.lift=span>0?span*engine_lift:40.F;
             place(index,key,light,1.6F,span>0?span*engine_back:20.F);
             break;

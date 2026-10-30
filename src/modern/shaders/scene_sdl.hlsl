@@ -252,8 +252,8 @@ float3 point_lighting(float3 colour,float3 surface,float3 normal,bool ground,boo
             // The pool widens (look.y times at the top) and fades as it climbs.
             float radius=placed.w*lerp(1.,look.y,climb);
             if(distance>=radius) continue;
-            float fade=1.-climb;
-            amount=point_light_edge(distance/radius,look.x)*fade*fade;
+            // Nearly full while low, then gone quickly.
+            amount=point_light_edge(distance/radius,look.x)*(1.-smoothstep(0.,1.,climb));
             if(amount<=0) continue;
             // Traced to the light itself: an engine's own hull cuts its pool.
             float3 toward=placed.xyz-origin;
