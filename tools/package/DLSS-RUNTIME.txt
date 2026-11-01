@@ -1,10 +1,10 @@
 OPTIONAL NVIDIA DLSS / DLSS 4.5 SUPER RESOLUTION RUNTIME
 
 These files are part of Star Fox Enhanced's Windows x64 application.
-Official releases embed them inside starfox_pc.exe and restore verified copies
-to a versioned per-user LocalAppData/StarFoxEnhanced/dlss cache when starting.
-No separate download, installer, NVIDIA App override or ReShade is required.
-Source builds can alternatively keep the packaged dlss folder beside the exe.
+Official releases provide them in a separate optional Windows x64 add-on.
+Extract its complete dlss folder beside starfox_pc.exe and restart the game.
+No installer, NVIDIA App override or ReShade is required. The base game works
+without this download. Custom source builds can still explicitly embed it.
 Select DLSS or DLSS 4.5 in 3D OPTIONS on a compatible NVIDIA GPU and D3D12.
 They are separate options, both OFF by default, and only one can be active.
 Each offers Quality, Balanced, Performance and DLAA. Standard DLSS requests

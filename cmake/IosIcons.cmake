@@ -10,10 +10,11 @@ function(starfox_add_ios_icons target)
             AppIcon76@2x.png AppIcon83.5@2x.png)
         list(APPEND icons "${CMAKE_CURRENT_BINARY_DIR}/generated/ios-icons/${name}")
     endforeach()
+    file(GLOB icon_inputs CONFIGURE_DEPENDS "${root}/assets/icons/ios/*.png")
     add_custom_command(OUTPUT ${icons}
         COMMAND "${Python3_EXECUTABLE}" "${root}/tools/generate_ios_assets.py"
             --output "${CMAKE_CURRENT_BINARY_DIR}/generated/ios-icons"
-        DEPENDS "${root}/tools/generate_ios_assets.py" "${root}/tools/generate_uwp_assets.py"
+        DEPENDS "${root}/tools/generate_ios_assets.py" ${icon_inputs}
         VERBATIM)
     target_sources(${target} PRIVATE ${icons})
     set_source_files_properties(${icons} PROPERTIES MACOSX_PACKAGE_LOCATION Resources)

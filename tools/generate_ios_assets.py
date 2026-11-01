@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
-"""Render our existing launcher chevron as opaque iPhone/iPad app icons."""
+"""Stage pre-rendered opaque iPhone/iPad icons without image dependencies."""
 import argparse
 from pathlib import Path
-import struct
-import zlib
-from generate_uwp_assets import chunk, pixel
+import shutil
 
 ICONS = {
     'AppIcon60@2x.png': 120,
@@ -18,15 +16,7 @@ ICONS = {
 def generate(output):
     output.mkdir(parents=True, exist_ok=True)
     for name, size in ICONS.items():
-        rows = bytearray()
-        for y in range(size):
-            rows.append(0)
-            for x in range(size):
-                rows.extend(pixel(x, y, size, size)[:3])
-        data = (b'\x89PNG\r\n\x1a\n'
-                + chunk(b'IHDR', struct.pack('>IIBBBBB', size, size, 8, 2, 0, 0, 0))
-                + chunk(b'IDAT', zlib.compress(rows, 9)) + chunk(b'IEND', b''))
-        (output / name).write_bytes(data)
+        shutil.copyfile(Path(__file__).resolve().parents[1] / 'assets/icons/ios' / name, output / name)
 
 
 if __name__ == '__main__':

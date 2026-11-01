@@ -224,6 +224,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release `
             -DSTARFOX_BUILD_TESTS=OFF `
             -DSTARFOX_ENABLE_LEIASR=ON `
+            "-DSTARFOX_DLSS_RUNTIME_DIRECTORY:PATH=" `
             -DSTARFOX_PACKAGE_MSU1_MUSIC=OFF
           cmake --build build/asset-builder --target starfox_pc starfox_asset_builder
       - name: Verify standalone Windows imports
@@ -261,16 +262,15 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'DLSS adapter configure failed' }
           cmake --build build/dlss-release --config Release --target starfox_dlss_native
           if ($LASTEXITCODE -ne 0) { throw 'DLSS adapter build failed' }
-      - name: Embed verified DLSS 4.5 runtime
+      - name: Package optional DLSS and DLSS 4.5 add-on
         shell: pwsh
         run: |
-          $staging = Join-Path $env:RUNNER_TEMP 'starfox-dlss-embed'
+          $staging = Join-Path $env:RUNNER_TEMP 'starfox-dlss-addon'
           ./tools/package_dlss.ps1 -SdkDirectory $env:STARFOX_RELEASE_DLSS_SDK `
             -Adapter build/dlss-release/Release/starfox_dlss_native.dll -Destination $staging
-          cmake -S . -B build/asset-builder "-DSTARFOX_DLSS_RUNTIME_DIRECTORY=$staging/dlss"
-          if ($LASTEXITCODE -ne 0) { throw 'Embedded DLSS configure failed' }
-          cmake --build build/asset-builder --target starfox_pc
-          if ($LASTEXITCODE -ne 0) { throw 'Embedded DLSS runtime build failed' }
+          if ($LASTEXITCODE -ne 0) { throw 'DLSS add-on packaging failed' }
+          Copy-Item tools/package/DLSS-ADDON.txt "$staging/INSTALL-DLSS.txt"
+          Compress-Archive -Path "$staging/*" -DestinationPath 'StarFoxEnhanced-0.0.8.8.2-dlss-windows-x64.zip'
       - name: Build optional direct SR Platform adapter
         shell: pwsh
         run: |
@@ -300,8 +300,8 @@ jobs:
           ./tools/package_displayxr.ps1 -OutputDirectory $runtime -VerifyOnly
           python tests/test_displayxr_package.py --package $runtime
           if ($LASTEXITCODE -ne 0) { throw 'DisplayXR optional package regression failed' }
-          if (!(Test-Path "$runtime/licenses/dlss/nvngx_dlss.license.txt")) {
-            throw 'Embedded DLSS redistribution notices missing'
+          if (Test-Path "$runtime/dlss") {
+            throw 'DLSS binaries must stay in the optional add-on, not the game ZIP'
           }
           if (!(Test-Path "$runtime/licenses/displayxr/LICENSE.txt") -or
               !(Test-Path "$runtime/licenses/displayxr/NOTICE.txt")) {
@@ -362,7 +362,8 @@ jobs:
               'StarFoxEnhanced-0.0.8.8.2-windows-x64/starfox_leia_sr_check.exe',
               'StarFoxAssetBuilder-0.0.8.8.2-windows-x64/starfox_asset_builder.exe',
               'StarFoxEnhanced-0.0.8.8.2-windows-x64.zip',
-              'StarFoxAssetBuilder-0.0.8.8.2-windows-x64.zip') `
+              'StarFoxAssetBuilder-0.0.8.8.2-windows-x64.zip',
+              'StarFoxEnhanced-0.0.8.8.2-dlss-windows-x64.zip') `
             -ReportPath build/validation/active/windows-defender-release.json
       - name: Preserve Windows scan receipt
         if: always()
@@ -382,6 +383,11 @@ jobs:
           name: StarFoxAssetBuilder-0.0.8.8.2-windows-x64
           path: StarFoxAssetBuilder-0.0.8.8.2-windows-x64.zip
           if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: StarFoxEnhanced-0.0.8.8.2-dlss-windows-x64
+          path: StarFoxEnhanced-0.0.8.8.2-dlss-windows-x64.zip
+          if-no-files-found: error
       - name: Add to GitHub release
         if: github.event_name == 'push' || inputs.release_tag != ''
         env:
@@ -392,7 +398,8 @@ jobs:
           tag="${REQUESTED_TAG:-${GITHUB_REF_NAME}}"
           gh release upload "${tag}" \
             StarFoxEnhanced-0.0.8.8.2-windows-x64.zip \
-            StarFoxAssetBuilder-0.0.8.8.2-windows-x64.zip --clobber
+            StarFoxAssetBuilder-0.0.8.8.2-windows-x64.zip \
+            StarFoxEnhanced-0.0.8.8.2-dlss-windows-x64.zip --clobber
 
   windows-x86:
     if: ${{ !inputs.quest_only && !inputs.source_checks_only && !inputs.windows_x64_only }}
@@ -1155,6 +1162,7 @@ jobs:
           # to be downloaded. Diagnostic artifacts and 3DS are not releases.
           assets=(
             StarFoxEnhanced-0.0.8.8.2-windows-x64.zip
+            StarFoxEnhanced-0.0.8.8.2-dlss-windows-x64.zip
             StarFoxAssetBuilder-0.0.8.8.2-windows-x64.zip
             StarFoxEnhanced-0.0.8.8.2-windows-x86.zip
             StarFoxEnhanced-0.0.8.8.2-xbox-uwp-x64.zip

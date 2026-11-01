@@ -39,6 +39,11 @@ For devices needing prepared assets, the release includes a standalone Windows
 mobile users can also select a ROM directly. The Windows builder is a separate
 download; the game can import your ROM without it.
 
+Windows x64 DLSS/DLSS 4.5 support is an optional separate add-on for future
+packages. Extract its `dlss` folder beside `starfox_pc.exe`; both menu options
+share that one download. See [installation instructions](tools/package/DLSS-ADDON.txt).
+The game runs normally without it. Existing 0.0.8.8.2 release assets are unchanged.
+
 ### Supported ROMs
 
 - Star Fox Japan: 1.0 / 1.1

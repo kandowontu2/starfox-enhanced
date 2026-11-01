@@ -308,7 +308,13 @@ def main():
     want = set(args.only or ["icon0", "pic0", "pic1"])
 
     if "icon0" in want:
-        save_png(out / "icon0.png", title_icon(load_capture(ICON_SOURCE)))
+        # Background regeneration must not restore the previous launcher icon.
+        from PIL import Image
+        with Image.open(HERE.parents[2] / "assets/icons/source.png") as source:
+            rgba = source.convert("RGBA")
+            icon = Image.new("RGB", rgba.size, "black")
+            icon.paste(rgba, mask=rgba.getchannel("A"))
+            icon.save(out / "icon0.png")
     pics = {
         "pic0": lambda: widescreen(load_capture(PIC0_SOURCE)),
         "pic1": lambda: widescreen(roll_starfield(load_capture(PIC1_SOURCE), *PIC1_ROLL)),

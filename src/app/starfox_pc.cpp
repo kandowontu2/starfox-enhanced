@@ -18,6 +18,8 @@ extern "C" void StarfoxPS5_HideSplashScreen(void);
 #endif
 #include "starfox/render/bloom.hpp"
 #include "starfox/render/object_snapshot.hpp"
+#include "starfox/render/exterior_ship_visibility.hpp"
+#include "starfox/render/gpu_compatibility.hpp"
 #include "starfox/render/source_sprite_material.hpp"
 #include "starfox/audio/msu1_audio.hpp"
 #include "starfox/audio/stem_mixer.hpp"
@@ -1780,6 +1782,7 @@ public:
             throw std::runtime_error{
                 std::string{"SDL_CreateWindow: "} + SDL_GetError()};
         }
+        starfox_set_window_icon(window_);
         recreate_renderer(renderer_mode);
         if(!std::getenv("STARFOX_TEST_HIDDEN")) SDL_ShowWindow(window_);
         static_cast<void>(SDL_SyncWindow(window_));
@@ -1823,6 +1826,7 @@ public:
         }
     }
     void release_renderer_resources() {
+        gpu_configuration_boundary_.reset();
         if(renderer_release_callback_) renderer_release_callback_();
         release_sr_platform();
         sr_platform_attempted_=false;sr_failure_reported_=false;
@@ -2242,6 +2246,31 @@ public:
             recreate_renderer(renderer_mode_);
     }
     bool amd_adapter() const {return adapter_vendor_==0x1002U;}
+    bool host_cartridge_composition() const {
+        if(!native_gpu_enabled()) return false;
+        // Finite regression runs can exercise the compatibility branch on a
+        // non-Radeon build machine without changing the real adapter identity.
+        if(std::getenv("STARFOX_TEST_FRAMES") && std::getenv("STARFOX_TEST_HOST_CARTRIDGE")) return true;
+#if defined(_WIN32) && !defined(STARFOX_UWP)
+        return starfox::render::host_cartridge_composition(true,adapter_vendor_,
+            SDL_GetGPUDeviceDriver(static_cast<SDL_GPUDevice*>(effect_device())));
+#else
+        return false;
+#endif
+    }
+    void prepare_gpu_configuration(std::uint64_t signature) {
+        if(!host_cartridge_composition()) return;
+        if(gpu_configuration_boundary_.changed(signature)) {
+            // SDL's presenter may still own the preceding scene texture. Drain
+            // it as well as our compute work before changing resolution/AA or
+            // rebinding effects during play; don't serialize unchanged frames.
+            auto* device=static_cast<SDL_GPUDevice*>(effect_device());
+            if(!SDL_FlushRenderer(renderer_) || !SDL_WaitForGPUIdle(device))
+                throw std::runtime_error(std::string{"GPU settings retirement: "}+SDL_GetError());
+            if(std::getenv("STARFOX_TRACE_GPU")) std::cerr<<"gpu-settings: retired previous configuration\n";
+        }
+        gpu_configuration_boundary_.commit(signature);
+    }
     bool prefers_fsr1() const {
         // Native D3D12 has its own SDK eye histories. Unsupported hardware or
         // the Vulkan runtime continues to use the independent per-eye FSR path.
@@ -5700,6 +5729,8 @@ private:
         }
 #endif
         require_no_legacy_graphics_injector();
+        if(host_cartridge_composition())
+            std::cerr<<"gpu-compatibility: Windows Radeon Vulkan host cartridge composition; GPU geometry/effects retained\n";
         native_gpu_binning_=false;
 #if defined(STARFOX_SDL_GPU_EFFECTS)
         if(gpu_hardware_requested && portable_gpu_ && !std::getenv("STARFOX_DISABLE_GPU_BINS"))
@@ -6730,6 +6761,7 @@ private:
     std::array<float,2> taa_jitter_{};
     std::uint8_t fsr1_mode_{};
     std::uint32_t adapter_vendor_{};
+    starfox::render::GpuConfigurationBoundary gpu_configuration_boundary_;
     bool leia_requested_{},leia_unavailable_{};
 #if defined(STARFOX_DISPLAYXR)
     starfox::render::DisplayXrDesktop leia_;
@@ -8129,6 +8161,7 @@ int main(int argc, char** argv) {
             ? *starfox_ex_assets : original_assets;
         const auto& rom = assets.rom;
         const auto& symbols = assets.symbols;
+        const starfox::render::ExteriorShipVisibility exterior_ships{symbols};
         if(menu_preview || editor_preview) {
             // Present before cartridge preroll, asset/scene preparation and
             // the first heavy GPU frame. The indicator itself has no effects.
@@ -10391,6 +10424,20 @@ int main(int argc, char** argv) {
             if (!running) break;
             // Exercise the same live transition as the menu, after resources
             // have been populated by several real presentation frames.
+            if(test_frames && std::getenv("STARFOX_TEST_GPU_SETTINGS_CYCLE")
+                && presented_frames && presented_frames%240U==0U) {
+                const bool enhanced=(presented_frames/240U)%2U!=0;
+                game.set_render_scale(static_cast<starfox::simulation::RenderScale>(enhanced?2U:0U));
+                game.set_aa_type(enhanced?2U:0U);
+                game.set_anti_aliasing_mode(enhanced?starfox::simulation::AntiAliasingMode::heavy:
+                    starfox::simulation::AntiAliasingMode::off);
+                game.set_bloom(enhanced?2U:0U);game.set_bloom_2d(enhanced?2U:0U);
+                auto environment=game.environment();environment[0]=environment[3]=enhanced?1U:0U;
+                game.set_environment(environment);game.set_vsync(enhanced);
+                std::cerr<<"gpu-settings-cycle: frame="<<presented_frames<<" enhanced="<<enhanced<<'\n';
+            }
+            // Exercise the same live transition as the menu, after resources
+            // have been populated by several real presentation frames.
             if(std::getenv("STARFOX_TEST_FRAMES") && std::getenv("STARFOX_TEST_RENDERER_CYCLE")
                 && presented_frames && presented_frames%8==0) {
                 game.set_renderer_mode(game.renderer_mode()==starfox::simulation::RendererMode::gpu
@@ -10427,6 +10474,19 @@ int main(int argc, char** argv) {
             }
             window.set_sr_platform_requested(game.stereo_output()==9 && !window.leia_requested(),
                 false); // record only; input can still change preview/menu-peek below
+            if(!game.in_setup_menu() || game.menu_preview() || editor_preview) {
+                std::uint64_t configuration=14695981039346656037ULL;
+                const auto add=[&](unsigned value) {configuration=(configuration^value)*1099511628211ULL;};
+                for(auto value:{unsigned(game.render_scale()),unsigned(game.anti_aliasing_mode()),unsigned(game.aa_type()),
+                    unsigned(game.bloom()),unsigned(game.bloom_2d()),unsigned(game.vsync()),unsigned(game.two_d_filter()),
+                    unsigned(game.ray_tracing_quality()),unsigned(game.reflective_surfaces_setting()),
+                    unsigned(game.effect()),unsigned(game.world_effect()),unsigned(game.manipulation()),
+                    unsigned(game.material()),unsigned(game.global_enhancements()),unsigned(game.scene_enhancements()),
+                    unsigned(game.depth_enhancements()),unsigned(game.particle_enhancements()),unsigned(game.display_mode()),
+                    unsigned(game.dlss_mode()),unsigned(game.dlss45_mode()),unsigned(game.fsr1_mode())}) add(value);
+                for(auto value:game.environment()) add(value);
+                window.prepare_gpu_configuration(configuration);
+            }
             window.set_render_options(presentation_renderer,
                 game.anti_aliasing_mode(),
                 game.aa_type(),
@@ -12580,6 +12640,7 @@ int main(int argc, char** argv) {
             // Main BG1/OBJ and isolated briefing BG2/text keep independent
             // recordings so their different fade/filter ordering stays intact.
             const bool record_background=record_models
+                && !window.host_cartridge_composition()
                 && !std::getenv("STARFOX_DISABLE_GPU_BACKGROUND")
                 && !std::getenv("STARFOX_CAPTURE_INDEXED_PATH");
             if(record_background) {
@@ -13189,6 +13250,12 @@ int main(int argc, char** argv) {
             for (const auto handle : game.draw_order()) {
                 if (!game.objects().is_active(handle)) continue;
                 const auto& object = game.objects().at(handle);
+                if(game.objects().is_active(game.player()) && handle!=game.player()
+                    && exterior_ships.hide(game.objects().at(game.player()).strategy_address,object.strategy_address)) {
+                    if(test_frames && std::getenv("STARFOX_TRACE_EXTERIOR_SHIPS"))
+                        std::cerr<<"exterior-ship: hidden slot="<<handle<<" strategy="<<object.strategy_address<<'\n';
+                    continue;
+                }
                 const auto gameplay_crosshair_scene = game.flow_state()
                         == starfox::simulation::GameFlowState::gameplay
                     || game.flow_state()
@@ -15131,6 +15198,7 @@ int main(int argc, char** argv) {
                 }
             }
             const bool record_ex_bitmap=present_native_ex_bitmap && resident_raster && record_models
+                && !window.host_cartridge_composition()
                 && !boss_roll
                 && !std::getenv("STARFOX_DISABLE_GPU_LATE_CARTRIDGE");
             // EX's intro can open a comms portrait before the gameplay HUD is
@@ -15140,7 +15208,7 @@ int main(int argc, char** argv) {
             if(game.flow_state()==starfox::simulation::GameFlowState::intro
                 && record_background && resident_raster && record_models
                 && !std::getenv("STARFOX_DISABLE_GPU_LATE_CARTRIDGE")) begin_late_cartridge();
-            if(stage_hud && resident_raster && record_models && !boss_roll
+            if(stage_hud && resident_raster && record_models && !boss_roll && !window.host_cartridge_composition()
                 && !std::getenv("STARFOX_DISABLE_GPU_LATE_CARTRIDGE")) begin_late_cartridge();
             if(record_ex_bitmap) {
                 begin_late_cartridge();
@@ -15218,7 +15286,8 @@ int main(int argc, char** argv) {
                     && (ppu.bg3_high_priority || game.flow_state()==starfox::simulation::GameFlowState::title))
                 || starfox::render::late_cartridge_objects(stage_hud,planet_presentation.briefing_layers,ppu.main_screen)
                 || (briefing.active && !planet_presentation.briefing_layers);
-            if(has_late_cartridge && resident_raster && record_models && !std::getenv("STARFOX_DISABLE_GPU_LATE_CARTRIDGE")) {
+            if(has_late_cartridge && resident_raster && record_models && !window.host_cartridge_composition()
+                && !std::getenv("STARFOX_DISABLE_GPU_LATE_CARTRIDGE")) {
                 begin_late_cartridge();
             }
             if (game.flow_state() == starfox::simulation::GameFlowState::title

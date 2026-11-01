@@ -45,6 +45,8 @@ class AppUpdateTests(unittest.TestCase):
         (self.target / "starfox_pc.exe").write_bytes(self.old)
         for name in ("pregame.cfg", "save.srm", "Starfox-Assets.BIN", "Starfox-MSU1.PAK", "touch-layout.cfg", "user.sfc"):
             (self.target / name).write_bytes(b"private-user-data")
+        (self.target / 'dlss').mkdir()
+        (self.target / 'dlss/starfox_dlss_native.dll').write_bytes(b'optional-addon-kept')
 
     def tearDown(self):
         self.temp.cleanup()
@@ -86,6 +88,7 @@ class AppUpdateTests(unittest.TestCase):
         self.assert_private()
 
     def assert_private(self):
+        self.assertEqual((self.target / 'dlss/starfox_dlss_native.dll').read_bytes(), b'optional-addon-kept')
         for name in ("pregame.cfg", "save.srm", "Starfox-Assets.BIN", "Starfox-MSU1.PAK", "touch-layout.cfg", "user.sfc"):
             self.assertEqual((self.target / name).read_bytes(), b"private-user-data", name)
 

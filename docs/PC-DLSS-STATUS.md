@@ -1,5 +1,12 @@
 # PC DLSS work — September 13
 
+November 1 packaging update (unreleased): normal Windows x64 builds no longer
+embed the NVIDIA runtime. DLSS and DLSS 4.5 share one optional add-on containing
+the verified production DLLs and notices. Extract `dlss` beside the executable;
+the normal updater preserves it and never selects the add-on as the game ZIP.
+Historical embedded-build validation below describes older builds, not the new
+default package. Explicit custom source builds may still opt into embedding.
+
 October 6 real-player rejected-command follow-up: the ordinary mono DLSS host
 still cancelled an SDK-encoded command, unlike the calibrated renderer's
 accepted drain policy. A separate actual player reproduces five D3D12 state

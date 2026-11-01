@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
-"""Render the existing code-native launcher chevron as opaque Vita PNGs."""
+"""Stage pre-rendered opaque, indexed Vita launcher artwork."""
 import argparse
 from pathlib import Path
 import struct
 import zlib
-from generate_uwp_assets import chunk, pixel
+
+
+def chunk(kind, payload):
+    """PNG fixture helper also used by the package corruption tests."""
+    return (struct.pack('>I', len(payload)) + kind + payload
+            + struct.pack('>I', zlib.crc32(kind + payload) & 0xffffffff))
 
 ASSETS = {
     "sce_sys/icon0.png": (128, 128),
@@ -14,17 +19,8 @@ ASSETS = {
 
 
 def png(width, height):
-    colours = [(8, 21, 40), (244, 151, 36), (255, 238, 186)]
-    indices = {rgb: index for index, rgb in enumerate(colours)}
-    rows = bytearray()
-    for y in range(height):
-        rows.append(0)
-        for x in range(width):
-            rows.append(indices[pixel(x, y, width, height)[:3]])
-    return (b"\x89PNG\r\n\x1a\n"
-            + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 3, 0, 0, 0))
-            + chunk(b"PLTE", bytes(value for rgb in colours for value in rgb))
-            + chunk(b"IDAT", zlib.compress(rows, 9)) + chunk(b"IEND", b""))
+    name = next(name for name, size in ASSETS.items() if size == (width, height))
+    return (Path(__file__).resolve().parents[1] / "assets/icons/vita" / name).read_bytes()
 
 
 def generate(output):

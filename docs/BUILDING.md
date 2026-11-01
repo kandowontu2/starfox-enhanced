@@ -17,13 +17,16 @@ Alt+0 restores automatic sizing for the current session.
 
 ### Smaller desktop binaries
 
-Enhanced background artwork accounts for most of the recent executable growth.
+Runtime enhanced backgrounds now use lossless PNG payloads (about 61 MB
+instead of 179 MB). The BMP authoring references remain in source, but are
+not embedded. Resolution and rendered pixels are unchanged; portable decoding
+is lazy and cached, with no operating-system image service required.
 Desktop flat-runtime builds can use `-DSTARFOX_EMBED_ENHANCED_BACKDROPS=OFF`
 to retain embedded import patches/symbols but load artwork from
 `assets/enhanced-backdrops/` beside the executable instead (inside Resources
 for a macOS `.app`). Use `cmake --install` to install that companion artwork
 with the runtime; keep it when distributing
-the smaller binary. Total artwork size is unchanged. Normal release builds
+the smaller binary. Normal release builds
 still embed it; mobile, console and VR packaging is unchanged.
 
 The standalone asset builder now embeds only the import patches/symbols, not

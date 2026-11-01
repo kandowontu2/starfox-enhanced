@@ -1,0 +1,17 @@
+OPTIONAL WINDOWS x64 DLSS / DLSS 4.5 ADD-ON
+
+Download the add-on from the same official Star Fox Enhanced release as your
+game. Extract this archive into the game's folder, beside starfox_pc.exe.
+The resulting path must be: <game folder>/dlss/starfox_dlss_native.dll
+Keep the entire dlss folder, including its NVIDIA licenses and manifest.
+Restart the game, then select DLSS or DLSS 4.5 in 3D OPTIONS on a compatible
+NVIDIA GPU using the D3D12 backend. Both modes use this single add-on.
+
+The normal game download does not include these DLLs. Without the add-on,
+DLSS remains unavailable; the game and its other renderers work normally.
+No ReShade, system installer, separate NVIDIA App override, or DLSS5 is used.
+
+Portable game auto-updates preserve the optional dlss folder. To update the
+add-on itself, close the game and extract the matching newer add-on over it.
+For removal, close the game and remove only the dlss folder. Settings, saves
+and cartridge data are unaffected. Do not disable security software.

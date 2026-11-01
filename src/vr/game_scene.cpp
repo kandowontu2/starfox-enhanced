@@ -41,7 +41,7 @@ std::array<std::optional<SourceCorridor>,source_corridor_count> source_corridors
 }
 GameSceneHistory::GameSceneHistory(const simulation::GameSimulation& game,
     const assets::RomImage& rom,const assets::SymbolMap& symbols,SceneCameraPolicy camera_policy)
-    :game_(game),rom_(rom),trig_(simulation::TrigTables::load(rom,symbols)),camera_policy_(camera_policy) {
+    :game_(game),rom_(rom),trig_(simulation::TrigTables::load(rom,symbols)),camera_policy_(camera_policy),exterior_ships_(symbols) {
     constexpr std::array names{"VIEWPOSX","VIEWPOSY","VIEWPOSZ",
         "VIEWROTXW","VIEWROTYW","VIEWROTZW","VIEWFLOATY","GAMEFRAME","PLAYERFLYMODE","SHADOWHEIGHT","BG2SCROLL","PVIEWPOSY","C_TYPE"};
     for(size_t i=0;i<names.size();++i) {
@@ -463,6 +463,8 @@ void GameSceneHistory::capture() {
         const auto pose=next->transforms.find(handle);
         if(pose==next->transforms.end()) continue; // Source invisible flag.
         const auto& object=game_.objects().at(handle);
+        if(handle!=next->player && game_.objects().is_active(next->player)
+            && exterior_ships_.hide(game_.objects().at(next->player).strategy_address,object.strategy_address)) continue;
         // EX's manual first-person view can spawn a separate animated cockpit
         // object even though its player ship is already invisible. Do not put
         // that flat shell in either headset eye or a reflected/ray model pass.

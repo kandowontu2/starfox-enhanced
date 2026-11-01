@@ -55,6 +55,11 @@ to produce geometry-based shadows, replacing the native shadows only while
 that backend is active. Unsupported devices retain the native shadows; there
 is no separate Enhanced Shadows setting. Quest does not expose PC hardware
 ray tracing. `ENHANCED LIGHTING` is a separate visual effect, not ray tracing.
+
+Enhanced Ground and Enhanced Sky/backgrounds are independent of Ray Tracing
+and work with it OFF. Reflections and ray-traced shadows retain separate
+requirements. Renderer-specific unsupported settings are not RT requirements.
+
 These options are under 3D Options. Wireframe line
 sizing is automatic; legacy thickness overrides are ignored.
 

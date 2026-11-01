@@ -2,7 +2,9 @@ param(
     [string]$Executable='build/current/starfox_pc.exe',
     [string]$OutputDirectory='build/validation/active',
     [ValidateSet(1,2,4)][int[]]$RenderScales=@(1,2),
-    [ValidateSet('ORIGINAL','EX')][string]$Experience='ORIGINAL'
+    [ValidateSet('ORIGINAL','EX')][string]$Experience='ORIGINAL',
+    [ValidateRange(0,1)][int]$RayTracing=1,
+    [switch]$HostCartridge
 )
 # Compare the actual fallback and resident presentation paths with identical
 # source geometry and CPU-reference ray masks. No ROMs or settings are copied.
@@ -62,8 +64,8 @@ try {
         STARFOX_TEST_PRESENTATION_FPS='120';STARFOX_TEST_SOURCE_FRAME='1'
         STARFOX_TEST_EXPERIENCE=$Experience;STARFOX_TEST_GOD_MODE='1'
         STARFOX_TEST_PREROLL_TICKS='500';STARFOX_TEST_PREROLL_AUDIO='1'
-        STARFOX_TEST_RAY_TRACING='1';STARFOX_TEST_SOFTWARE_SHADOWS='1'
-        STARFOX_TEST_SHADOW_REFERENCE='1';STARFOX_TRACE_GPU='1'
+        STARFOX_TEST_RAY_TRACING="$RayTracing";STARFOX_TEST_SOFTWARE_SHADOWS="$RayTracing"
+        STARFOX_TEST_SHADOW_REFERENCE="$RayTracing";STARFOX_TRACE_GPU='1'
         STARFOX_TEST_EFFECT='0';STARFOX_TEST_WORLD_EFFECT='0';STARFOX_TEST_MANIPULATION='0'
         STARFOX_TEST_MATERIAL='0';STARFOX_TEST_MODEL_SMOOTHING='0';STARFOX_TEST_SEPARATED_MODELS='0'
         STARFOX_TEST_WORLD_DISTORTION='0';STARFOX_TEST_MODEL_FX='0';STARFOX_TEST_WORLD_FX='0'
@@ -77,6 +79,7 @@ try {
         STARFOX_TEST_ENVIRONMENT_4='0';STARFOX_TEST_ENVIRONMENT_5='0'
     }
     foreach($key in $settings.Keys) {Set-Item "Env:$key" $settings[$key]}
+    if($HostCartridge) {$env:STARFOX_TEST_HOST_CARTRIDGE='1'}
     foreach($scale in $RenderScales) {
         $env:STARFOX_TEST_RENDER_SCALE="$scale"
         foreach($enhanced in @(0,1)) {
@@ -94,7 +97,7 @@ try {
                 if(!$process.WaitForExit(30000)) {throw "Owned capture is still running: PID $($process.Id); inspect before retrying."}
                 $process.Refresh()
                 if($process.ExitCode -ne 0) {throw "Capture failed ($($process.ExitCode)): $log"}
-                if(!(Select-String -LiteralPath $log -Pattern 'shadow-receivers: ground=[1-9][0-9]* model=' -Quiet)) {
+                if($RayTracing -and !(Select-String -LiteralPath $log -Pattern 'shadow-receivers: ground=[1-9][0-9]* model=' -Quiet)) {
                     throw "Fixture did not exercise ground shadows: $log"
                 }
                 if($renderer -eq 'GPU_FAST' -and !(Select-String -LiteralPath $log -SimpleMatch 'native-pipeline: resident raster -> composition -> effects -> presentation' -Quiet)) {
@@ -103,7 +106,7 @@ try {
             }
             $result=[EnhancedGroundShadowCompare]::Compare($captures.SOFTWARE,$captures.GPU_FAST)
             if($result[1]) {throw "Enhanced=$enhanced scale=${scale}: $($result[1]) pixels differ by more than 1 (max=$($result[2]))."}
-            "PASS $Experience scale=$scale enhanced=${enhanced}: CPU/resident GPU shadows agree (max channel delta=$($result[2]))."
+            "PASS $Experience scale=$scale enhanced=${enhanced}: RT=$RayTracing CPU/resident GPU environment agrees (max channel delta=$($result[2]))."
         }
         $native=Join-Path $output "ground-shadow-$Experience-$scale-0-SOFTWARE.bmp"
         $enhanced=Join-Path $output "ground-shadow-$Experience-$scale-1-SOFTWARE.bmp"

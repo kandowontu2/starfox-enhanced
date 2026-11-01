@@ -1,6 +1,10 @@
 # PS5 presentation artwork
 
-The artwork is made from real in-game frames. `capture_frames.sh` captures them from a Star Fox Enhanced Linux release built from your own cartridge, using the runtime's capture mode. `make_artwork.py` then turns the stored captures into the final files. It is deterministic, so running it again gives byte-identical output.
+The launcher icon now uses the owner's supplied `assets/icons/source.png`,
+exported as opaque RGB by `tools/generate_app_icons.py`. `make_artwork.py`
+preserves that choice when regenerating artwork. The two backgrounds remain
+real in-game frames captured by `capture_frames.sh` and converted by
+`make_artwork.py`.
 
 | File | Format | Use |
 | --- | --- | --- |
@@ -14,7 +18,7 @@ These files match the reference homebrew templates in `build/console-sdk` (`PS5_
 
 ## Provenance
 
-All three images come from the Linux x64 release (`starfox_pc` sha256 `b7f2d1540a23...43c6`, built 2026-09-14). That release reads `Starfox-Assets.BIN`, which was built from the user's own cartridge. The release was run from a copy of its folder, so the user's settings and saves were never touched.
+The two backgrounds come from the Linux x64 release (`starfox_pc` sha256 `b7f2d1540a23...43c6`, built 2026-09-14). That release reads `Starfox-Assets.BIN`, which was built from the user's own cartridge. The release was run from a copy of its folder, so the user's settings and saves were never touched. The icon was replaced with the owner's supplied artwork on 2026-11-01.
 
 Capture settings:
 
@@ -30,7 +34,7 @@ Frames are numbered by the runtime's `STARFOX_CAPTURE_DIR` frame counter.
 | --- | --- | --- |
 | `pic0` | `corneria_start_f001694.png`: `LEVEL1_1` from a cold start, frame 1694, no input | The start of Corneria, after the carrier launch: Fox's Arwing in chase view with two wingmen in formation, over the city blocks and the mountain backdrop. |
 | `pic1` | `intro_carrier_f002076.png`: `INTROMAP` (attract intro), frame 2076 | The attack carrier above planet Corneria. |
-| `icon0` | `title_screen_f000108.png`: `TITLEMAP`, frame 108 | The title screen: the STAR FOX logo, the team portraits, and the Arwing sweeping behind them. |
+| `icon0` | `assets/icons/source.png` | Owner-supplied shared application icon. |
 
 Several thousand candidate frames were reviewed before these were chosen. They covered the carrier launch, the Corneria opening, arches, the boss, the asteroid field, the Space Armada, the Venom orbit and base, the attract intro and the title screen.
 
@@ -43,9 +47,8 @@ Several thousand candidate frames were reviewed before these were chosen. They c
 
   Only empty starfield crosses the wrap seams. The script checks this and refuses to run if any part of the subject would wrap.
 - **icon0**:
-  - The title screen's "PUSH START" and "(c) 1993 Nintendo" lines are erased. Where "PUSH START" overlaps the Arwing wing, each hole pixel copies the wing pixel found by stepping back along the wing's fitted top edge. This keeps the flat polygon and its shading band intact. Elsewhere the hole takes the nearest backdrop pixel.
-  - The square crop is centred on the remaining artwork. It is sized so the artwork fills the central 85 %, which pads about 70 capture px of backdrop black above and below (crop side 1032 px).
-  - The crop is resampled with Lanczos to 512x512. The logo stays legible down to about 64 px.
+  - The owner's shared 512×512 artwork is flattened onto black for PS5's
+    opaque RGB format. The entire image is preserved without a crop or redraw.
 - No colour grading, sharpening, glow or synthetic elements are added.
 
 ## Regenerating

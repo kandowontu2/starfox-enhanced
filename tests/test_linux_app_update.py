@@ -43,6 +43,8 @@ class LinuxUpdateTests(unittest.TestCase):
         self.private = ("pregame.cfg", "starfox-ex.srm", "input-bindings.cfg", "hud-layout.cfg", "touch-layout.cfg", "Starfox-Assets.BIN", "Starfox-MSU1.PAK", "user.sfc")
         for name in self.private:
             (self.target / name).write_bytes(b"private-user-data")
+        (self.target / 'dlss').mkdir()
+        (self.target / 'dlss/starfox_dlss_native.dll').write_bytes(b'optional-addon-kept')
 
     def tearDown(self):
         self.temp.cleanup()
@@ -63,6 +65,7 @@ class LinuxUpdateTests(unittest.TestCase):
         updater.prepare(self.work, self.target, self.digest, self.size)
 
     def assert_private(self):
+        self.assertEqual((self.target / 'dlss/starfox_dlss_native.dll').read_bytes(), b'optional-addon-kept')
         for name in self.private:
             self.assertEqual((self.target / name).read_bytes(), b"private-user-data")
 

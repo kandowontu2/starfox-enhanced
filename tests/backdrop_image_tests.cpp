@@ -458,6 +458,13 @@ int main(int argc,char** argv) {
         std::ifstream stream(argv[1],std::ios::binary);
         const std::vector<std::uint8_t> bytes{std::istreambuf_iterator<char>{stream},{}};
         const auto image=BackdropImage::decode(bytes);
+        if(argc>2) {
+            std::ifstream original(argv[2],std::ios::binary);
+            const std::vector<std::uint8_t> source{std::istreambuf_iterator<char>{original},{}};
+            const auto reference=BackdropImage::decode(source);
+            require(image.width==reference.width && image.height==reference.height && image.pixels==reference.pixels,
+                "Lossless backdrop compression changed a pixel or dimension");
+        }
         require(image.width>1000 && image.height>300,"backdrop lost source resolution");
         auto damaged=bytes;damaged.resize(bytes.size()/2);
         bool rejected=false;try {BackdropImage::decode(damaged);} catch(const std::runtime_error&) {rejected=true;}

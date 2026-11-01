@@ -71,8 +71,8 @@ class QuestPackageTest(unittest.TestCase):
         # package check below validates every listed asset rather than pinning
         # an obsolete count when new worlds are added.
         self.assertGreaterEqual(len(paths),37)
-        self.assertIn('orbital-ocean-surface-v1.bmp',{path.name for path in paths})
-        self.assertIn('orbital-lava-surface-v1.bmp',{path.name for path in paths})
+        self.assertIn('orbital-ocean-surface-v1.png',{path.name for path in paths})
+        self.assertIn('orbital-lava-surface-v1.png',{path.name for path in paths})
         self.assertTrue(all(path.is_file() for path in paths))
 
 

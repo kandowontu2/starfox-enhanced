@@ -13,7 +13,7 @@
         <intent><action android:name="org.khronos.openxr.OpenXRRuntimeService" /></intent>
     </queries>
     <application android:allowBackup="false" android:label="Star Fox Enhanced VR (Development)"
-        android:icon="@drawable/ic_launcher"
+        android:icon="@mipmap/ic_launcher"
         android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen">
         <meta-data android:name="com.oculus.supportedDevices" android:value="quest3" />
         <activity android:name=".AssetImportActivity" android:exported="false"

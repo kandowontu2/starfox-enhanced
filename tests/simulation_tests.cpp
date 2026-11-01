@@ -7421,6 +7421,25 @@ int main(int argc, char** argv) {
         }
         drive_boot({0,starfox::input::right,0});
         require(!boot_game.ray_tracing(),"RT High did not wrap to Off");
+        {
+            const auto original_environment=boot_game.environment();
+            for(unsigned row:{36U,39U}) {
+                select_menu_action(boot_game,starfox::simulation::PregamePage::two_d,row,&boot_audio);
+                if(!boot_game.environment()[row-36]) drive_boot({0,starfox::input::right,0});
+            }
+            const auto enhanced=boot_game.environment();
+            require(enhanced[0] && enhanced[3],"Enhanced ground/sky did not enable with ray tracing Off");
+            for(unsigned quality=0;quality<=3;++quality) {
+                boot_game.set_ray_tracing_quality(quality);
+                require(boot_game.environment()==enhanced,"Ray tracing changed independent enhanced ground/sky settings");
+            }
+            boot_game.set_ray_tracing(false);
+            require(boot_game.environment()==enhanced,"Disabling RT disabled enhanced scenery");
+            for(unsigned row:{36U,39U}) {
+                select_menu_action(boot_game,starfox::simulation::PregamePage::two_d,row,&boot_audio);
+                if(boot_game.environment()[row-36]!=original_environment[row-36]) drive_boot({0,starfox::input::right,0});
+            }
+        }
         for(unsigned row=44;row<=46;++row) {
             select_menu_action(boot_game,row==45?starfox::simulation::PregamePage::three_d:starfox::simulation::PregamePage::two_d,row,&boot_audio);
             drive_boot({0,starfox::input::right,0});

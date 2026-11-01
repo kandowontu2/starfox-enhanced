@@ -7,13 +7,14 @@
 #include <span>
 #include <stdexcept>
 #include <vector>
+#include "starfox/render/backdrop_png.hpp"
 #include "starfox/render/face_planet_geometry.hpp"
 #include "starfox/render/city_moon_geometry.hpp"
 #include "starfox/render/cloud_limb_geometry.hpp"
 
 namespace starfox::render {
 // Optional enhancement artwork, independent of cartridge assets. Restricted
-// BMP decoding keeps the embedded asset usable on every target without an
+// PNG/BMP decoding keeps the embedded asset usable on every target without an
 // OS image decoder. Returned pixels are little-endian RGBA words.
 struct BackdropImage {
     // Cover one view with photographic panoramas instead of showing another
@@ -263,6 +264,12 @@ struct BackdropImage {
         return result;
     }
     static BackdropImage decode(std::span<const std::uint8_t> bytes) {
+        constexpr std::array<std::uint8_t,8> png{137,80,78,71,13,10,26,10};
+        if(bytes.size()>=png.size() && std::equal(png.begin(),png.end(),bytes.begin())) {
+            BackdropImage image;
+            image.pixels=decode_backdrop_png(bytes,image.width,image.height);
+            return image;
+        }
         const auto u16=[&](std::size_t p)->unsigned {
             if(p>bytes.size() || bytes.size()-p<2) throw std::runtime_error("Truncated backdrop BMP");
             return unsigned(bytes[p])|(unsigned(bytes[p+1])<<8);

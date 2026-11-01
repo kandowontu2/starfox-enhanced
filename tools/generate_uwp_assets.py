@@ -1,47 +1,15 @@
 #!/usr/bin/env python3
-"""Generate dependency-free UWP tile and splash PNGs."""
+"""Stage pre-rendered UWP tile and splash PNGs without image dependencies."""
 
 from __future__ import annotations
 
 import argparse
 import pathlib
-import struct
-import zlib
-
-
-def chunk(kind: bytes, payload: bytes) -> bytes:
-    return (
-        struct.pack(">I", len(payload))
-        + kind
-        + payload
-        + struct.pack(">I", zlib.crc32(kind + payload) & 0xFFFFFFFF)
-    )
-
-
-def pixel(x: int, y: int, width: int, height: int) -> tuple[int, int, int, int]:
-    # A restrained Arwing-like gold chevron on the game's deep-space blue.
-    nx = (2.0 * x - width) / max(1, width)
-    ny = (2.0 * y - height) / max(1, height)
-    gold = abs(abs(nx) * 0.70 + ny - 0.12) < 0.085 and abs(nx) < 0.72
-    core = abs(nx) < 0.08 and -0.30 < ny < 0.36
-    if core:
-        return (255, 238, 186, 255)
-    if gold:
-        return (244, 151, 36, 255)
-    return (8, 21, 40, 255)
+import shutil
 
 
 def write_png(path: pathlib.Path, width: int, height: int) -> None:
-    rows = bytearray()
-    for y in range(height):
-        rows.append(0)
-        for x in range(width):
-            rows.extend(pixel(x, y, width, height))
-    png = bytearray(b"\x89PNG\r\n\x1a\n")
-    png += chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0))
-    png += chunk(b"IDAT", zlib.compress(bytes(rows), 9))
-    png += chunk(b"IEND", b"")
-    path.write_bytes(png)
+    shutil.copyfile(pathlib.Path(__file__).resolve().parents[1] / 'assets/icons/uwp' / path.name, path)
 
 
 def main() -> None:

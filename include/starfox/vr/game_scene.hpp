@@ -4,6 +4,7 @@
 #define STARFOX_SCENE_TRACKED_HELPERS
 #endif
 #include "starfox/render/object_snapshot.hpp"
+#include "starfox/render/exterior_ship_visibility.hpp"
 #include "starfox/render/software_renderer.hpp"
 #include "starfox/render/grid_line_history.hpp"
 #include "starfox/simulation/game_simulation.hpp"
@@ -197,6 +198,7 @@ private:
     const assets::RomImage& rom_;
     simulation::TrigTables trig_;
     SceneCameraPolicy camera_policy_;
+    render::ExteriorShipVisibility exterior_ships_;
     std::array<uint32_t,13> addresses_{};
     std::array<uint32_t,2> tracking_strategies_{};
     std::array<uint32_t,4> cockpit_strategies_{};

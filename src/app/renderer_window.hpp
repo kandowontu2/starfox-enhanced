@@ -1,6 +1,7 @@
 #pragma once
 
 #include <SDL3/SDL.h>
+#include "app_icon.hpp"
 #include <stdexcept>
 #include <string>
 
@@ -17,6 +18,7 @@ inline SDL_Window* recreate_software_window(SDL_Window* previous) {
     if (!replacement) {
         throw std::runtime_error{std::string{"Recreate software window: "} + SDL_GetError()};
     }
+    starfox_set_window_icon(replacement);
     SDL_SetWindowPosition(replacement, x, y);
     if (flags & SDL_WINDOW_MAXIMIZED) SDL_MaximizeWindow(replacement);
     if (flags & SDL_WINDOW_FULLSCREEN) SDL_SetWindowFullscreen(replacement, true);

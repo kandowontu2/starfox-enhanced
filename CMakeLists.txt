@@ -334,6 +334,8 @@ add_library(starfox_core
 )
 
 target_include_directories(starfox_core PUBLIC include)
+include(cmake/BackdropCodec.cmake)
+target_link_libraries(starfox_core PUBLIC starfox_backdrop_codec)
 if(IOS)
     target_compile_definitions(starfox_core PUBLIC STARFOX_IOS_RUNTIME)
 endif()
@@ -1057,6 +1059,8 @@ if(STARFOX_BUILD_RUNTIME)
         find_package(Python3 REQUIRED COMPONENTS Interpreter)
         set(STARFOX_UWP_ASSET_DIRECTORY
             "${CMAKE_CURRENT_BINARY_DIR}/uwp-assets")
+        file(GLOB STARFOX_UWP_ICON_INPUTS CONFIGURE_DEPENDS
+            "${CMAKE_CURRENT_SOURCE_DIR}/assets/icons/uwp/*.png")
         set(STARFOX_UWP_VISUAL_ASSETS
             "${STARFOX_UWP_ASSET_DIRECTORY}/StoreLogo.png"
             "${STARFOX_UWP_ASSET_DIRECTORY}/Square44x44Logo.png"
@@ -1070,6 +1074,7 @@ if(STARFOX_BUILD_RUNTIME)
                 --output "${STARFOX_UWP_ASSET_DIRECTORY}"
             DEPENDS
                 "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_uwp_assets.py"
+                ${STARFOX_UWP_ICON_INPUTS}
             COMMENT "Generating Xbox UWP visual assets"
             VERBATIM)
         set(STARFOX_UWP_MANIFEST
@@ -1313,6 +1318,8 @@ if(STARFOX_BUILD_RUNTIME)
             MACOSX_BUNDLE_INFO_PLIST
                 "${CMAKE_CURRENT_SOURCE_DIR}/platform/apple/Info.plist.in")
     endif()
+    include(cmake/AppIcons.cmake)
+    starfox_add_desktop_icon(starfox_pc)
     if(IOS)
         include(cmake/IosIcons.cmake)
         starfox_add_ios_icons(starfox_pc)
@@ -1331,11 +1338,13 @@ if(STARFOX_BUILD_RUNTIME)
             nx_create_nro(starfox_pc_nro
                 TARGET starfox_pc
                 OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/StarFoxEnhanced.nro"
-                NACP "${STARFOX_SWITCH_NACP}")
+                NACP "${STARFOX_SWITCH_NACP}"
+                ICON "${CMAKE_CURRENT_SOURCE_DIR}/assets/icons/switch.jpg")
         elseif(COMMAND nx_generate_nro)
             nx_generate_nro(starfox_pc
                 NAME "Star Fox Enhanced"
-                AUTHOR "Star Fox Enhanced team")
+                AUTHOR "Star Fox Enhanced team"
+                ICON "${CMAKE_CURRENT_SOURCE_DIR}/assets/icons/switch.jpg")
         else()
             message(FATAL_ERROR
                 "The devkitPro Switch CMake helpers are unavailable")
@@ -1574,44 +1583,44 @@ if(STARFOX_BUILD_RUNTIME)
             target_sources(starfox_pc PRIVATE
                 $<TARGET_OBJECTS:starfox_runtime_resources>)
             set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/starfox_assets.rc" APPEND PROPERTY OBJECT_DEPENDS
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/alpine-day-v2.bmp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/macbeth-dusk-v1.bmp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/storm-night-v1.bmp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/desert-horizon-v1.bmp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/orbital-clouds-v1.bmp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/orbital-volcanic-v1.bmp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/city-night-v1.bmp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/nebula-red-blue-v1.bmp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/cloud-plains-v1.bmp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/gold-storm-v1.bmp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/dune-horizon-v2.bmp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/distant-snow-v1.bmp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/titania-clouds-v1.bmp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/ocean-clouds-v2.bmp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/night-coast-v1.bmp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/day-coast-v1.bmp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/red-cloud-band-v1.bmp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/rocky-green-v1.bmp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/dense-city-v1.bmp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/asteroid-belt-v1.bmp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/fine-debris-v1.bmp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/ember-nebula-v2.bmp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/comet-corona-v1.bmp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/cratered-planet-v1.bmp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/storm-planet-v1.bmp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/banded-planet-v1.bmp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/blue-cloud-v1.bmp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/ember-sky-v1.bmp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/jade-planet-horizon-v1.bmp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/dimension-vortex-v1.bmp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/amber-blue-cloud-v1.bmp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/inferno-band-v1.bmp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/spectral-clouds-v1.bmp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/face-moon-v1.bmp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/deep-space-v1.bmp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/orbital-ocean-surface-v1.bmp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/orbital-lava-surface-v1.bmp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/kazaru-volcanic-hills-v1.bmp")
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/alpine-day-v2.png"
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/macbeth-dusk-v1.png"
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/storm-night-v1.png"
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/desert-horizon-v1.png"
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/orbital-clouds-v1.png"
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/orbital-volcanic-v1.png"
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/city-night-v1.png"
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/nebula-red-blue-v1.png"
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/cloud-plains-v1.png"
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/gold-storm-v1.png"
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/dune-horizon-v2.png"
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/distant-snow-v1.png"
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/titania-clouds-v1.png"
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/ocean-clouds-v2.png"
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/night-coast-v1.png"
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/day-coast-v1.png"
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/red-cloud-band-v1.png"
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/rocky-green-v1.png"
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/dense-city-v1.png"
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/asteroid-belt-v1.png"
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/fine-debris-v1.png"
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/ember-nebula-v2.png"
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/comet-corona-v1.png"
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/cratered-planet-v1.png"
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/storm-planet-v1.png"
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/banded-planet-v1.png"
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/blue-cloud-v1.png"
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/ember-sky-v1.png"
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/jade-planet-horizon-v1.png"
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/dimension-vortex-v1.png"
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/amber-blue-cloud-v1.png"
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/inferno-band-v1.png"
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/spectral-clouds-v1.png"
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/face-moon-v1.png"
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/deep-space-v1.png"
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/orbital-ocean-surface-v1.png"
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/orbital-lava-surface-v1.png"
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/kazaru-volcanic-hills-v1.png")
             target_compile_definitions(starfox_pc PRIVATE
                 STARFOX_HAS_EMBEDDED_ASSETS=1)
             set(STARFOX_RUNTIME_ASSETS_EMBEDDED TRUE)
@@ -1658,17 +1667,17 @@ if(STARFOX_BUILD_RUNTIME)
         LIBRARY DESTINATION .
         BUNDLE DESTINATION .)
     if(NOT STARFOX_EMBED_ENHANCED_BACKDROPS)
+        include(cmake/EnhancedBackdropAssets.cmake)
         target_compile_definitions(starfox_pc PRIVATE STARFOX_EXTERNAL_BACKDROPS=1)
         if(APPLE)
             # SDL_GetBasePath resolves to Contents/Resources in a desktop .app.
-            file(GLOB STARFOX_EXTERNAL_BACKDROP_FILES CONFIGURE_DEPENDS
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/*.bmp")
+            starfox_enhanced_backdrop_resources(unused_args STARFOX_EXTERNAL_BACKDROP_FILES FORCE)
             target_sources(starfox_pc PRIVATE ${STARFOX_EXTERNAL_BACKDROP_FILES})
             set_source_files_properties(${STARFOX_EXTERNAL_BACKDROP_FILES} PROPERTIES
                 MACOSX_PACKAGE_LOCATION Resources/assets/enhanced-backdrops)
         else()
-            install(DIRECTORY assets/enhanced-backdrops DESTINATION assets
-                FILES_MATCHING PATTERN "*.bmp")
+            starfox_enhanced_backdrop_resources(unused_args STARFOX_EXTERNAL_BACKDROP_FILES FORCE)
+            install(FILES ${STARFOX_EXTERNAL_BACKDROP_FILES} DESTINATION assets/enhanced-backdrops)
         endif()
     endif()
     if(WIN32 AND NOT WINDOWS_STORE AND STARFOX_ENABLE_LEIASR)
@@ -1685,6 +1694,7 @@ if(STARFOX_BUILD_RUNTIME)
         install(TARGETS starfox_asset_builder RUNTIME DESTINATION .)
     endif()
     install(FILES README.md CREDITS.md THIRD_PARTY_NOTICES.md LICENSE-XBRZ.txt DESTINATION .)
+    install(FILES third_party/lodepng/LICENSE DESTINATION licenses/lodepng)
     install(FILES assets/fonts/README.md assets/fonts/misaki.txt
         DESTINATION licenses/fonts)
     # Player packages contain runtime files and notices only. Development
@@ -2025,27 +2035,32 @@ if(STARFOX_BUILD_TESTS)
     target_link_libraries(starfox_background_scanline_tests PRIVATE starfox_core)
     add_test(NAME starfox_background_scanline_tests COMMAND starfox_background_scanline_tests)
     add_executable(starfox_backdrop_image_tests tests/backdrop_image_tests.cpp)
+    add_executable(starfox_backdrop_png_tests tests/backdrop_png_tests.cpp)
+    target_include_directories(starfox_backdrop_png_tests PRIVATE include)
+    target_link_libraries(starfox_backdrop_png_tests PRIVATE starfox_backdrop_codec)
+    add_test(NAME starfox_backdrop_png_tests COMMAND starfox_backdrop_png_tests)
+    target_link_libraries(starfox_backdrop_image_tests PRIVATE starfox_backdrop_codec)
     target_include_directories(starfox_backdrop_image_tests PRIVATE include)
     target_compile_features(starfox_backdrop_image_tests PRIVATE cxx_std_20)
     add_test(NAME starfox_backdrop_image_tests COMMAND starfox_backdrop_image_tests
-        "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/alpine-day-v2.bmp")
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/alpine-day-v2.png")
     add_test(NAME starfox_face_moon_backdrop_tests COMMAND starfox_backdrop_image_tests
-        "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/face-moon-v1.bmp")
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/face-moon-v1.png")
     add_test(NAME starfox_deep_space_backdrop_tests COMMAND starfox_backdrop_image_tests
-        "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/deep-space-v1.bmp")
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/deep-space-v1.png")
     add_test(NAME starfox_macbeth_backdrop_tests COMMAND starfox_backdrop_image_tests
-        "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/macbeth-dusk-v1.bmp")
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/macbeth-dusk-v1.png")
     add_test(NAME starfox_storm_backdrop_tests COMMAND starfox_backdrop_image_tests
-        "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/storm-night-v1.bmp")
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/storm-night-v1.png")
     add_test(NAME starfox_desert_backdrop_tests COMMAND starfox_backdrop_image_tests
-        "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/desert-horizon-v1.bmp")
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/desert-horizon-v1.png")
     foreach(backdrop IN ITEMS orbital-clouds-v1 orbital-volcanic-v1 city-night-v1 nebula-red-blue-v1 cloud-plains-v1 gold-storm-v1 dune-horizon-v2 distant-snow-v1 titania-clouds-v1 ocean-clouds-v1 ocean-clouds-v2 night-coast-v1 day-coast-v1 red-cloud-band-v1 rocky-green-v1 dense-city-v1 asteroid-belt-v1 fine-debris-v1 ember-nebula-v2 lava-cavern-v1 comet-corona-v1 cratered-planet-v1 storm-planet-v1 banded-planet-v1 blue-cloud-v1 ember-sky-v1 jade-planet-horizon-v1 dimension-vortex-v1 amber-blue-cloud-v1 inferno-band-v1 spectral-clouds-v1 orbital-ocean-surface-v1 orbital-lava-surface-v1)
         add_test(NAME starfox_${backdrop}_tests COMMAND starfox_backdrop_image_tests
-            "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/${backdrop}.bmp")
+            "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/${backdrop}.png")
     endforeach()
     add_executable(starfox_frame_persistence_tests tests/frame_persistence_tests.cpp)
     add_test(NAME starfox_kazaru_volcanic_hills_tests COMMAND starfox_backdrop_image_tests
-        "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/kazaru-volcanic-hills-v1.bmp")
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets/enhanced-backdrops/kazaru-volcanic-hills-v1.png")
     target_link_libraries(starfox_frame_persistence_tests PRIVATE starfox_core)
     add_test(NAME starfox_frame_persistence_tests COMMAND starfox_frame_persistence_tests)
     target_link_libraries(starfox_pixel_filter_tests PRIVATE starfox_core)
@@ -2206,6 +2221,13 @@ if(STARFOX_BUILD_TESTS)
     add_test(NAME starfox_shape_decoder_tests COMMAND starfox_shape_decoder_tests)
 
     add_executable(starfox_simulation_tests tests/simulation_tests.cpp)
+    add_executable(starfox_issue_32_49_tests tests/issue_32_49_tests.cpp)
+    target_link_libraries(starfox_issue_32_49_tests PRIVATE starfox_core)
+    if(TARGET starfox_scene)
+        target_link_libraries(starfox_issue_32_49_tests PRIVATE starfox_scene)
+        target_compile_definitions(starfox_issue_32_49_tests PRIVATE STARFOX_TEST_SHARED_SCENE STARFOX_SCENE_SOURCE_ONLY)
+    endif()
+    add_test(NAME starfox_issue_32_49_tests COMMAND starfox_issue_32_49_tests)
     target_link_libraries(starfox_simulation_tests PRIVATE starfox_core)
     # The cartridge-wide integration fixture intentionally keeps several full
     # GameSimulation snapshots alive in nested parity sections. PE/COFF's
@@ -2368,6 +2390,10 @@ if(STARFOX_BUILD_TESTS)
                     "${CMAKE_CURRENT_SOURCE_DIR}/upstream-ultrastarfox/SF.SFC"
                     "${CMAKE_CURRENT_SOURCE_DIR}/upstream-ultrastarfox/SYMBOLS.TXT"
         )
+        add_test(NAME starfox_issue32_upstream_data COMMAND starfox_issue_32_49_tests
+            "${CMAKE_CURRENT_SOURCE_DIR}/upstream-ultrastarfox/SF.SFC"
+            "${CMAKE_CURRENT_SOURCE_DIR}/upstream-ultrastarfox/SYMBOLS.TXT")
+        set_tests_properties(starfox_issue32_upstream_data PROPERTIES TIMEOUT 60)
         add_test(NAME starfox_upstream_state_data COMMAND starfox_state_tests
             "${CMAKE_CURRENT_SOURCE_DIR}/upstream-ultrastarfox/SF.SFC"
             "${CMAKE_CURRENT_SOURCE_DIR}/upstream-ultrastarfox/SYMBOLS.TXT")
@@ -2614,6 +2640,11 @@ if(STARFOX_BUILD_TESTS)
 
     find_package(Python3 COMPONENTS Interpreter)
     if(Python3_Interpreter_FOUND)
+        add_test(NAME starfox_app_icon_tests
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_app_icons.py")
+        add_test(NAME starfox_backdrop_compression_tests
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_backdrop_compression.py"
+                --decoder $<TARGET_FILE:starfox_backdrop_image_tests>)
         add_test(NAME starfox_ios_package_tests
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ios_package.py")
         add_test(NAME starfox_desktop_asset_layout_tests

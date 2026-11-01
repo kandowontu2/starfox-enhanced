@@ -118,7 +118,9 @@ class VitaPackageTest(unittest.TestCase):
 
     def test_png_validation(self):
         original = self.entries["sce_sys/icon0.png"]
-        for payload in (b"bad", original[:-3], generator.png(127, 128), original[:-20] + bytes(20)):
+        with self.assertRaises(ValueError):
+            checker.check_png(original, (127, 128))
+        for payload in (b"bad", original[:-3], original[:-20] + bytes(20)):
             with self.assertRaises(ValueError): checker.check_png(payload, (128, 128))
         transparent = original[:-12] + generator.chunk(b"tRNS", bytes([0, 255, 255])) + original[-12:]
         with self.assertRaises(ValueError): checker.check_png(transparent, (128, 128))

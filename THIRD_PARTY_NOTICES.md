@@ -1,5 +1,13 @@
 # Third-party notices
 
+## LodePNG
+
+Lossless enhanced-background PNG decoding uses unmodified
+[LodePNG](https://github.com/lvandeve/lodepng), revision
+`7735153f542e54e94285dc5c1e7f196b02e15385` (20261006), by Lode Vandevenne.
+Its zlib license is reproduced in `third_party/lodepng/LICENSE` and the source
+headers. No platform image service, runtime download or lossy conversion is used.
+
 ## AMD FidelityFX Super Resolution 1
 
 The FSR1 EASU/RCAS implementation in `third_party/fsr1` is from
@@ -11,12 +19,12 @@ and the upstream headers. This component is independent of NVIDIA DLSS.
 
 ## Optional Windows x64 NVIDIA DLSS runtime
 
-Windows x64 releases include unmodified production runtime binaries from
+The optional Windows x64 DLSS add-on includes unmodified production binaries from
 [NVIDIA Streamline 2.14.1](https://github.com/NVIDIA-RTX/Streamline/releases/tag/v2.14.1).
 These are separately licensed components, not relicensed under the game's
 source license. Full NVIDIA RTX SDK terms, Streamline copyright/license and
-third-party notices accompany them in `licenses/dlss` and the embedded runtime
-cache (or the `dlss` folder in non-embedded builds). DLSS is optional and
+third-party notices accompany them in the add-on's `dlss` folder. The normal
+game download does not embed these binaries. DLSS is optional and
 defaults to off. ReShade, RenoDX and DLSS5 add-on binaries are not included.
 
 ## RetroCPU

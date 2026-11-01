@@ -8,7 +8,7 @@ import re
 
 def source_backdrops(root):
     source = (root / 'include/starfox/render/enhanced_backdrop_library.hpp').read_text(encoding='utf-8')
-    paths = re.findall(r'EnhancedBackdropAsset\{"(assets/enhanced-backdrops/[a-z0-9-]+\.bmp)"', source)
+    paths = re.findall(r'EnhancedBackdropAsset\{"(assets/enhanced-backdrops/[a-z0-9-]+\.(?:bmp|png))"', source)
     if not paths or len(paths) != len(set(paths)):
         raise ValueError('Missing or duplicate shared backdrop catalogue')
     return [root / path for path in paths]
@@ -42,8 +42,8 @@ def check(path, backdrops=()):
             native=apk.read('lib/arm64-v8a/libstarfox_quest.so')
             for path in backdrops:
                 data=path.read_bytes()
-                if len(data)<54 or not data.startswith(b'BM'):
-                    raise ValueError(f'Invalid expected BMP backdrop: {path}')
+                if len(data)<54 or not data.startswith((b'BM', b'\x89PNG\r\n\x1a\n')):
+                    raise ValueError(f'Invalid expected backdrop: {path}')
                 if data not in native:
                     # Quest's bounded C++ resource units keep each 8 KiB
                     # literal separate in the ELF. The generator round-trip

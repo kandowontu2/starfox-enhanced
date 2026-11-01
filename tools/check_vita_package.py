@@ -57,7 +57,7 @@ def check_self(executable, file_size):
 
 def backdrop_paths():
     catalogue = Path(__file__).resolve().parents[1] / "include/starfox/render/enhanced_backdrop_library.hpp"
-    return re.findall(r'EnhancedBackdropAsset\{"(assets/enhanced-backdrops/[a-z0-9-]+\.bmp)"', catalogue.read_text())
+    return re.findall(r'EnhancedBackdropAsset\{"(assets/enhanced-backdrops/[a-z0-9-]+\.(?:bmp|png))"', catalogue.read_text())
 
 
 def check_png(data, size):
@@ -186,7 +186,7 @@ def check(path, title_id="SFXE00001", require_backdrops=False):
                 if name not in names or package.getinfo(name).file_size < 54:
                     raise ValueError("Missing packaged Vita backdrop: " + name)
                 with package.open(name) as image:
-                    if image.read(2) != b"BM":
+                    if not image.read(8).startswith((b"BM", b"\x89PNG\r\n\x1a\n")):
                         raise ValueError("Invalid packaged Vita backdrop: " + name)
         def small(name):
             if package.getinfo(name).file_size > 2 * 1024 * 1024:

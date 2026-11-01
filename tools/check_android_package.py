@@ -11,7 +11,7 @@ def source_backdrops(root):
     """Read the actual portable resource list, not every obsolete BMP on disk."""
     source = (root / 'CMakeLists.txt').read_text(encoding='utf-8')
     entries = re.findall(r'^\s*--resource "(\d+)=\$\{CMAKE_CURRENT_SOURCE_DIR\}/'
-                         r'(assets/enhanced-backdrops/[^"\r\n]+\.bmp)"', source, re.M)
+                         r'(assets/enhanced-backdrops/[^"\r\n]+\.(?:bmp|png))"', source, re.M)
     if re.search(r'starfox_enhanced_backdrop_resources\(\s*'
                  r'STARFOX_EMBED_BACKDROP_ARGS\s+STARFOX_EMBED_BACKDROP_FILES\)', source):
         if entries:
@@ -26,7 +26,7 @@ def source_backdrops(root):
         raise ValueError('Duplicate enhanced backdrop resource IDs')
     paths = []
     for _, relative in entries:
-        if not relative.startswith('assets/enhanced-backdrops/') or not relative.endswith('.bmp'):
+        if not relative.startswith('assets/enhanced-backdrops/') or not relative.endswith(('.bmp', '.png')):
             raise ValueError(f'Invalid declared backdrop path: {relative}')
         path = (root / relative).resolve()
         if not path.is_relative_to((root / 'assets/enhanced-backdrops').resolve()):

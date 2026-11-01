@@ -2,6 +2,7 @@ plugins { id 'com.android.application' }
 
 android {
     namespace 'com.starfox.enhanced.quest'
+    sourceSets.main.res.srcDir '../../assets/icons/android'
     compileSdk 35
     ndkVersion '28.2.13676358'
     compileOptions {
