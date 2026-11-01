@@ -35,19 +35,19 @@ def check(root: Path, tag: str | None = None) -> str:
             "UWP output filename is stale")
     for path in ("platform/android/app/build.gradle", "platform/quest/build.gradle"):
         gradle = read(path)
-        require(f"versionName '{version}'" in gradle and "versionCode 20" in gradle,
+        require(f"versionName '{version}'" in gradle and "versionCode 21" in gradle,
                 f"Incorrect Android package version: {path}")
-    require(workflow.count(f"versionCode='20' versionName='{version}'") == 2,
+    require(workflow.count(f"versionCode='21' versionName='{version}'") == 2,
             "Android/Quest CI must validate native and public versions")
-    require('MACOSX_BUNDLE_BUNDLE_VERSION "0.0.810"' in read("CMakeLists.txt")
-            and '.CFBundleVersion == "0.0.810"' in workflow,
+    require('MACOSX_BUNDLE_BUNDLE_VERSION "0.0.811"' in read("CMakeLists.txt")
+            and '.CFBundleVersion == "0.0.811"' in workflow,
             "Apple build version differs from package validation")
-    require('set(STARFOX_UWP_BUILD_REVISION "10"' in read("CMakeLists.txt")
-            and "[int]$BuildRevision = 10" in read("tools/build_xbox_uwp.ps1"),
+    require('set(STARFOX_UWP_BUILD_REVISION "11"' in read("CMakeLists.txt")
+            and "[int]$BuildRevision = 11" in read("tools/build_xbox_uwp.ps1"),
             "UWP build revisions disagree")
-    require('set(STARFOX_VITA_APP_VERSION "00.90"' in read("cmake/VitaPackage.cmake"),
+    require('set(STARFOX_VITA_APP_VERSION "00.91"' in read("cmake/VitaPackage.cmake"),
             "Vita build version is stale")
-    require('set(STARFOX_PS5_CONTENT_VERSION "01.000.002")' in read("cmake/PS5.cmake"),
+    require('set(STARFOX_PS5_CONTENT_VERSION "01.000.003")' in read("cmake/PS5.cmake"),
             "PS5 build version is stale")
     return version
 

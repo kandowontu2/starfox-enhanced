@@ -75,6 +75,12 @@ int main(int argc,char** argv) {
             "0.0.8.8.1 client cannot select the 0.0.8.8.2 platform update");
         require(!parse_update_release(fixture("0.0.8.8.2",suffix),"0.0.8.8.2",suffix).newer,
             "0.0.8.8.2 offers itself as an update");
+        const auto next=parse_update_release(fixture("0.0.8.8.3",suffix),"0.0.8.8.2",suffix);
+        require(next.newer && next.version=="0.0.8.8.3"
+                && next.asset_url.ends_with(std::string{"StarFoxEnhanced-0.0.8.8.3-"}+suffix),
+            "0.0.8.8.2 client cannot select the 0.0.8.8.3 platform update");
+        require(!parse_update_release(fixture("0.0.8.8.3",suffix),"0.0.8.8.3",suffix).newer,
+            "0.0.8.8.3 offers itself as an update");
     }
     require(!parse_update_release(fixture("0.0.8.8"),"0.0.8.8.1","windows-x64.zip").newer,"hotfix downgrade offered");
     require(parse_update_release(fixture("0.0.8.9"),"0.0.8.8.1","windows-x64.zip").newer,"hotfix blocks next release");

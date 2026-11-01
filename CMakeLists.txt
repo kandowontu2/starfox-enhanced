@@ -1081,7 +1081,7 @@ if(STARFOX_BUILD_RUNTIME)
         set(STARFOX_UWP_MANIFEST
             "${CMAKE_CURRENT_BINARY_DIR}/Package.appxmanifest")
         # Native package revision is monotonic and separate from public tags.
-        set(STARFOX_UWP_BUILD_REVISION "10" CACHE STRING
+        set(STARFOX_UWP_BUILD_REVISION "11" CACHE STRING
             "Fourth component of the Xbox UWP package version")
         if(NOT STARFOX_UWP_BUILD_REVISION MATCHES "^[0-9]+$")
             message(FATAL_ERROR
@@ -1315,7 +1315,7 @@ if(STARFOX_BUILD_RUNTIME)
             # Apple bundle versions accept three components, not our four-part
             # release tag. Keep the marketing series and increment the build.
             MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}"
-            MACOSX_BUNDLE_BUNDLE_VERSION "0.0.810"
+            MACOSX_BUNDLE_BUNDLE_VERSION "0.0.811"
             MACOSX_BUNDLE_INFO_PLIST
                 "${CMAKE_CURRENT_SOURCE_DIR}/platform/apple/Info.plist.in")
     endif()

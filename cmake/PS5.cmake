@@ -76,7 +76,7 @@ function(starfox_add_ps5_title target)
         # ProsperoEden titles use.
         set(STARFOX_PS5_CONTENT_ID "UP9000-${STARFOX_PS5_TITLE_ID}_00-STARFOXENHANCED0")
     endif()
-    set(STARFOX_PS5_CONTENT_VERSION "01.000.002")
+    set(STARFOX_PS5_CONTENT_VERSION "01.000.003")
     set(param "${CMAKE_CURRENT_BINARY_DIR}/ps5-param.json")
     configure_file("${PROJECT_SOURCE_DIR}/platform/ps5/param.json.in" "${param}" @ONLY)
     add_custom_target(starfox_ps5_title ALL

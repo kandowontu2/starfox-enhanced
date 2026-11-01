@@ -34,10 +34,10 @@ is up to date. No network request occurs until the update screen is opened.
 Existing 0.0.8.8 downloads do not acquire new menu code automatically. The first
 release containing the updater must be installed normally.
 
-Public release 0.0.8.8.2 keeps all five components in tags, download filenames
+Public release 0.0.8.8.3 keeps all five components in tags, download filenames
 and the update screen. Native package versions use their platform's restricted
-format: Android/Quest build 20, Apple build 0.0.810, UWP 0.0.8.10, Vita 00.90 and
-PS5 01.000.002. These are increasing package identifiers, not alternate public
+format: Android/Quest build 21, Apple build 0.0.811, UWP 0.0.8.11, Vita 00.91 and
+PS5 01.000.003. These are increasing package identifiers, not alternate public
 release names. CMake's four-component project version remains the base series.
 
 ## Safety and failure behavior
@@ -82,8 +82,10 @@ concurrently running copy can prevent replacement; close other copies first.
 
 ## Validation
 
-The 0.0.8.8.2 packages use the same five-component version and platform-asset
-format understood by 0.0.8.8.1's updater. The main Windows ZIP no longer needs
+The 0.0.8.8.3 packages use the same five-component version and platform-asset
+format understood by 0.0.8.8.1/0.0.8.8.2's updater. The separate DLSS add-on is
+not selected as a game update, and installed optional runtime files are preserved.
+The main Windows ZIP no longer needs
 the standalone builder or bundled DisplayXR installers. Only DisplayXR's
 download instructions/reference metadata may be staged by the new helper;
 existing user files and older optional files are not silently deleted.

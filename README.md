@@ -10,8 +10,8 @@ presentation, widescreen support, and optional visual enhancements using Codex A
 Codex and AI tools used for programming, testing, documentation and some visual
 assets.
 
-**[Download 0.0.8.8.2](https://github.com/kandowontu2/starfox-enhanced/releases/tag/v0.0.8.8.2)** ·
-[Changelog](https://github.com/kandowontu2/starfox-enhanced/blob/main/docs/RELEASE-0.0.8.8.2.md) ·
+**[Download 0.0.8.8.3](https://github.com/kandowontu2/starfox-enhanced/releases/tag/v0.0.8.8.3)** ·
+[Changelog](https://github.com/kandowontu2/starfox-enhanced/blob/main/docs/RELEASE-0.0.8.8.3.md) ·
 [Settings and controls](https://github.com/kandowontu2/starfox-enhanced/blob/main/docs/SETTINGS-AND-CONTROLS.md) ·
 [Build guide](https://github.com/kandowontu2/starfox-enhanced/blob/main/docs/BUILDING.md) ·
 [Report a bug](https://github.com/kandowontu2/starfox-enhanced/issues)
@@ -39,10 +39,10 @@ For devices needing prepared assets, the release includes a standalone Windows
 mobile users can also select a ROM directly. The Windows builder is a separate
 download; the game can import your ROM without it.
 
-Windows x64 DLSS/DLSS 4.5 support is an optional separate add-on for future
-packages. Extract its `dlss` folder beside `starfox_pc.exe`; both menu options
+Windows x64 DLSS/DLSS 4.5 support is an optional separate add-on in 0.0.8.8.3.
+Extract its `dlss` folder beside `starfox_pc.exe`; both menu options
 share that one download. See [installation instructions](tools/package/DLSS-ADDON.txt).
-The game runs normally without it. Existing 0.0.8.8.2 release assets are unchanged.
+The game runs normally without it. Game updates preserve an installed add-on.
 
 ### Supported ROMs
 

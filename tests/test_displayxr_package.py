@@ -90,7 +90,7 @@ class DisplayXrPackageTests(unittest.TestCase):
     def test_release_gates_before_upload(self):
         workflow = (ROOT / '.github/workflows/portable-builds.yml').read_text()
         start = workflow.index('- name: Package runtime and builder')
-        end = workflow.index('name: StarFoxEnhanced-0.0.8.8.2-windows-x64', start)
+        end = workflow.index('name: StarFoxEnhanced-0.0.8.8.3-windows-x64', start)
         block = workflow[start:end]
         self.assertIn('-OutputDirectory $runtime -VerifyOnly', block)
         self.assertIn('tests/test_displayxr_package.py --package $runtime', block)
