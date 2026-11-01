@@ -1,4 +1,5 @@
 #include "starfox/modern/sdl_frame.hpp"
+#include "starfox/compat/bit_cast.hpp"
 #include "starfox/vr/background_tiles.hpp"
 #include <algorithm>
 #include <bit>
@@ -183,7 +184,7 @@ void SdlFrameRenderer::push_fog(SDL_GPUCommandBuffer* command,const vr::EyeCamer
             const auto& point=point_lights_[i];
             float* out=data.data()+40+i*16;
             out[0]=point.position[0];out[1]=point.position[1];out[2]=point.position[2];out[3]=point.radius;
-            out[4]=point.colour[0];out[5]=point.colour[1];out[6]=point.colour[2];out[7]=std::bit_cast<float>(point.object);
+            out[4]=point.colour[0];out[5]=point.colour[1];out[6]=point.colour[2];out[7]=starfox::bit_cast<float>(point.object);
             out[8]=point.axis[0];out[9]=point.axis[1];out[10]=point.axis[2];out[11]=point.aspect;
             // Projected lights: look.y = spread (nonzero), look.w = lift.
             out[12]=point.hardness;out[13]=point.projected?std::max(point.spread,1e-3F):0.F;out[14]=point.fade_height;

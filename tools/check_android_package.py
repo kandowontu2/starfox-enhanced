@@ -73,8 +73,8 @@ def check(path, backdrops, native_markers=()):
                 raise ValueError(f'Native runtime lacks required build marker: {marker!r}')
         for backdrop_path in backdrops:
             backdrop = backdrop_path.read_bytes()
-            if not backdrop.startswith(b"BM") or len(backdrop) < 54:
-                raise ValueError(f"Expected a nonempty BMP backdrop: {backdrop_path}")
+            if not backdrop.startswith((b"BM", b"\x89PNG\r\n\x1a\n")) or len(backdrop) < 54:
+                raise ValueError(f"Expected a nonempty PNG/BMP backdrop: {backdrop_path}")
             if backdrop not in native:
                 # Mobile builds keep each asset in bounded compiler units.
                 # The generator's round-trip test checks every byte; here we

@@ -136,6 +136,25 @@ class AndroidPackageTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 module.check(stale, backdrops, [markers[0]])
 
+    def test_embedded_lossless_png(self):
+        # Same real 3x2 RGB fixture decoded in backdrop_png_tests.cpp.
+        data = bytes((137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,3,0,0,0,2,
+                      8,2,0,0,0,18,22,241,77,0,0,0,24,73,68,65,84,120,156,99,248,207,
+                      192,192,0,193,255,255,255,231,81,178,96,96,96,0,0,70,161,6,97,3,
+                      96,28,182,0,0,0,0,73,69,78,68,174,66,96,130))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            image = root / 'expected.png'
+            image.write_bytes(data)
+            apk, _ = self.fixture(root, payload=data)
+            self.assertEqual(module.check(apk, [image]), 1)
+            apk, _ = self.fixture(root, payload=data[:-1])
+            with self.assertRaises(ValueError):
+                module.check(apk, [image])
+            image.write_bytes(data[:8])
+            with self.assertRaises(ValueError):
+                module.check(apk, [image])
+
 
 if __name__ == '__main__':
     unittest.main()
