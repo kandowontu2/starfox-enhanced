@@ -266,6 +266,9 @@ jobs:
         shell: pwsh
         run: |
           $staging = Join-Path $env:RUNNER_TEMP 'starfox-dlss-addon'
+          # This helper uses cmdlets and throws on validation errors. A fresh
+          # PowerShell session otherwise leaves LASTEXITCODE null on success.
+          $global:LASTEXITCODE = 0
           ./tools/package_dlss.ps1 -SdkDirectory $env:STARFOX_RELEASE_DLSS_SDK `
             -Adapter build/dlss-release/Release/starfox_dlss_native.dll -Destination $staging
           if ($LASTEXITCODE -ne 0) { throw 'DLSS add-on packaging failed' }

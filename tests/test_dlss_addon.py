@@ -7,6 +7,12 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class DlssAddonTests(unittest.TestCase):
+    def test_cmdlet_packaging_initializes_exit_status(self):
+        workflow = (ROOT / '.github/workflows/portable-builds.yml').read_text()
+        step = workflow.split('- name: Package optional DLSS and DLSS 4.5 add-on', 1)[1].split('- name:', 1)[0]
+        self.assertLess(step.index('$global:LASTEXITCODE = 0'), step.index('./tools/package_dlss.ps1'))
+        self.assertIn("if ($LASTEXITCODE -ne 0) { throw 'DLSS add-on packaging failed' }", step)
+
     def test_runtime_is_packaged_not_embedded(self):
         workflow = (ROOT / '.github/workflows/portable-builds.yml').read_text()
         windows = workflow.split('  windows-x64:', 1)[1].split('  windows-x86:', 1)[0]
