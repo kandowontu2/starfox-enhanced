@@ -118,6 +118,8 @@ cp -- "${source_root}/THIRD_PARTY_NOTICES.md" "${source_root}/CREDITS.md" \
 mkdir -p -- "${diagnostics_root}/licenses/fonts"
 cp -- "${source_root}/assets/fonts/README.md" "${source_root}/assets/fonts/misaki.txt" \
     "${diagnostics_root}/licenses/fonts/"
+mkdir -p -- "${diagnostics_root}/licenses/lodepng"
+cp -- "${source_root}/third_party/lodepng/LICENSE" "${diagnostics_root}/licenses/lodepng/"
 
 bash -n "${source_root}/tools/package/LAUNCH-STEAM-FRAME.sh"
 python3 "${source_root}/tests/test_steam_frame_package_validation.py"

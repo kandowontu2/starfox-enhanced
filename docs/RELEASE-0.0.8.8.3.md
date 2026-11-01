@@ -15,7 +15,8 @@ private game data is included. Nintendo 3DS remains paused and is not packaged.
 - Added the new Star Fox Enhanced application icon across desktop, mobile
   and supported console packages.
 - Updated Android's embedded-artwork verification for lossless PNG resources,
-  and preserved the older Steam Frame toolchain's bit-cast compatibility.
+  preserved the older Steam Frame toolchain's bit-cast compatibility, and
+  corrected Vita decoder linking and Steam Frame icon/notice packaging.
 
 ## MODERN renderer
 

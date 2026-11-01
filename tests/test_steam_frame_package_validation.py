@@ -86,6 +86,7 @@ def test_runtime_package(root: pathlib.Path) -> None:
         "vrpreferences.json",
         "THIRD_PARTY_NOTICES.md", "CREDITS.md", "LICENSE-XBRZ.txt",
         "licenses/fonts/README.md", "licenses/fonts/misaki.txt",
+        "licenses/lodepng/LICENSE",
     )
     for relative in files:
         path = root / relative
@@ -96,8 +97,21 @@ def test_runtime_package(root: pathlib.Path) -> None:
     (root / "vrpreferences.json").write_text(
         json.dumps(EXPECTED_VR_PREFERENCES), encoding="utf-8"
     )
+    icon = (SOURCE_ROOT / "assets/icons/source.png").read_bytes()
+    (root / "starfox-enhanced.png").write_bytes(icon)
     write_metadata(root, "runtime-package")
     validate(root, "runtime-package")
+
+    (root / "starfox-enhanced.png").write_bytes(b"not a PNG")
+    write_metadata(root, "runtime-package")
+    try:
+        validate(root, "runtime-package")
+    except AssertionError as error:
+        if "512x512 PNG" not in str(error):
+            raise
+    else:
+        raise AssertionError("runtime package accepted an invalid application icon")
+    (root / "starfox-enhanced.png").write_bytes(icon)
 
     (root / "vrpreferences.json").write_text(
         json.dumps({"steam_frame": {"preferMinRefreshRate": 120}}), encoding="utf-8"
@@ -128,7 +142,8 @@ def test_runtime_package(root: pathlib.Path) -> None:
 def test_hardware_diagnostics(root: pathlib.Path) -> None:
     root.mkdir(parents=True, exist_ok=True)
     for relative in ("THIRD_PARTY_NOTICES.md", "CREDITS.md", "LICENSE-XBRZ.txt",
-                     "licenses/fonts/README.md", "licenses/fonts/misaki.txt"):
+                     "licenses/fonts/README.md", "licenses/fonts/misaki.txt",
+                     "licenses/lodepng/LICENSE"):
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("fixture notice", encoding="utf-8")
@@ -163,7 +178,9 @@ def test_hardware_diagnostics(root: pathlib.Path) -> None:
 
 
 def main() -> None:
-    with tempfile.TemporaryDirectory(prefix="starfox-frame-package-test-") as temp:
+    scratch = SOURCE_ROOT / "build/validation/active"
+    scratch.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=scratch, prefix="starfox-frame-package-test-") as temp:
         test_runtime_package(pathlib.Path(temp) / "runtime")
         test_hardware_diagnostics(pathlib.Path(temp) / "diagnostics")
     print("Steam Frame runtime and diagnostic package allowlists passed.")

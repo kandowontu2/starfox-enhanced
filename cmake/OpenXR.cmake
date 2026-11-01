@@ -140,6 +140,8 @@ if(NOT ANDROID)
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/README.md"
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/misaki.txt"
         DESTINATION licenses/fonts COMPONENT pcvr)
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/third_party/lodepng/LICENSE"
+        DESTINATION licenses/lodepng COMPONENT pcvr)
     if(STARFOX_BUILD_STEAM_FRAME)
         add_executable(starfox_steamframe
             src/vr/desktop_main.cpp src/vr/desktop_paths.cpp)
@@ -164,6 +166,8 @@ if(NOT ANDROID)
             "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/README.md"
             "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/misaki.txt"
             DESTINATION licenses/fonts COMPONENT steamframe)
+        install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/third_party/lodepng/LICENSE"
+            DESTINATION licenses/lodepng COMPONENT steamframe)
     endif()
     add_executable(starfox_vr_cache_check tests/vulkan_pipeline_cache_tests.cpp)
     target_link_libraries(starfox_vr_cache_check PRIVATE starfox_vr_core)

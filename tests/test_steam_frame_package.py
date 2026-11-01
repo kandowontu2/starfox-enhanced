@@ -8,6 +8,7 @@ import hashlib
 import json
 import pathlib
 import re
+import struct
 
 
 REQUIRED_FILES = {
@@ -21,6 +22,8 @@ REQUIRED_FILES = {
     "LICENSE-XBRZ.txt",
     "licenses/fonts/README.md",
     "licenses/fonts/misaki.txt",
+    "licenses/lodepng/LICENSE",
+    "starfox-enhanced.png",
 }
 REQUIRED_DIAGNOSTICS = {
     "starfox_pc",
@@ -34,14 +37,15 @@ REQUIRED_DIAGNOSTICS = {
     "LICENSE-XBRZ.txt",
     "licenses/fonts/README.md",
     "licenses/fonts/misaki.txt",
+    "licenses/lodepng/LICENSE",
 }
 ALLOWED_FILES = {
     "runtime-package": REQUIRED_FILES,
     "hardware-diagnostics": REQUIRED_DIAGNOSTICS,
 }
 ALLOWED_DIRECTORIES = {
-    "runtime-package": {"licenses", "licenses/fonts"},
-    "hardware-diagnostics": {"licenses", "licenses/fonts"},
+    "runtime-package": {"licenses", "licenses/fonts", "licenses/lodepng"},
+    "hardware-diagnostics": {"licenses", "licenses/fonts", "licenses/lodepng"},
 }
 FORBIDDEN_EXTENSIONS = {
     ".sfc", ".smc", ".srm", ".bin", ".rom", ".sav", ".state",
@@ -103,6 +107,12 @@ def validate(package: pathlib.Path, artifact_set: str = "runtime-package") -> No
     if artifact_set == "runtime-package" and not files["LAUNCH-STEAM-FRAME.sh"].stat().st_mode & 0o111:
         raise AssertionError("Steam Frame launcher is not executable")
     if artifact_set == "runtime-package":
+        with files["starfox-enhanced.png"].open("rb") as source:
+            icon_header = source.read(24)
+        if (icon_header[:16] != b"\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR"
+                or len(icon_header) != 24
+                or struct.unpack(">II", icon_header[16:24]) != (512, 512)):
+            raise AssertionError("Steam Frame icon must be a 512x512 PNG")
         try:
             preferences = json.loads(files["vrpreferences.json"].read_text(encoding="utf-8"))
         except (UnicodeError, json.JSONDecodeError) as error:

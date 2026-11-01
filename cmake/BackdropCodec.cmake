@@ -7,4 +7,11 @@ target_include_directories(starfox_backdrop_codec PRIVATE "${CMAKE_CURRENT_LIST_
     PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../third_party/lodepng")
 target_compile_definitions(starfox_backdrop_codec PRIVATE LODEPNG_NO_COMPILE_ENCODER
     LODEPNG_NO_COMPILE_DISK LODEPNG_NO_COMPILE_CPP LODEPNG_NO_COMPILE_ANCILLARY_CHUNKS)
-set_target_properties(starfox_backdrop_codec PROPERTIES POSITION_INDEPENDENT_CODE ON)
+if(VITA)
+    # Vita's SELF converter cannot encode the R_ARM_BASE_PREL relocations
+    # produced by -fPIC. This codec is linked into its executable, not a DSO.
+    set_target_properties(starfox_backdrop_codec PROPERTIES POSITION_INDEPENDENT_CODE OFF)
+else()
+    # Android and the other shared-library hosts need PIC static objects.
+    set_target_properties(starfox_backdrop_codec PROPERTIES POSITION_INDEPENDENT_CODE ON)
+endif()
