@@ -12,6 +12,8 @@
 #include "starfox/render/scaled_text_renderer.hpp"
 #include "starfox/timing/fixed_step.hpp"
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <cmath>
 #include <stdexcept>
 namespace starfox::vr {
@@ -87,8 +89,19 @@ FrameLayers assemble_frame_layers(const GameSceneSnapshot& scene,const FrameLaye
     auto& next_backgrounds=out.backgrounds;
     std::optional<DrawPacket> corridor;
     if(in.tunnel_corridor && snapshot->ppu->tunnel_scene && snapshot->ppu->background_mode>=1 && snapshot->ppu->background_mode<=2) {
-        corridor=tunnel_corridor_packet(*snapshot->ppu,snapshot->display_brightness,srgb);
-        if(corridor->geometry.vertex_view().empty()) corridor.reset();
+        // The authored box when the scene knows it (MTUNNEL: x +-90).
+        const auto& bounds=snapshot->background_corridor;
+        const float half_width=bounds && bounds->right>bounds->left?float(int(bounds->right)-int(bounds->left))*.5F:90.F;
+        // An enhancement: on any failure keep the cartridge's own layer
+        // rather than failing (and dropping out of) the whole frame.
+        try {
+            corridor=tunnel_corridor_packet(*snapshot->ppu,snapshot->display_brightness,srgb,half_width);
+            if(corridor->geometry.vertex_view().empty()) corridor.reset();
+        } catch(const std::exception& error) {
+            static bool reported=false;
+            if(!reported) {std::fprintf(stderr,"modern: 3D corridor skipped: %s\n",error.what());reported=true;}
+            corridor.reset();
+        }
     }
     if(snapshot->ppu->tunnel_scene && !corridor && !in.flat_tunnel_extension) {
         const auto border=[&](unsigned y,unsigned x) {
@@ -129,7 +142,11 @@ FrameLayers assemble_frame_layers(const GameSceneSnapshot& scene,const FrameLaye
             if(snapshot->background_ex_face_planets && !bg2.geometry.texels.empty()) bg2.geometry.texels[7]|=256U;
         }
         else if(!snapshot->ppu->tunnel_scene && snapshot->background_space_horizon && in.flat_space_horizon) {
-            bg2=background_tile_packet(*snapshot->ppu,BackgroundLayer::bg2,space_options,srgb);
+            // Rolled as geometry: reach past the view so no corner shows the
+            // backdrop (the airspace's planet surface below its limb).
+            auto horizon_options=space_options;
+            if(in.space_roll_geometry) horizon_options.overscan=512;
+            bg2=background_tile_packet(*snapshot->ppu,BackgroundLayer::bg2,horizon_options,srgb);
             bg2.model=packet.model;
         }
         else if(!snapshot->ppu->tunnel_scene && snapshot->background_space_horizon)
@@ -137,10 +154,20 @@ FrameLayers assemble_frame_layers(const GameSceneSnapshot& scene,const FrameLaye
                 ?orbital_planet_sphere_packet(*snapshot->ppu,background_options,srgb,snapshot->background_orbital_thin,snapshot->background_orbital_entry,
                     snapshot->flow==simulation::GameFlowState::gameplay && in.ex_experience)
                 :space_horizon_sphere_packet(*snapshot->ppu,space_options,srgb);
-        else if(!snapshot->ppu->tunnel_scene && snapshot->background_landscape && in.landscape_world)
+        else if(!snapshot->ppu->tunnel_scene && snapshot->background_landscape && in.landscape_world) {
+            // The cartridge's dots are a field about the camera, gone from
+            // view once a stage-clear camera climbs away; the world-fixed
+            // lattice would crowd into a dense grid. Fade it out between 200
+            // and 800 units above the ground (flight stays near 50-150).
+            std::optional<uint32_t> dots;
+            if(in.landscape_ground_dots && snapshot->dots_mode>0 && !snapshot->grid_lines) {
+                const double height=double(snapshot->shadow_height)-double(snapshot->camera.y);
+                const double fade=std::clamp((800.-height)/600.,0.,1.);
+                if(fade>0) dots=(landscape_dot_colour(*snapshot)&0xffffffU)|(uint32_t(std::lround(fade*255.))<<24);
+            }
             bg2=landscape_world_packet(*snapshot->ppu,plain_options,float(snapshot->source_vanishing_point[1])+16.F,srgb,
-                in.classic_ground_scroll,in.landscape_horizon,in.landscape_ground_dots && snapshot->dots_mode>0 && !snapshot->grid_lines
-                    ?std::optional<uint32_t>(landscape_dot_colour(*snapshot)):std::nullopt);
+                in.classic_ground_scroll,in.landscape_horizon,dots);
+        }
         else if(!snapshot->ppu->tunnel_scene && snapshot->background_landscape && !in.flat_landscape) {
             bg2=landscape_sphere_packet(*snapshot->ppu,background_options,
                 112.F,srgb,snapshot->background_landscape_unique_half,snapshot->landscape_atlas_origin,
@@ -153,6 +180,38 @@ FrameLayers assemble_frame_layers(const GameSceneSnapshot& scene,const FrameLaye
                 std::clamp(std::abs(float(snapshot->camera.y-snapshot->shadow_height))/256.F,.01F,8.F),srgb);
         else bg2.model=packet.model;
         if(corridor) bg2=std::move(*corridor);
+        // Space Armada's boss room as a room around the reactor: its ceiling
+        // and floor (drawn first) and the drum wall over their edges.
+        std::optional<DrawPacket> nucleus_floor;
+        if(in.tunnel_corridor && snapshot->background_nucleus && snapshot->ppu->background_mode==2) {
+            const auto& room=*snapshot->background_nucleus;
+            const float offset=float(int16_t(uint16_t(room.centre_z-snapshot->camera.z)));
+            try {
+                auto packet=nucleus_room_packet(*snapshot->ppu,snapshot->display_brightness,srgb,
+                    float(room.radius),float(room.top),float(room.bottom),float(snapshot->camera.y),offset);
+                if(!packet.geometry.vertex_view().empty()) {
+                    // About the reactor (behind the ring's centre), turned with
+                    // its spinning cover (BOSS_8_1C); model Z is minus world Z.
+                    float reactor_x=0,reactor_z=0;double turn=0;
+                    for(const auto& item:snapshot->objects) if(item.object.shape==room.reactor_shape) {
+                        reactor_x=float(item.object.world_x);
+                        reactor_z=-float(int16_t(uint16_t(item.object.world_z-room.centre_z)));
+                        turn=double(item.object.rotation_y)*(2*3.14159265358979323846/256.);
+                        break;
+                    }
+                    auto floor=nucleus_floor_packet(*snapshot->ppu,snapshot->display_brightness,srgb,
+                        float(room.radius),float(room.top),float(room.bottom),float(snapshot->camera.y),offset,
+                        reactor_x,reactor_z,turn,16);
+                    if(!floor.geometry.vertex_view().empty()) {
+                        bg2=std::move(packet);
+                        nucleus_floor=std::move(floor);
+                    }
+                }
+            } catch(const std::exception& error) {
+                static bool reported=false;
+                if(!reported) {std::fprintf(stderr,"modern: 3D boss room skipped: %s\n",error.what());reported=true;}
+            }
+        }
         auto photograph=enhanced_sky?in.prepare_photograph():std::optional<DrawPacket>{};
         if(photograph) in.enhanced_landscape->retain_native_ground(bg2,*snapshot->ppu);
         if(!photograph && snapshot->flow==simulation::GameFlowState::game_over)
@@ -162,6 +221,7 @@ FrameLayers assemble_frame_layers(const GameSceneSnapshot& scene,const FrameLaye
             next_backgrounds.push_back(std::move(*photograph));photograph.reset();
         }
         auto ground=landscape_ground_packet(bg2);
+        if(nucleus_floor) next_backgrounds.push_back(std::move(*nucleus_floor));
         const auto bg2_index=next_backgrounds.size();
         next_backgrounds.push_back(std::move(bg2));
         if(!ground.geometry.vertex_view().empty()) next_backgrounds.push_back(std::move(ground));
@@ -251,6 +311,19 @@ FrameLayers assemble_frame_layers(const GameSceneSnapshot& scene,const FrameLaye
                 uint8_t(112+(in.rom->read8(address)&15U)),snapshot->ppu->cgram,snapshot->display_brightness,srgb);
             text.model=ui_transform(in.comms_offset);next_sprites.push_back(std::move(text));
             break;
+        }
+    }
+    if(in.stage_tally && in.stage_tally->ink && in.rom && in.symbols) {
+        // Through the 2D layer path (filtering, replacement portraits), not
+        // a host overlay.
+        const auto& tally=*in.stage_tally;
+        const auto tally_transform=ui_transform(in.comms_offset);
+        auto ink=source_indexed_ink_packet(*tally.ink,snapshot->ppu->cgram,snapshot->display_brightness,srgb);
+        ink.model=tally_transform;next_sprites.push_back(std::move(ink));
+        for(unsigned i=0;i<3;++i) {
+            auto face=source_portrait_packet(*in.rom,*in.symbols,tally.faces[i],false,
+                snapshot->ppu->cgram,snapshot->display_brightness,srgb,in.portrait_overrides,tally.face_at[i]);
+            face.model=tally_transform;next_sprites.push_back(std::move(face));
         }
     }
     if(snapshot->briefing.active) {

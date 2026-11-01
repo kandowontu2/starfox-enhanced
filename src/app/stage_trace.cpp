@@ -2,6 +2,8 @@
 #include "starfox/assets/shape_decoder.hpp"
 #include "starfox/simulation/game_simulation.hpp"
 
+#include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <exception>
 #include <iostream>
@@ -69,6 +71,28 @@ int main(int argc, char** argv) {
                               << ") player-z="
                               << game.objects().at(game.player()).world_z << '\n';
                     previous_strategy = strategy;
+                }
+            }
+            // STARFOX_TRACE_OBJECTS=first,last,step: active objects (shape
+            // and strategy symbols, position relative to the player).
+            if (const auto* window = std::getenv("STARFOX_TRACE_OBJECTS")) {
+                unsigned long first{}, last{}, step{1};
+                std::sscanf(window, "%lu,%lu,%lu", &first, &last, &step);
+                if (tick >= first && tick <= last && (tick - first) % std::max(step, 1UL) == 0UL) {
+                    const auto name = [&](std::uint32_t value, bool word) {
+                        for (const auto& [symbol, values] : symbols.entries())
+                            for (const auto v : values)
+                                if (word ? (v & 0xffffU) == value && (v >> 16U) < 0x70U : v == value) return symbol;
+                        return std::string{"?"};
+                    };
+                    const auto& p = game.objects().at(game.player());
+                    std::cout << "objects tick=" << tick << '\n';
+                    for (const auto handle : game.objects().active_handles()) {
+                        const auto& o = game.objects().at(handle);
+                        std::cout << "  shape=" << name(o.shape, true) << " strat=" << name(o.strategy_address, false)
+                                  << " rel=(" << o.world_x - p.world_x << ',' << o.world_y - p.world_y << ','
+                                  << int(std::int16_t(std::uint16_t(o.world_z - p.world_z))) << ")\n";
+                    }
                 }
             }
             const auto pulse = press_tick != ~0UL && tick >= press_tick

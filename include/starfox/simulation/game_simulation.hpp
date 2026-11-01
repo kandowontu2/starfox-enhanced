@@ -129,7 +129,7 @@ enum class PregamePage {
 inline constexpr std::array<std::uint8_t, 14> main_menu_order{
     0,1,2,3,43,4,5,6,20,21,47,14,15,16};
 inline constexpr std::array<std::uint8_t, 13> two_d_menu_order{8,18,36,37,38,39,40,41,13,24,44,46,23};
-inline constexpr std::array<std::uint8_t, 15> three_d_menu_order{42,7,11,9,30,78,17,79,12,22,35,33,34,45,23};
+inline constexpr std::array<std::uint8_t, 17> three_d_menu_order{42,7,11,9,30,78,17,79,80,81,12,22,35,33,34,45,23};
 inline constexpr std::array<std::uint8_t, 32> global_menu_order{
     29,72,32,71,76,77,10,65,66,28,70,27,73,74,61,62,67,63,68,48,49,50,52,53,54,55,56,57,69,59,60,23};
 #if defined(__3DS__)
@@ -143,6 +143,23 @@ inline constexpr std::array<std::uint8_t, 8> cheats_menu_order{0,1,2,3,4,5,7,6};
 // Keep BACK's saved selection 5 stable. Native Leia is a host-owned option 6.
 inline constexpr std::array<std::uint8_t, 7> stereo_menu_order{0,1,2,3,4,6,5};
 inline constexpr std::array<std::uint8_t, 4> updates_menu_order{0,1,2,3};
+// 2D/3D/GLOBAL rows MODERN draws without (GPU / GPU FAST effects,
+// materials, upscalers, AA types). The pre-game menu greys them while
+// MODERN is selected; the other rows on those pages apply to MODERN.
+inline constexpr bool modern_unsupported_row(unsigned row) noexcept {
+    switch(row) {
+    case 8: case 23:  // 2D FILTER, BACK
+    case 7: case 11: case 9: // AA QUALITY (as MSAA), VSYNC, RENDER UPSCALE
+    case 79: case 80: case 81: // 3D ASTEROIDS, HIGH POLY ARWINGS, DYNAMIC LIGHTING
+    case 29: case 72: // RAY TRACING (sun shadows), SHADOW SOFTNESS
+        return false;
+    default: break;
+    }
+    for(const auto id:two_d_menu_order) if(id==row) return true;
+    for(const auto id:three_d_menu_order) if(id==row) return true;
+    for(const auto id:global_menu_order) if(id==row) return true;
+    return false;
+}
 inline std::span<const std::uint8_t> pregame_menu_order(PregamePage page) {
     switch (page) {
     case PregamePage::two_d: return two_d_menu_order;
@@ -497,6 +514,14 @@ public:
     void set_bloom_2d(std::uint8_t value) noexcept { bloom_2d_ = value < 4U ? value : 0U; }
     [[nodiscard]] std::uint8_t model_smoothing() const noexcept { return 0; } // Retired; old states cannot re-enable it.
     [[nodiscard]] render::AsteroidModels asteroid_models() const noexcept { return asteroid_models_; }
+    // HIGH POLY ARWINGS (MODERN): the ending model replaces the flight Arwings.
+    [[nodiscard]] bool hipoly_arwings() const noexcept { return hipoly_arwings_; }
+    void set_hipoly_arwings(bool value) noexcept { hipoly_arwings_ = value; }
+    // DYNAMIC LIGHTING (MODERN): ray-traced coloured lights from shots and
+    // explosions, and the engine glow on the ground. MODERN's ray-traced
+    // sun shadows follow RAY TRACING.
+    [[nodiscard]] bool dynamic_lighting() const noexcept { return dynamic_lighting_; }
+    void set_dynamic_lighting(bool value) noexcept { dynamic_lighting_ = value; }
     [[nodiscard]] std::uint8_t language() const noexcept { return language_; }
     [[nodiscard]] bool ray_tracing() const noexcept { return ray_tracing_; }
     [[nodiscard]] std::uint8_t ray_tracing_quality() const noexcept { return ray_tracing_?ray_tracing_quality_:0; }
@@ -606,8 +631,13 @@ public:
     }
     [[nodiscard]] static constexpr std::pair<RendererMode,GpuRenderer> next_renderer_selection(
         RendererMode mode,GpuRenderer gpu,bool backward,bool hardware_only,bool modern=false) noexcept {
-        if(hardware_only) return {RendererMode::gpu,
-            gpu==GpuRenderer::fast?GpuRenderer::accurate:GpuRenderer::fast};
+        if(hardware_only) {
+            // GPU ACCURATE -> GPU FAST [-> MODERN], wrapping.
+            const unsigned count=modern?3U:2U;
+            const unsigned position=gpu==GpuRenderer::fast?1U:gpu==GpuRenderer::modern && modern?2U:0U;
+            const unsigned next=(position+(backward?count-1U:1U))%count;
+            return {RendererMode::gpu,next==2U?GpuRenderer::modern:next==1U?GpuRenderer::fast:GpuRenderer::accurate};
+        }
         // SOFTWARE -> GPU -> GPU FAST [-> MODERN], wrapping.
         const unsigned count=modern?4U:3U;
         const unsigned position=mode==RendererMode::software?0U
@@ -1346,6 +1376,8 @@ private:
     std::uint8_t ray_tracing_quality_{2};
     std::uint8_t reflective_surfaces_{};
     render::AsteroidModels asteroid_models_{};
+    bool hipoly_arwings_{};
+    bool dynamic_lighting_{};
     std::uint8_t dlss_mode_{}; // Host quality preference, not emulated game state.
     std::uint8_t dlss45_mode_{};
     std::uint8_t fsr1_mode_{}; // Host quality preference; preserve across state loads.

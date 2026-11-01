@@ -1336,6 +1336,8 @@ GameTickResult GameSimulation::tick_pregame_menu(
         && (menu_input.pressed & (starfox::input::a | starfox::input::select
             | starfox::input::left | starfox::input::right))) {
         if (renderer_mode_ == RendererMode::software) set_enhanced_shadows(!enhanced_shadows_);
+        // MODERN's ray-traced shadows have no quality levels: OFF or ON.
+        else if (modern_renderer()) set_ray_tracing_quality(ray_tracing_quality() ? 0U : 2U);
         else set_ray_tracing_quality((ray_tracing_quality()+((menu_input.pressed & starfox::input::left)?3U:1U))%4U);
         queue_sound_effect(0x11U);
     }
@@ -1352,6 +1354,18 @@ GameTickResult GameSimulation::tick_pregame_menu(
         const auto count = render::asteroid_model_mode_count;
         set_asteroid_models(static_cast<std::uint8_t>((static_cast<unsigned>(asteroid_models_)
             + ((menu_input.pressed & starfox::input::left) ? count - 1U : 1U)) % count));
+        queue_sound_effect(0x11U);
+    }
+    if (graphics_page && pregame_selection_ == 80U
+        && (menu_input.pressed & (starfox::input::a | starfox::input::select
+            | starfox::input::left | starfox::input::right))) {
+        set_hipoly_arwings(!hipoly_arwings_);
+        queue_sound_effect(0x11U);
+    }
+    if (graphics_page && pregame_selection_ == 81U
+        && (menu_input.pressed & (starfox::input::a | starfox::input::select
+            | starfox::input::left | starfox::input::right))) {
+        set_dynamic_lighting(!dynamic_lighting_);
         queue_sound_effect(0x11U);
     }
     if (graphics_page && pregame_selection_ == 28U

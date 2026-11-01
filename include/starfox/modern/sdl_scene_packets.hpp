@@ -63,13 +63,25 @@ public:
     // every fragment (compare ALWAYS) and still write depth, so later draws
     // cover earlier ones exactly as the cartridge's painter does.
     void set_painter(bool enabled) noexcept {painter_=enabled;}
+    // Target sample count (MSAA); a change drops the cached pipelines.
+    void set_sample_count(SDL_GPUSampleCount samples) noexcept;
+    // Fragment storage slots 1-2 (scene_sdl.hlsl): the ray-traced shadow
+    // casters' triangles and objects for the next passes, or null for a small
+    // placeholder (no shadow receivers). Draws bind all three slots through
+    // bind_fragment_storage(), slot 0 being the draw's own texels.
+    void set_shadow_buffers(SDL_GPUBuffer* triangles,SDL_GPUBuffer* objects) noexcept {
+        shadow_triangles_=triangles;shadow_objects_=objects;
+    }
+    void bind_fragment_storage(SDL_GPURenderPass*,SDL_GPUBuffer* texels) const noexcept;
     void release() noexcept;
     const std::string& status() const noexcept {return status_;}
 private:
     SDL_GPUDevice* device_{};
     SDL_GPUShader* vertex_{};SDL_GPUShader* fragment_{};
+    SDL_GPUBuffer* placeholder_{};SDL_GPUBuffer* shadow_triangles_{};SDL_GPUBuffer* shadow_objects_{};
     SDL_GPUTextureFormat colour_{},depth_{};
     bool reversed_depth_{},painter_{};
+    SDL_GPUSampleCount samples_{SDL_GPU_SAMPLECOUNT_1};
     unsigned brush_pixels_{1};
     std::array<float,4> brush_{};
     std::map<unsigned,SDL_GPUGraphicsPipeline*> pipelines_;

@@ -402,6 +402,11 @@ void ShapeDecoder::decode_faces(Shape& shape) const {
             const auto vertex_index = rom_.read8(face_cursor++);
             face.vertex_indices.push_back(vertex_index);
         }
+        // MOBJ.MC msh_faces branches two-point faces to misline before its
+        // m_vistab lookup: lines are never culled by their face number. The
+        // HYPER warp streaks name visibility 0, which faces away once their
+        // strategy turns them 180 degrees.
+        if (vertex_count == 2U) face.visibility_index = -1;
         return face;
     };
 

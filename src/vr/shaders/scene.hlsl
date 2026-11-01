@@ -154,7 +154,16 @@ Fragment vertex_main(Vertex input) {
 float4 styled_colour(float4 colour) {return scene_styled_colour(colour,camera.effects);}
 float4 fragment_solid_raw(Fragment input) {
     if(input.visible==0) discard;
-    if((input.texture.w&4096)!=0 && dot(input.perspective_uv,input.perspective_uv)>1.) discard;
+    if((input.texture.w&4096)!=0) {
+        float radius=dot(input.perspective_uv,input.perspective_uv);
+        if(radius>1.) discard;
+        // A glow decal (vr::ModernFrame::engine_glow): texture.y = 1 + the
+        // edge's start (fraction of the radius) x 65534, fading to the rim.
+        if(input.texture.y!=0) {
+            float edge=1.-smoothstep(float(input.texture.y-1)/65534.,1.,sqrt(radius));
+            return float4(input.color.rgb*edge*edge,input.color.a);
+        }
+    }
     if(input.dither_scale!=0) {
 #if defined(STARFOX_CALIBRATED_MSAA)
         // Smooth flat-model authored colour pairs, not framebuffer checkerboard
@@ -590,8 +599,42 @@ bool game_over_front_window(Fragment input) {
     float2 hit=eye.xy+ray.xy*distance;
     return distance>0 && abs(hit.x)<1. && abs(hit.y)<.875;
 }
-// vr::tunnel_corridor_packet: camera-attached ceiling/floor planes coloured per depth row
-// from the cartridge's two chequered tunnel pages (header in background_tiles.cpp).
+// Screen derivatives of the model-space surface, set by the fragment entry
+// (derivatives do not exist in the vertex stage, which also samples):
+// plane_dx/dy = (x, -z) for the landscape ground and the corridor,
+// surface_dy = d(y)/d(screen x, y) for the corridor's walls.
+static float2 plane_dx=0,plane_dy=0,surface_dy=0;
+// One chequered page's colour at a lateral position (|x| / height on the
+// ceiling or floor): the art's per-row graded centre, then each fitted
+// strip and wall zone, blended across its boundary over a pixel footprint.
+float4 corridor_zone_colour(uint s,uint page,bool ceiling,uint row,float lateral,float footprint,uint flags) {
+    uint zones=s+272+896+(page*2+(ceiling?0U:1U))*8;
+    float4 colour=tile_colour(s,texels[s+272+page*448+row*2],flags);
+    for(uint zone=0;zone<texels[zones+6];++zone) {
+        float boundary=asfloat(texels[zones+zone*2]);
+        float t=footprint>1e-6?saturate((lateral-boundary)/footprint+.5):(lateral>boundary?1.:0.);
+        colour=lerp(colour,tile_colour(s,texels[zones+zone*2+1],flags),t);
+    }
+    return colour;
+}
+// The same zones on a wall at height |y| from the centre line: lateral =
+// half width / |y| crosses a boundary b at |y| = half width / b, so blend in
+// height, where the pixel footprint stays finite (|y| -> 0 is no boundary).
+float4 corridor_wall_colour(uint s,uint page,bool ceiling,float y,float half_width,float footprint,uint flags) {
+    uint zones=s+272+896+(page*2+(ceiling?0U:1U))*8;
+    float4 colour=tile_colour(s,texels[s+272+page*448+(ceiling?0U:223U)*2],flags);
+    for(uint zone=0;zone<texels[zones+6];++zone) {
+        float edge=half_width/max(asfloat(texels[zones+zone*2]),1e-3);
+        float t=footprint>1e-6?saturate((edge-y)/footprint+.5):(y<edge?1.:0.);
+        colour=lerp(colour,tile_colour(s,texels[zones+zone*2+1],flags),t);
+    }
+    return colour;
+}
+// vr::tunnel_corridor_packet: a closed box around the corridor's centre line
+// (header in background_tiles.cpp). Ceiling and floor are coloured per depth
+// row from the cartridge's two chequered tunnel pages; the walls carry what
+// the art paints beyond its wall lines, mapped along the rays from the
+// centre line the art was drawn for, at the walls' own depth.
 float4 tunnel_corridor_sample(Fragment input) {
     uint s=input.texture.x;
     float3 p=input.surface_position;
@@ -607,22 +650,39 @@ float4 tunnel_corridor_sample(Fragment input) {
         distance=max(abs(p.z+mul(t,a).z/dot(column,column)),1.);
     }
     uint face=uint(input.uv.x+.5);
-    bool ceiling=face==0;
+    bool wall=face==2;
+    // Walls: the upper half continues the ceiling's art, the lower the floor's.
+    bool ceiling=wall?p.y>=0:face==0;
     float height=asfloat(texels[s+(ceiling?1:2)]);
     float vanishing=asfloat(texels[s+(ceiling?10:11)]);
     float row=ceiling?vanishing-height*256./distance:vanishing+height*256./distance;
     uint index=uint(clamp(floor(row),0.,223.));
     float start=float(texels[s+(ceiling?3:5)]),length=float(texels[s+(ceiling?4:6)]);
+    // Lateral position in the art's terms (|x| / height on the ceiling and
+    // floor). On a wall (x = +-half width) the ray from the centre line
+    // through height y meets the extended plane at lateral = half width / |y|.
+    float lateral=abs(p.x)/height,lateral_footprint=(abs(plane_dx.x)+abs(plane_dy.x))/height;
+    // Page-24 coverage of this pixel's depth footprint, so bands thinner
+    // than a pixel toward the vanishing point blend instead of sparkling.
     float phase=-p.z-start;phase-=256.*floor(phase/256.);
-    uint page=phase<length?0U:1U;
-    // Lateral zones (strips, side wall): |x| / height against each fitted
-    // boundary slope for this page and half; the centre is graded per row.
-    uint zones=s+272+896+(page*2+(ceiling?0U:1U))*8;
-    uint colour=texels[s+272+page*448+index*2];
-    float lateral=abs(p.x)/height;
-    for(uint zone=0;zone<texels[zones+6];++zone)
-        if(lateral>asfloat(texels[zones+zone*2])) colour=texels[zones+zone*2+1];
-    return tile_colour(s,colour,input.texture.w);
+    float footprint=min(abs(plane_dx.y)+abs(plane_dy.y),256.);
+    float coverage=phase<length?1.:0.;
+    if(footprint>1e-3) {
+        float a=phase-footprint*.5,b=phase+footprint*.5;
+        float fa=floor(a/256.)*length+min(a-256.*floor(a/256.),length);
+        float fb=floor(b/256.)*length+min(b-256.*floor(b/256.),length);
+        coverage=saturate((fb-fa)/footprint);
+    }
+    float4 near_page,far_page;
+    if(wall) {
+        float half_width=asfloat(texels[s+8]),y=abs(p.y),y_footprint=abs(surface_dy.x)+abs(surface_dy.y);
+        near_page=corridor_wall_colour(s,0U,ceiling,y,half_width,y_footprint,input.texture.w);
+        far_page=corridor_wall_colour(s,1U,ceiling,y,half_width,y_footprint,input.texture.w);
+    } else {
+        near_page=corridor_zone_colour(s,0U,ceiling,index,lateral,lateral_footprint,input.texture.w);
+        far_page=corridor_zone_colour(s,1U,ceiling,index,lateral,lateral_footprint,input.texture.w);
+    }
+    return lerp(far_page,near_page,coverage);
 }
 // One BG art texel at atlas coordinates (no scroll, offsets or EX regions).
 float4 tile_art_texel(uint start,int2 source,uint flags) {
@@ -672,9 +732,6 @@ float square_wave_box(float x,float period,float footprint) {
     footprint=max(footprint,1e-3);
     return saturate((square_wave_integral(x+footprint*.5,period)-square_wave_integral(x-footprint*.5,period))/footprint);
 }
-// Screen derivatives of the ground plane's source X/Z, set by the fragment
-// entry (derivatives do not exist in the vertex stage, which also samples).
-static float2 plane_dx=0,plane_dy=0;
 // Headset views (vr::set_headset_mapping) map the art by direction:
 // art columns per radian near the native focal length of 256, rounded so a
 // full turn wraps the art a whole number of times (no seam behind).
@@ -775,7 +832,8 @@ float4 landscape_world_sample(Fragment input) {
             float radius=min(.6*pixel,.2*cell);
             float fade=saturate(radius/.75);
             float half_side=max(radius,.75);
-            float coverage=saturate(half_side-abs(screen.x)+.5)*saturate(half_side-abs(screen.y)+.5)*fade*fade;
+            float coverage=saturate(half_side-abs(screen.x)+.5)*saturate(half_side-abs(screen.y)+.5)*fade*fade
+                *float(dot_word>>24)/255.; // Alpha: the dots' fade (frame_layers).
             float4 ink=float4(dot_word&255U,(dot_word>>8)&255U,(dot_word>>16)&255U,255U)/255.;
             if((input.texture.w&2U)!=0) ink.rgb=select(ink.rgb<=.04045,ink.rgb/12.92,pow((ink.rgb+.055)/1.055,2.4));
             colour.rgb=lerp(colour.rgb,ink.rgb,coverage);
@@ -1016,6 +1074,14 @@ float orbital_noise(float3 p) {
 }
 float4 tile_background(Fragment input) {
     uint flags=texels[input.texture.x+15];
+    // Overscanned layers (BackgroundTileOptions::overscan): above the 224
+    // source rows repeat the first row (open space); below, reflect back and
+    // forth through the last 12 rows (the airspace planet's surface sits just
+    // below its limb) so the surface keeps its texture.
+    if((texels[input.texture.x+7]&8192U)!=0) {
+        if(input.uv.y<0) input.uv.y=0;
+        else if(input.uv.y>=224) {float t=fmod(input.uv.y-224.,24.);input.uv.y=223.99-(t<12.?t:24.-t);}
+    }
     if((flags&0x80000000U)==0) {
         float4 colour;
         // Flat uv-addressed layers; sphere/receiver mappings and the 3D
@@ -1224,6 +1290,7 @@ float4 resident_texel(Fragment input,uint material,uint2 masks,int2 pixel) {
 float4 fragment_textured_raw(Fragment input) {
     plane_dx=ddx(float2(input.surface_position.x,-input.surface_position.z));
     plane_dy=ddy(float2(input.surface_position.x,-input.surface_position.z));
+    surface_dy=float2(ddx(input.surface_position.y),ddy(input.surface_position.y));
     if(input.visible==0) discard;
     if((input.texture.w&8193U)==8193U) return backdrop_colour(input);
     if((input.texture.w&8388608U)!=0) {

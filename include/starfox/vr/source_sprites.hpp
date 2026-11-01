@@ -5,7 +5,7 @@
 #include <optional>
 #include <string_view>
 namespace starfox::simulation { class TrigTables; struct MeterState; struct CircleEffectState; struct WindowWipeState; struct DialogueState; struct ColourMathEffectState; }
-namespace starfox::render { struct HudLayout; class ScaledTextRenderer; }
+namespace starfox::render { struct HudLayout; class ScaledTextRenderer; class Framebuffer; }
 namespace starfox::vr {
 struct FrameMenu;
 struct GameSceneSnapshot;
@@ -26,9 +26,16 @@ enum class SourceSpritePass {all,world,hud,all_but_reticle};
     const render::TextureOverrides* portraits=nullptr);
 [[nodiscard]] DrawPacket source_dialogue_meter_packet(const simulation::DialogueState&,
     const std::array<uint16_t,256>& cgram,unsigned brightness=15,bool srgb=false);
+// `at`: the 32x40 frame's top-left in square source pixels (the stage
+// tally's draw_face) instead of the communications placement.
 [[nodiscard]] DrawPacket source_portrait_packet(const assets::RomImage&,const assets::SymbolMap&,
     uint8_t frame,bool alternate,const std::array<uint16_t,256>& cgram,
-    unsigned brightness=15,bool srgb=false,const render::TextureOverrides* portraits=nullptr);
+    unsigned brightness=15,bool srgb=false,const render::TextureOverrides* portraits=nullptr,
+    std::optional<std::array<int,2>> at={});
+// Host-drawn indexed ink (CGRAM indices, zero clear) as filtered 2D layer
+// quads, in the bitmap's own pixel coordinates.
+[[nodiscard]] DrawPacket source_indexed_ink_packet(const render::Framebuffer&,
+    const std::array<uint16_t,256>& cgram,unsigned brightness=15,bool srgb=false);
 // A portrait frame's identity for replacement art: its ROM address (each
 // frame is 640 bytes of 4bpp tiles, 32x40 pixels, from FACEDATA/FACEDATA2).
 [[nodiscard]] uint32_t source_portrait_address(const assets::SymbolMap&,uint8_t frame,bool alternate);

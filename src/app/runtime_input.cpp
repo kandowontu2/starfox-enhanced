@@ -967,6 +967,14 @@ bool load_pregame_settings(
             // files load unchanged and the revision number is not consumed.
             if (value < 0 || value >= render::asteroid_model_mode_count) return false;
             loaded.asteroid_models = static_cast<std::uint8_t>(value);
+        } else if (name == "HIPOLY_ARWINGS") {
+            // Optional like ASTEROID_MODELS: absent means the retail ship.
+            if (value < 0 || value > 1) return false;
+            loaded.hipoly_arwings = value != 0;
+        } else if (name == "DYNAMIC_LIGHTING") {
+            // Optional: absent means off.
+            if (value < 0 || value > 1) return false;
+            loaded.dynamic_lighting = value != 0;
         } else if (name == "EFFECT_INTENSITY") {
             if (value < 0 || value > 100) return false;
             loaded.effect_intensity = static_cast<std::uint8_t>(value);
@@ -1241,7 +1249,9 @@ bool save_pregame_settings(
            << static_cast<unsigned>(settings.on_screen_controls) << '\n'
            << "SWAP_FACE_BUTTONS "
            << static_cast<unsigned>(settings.swap_face_buttons) << '\n'
-           << "GPU_RENDERER " << static_cast<unsigned>(settings.gpu_renderer) << '\n';
+           << "GPU_RENDERER " << static_cast<unsigned>(settings.gpu_renderer) << '\n'
+           << "HIPOLY_ARWINGS " << static_cast<unsigned>(settings.hipoly_arwings) << '\n'
+           << "DYNAMIC_LIGHTING " << static_cast<unsigned>(settings.dynamic_lighting) << '\n';
     if (!output) return false;
     const auto bytes = output.str();
     AtomicFile file{path};

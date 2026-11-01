@@ -499,6 +499,13 @@ std::size_t Spc700Audio::prime_upload_sequence(
 bool Spc700Audio::driver_loaded() const noexcept {
     return music_impl_->loaded && effects_impl_->loaded;
 }
+std::vector<std::uint8_t> Spc700Audio::music_ram() const {
+    if (!music_impl_->loaded) return {music_impl_->aram.begin(), music_impl_->aram.end()};
+    std::array<std::uint8_t, spc_file_size> snapshot{};
+    spc_init_header(snapshot.data());
+    spc_save_spc(music_impl_->spc, snapshot.data());
+    return {snapshot.begin() + kSpcRamOffset, snapshot.begin() + kSpcRamOffset + kSpcRamSize};
+}
 std::size_t Spc700Audio::uploaded_bytes() const noexcept {
     return std::min(music_impl_->upload_count, effects_impl_->upload_count);
 }

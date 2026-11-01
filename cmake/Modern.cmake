@@ -1,7 +1,8 @@
 # MODERN renderer: the shared VR scene (starfox_scene) drawn through SDL_GPU
 # for flat-screen targets. Needs SDL3::SDL3 from the runtime build. Desktop
-# Windows/Linux only for now; other targets keep their existing renderers.
-if((WIN32 AND NOT WINDOWS_STORE) OR (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ANDROID))
+# Windows/Linux, Android and PS5 (all present through SDL_GPU with DXIL or
+# SPIR-V); other targets keep their existing renderers.
+if((WIN32 AND NOT WINDOWS_STORE) OR CMAKE_SYSTEM_NAME STREQUAL "Linux" OR ANDROID OR STARFOX_PS5)
     set(STARFOX_MODERN_DEFAULT ON)
 else()
     set(STARFOX_MODERN_DEFAULT OFF)
@@ -13,7 +14,7 @@ endif()
 if(NOT TARGET starfox_scene)
     include("${CMAKE_CURRENT_LIST_DIR}/Scene.cmake")
 endif()
-add_library(starfox_modern STATIC src/modern/sdl_scene_packets.cpp src/modern/sdl_source_scene.cpp src/modern/sdl_frame.cpp src/modern/modern_runtime.cpp
+add_library(starfox_modern STATIC src/modern/sdl_scene_packets.cpp src/modern/sdl_layer_filter.cpp src/modern/sdl_source_scene.cpp src/modern/sdl_frame.cpp src/modern/sdl_ray_shadows.cpp src/modern/modern_runtime.cpp
     src/modern/texture_dump.cpp)
 target_include_directories(starfox_modern PUBLIC include PRIVATE src)
 target_compile_features(starfox_modern PUBLIC cxx_std_20)

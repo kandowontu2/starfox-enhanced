@@ -74,6 +74,8 @@ public:
 
     [[nodiscard]] bool driver_loaded() const noexcept;
     [[nodiscard]] std::size_t uploaded_bytes() const noexcept;
+    // The music SPC's 64 KB ARAM as it stands (driver, BRR samples, songs).
+    [[nodiscard]] std::vector<std::uint8_t> music_ram() const;
     [[nodiscard]] std::array<std::uint8_t, 4> output_ports() const noexcept;
     [[nodiscard]] State state() const;
     [[nodiscard]] std::vector<std::uint8_t> save_state() const;
