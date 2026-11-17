@@ -233,7 +233,7 @@ private:
     uint16_t ex_intro_star_background_{};
     uint16_t sector_y_star_background_{};
     uint16_t asteroid_star_background_{};
-    std::array<uint16_t,8> unique_backgrounds_{};
+    std::array<uint16_t,9> unique_backgrounds_{};
     std::array<uint16_t,5> orbital_backgrounds_{};
     std::array<uint16_t,4> ex_star_backgrounds_{};
     std::array<uint16_t,25> landscape_backgrounds_{};

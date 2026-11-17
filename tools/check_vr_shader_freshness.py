@@ -28,6 +28,7 @@ scene = root / 'src/vr/shaders/scene.hlsl'
 ray = root / 'src/vr/shaders/ray_expand.hlsl'
 include_graph(scene)
 include_graph(ray)
+include_graph(root / 'src/vr/shaders/hud_layer.hlsl')
 for relative in ('cmake/VRShaderChecks.cmake', 'tools/generate_vr_shaders.py',
                  'tools/generate_vr_ray_shader.py', 'tools/portable_shader_source.py',
                  'src/vr/shaders/scene_spirv.hpp', 'src/vr/shaders/ray_expand_spirv.hpp'):
@@ -56,6 +57,7 @@ with tempfile.TemporaryDirectory(prefix='starfox-vr-shader-gate-') as temporary:
     run(build_command)
     cases = [
         ('src/vr/shaders/scene.hlsl', 'VR shaders stale', False),
+        ('src/vr/shaders/hud_layer.hlsl', 'VR shaders stale', False),
         ('include/starfox/render/ex_face_planet_regions.inc', 'VR shaders stale', False),
         ('src/vr/shaders/ray_expand.hlsl', 'VR ray expansion shader is stale', False),
         ('src/vr/shaders/scene_spirv.hpp', 'VR shaders stale', True),

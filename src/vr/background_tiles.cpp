@@ -574,7 +574,7 @@ std::optional<NucleusSurfaces> nucleus_surfaces(const simulation::SnesPpuState& 
     if(brightness>15) throw std::invalid_argument("Invalid nucleus room brightness");
     if(!(radius>0) || !(top<bottom) || !std::isfinite(eye_y) || !std::isfinite(camera_offset))
         throw std::invalid_argument("Invalid nucleus room dimensions");
-    if(!(source.main_screen&2) || source.background_mode!=2) return {};
+    if(!(source.main_screen&2) || (source.background_mode!=1 && source.background_mode!=2)) return {}; // Sector Z: Mode 1
     // The entry (BG_1_3DA) twists the camera through heights outside the
     // room; the eye only places the painting's bands, so keep it inside.
     eye_y=std::clamp(eye_y,top+1.F,bottom-1.F);
@@ -1150,6 +1150,28 @@ Matrix4 orbital_horizon_motion(float previous_scroll,float current_scroll,double
     // correction on the planet layer, never on the eye camera or UI.
     if(gameplay && (entry || thin)) return {0,-1,0,0,c,0,s,0,-s,0,c,0,0,0,0,1};
     return {1,0,0,0,0,c,s,0,0,-s,c,0,0,0,0,1};
+}
+void flat_orbital_surface(DrawPacket& bg2,const simulation::SnesPpuState& source,bool thin_horizon,bool entry_horizon) {
+    auto& data=bg2.geometry.texels;
+    if(data.size()<272+16384 || bg2.geometry.vertex_view().empty()) return;
+    const unsigned horizon=entry_horizon?424U:thin_horizon?400U:384U;
+    const unsigned depth=entry_horizon?40U:thin_horizon?15U:80U;
+    // The surface rows' inks, probed where the headset sphere probes them
+    // (scene.hlsl's vertex stage): atlas rows below the limb, unscrolled.
+    auto ppu=source;
+    ppu.bg2_horizontal_offsets_enabled=false;ppu.bg2_scanline_scroll_enabled=false;
+    ppu.bg2_scroll_x=0;ppu.bg2_scroll_y=int16_t(horizon-100U);
+    std::array<uint32_t,2> inks{};
+    for(unsigned i=0;i<8;++i) {
+        const unsigned row=100U+unsigned(float(depth)*(.3F+.25F*float(i%3)));
+        const auto index=render::tunnel_border_index(ppu,row,29U+i*61U);
+        // Ink 0 (transparent) falls back to the darkest colour; skip it.
+        if(index%16U) inks[i/4]|=uint32_t(index)<<((i%4)*8);
+    }
+    data[7]|=65536U;
+    data.push_back(starfox::bit_cast<uint32_t>(float(horizon)));
+    data.push_back(starfox::bit_cast<uint32_t>(float(depth)));
+    data.push_back(inks[0]);data.push_back(inks[1]);
 }
 DrawPacket orbital_planet_sphere_packet(const simulation::SnesPpuState& ppu,
     const BackgroundTileOptions& options,bool srgb,bool thin_horizon,bool entry_horizon,bool gameplay) {

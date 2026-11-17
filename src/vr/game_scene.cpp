@@ -117,7 +117,8 @@ GameSceneHistory::GameSceneHistory(const simulation::GameSimulation& game,
     if(!title_intro.empty() && !background_lists.empty()
         && (title_intro.front()&0xff0000U)==(background_lists.front()&0xff0000U))
         ex_title_intro_background_=static_cast<uint16_t>(title_intro.front()-background_lists.front());
-    constexpr std::array unique_names{"BG_2_2","BG_3_4B","BG_3_4D","BG_INTRO","BG_1_3I","BG_3_2","BG_1_3C","BG_1_3A"};
+    // BG_1_3E: Space Armada's exit into open space after the boss.
+    constexpr std::array unique_names{"BG_2_2","BG_3_4B","BG_3_4D","BG_INTRO","BG_1_3I","BG_3_2","BG_1_3C","BG_1_3A","BG_1_3E"};
     constexpr std::array orbital_names{"BG_1_5","BG_3_6","BG_5_1E","BG_5_1I","BG_2_2"};
     for(size_t i=0;i<orbital_names.size();++i) {
         const auto& value=symbols.find(orbital_names[i]);
@@ -323,7 +324,7 @@ void GameSceneHistory::capture() {
             // with one large meteor in the right. Keep that artwork planar
             // and unique while the planet-free stars fill the surround.
             next->background_unique_space=i>=4 || i==1 || i==2;
-            if(i==1 || i==2 || i==4 || i==6 || i==7) next->background_planet_rect={320,88,120,120};
+            if(i==1 || i==2 || i==4 || i==6 || i==7 || i==8) next->background_planet_rect={320,88,120,120};
             if(i==5) next->background_planet_rect={56,360,112,112};
         }
     next->background_scroll_override=game_.map().peek_background_scroll_override();

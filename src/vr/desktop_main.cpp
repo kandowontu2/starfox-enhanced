@@ -282,6 +282,7 @@ int main(int argc,char** argv) try {
     host.time_limit=std::chrono::seconds(0);
     host.steam_frame=steam_frame;
     host.cartridge_save_path=data/"starfox-ex.srm";
+    host.texture_directory=directory/"textures";
     std::signal(SIGINT,interrupt);
     std::signal(SIGTERM,interrupt);
     host.stop_requested=[] {return interrupted!=0;};

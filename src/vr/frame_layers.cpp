@@ -103,17 +103,7 @@ FrameLayers assemble_frame_layers(const GameSceneSnapshot& scene,const FrameLaye
             corridor.reset();
         }
     }
-    if(snapshot->ppu->tunnel_scene && !corridor && !in.flat_tunnel_extension) {
-        const auto border=[&](unsigned y,unsigned x) {
-            const auto ink=render::tunnel_border_index(*snapshot->ppu,y,x);
-            return source_backdrop_colour(snapshot->ppu->cgram[ink],snapshot->display_brightness,srgb);
-        };
-        auto surround=tunnel_surround_packet(border(112,0),border(4,128),border(219,128));
-        surround.model=source_layer_matrix(
-            float(snapshot->source_vanishing_point[0])+16.F,
-            float(snapshot->source_vanishing_point[1])+16.F).value();
-        out.tunnel_surround.push_back(std::move(surround));
-    }
+    bool nucleus_room=false; // Space Armada's 3D boss room replaced the tunnel art.
     const bool intro_sky=!snapshot->ppu->tunnel_scene
         && snapshot->flow==simulation::GameFlowState::intro
         && !snapshot->meters.extended && snapshot->background_unique_top_rows==224;
@@ -145,9 +135,18 @@ FrameLayers assemble_frame_layers(const GameSceneSnapshot& scene,const FrameLaye
             // Rolled as geometry: reach past the view so no corner shows the
             // backdrop (the airspace's planet surface below its limb).
             auto horizon_options=space_options;
-            if(in.space_roll_geometry) horizon_options.overscan=512;
+            // The airspace's surface also reaches past a rolled, diving
+            // 32:9 view's corners.
+            if(in.space_roll_geometry) horizon_options.overscan=snapshot->background_orbital_planet?1024:512;
             bg2=background_tile_packet(*snapshot->ppu,BackgroundLayer::bg2,horizon_options,srgb);
             bg2.model=packet.model;
+            // The airspace planet's surface: the headset's scrolling field
+            // below the native limb (STARFOX_MODERN_ORBITAL_FLOW=0: native).
+            static const bool flat_surface=[] {
+                const char* value=std::getenv("STARFOX_MODERN_ORBITAL_FLOW");return !(value && std::string_view(value)=="0");
+            }();
+            if(flat_surface && snapshot->background_orbital_planet)
+                flat_orbital_surface(bg2,*snapshot->ppu,snapshot->background_orbital_thin,snapshot->background_orbital_entry);
         }
         else if(!snapshot->ppu->tunnel_scene && snapshot->background_space_horizon)
             bg2=snapshot->background_orbital_planet
@@ -181,9 +180,11 @@ FrameLayers assemble_frame_layers(const GameSceneSnapshot& scene,const FrameLaye
         else bg2.model=packet.model;
         if(corridor) bg2=std::move(*corridor);
         // Space Armada's boss room as a room around the reactor: its ceiling
-        // and floor (drawn first) and the drum wall over their edges.
+        // and floor (drawn first) and the drum wall over their edges. Sector Z
+        // fights the same boss in the same room in Mode 1 (BG_1_3D); its
+        // 4bpp BG2 painting reads the same way.
         std::optional<DrawPacket> nucleus_floor;
-        if(in.tunnel_corridor && snapshot->background_nucleus && snapshot->ppu->background_mode==2) {
+        if(in.tunnel_corridor && snapshot->background_nucleus) {
             const auto& room=*snapshot->background_nucleus;
             const float offset=float(int16_t(uint16_t(room.centre_z-snapshot->camera.z)));
             try {
@@ -204,7 +205,7 @@ FrameLayers assemble_frame_layers(const GameSceneSnapshot& scene,const FrameLaye
                         reactor_x,reactor_z,turn,16);
                     if(!floor.geometry.vertex_view().empty()) {
                         bg2=std::move(packet);
-                        nucleus_floor=std::move(floor);
+                        nucleus_floor=std::move(floor);nucleus_room=true;
                     }
                 }
             } catch(const std::exception& error) {
@@ -255,6 +256,20 @@ FrameLayers assemble_frame_layers(const GameSceneSnapshot& scene,const FrameLaye
                 next_backgrounds.insert(next_backgrounds.begin()+std::ptrdiff_t(bg2_index),std::move(bg3));
             else next_backgrounds.push_back(std::move(bg3));
         }
+    }
+    // The cartridge's colours around its view, where the tunnel art has no
+    // 3D replacement; around the corridor or the boss room they would frame
+    // it in a window.
+    if(snapshot->ppu->tunnel_scene && !corridor && !nucleus_room && !in.flat_tunnel_extension) {
+        const auto border=[&](unsigned y,unsigned x) {
+            const auto ink=render::tunnel_border_index(*snapshot->ppu,y,x);
+            return source_backdrop_colour(snapshot->ppu->cgram[ink],snapshot->display_brightness,srgb);
+        };
+        auto surround=tunnel_surround_packet(border(112,0),border(4,128),border(219,128));
+        surround.model=source_layer_matrix(
+            float(snapshot->source_vanishing_point[0])+16.F,
+            float(snapshot->source_vanishing_point[1])+16.F).value();
+        out.tunnel_surround.push_back(std::move(surround));
     }
     if(in.backgrounds_only) return out;
     DrawPacket bitmap;

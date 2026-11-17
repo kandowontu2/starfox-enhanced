@@ -26,6 +26,9 @@ public:
     // MODERN: also compile painter pipelines (depth test always passes,
     // depth still written) at the next initialize, for record_range(painter).
     void set_painter_pipelines(bool enabled) noexcept {painter_=enabled;}
+    // Colour blend of the triangle and line pipelines from the next
+    // initialize (photographs keep alpha), e.g. MODERN's see-through reticle.
+    void set_blend(SceneBlend blend) noexcept {blend_=blend;}
     bool initialize(VkDevice,PFN_vkGetDeviceProcAddr,const VkPhysicalDeviceMemoryProperties&,
         VkRenderPass,std::span<const DrawPacket>,std::span<const uint32_t> object_keys={},
         bool depth_test=true,bool depth_write=true);
@@ -65,6 +68,7 @@ public:
 private:
     VulkanPipelineCache* cache_{};
     bool painter_{};
+    SceneBlend blend_{SceneBlend::opaque};
     struct State;
     std::unique_ptr<State> state_;
     std::string status_{"Draw packets not initialized"};

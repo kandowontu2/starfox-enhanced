@@ -1,4 +1,5 @@
 #include "starfox/modern/sdl_frame.hpp"
+#include "starfox/render/texture_override_files.hpp"
 #include "starfox/compat/bit_cast.hpp"
 #include "starfox/vr/background_tiles.hpp"
 #include <algorithm>
@@ -12,18 +13,9 @@ namespace {
 void require(bool ok,const std::string& what) {if(!ok) throw std::runtime_error(what);}
 // PNG (or BMP) to RGBA words with red in the low byte; empty when absent.
 std::optional<vr::ModernImage> load_rgba(const std::string& path) {
-    SDL_Surface* loaded=SDL_LoadSurface(path.c_str());
-    if(!loaded) return {};
-    SDL_Surface* rgba=SDL_ConvertSurface(loaded,SDL_PIXELFORMAT_ABGR8888);
-    SDL_DestroySurface(loaded);
-    if(!rgba) return {};
-    vr::ModernImage image{unsigned(rgba->w),unsigned(rgba->h),{}};
-    if(image.width==0 || image.height==0 || image.width>8192 || image.height>8192) {SDL_DestroySurface(rgba);return {};}
-    image.pixels.resize(std::size_t(image.width)*image.height);
-    for(unsigned y=0;y<image.height;++y)
-        std::memcpy(image.pixels.data()+std::size_t(y)*image.width,static_cast<const uint8_t*>(rgba->pixels)+std::size_t(y)*rgba->pitch,image.width*4U);
-    SDL_DestroySurface(rgba);
-    return image;
+    auto image=render::load_rgba_image(path);
+    if(!image) return {};
+    return vr::ModernImage{image->width,image->height,std::move(image->rgba)};
 }
 SceneBlend sdl_blend(vr::SceneBlend blend) {
     switch(blend) {

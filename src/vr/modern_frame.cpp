@@ -139,6 +139,14 @@ EyeCamera reversed_depth_camera(EyeCamera camera) noexcept {
     if(m[11]==-1 && m[15]==0 && m[10]==-1) {m[10]=0;m[14]=-m[14];}
     return camera;
 }
+float headset_world_scale() noexcept {
+    static const float scale=[] {
+        const char* value=std::getenv("STARFOX_VR_WORLD_SCALE");
+        const float chosen=value?float(std::atof(value)):8.F;
+        return std::isfinite(chosen) && chosen>=1 && chosen<=64?chosen:8.F;
+    }();
+    return scale;
+}
 std::vector<bool> painter_scenery(const SourceModelPackets& source,std::span<const uint16_t> moving) {
     std::vector<const SourceComputeModel*> requests(source.packets.size());
     for(const auto& request:source.compute_models)
@@ -246,7 +254,7 @@ void ModernFrame::reset() noexcept {
     stars.clear();star_keys.clear();world={};moving.clear();
     tunnel_surround.clear();sprites.clear();backgrounds.clear();background_models.clear();
     textures.clear();texture_models.clear();texture_mapping=landscape_heading=sky_turn=0;
-    sky_yaw_.reset();sky_columns_=0;
+    sky_yaw_.reset();sky_columns_=0;flow_revision_.reset();flow_ticks_=0;
     cockpit.reset();reticle.reset();circle.reset();colour_math.reset();shutter.reset();
     layers_rebuilt=backgrounds_rebuilt=textures_rebuilt=false;
     layer_revision_.reset();texture_background_.reset();level_horizon_.reset();horizon_votes_.clear();
@@ -263,6 +271,43 @@ void ModernFrame::prepare(const GameSceneSnapshot& previous,const GameSceneSnaps
         const auto index=std::size_t(star-world.handles.begin());
         stars.push_back(world.packets[index]);star_keys.push_back(*star);
         erase_world_packet(world,index,"Star pass");
+    }
+    // Set pieces the cartridge parks just outside its 256x224 view, never
+    // shown there but in plain sight once a headset looks around: Corneria's
+    // wingmen (FRIENDSHIP) held beside the camera through the hangar-exit
+    // dialogue, and Space Armada's mothership (SSHIP_0) dropped below the
+    // player as its corridor takes over. Left out (with their shadow
+    // passes) while outside that view, 1.5 times wider for their size.
+    if(inputs.symbols && prop_symbols_!=inputs.symbols) {
+        prop_symbols_=inputs.symbols;offscreen_props_.clear();
+        for(const auto& [name,values]:inputs.symbols->entries())
+            if(name.starts_with("FRIENDSHIP_") || name.starts_with("SSHIP_0"))
+                for(const auto value:values) if(value<0x10000U) offscreen_props_.push_back(uint16_t(value));
+    }
+    if(!offscreen_props_.empty()) {
+        std::vector<uint32_t> hidden;
+        for(const auto& item:current.objects) {
+            if(std::find(offscreen_props_.begin(),offscreen_props_.end(),item.object.shape)==offscreen_props_.end()) continue;
+            const auto compute=std::find_if(world.compute_models.begin(),world.compute_models.end(),
+                [&](const auto& model){return model.key==item.handle;});
+            if(compute==world.compute_models.end() || compute->model.projection.continuous_poses.empty()) continue;
+            // Camera-relative, native axes (+Y down, +Z forward).
+            const auto& p=compute->model.projection.continuous_poses[0].translation;
+            const double x=std::abs(double(p[0])),y=std::abs(double(p[1])),z=double(p[2]);
+            const bool in_view=z>0 && x<=z*(128./256.)*1.5 && y<=z*(112./256.)*1.5;
+            static const bool trace=std::getenv("STARFOX_TRACE_MODERN")!=nullptr;
+            if(trace) std::fprintf(stderr,"modern-prop handle=%u shape=%u at=%.0f,%.0f,%.0f %s\n",unsigned(item.handle),
+                unsigned(item.object.shape),double(p[0]),double(p[1]),z,in_view?"shown":"hidden");
+            if(!in_view) hidden.push_back(item.handle);
+        }
+        for(std::size_t index=world.handles.size();index-->0;) {
+            if(std::find(hidden.begin(),hidden.end(),world.handles[index]&0xffffU)==hidden.end() || world.handles[index]>=0x20000U) continue;
+            world.packets.erase(world.packets.begin()+std::ptrdiff_t(index));
+            world.handles.erase(world.handles.begin()+std::ptrdiff_t(index));
+            auto& models=world.compute_models;
+            models.erase(std::remove_if(models.begin(),models.end(),[&](const auto& model){return model.packet_index==index;}),models.end());
+            for(auto& model:models) if(model.packet_index>index) --model.packet_index;
+        }
     }
     // The cartridge's ground dots (grid packet 0x30000) tie objects to the
     // ground; keep them over the 3D landscape ground unless switched off.
@@ -336,6 +381,9 @@ void ModernFrame::prepare(const GameSceneSnapshot& previous,const GameSceneSnaps
     if(layers_rebuilt) {
         auto layers=assemble_frame_layers(current,inputs);
         tunnel_surround=std::move(layers.tunnel_surround);sprites=std::move(layers.sprites);
+        // As assemble_frame_layers places the PPU canvas.
+        sprite_layer=source_ui_layer_matrix(float(current.source_vanishing_point[0]),float(current.source_vanishing_point[1]),
+            current.flow==simulation::GameFlowState::ex_pregame_menu).value_or(identity_matrix);
         layer_revision_=current.revision;
     }
     // Backgrounds follow the source's scroll registers and per-scanline
@@ -371,7 +419,7 @@ void ModernFrame::prepare(const GameSceneSnapshot& previous,const GameSceneSnaps
                 if(votes>=horizon_votes_[int(std::lround(*level_horizon_*4.F))]) level_horizon_=float(key)/4.F;
             }
             background_inputs.landscape_horizon=level_horizon_;
-            // Venom haze colour from this background's own sky art: half
+            // Venom's and Macbeth's haze colour from this background's own sky art: half
             // its mean, half its brightest third (the glowing clouds). Once
             // per background, retried until the level has loaded the art.
             if(fog_background_!=scene.background_id) {
@@ -379,7 +427,7 @@ void ModernFrame::prepare(const GameSceneSnapshot& previous,const GameSceneSnaps
                 bool venom=false;
                 if(inputs.symbols) {
                     const auto& lists=inputs.symbols->find("BGLISTS");
-                    for(const char* name:{"BG_1_6A","BG_3_7A"})
+                    for(const char* name:{"BG_1_6A","BG_3_7A","BG_3_5"}) // Venom 1 and 3, Macbeth
                         for(const auto value:inputs.symbols->find(name))
                             if(!lists.empty() && value>lists.front() && (value&0xff0000U)==(lists.front()&0xff0000U)
                                 && uint16_t(value-lists.front())==scene.background_id) venom=true;
@@ -442,7 +490,7 @@ void ModernFrame::prepare(const GameSceneSnapshot& previous,const GameSceneSnaps
         background_interpolated_=interpolated;
     }
     fog.reset();
-    if(fog_colour_ && !settings_.headset && landscape_world && fog_background_==current.background_id
+    if(fog_colour_ && landscape_world && fog_background_==current.background_id
         && gameplay_flow(current)) {
         static const auto distances=[] {
             std::array<float,2> d{1500.F,3300.F};
@@ -556,6 +604,25 @@ void ModernFrame::prepare(const GameSceneSnapshot& previous,const GameSceneSnaps
             const double offset=sky_columns_<0?sky_columns_+4096.:sky_columns_;
             sky_turn=(uint32_t(std::lround(offset*16.))&0xffffU)|0x20000U;
         } else sky_yaw_.reset();
+        // The orbital surface's flow (scene.hlsl tile_background): one
+        // period every 480 source ticks (24 s), interpolated between them.
+        // It counts only unpaused gameplay ticks, so it stops where it is
+        // while paused (snapshots keep coming then) and resumes from there.
+        // STARFOX_MODERN_ORBITAL_FLOW=0 keeps the field still.
+        static const bool flow_enabled=[] {
+            const char* value=std::getenv("STARFOX_MODERN_ORBITAL_FLOW");return !(value && std::string_view(value)=="0");
+        }();
+        const bool flowing=current.background_orbital_planet && gameplay_flow(current) && !current.paused;
+        if(!flow_revision_ || *flow_revision_!=current.revision) {
+            if(flow_revision_ && flowing && current.revision>*flow_revision_)
+                flow_ticks_=uint32_t((flow_ticks_+std::min<uint64_t>(current.revision-*flow_revision_,4))%480U);
+            flow_revision_=current.revision;
+        }
+        if(flow_enabled && current.background_orbital_planet && gameplay_flow(current)) {
+            const double ticks=double(flow_ticks_)+(flowing?std::clamp(alpha,0.,1.):0.);
+            const uint32_t phase=uint32_t(std::lround(ticks/480.*16384.))&0x3fffU;
+            landscape_heading|=phase<<18;sky_turn|=phase<<18;
+        }
     }
     // Space backgrounds: the real camera roll as geometry around the view
     // axis (the vanishing point), like the planet landscape, instead of
@@ -563,6 +630,63 @@ void ModernFrame::prepare(const GameSceneSnapshot& previous,const GameSceneSnaps
     if(inputs.space_roll_geometry && space_background_roll(current)) {
         const auto roll=landscape_world_model(landscape.roll,0,256.);
         for(auto& model:background_models) model=multiply_matrix(roll,model);
+    }
+    // Headsets: space skies (stars, nebulae, the airspace's planet) follow
+    // the ship's steering the way the cartridge's BG2 does, so they stay with
+    // the 3D scene: sideways by its per-line horizontal offset at the centre
+    // row (which tracks the ship's sideways position, not only the camera's
+    // late yaw), 512 texels per radian like the sky spheres; up and down with
+    // the camera's pitch, and rolled with the camera as Corneria's ground
+    // and every 3D object are. STARFOX_VR_SKY_TURN=0 keeps them still.
+    static const bool sky_follows=[] {
+        const char* value=std::getenv("STARFOX_VR_SKY_TURN");return !(value && std::string_view(value)=="0");
+    }();
+    if(settings_.headset && sky_follows && space_background_roll(current)) {
+        const bool continuous=!timing::camera_transform_is_discontinuous(previous.camera,current.camera);
+        const double a=continuous?alpha:1.;
+        const auto angle=[&](uint16_t before,uint16_t now) {
+            const double value=double(int16_t(before))+double(int16_t(uint16_t(now-before)))*a;
+            return value*(2*pi/65536.);
+        };
+        const auto centre_offset=[](const GameSceneSnapshot& scene) {
+            return scene.ppu->bg2_horizontal_offsets_enabled?int(scene.ppu->bg2_horizontal_offsets[112]):int(scene.ppu->bg2_scroll_x);
+        };
+        const int now=centre_offset(current),before=continuous && previous.ppu?centre_offset(previous):now;
+        const double offset=double(now)-double(((now-before+512)&1023)-512)*(1-a);
+        const double pitch=-angle(continuous?previous.camera.pitch:current.camera.pitch,current.camera.pitch);
+        const float cp=float(std::cos(pitch)),sp=float(std::sin(pitch));
+        const Matrix4 turn_pitch=multiply_matrix(landscape_world_model(landscape.roll,0,256.),
+            Matrix4{1,0,0,0,0,cp,sp,0,0,-sp,cp,0,0,0,0,1});
+        // The airspace's stars share the planet's sphere, but turn by only a
+        // fraction of its sideways offset (STARFOX_VR_STAR_PARALLAX, default
+        // .5), as the flat view's distant starfield lags its surface: the
+        // shader takes back the rest above the limb (camera.effects.z bits
+        // 0-15, a signed turn with bits 16-17 clear).
+        static const double star_parallax=[] {
+            const char* value=std::getenv("STARFOX_VR_STAR_PARALLAX");
+            return value?std::clamp(std::atof(value),0.,1.):.5;
+        }();
+        if(current.background_orbital_planet) {
+            const double back=-(1.-star_parallax)*offset/512.;
+            landscape_heading=(landscape_heading&~0x3ffffU)
+                |(uint32_t(int32_t(std::lround(back*65536./(2*pi))))&0xffffU);
+        }
+        model_index=0;
+        for(const auto& packet:backgrounds) {
+            if(packet.geometry.vertex_view().empty() && packet.geometry.line_view().empty()) continue;
+            auto& model=background_models.at(model_index++);
+            // A sky that already samples the source's per-line offsets moves
+            // by itself; one that keeps the scroll register needs only the rest.
+            const auto texels=packet.geometry.texel_view();
+            const bool own_lines=texels.size()>10 && (texels[10]&1U)!=0;
+            const double base=texels.size()>3?double(int32_t(texels[3])):0.;
+            const double yaw=own_lines?0.:(offset-base)/512.;
+            const float cy=float(std::cos(yaw)),sy=float(std::sin(yaw));
+            const Matrix4 turn_yaw{cy,0,-sy,0,0,1,0,0,sy,0,cy,0,0,0,0,1};
+            // Yaw about each sky's own pole (the airspace planet's horizon is
+            // already pitched into place), pitch about the view's sideways axis.
+            model=multiply_matrix(turn_pitch,multiply_matrix(model,turn_yaw));
+        }
     }
     // The landscape dome, ground plane and 3D tunnel corridor follow the
     // display-rate camera.

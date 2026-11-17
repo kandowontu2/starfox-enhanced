@@ -36,6 +36,8 @@ public:
     // must precede expansion. No ownership or completed-GPU-work is implied.
     bool ray_source(uint32_t key,RaySource&,bool include_warp_candidates=false) const;
     bool legacy_ray_source(uint32_t key,LegacyRaySource&) const;
+    // MODERN: whether a source packet is painter scenery (vr::painter_scenery).
+    bool painter(std::size_t packet) const noexcept;
     void close() noexcept;
     bool reused_resources() const noexcept;
     const std::string& status() const noexcept {return status_;}

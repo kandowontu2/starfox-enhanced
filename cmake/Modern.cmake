@@ -19,6 +19,15 @@ add_library(starfox_modern STATIC src/modern/sdl_scene_packets.cpp src/modern/sd
 target_include_directories(starfox_modern PUBLIC include PRIVATE src)
 target_compile_features(starfox_modern PUBLIC cxx_std_20)
 target_link_libraries(starfox_modern PUBLIC starfox_scene SDL3::SDL3)
+if(NOT TARGET starfox_texture_files)
+    # Replacement artwork files (MODERN's <exe>/textures/), for the flat
+    # renderer and the PCVR app.
+    add_library(starfox_texture_files STATIC src/render/texture_override_files.cpp)
+    target_include_directories(starfox_texture_files PUBLIC include)
+    target_compile_features(starfox_texture_files PUBLIC cxx_std_20)
+    target_link_libraries(starfox_texture_files PUBLIC starfox_core PRIVATE SDL3::SDL3)
+endif()
+target_link_libraries(starfox_modern PUBLIC starfox_texture_files)
 if(STARFOX_BUILD_TESTS)
     add_executable(starfox_modern_safety_tests tests/modern_safety_tests.cpp)
     target_include_directories(starfox_modern_safety_tests PRIVATE include)
@@ -36,4 +45,8 @@ if(TARGET starfox_vr_game)
     # M1 harness (fork-local): SDL_GPU packets vs starfox_vr_scene_route_bench captures.
     add_executable(starfox_modern_scene_check EXCLUDE_FROM_ALL tools/check_modern_scene.cpp)
     target_link_libraries(starfox_modern_scene_check PRIVATE starfox_modern starfox_vr_game SDL3::SDL3)
+    # PCVR MODERN without a headset: one snapshot through the VR Vulkan path
+    # and the flat renderer's headset preview, with a difference report.
+    add_executable(starfox_vr_modern_capture EXCLUDE_FROM_ALL tools/check_vr_modern_capture.cpp)
+    target_link_libraries(starfox_vr_modern_capture PRIVATE starfox_modern starfox_vr_game SDL3::SDL3)
 endif()

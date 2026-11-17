@@ -67,6 +67,7 @@ target_sources(starfox_vr_core PRIVATE src/vr/openxr_input.cpp src/vr/refresh_ra
 target_compile_features(starfox_vr_core PUBLIC cxx_std_20)
 target_link_libraries(starfox_vr_core PUBLIC starfox_scene OpenXR::openxr_loader Vulkan::Headers starfox_sfvr PRIVATE ${CMAKE_DL_LIBS})
 add_library(starfox_vr_game STATIC src/vr/game_frame_driver.cpp src/vr/vulkan_draw_packets.cpp)
+target_sources(starfox_vr_game PRIVATE src/vr/vulkan_modern_layers.cpp src/vr/vulkan_layer_filter.cpp src/vr/vulkan_ray_shadows.cpp)
 target_sources(starfox_vr_game PRIVATE src/vr/vulkan_source_bindings.cpp)
 target_sources(starfox_vr_game PRIVATE src/vr/vulkan_source_model.cpp)
 target_sources(starfox_vr_game PRIVATE src/vr/vulkan_source_scene.cpp)
@@ -75,6 +76,15 @@ target_sources(starfox_vr_game PRIVATE src/vr/pcm_output.cpp)
 target_sources(starfox_vr_game PRIVATE src/vr/application.cpp src/vr/steam_frame_application.cpp)
 target_sources(starfox_vr_game PRIVATE src/vr/cartridge_save.cpp)
 target_link_libraries(starfox_vr_game PRIVATE SDL3::SDL3)
+if(NOT TARGET starfox_texture_files)
+    # Replacement artwork files (MODERN's <exe>/textures/), for the flat
+    # renderer and the PCVR app.
+    add_library(starfox_texture_files STATIC src/render/texture_override_files.cpp)
+    target_include_directories(starfox_texture_files PUBLIC include)
+    target_compile_features(starfox_texture_files PUBLIC cxx_std_20)
+    target_link_libraries(starfox_texture_files PUBLIC starfox_core PRIVATE SDL3::SDL3)
+endif()
+target_link_libraries(starfox_vr_game PRIVATE starfox_texture_files)
 target_link_libraries(starfox_vr_game PUBLIC starfox_vr_core starfox_core)
 execute_process(COMMAND git -C "${PROJECT_SOURCE_DIR}" rev-parse HEAD
     OUTPUT_VARIABLE STARFOX_SOURCE_REVISION OUTPUT_STRIP_TRAILING_WHITESPACE

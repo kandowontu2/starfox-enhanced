@@ -75,7 +75,7 @@ int hud_edge_shift(float aspect) noexcept {
 }
 struct ModernRuntime::State {
     State(const simulation::GameSimulation& game,const assets::RomImage& rom,const assets::SymbolMap& symbols)
-        :history(game,rom,symbols),models(rom,symbols,true,true),dialogue_layout(rom,symbols),
+        :emitters(symbols),history(game,rom,symbols),models(rom,symbols,true,true),dialogue_layout(rom,symbols),
         trigonometry(simulation::TrigTables::load(rom,symbols)) {
         inputs.rom=&rom;inputs.symbols=&symbols;inputs.dialogue_layout=&dialogue_layout;
         inputs.trigonometry=&trigonometry;
@@ -105,9 +105,9 @@ struct ModernRuntime::State {
         vr::set_inset_decals(true);
         vr::set_solid_decals(true);
         if(preview) {
-            // The PCVR app's inputs (application.cpp): VR's own cockpit, no
-            // flat-screen layer substitutes, no widescreen HUD shift.
-            inputs.trigonometry=nullptr;inputs.flat_landscape=inputs.space_roll_geometry=false;
+            // The PCVR app's inputs (application.cpp): no flat-screen layer
+            // substitutes, no widescreen HUD shift (MHUD's wing indicators stay).
+            inputs.flat_landscape=inputs.space_roll_geometry=false;
             inputs.flat_space_horizon=inputs.flat_tunnel_extension=false;
             inputs.comms_offset={};inputs.pause_text=false;
         }
@@ -130,6 +130,8 @@ struct ModernRuntime::State {
                 });
             }
         }
+        // The headset's 2D layer distance (vr::headset_ui_distance), as PCVR.
+        if(preview) vr::set_source_ui_distance(vr::headset_ui_distance());
         // Ray-traced sun shadows (experimental, off unless asked for):
         // STARFOX_MODERN_RT_SHADOWS=1; STARFOX_MODERN_RT_SHADOW_LEVEL = the
         // percentage of the ground colour kept in shadow (default 50).
@@ -149,10 +151,6 @@ struct ModernRuntime::State {
         // cartridge's straight-down shadows; 35.26 is GPU FAST's sun.
         if(const auto* elevation=std::getenv("STARFOX_MODERN_RT_SUN_ELEVATION"))
             rt_sun_elevation=std::clamp(std::atof(elevation),5.,90.);
-        // Indicators draw normally but are not physical occluders
-        // (vr::SourceRayPolicy): muzzle flashes and the reticle.
-        if(const auto flashes=symbols.find("FLASH_STRAT");!flashes.empty()) flash_strategy=flashes.front();
-        if(const auto reticles=symbols.find("XHAIR2");!reticles.empty()) reticle_shape=uint16_t(reticles.front());
         // Ray-traced coloured lights (experimental, off unless asked for):
         // STARFOX_MODERN_RT_LIGHTS=1. Lasers are the existing renderer's
         // emissive beam shapes (starfox_pc.cpp emissive_beam_shapes).
@@ -162,41 +160,15 @@ struct ModernRuntime::State {
         if(const auto* value=std::getenv("STARFOX_MODERN_RT_LIGHT_STRENGTH")) rt_shadow.light_strength*=std::clamp(float(std::atof(value)),0.F,1000.F)/100.F;
         if(const auto* value=std::getenv("STARFOX_MODERN_RT_LIGHT_REACH")) rt_shadow.light_reach*=std::clamp(float(std::atof(value)),1.F,1000.F)/100.F;
         if(const auto* value=std::getenv("STARFOX_MODERN_RT_LIGHT_STEPS")) rt_shadow.light_steps=unsigned(std::clamp(std::atoi(value),0,16));
-        const auto shapes=[&](std::initializer_list<const char*> names,std::unordered_set<uint16_t>& into) {
-            for(const auto* name:names) for(const auto address:symbols.find(name))
-                if(address>=0x8000U && address<=0xffffU) into.insert(uint16_t(address));
-        };
-        // Shots by strategy: the Arwings fire ELASER2 shapes too. Arwing
-        // shots (laser, twin laser, plasma) and enemy bombs are known by
-        // their strategies; ring shots and plasma balls by shape.
-        shapes({"ELASER2","ELASER2_S2","ELASER2A","OVALBEAM","LASERLINE","LASER_0"},beam_shapes);
-        shapes({"PLASMA","LARGEPLASMA","RINGLASER","PLAYERBEAM"},plasma_shapes);
-        const auto strategies=[&](std::initializer_list<const char*> names,std::unordered_set<uint32_t>& into) {
-            for(const auto* name:names) for(const auto address:symbols.find(name)) into.insert(address);
-        };
-        strategies({"PELASER_STRAT","PBEAM_STRAT"},arwing_shot_strategies);
-        strategies({"MISSILE1_STRAT","MISSILE2A_STRAT","HMISSILE1_STRAT","HMISSILE2_STRAT","HMISSILE3_STRAT",
-            "QHMISSILE1_STRAT","STBHMISSILE1_STRAT","CHICKHMISSILE1_STRAT","NUKE_STRAT"},bomb_strategies);
-        shapes({"MYSHIP_4","MYSHIP_L","MYSHIP_R","MYSHIP_B","IMYSHIP_4","FRIENDSHIP_4"},ship_shapes);
-        shapes({"NUKE"},bomb_shapes);
-        shapes({"BOOSTSHAPE"},boost_shapes);
-        // Corneria's launch tunnel (BG_1_1I): its hangar is a wireframe over
-        // black, with nothing for a shadow to land on, so it has none.
-        const auto lists=symbols.find("BGLISTS"),intro=symbols.find("BG_1_1I");
-        if(!lists.empty() && !intro.empty() && intro.front()>lists.front() && intro.front()-lists.front()<=0xffffU)
-            intro_background=uint16_t(intro.front()-lists.front());
     }
     // rt_*_forced: the STARFOX_MODERN_RT_* switches; rt_*: this frame (or DYNAMIC LIGHTING).
     bool rt_lights{},rt_lights_forced{};
-    std::unordered_set<uint16_t> beam_shapes,plasma_shapes,ship_shapes,bomb_shapes,boost_shapes;
-    std::optional<uint16_t> intro_background;
-    std::unordered_set<uint32_t> arwing_shot_strategies,bomb_strategies;
+    // The cartridge's light sources and non-occluders (shared with PCVR).
+    vr::RayEmitters emitters;
     bool rt_shadows{},rt_shadows_forced{};
     double rt_sun_elevation{75};
     SdlFrameRenderer::ShadowSettings rt_shadow;
     std::optional<int> rt_softness_override;
-    uint32_t flash_strategy{};
-    uint16_t reticle_shape{};
     vr::GameSceneHistory history;
     vr::SourceModels models;
     render::ScaledTextRenderer dialogue_layout;
@@ -363,46 +335,34 @@ bool ModernRuntime::present(SDL_Renderer* renderer,double alpha,int requested_wi
         require(command!=nullptr,"Acquire MODERN command buffer");
         s.inputs.hud_edge_shift=s.preview?0:hud_edge_shift(float(width)/float(height));
         if(tally && !s.preview) s.inputs.stage_tally=*tally;else s.inputs.stage_tally.reset();
-        // flat_scene_camera fills the height with the 224 source rows.
-        s.frame.set_target(unsigned(width),unsigned(height),unsigned(std::max(1L,std::lround(height/224.))));
+        const auto camera=s.preview?headset_preview_camera(*s.preview,float(width)/float(height))
+            :flat_scene_camera(*current,float(width)/float(height));
+        // Source lines one source pixel thick. flat_scene_camera fills the
+        // height with the 224 source rows; a headset eye's scale follows from
+        // its projection (as vr::VulkanModernLayers::eye_camera's).
+        const double source_pixel=s.preview?double(height)*std::abs(camera.projection[5])/512.:height/224.;
+        s.frame.set_target(unsigned(width),unsigned(height),unsigned(std::max(1L,std::lround(source_pixel))));
         s.frame.set_two_d_filter(unsigned(s.history.game().two_d_filter()));
         // GPU FAST and VR's sun direction (vr::source_shadow_environment:
         // world -1,-1,-1, +Y down) at the chosen elevation.
         using Flow=simulation::GameFlowState;
         std::optional<render::shadows::Vec3> light;
         const bool gameplay=current->flow==Flow::gameplay || current->flow==Flow::training;
-        if(s.rt_shadows && !s.preview && gameplay) {
-            double fraction=alpha;
-            if(previous->flow!=current->flow || timing::camera_transform_is_discontinuous(previous->camera,current->camera)) fraction=1;
-            const auto view=simulation::interpolate_rotation_matrix_q15(previous->view_matrix,current->view_matrix,fraction);
-            if(vr::source_shadow_environment(view,double(current->camera.y),current->shadow_height,true)) {
-                // The environment's world basis (x, y, z rows of the view,
-                // as source_shadow_environment builds them).
-                const render::shadows::Vec3 x{view[0]/32768.,-view[1]/32768.,-view[2]/32768.};
-                const render::shadows::Vec3 y{view[3]/32768.,-view[4]/32768.,-view[5]/32768.};
-                const render::shadows::Vec3 z{view[6]/32768.,-view[7]/32768.,-view[8]/32768.};
-                // Corridors, tunnels and the boss room: straight overhead,
-                // as the cartridge drops shadows directly under the ship.
-                const bool enclosed=current->ppu->tunnel_scene || current->background_corridor || current->background_nucleus;
-                const double angle=(enclosed?90.:s.rt_sun_elevation)*3.14159265358979/180.;
-                const double across=std::cos(angle)/std::sqrt(2.);
-                light=x*-across+y*-std::sin(angle)+z*-across;
-            }
-        }
+        if(s.rt_shadows && gameplay) light=vr::ray_sun(*previous,*current,alpha,s.rt_sun_elevation);
         // The engine glow comes with the coloured lights: ray traced on the
-        // flat view (SdlRayShadows), the shared ground decal in the headset
-        // preview, as PCVR draws it.
+        // flat view (SdlRayShadows); the headset preview traces them as PCVR
+        // does, only with ray tracing on.
+        const bool traced_lights=s.rt_lights && gameplay && (!s.preview || s.rt_shadows);
         {
             vr::ModernFrame::EngineGlowSettings glow;
-            glow.enabled=s.rt_lights && s.preview && gameplay;
+            // The decal stands in where the traced glow is not drawn.
+            glow.enabled=s.rt_lights && gameplay && !traced_lights;
             if(light) glow.toward_light=std::array<float,3>{float(light->x),float(light->y),float(light->z)};
             s.frame.set_engine_glow(glow);
         }
         if(!s.frame.prepare(command,*previous,*current,alpha,std::move(world),s.inputs)) {
             SDL_CancelGPUCommandBuffer(command);throw std::runtime_error(s.frame.status());
         }
-        const auto camera=s.preview?headset_preview_camera(*s.preview,float(width)/float(height))
-            :flat_scene_camera(*current,float(width)/float(height));
         if(!s.frame.record_filtered_layers(command,camera)) {
             SDL_CancelGPUCommandBuffer(command);throw std::runtime_error(s.frame.status());
         }
@@ -411,61 +371,22 @@ bool ModernRuntime::present(SDL_Renderer* renderer,double alpha,int requested_wi
             // bit); SdlFrameRenderer also lights the 3D corridor and the
             // Space Armada boss room, where that bit is off.
             s.rt_shadow.cartridge_shadows=current->shadows_enabled;
-            s.rt_shadow.no_shadows=s.rt_shadows && s.intro_background && current->background_id==*s.intro_background;
-            // Coloured lights by object class.
-            const auto emitter_kind=[&](uint32_t key)->unsigned {
-                using E=SdlRayShadows::Emitter;
-                for(const auto& item:current->objects) if(item.handle==(key&65535)) {
-                    const auto shape=item.object.shape;
-                    const auto strategy=item.object.strategy_address;
-                    if(s.arwing_shot_strategies.contains(strategy)) return E::EmitterArwingLaser;
-                    if(s.bomb_shapes.contains(shape) || s.bomb_strategies.contains(strategy)) return E::EmitterBomb;
-                    if(s.plasma_shapes.contains(shape)) return E::EmitterPlasma;
-                    if(s.beam_shapes.contains(shape)) return E::EmitterLaser;
-                    if(s.boost_shapes.contains(shape)) return E::EmitterBoost; // the cartridge's boost flame
-                    if(item.handle==current->player || s.ship_shapes.contains(shape)) return E::EmitterEngine;
-                    return (item.object.flags&1U)!=0 && item.object.count>0?E::EmitterExplosion:E::EmitterNone;
-                }
-                return E::EmitterNone;
-            };
-            const auto caster=[&](uint32_t key) {
-                if(key==0x20000 || key==0x30000) return false;
-                // Shots, plasma, bombs and the boost flame are light, not
-                // matter: they never shade anything, not even the light of
-                // the shot beside them (a twin laser, the next shot in a stream).
-                using E=SdlRayShadows::Emitter;
-                switch(emitter_kind(key)) {
-                case E::EmitterLaser: case E::EmitterArwingLaser: case E::EmitterPlasma:
-                case E::EmitterBomb: case E::EmitterBoost: return false;
-                default: break;
-                }
-                for(const auto& item:current->objects) if(item.handle==(key&65535))
-                    return !((s.flash_strategy && item.object.strategy_address==s.flash_strategy)
-                        || (s.reticle_shape && item.presentation.shape==s.reticle_shape));
-                return true;
-            };
+            s.rt_shadow.no_shadows=s.rt_shadows && s.emitters.shadowless(*current);
+            // Coloured lights by object class (vr::RayEmitters).
+            const auto emitter_kind=[&](uint32_t key)->unsigned {return s.emitters.kind(*current,key);};
+            const auto caster=[&](uint32_t key) {return s.emitters.caster(*current,key);};
             {
-                // GPU FAST's sun disc radii per SHADOW SOFTNESS level, with
-                // 8/12/16 fixed rays for the soft levels.
-                const int level=s.rt_softness_override.value_or(int(s.history.game().shadow_softness()&3U));
-                constexpr float radii[]{0.F,.0075F,.015F,.03F};
-                constexpr unsigned samples[]{1,8,12,16};
-                s.rt_shadow.radius=radii[level];s.rt_shadow.samples=samples[level];
+                const auto softness=vr::ray_softness(s.rt_softness_override.value_or(int(s.history.game().shadow_softness()&3U)));
+                s.rt_shadow.radius=softness.radius;s.rt_shadow.samples=softness.samples;
             }
             // Coloured lights by object class; cycling colour materials
             // (hit boxes) come with the models themselves.
             std::optional<SdlFrameRenderer::LightInputs> lights;
-            if(s.rt_lights && !s.preview && gameplay) {
+            if(traced_lights) {
                 lights.emplace();
                 lights->emitter=emitter_kind;
                 lights->tick=uint32_t(current->revision);
-                if(const auto& circle=current->circle;circle.active && circle.radius>0) {
-                    // The smart bomb's detonation circle: its colour-math colour
-                    // (0-31 per channel), or white when it has none.
-                    std::array<float,3> colour{circle.red/31.F,circle.green/31.F,circle.blue/31.F};
-                    if(std::max({colour[0],colour[1],colour[2]})<.05F) colour={1,1,1};
-                    lights->bomb=SdlRayShadows::BombFlash{float(circle.centre_x),float(circle.centre_y),float(circle.radius),colour};
-                }
+                lights->bomb=vr::ray_bomb_flash(*current);
             }
             if(!s.frame.record_shadows(command,camera,light,caster,s.rt_shadow,lights?&*lights:nullptr)) {
                 SDL_CancelGPUCommandBuffer(command);throw std::runtime_error(s.frame.status());

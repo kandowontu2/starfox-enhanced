@@ -213,6 +213,9 @@ bool VulkanSourceScene::ray_source(uint32_t key,RaySource& output,bool include_w
     }
     return false;
 }
+bool VulkanSourceScene::painter(std::size_t packet) const noexcept {
+    return state_ && packet<state_->painter.size() && state_->painter[packet];
+}
 bool VulkanSourceScene::legacy_ray_source(uint32_t key,LegacyRaySource& output) const {
     if(!state_) return false;
     LegacyRaySource next;

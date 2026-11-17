@@ -248,6 +248,10 @@ void place_landscape_ground(DrawPacket&,float ground_y,bool gpu=false);
 // Original LSB atlas: stars above the horizon, planet across the entire lower hemisphere.
 [[nodiscard]] Matrix4 orbital_horizon_motion(float previous_scroll,float current_scroll,double alpha,
     bool thin_horizon=false,bool entry_horizon=false,bool gameplay=false);
+// Flat views: mark a native BG2 airspace layer so scene.hlsl continues the
+// planet below its limb as the scrolling orbital surface (the headset
+// sphere's), in the palette its surface rows use.
+void flat_orbital_surface(DrawPacket& bg2,const simulation::SnesPpuState&,bool thin_horizon,bool entry_horizon);
 [[nodiscard]] DrawPacket orbital_planet_sphere_packet(const simulation::SnesPpuState&,
     const BackgroundTileOptions&,bool srgb=false,bool thin_horizon=false,bool entry_horizon=false,bool gameplay=false);
 // Source Mode-1 title overlays, in painter order after models and before OAM.

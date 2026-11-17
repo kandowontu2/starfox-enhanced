@@ -31,6 +31,7 @@ struct VulkanDrawPackets::State {
     std::size_t grid_allocations{},grid_reuses{};
     bool keyed{};
     bool depth_test{true},depth_write{true};
+    SceneBlend blend{SceneBlend::opaque};
 };
 VulkanDrawPackets::VulkanDrawPackets()=default;
 VulkanDrawPackets::~VulkanDrawPackets()=default;
@@ -75,11 +76,12 @@ bool VulkanDrawPackets::initialize(VkDevice device,PFN_vkGetDeviceProcAddr get,
         for(const auto& packet:packets) validator.add(packet);
         auto next=std::make_unique<State>();next->items.reserve(packets.size());
         next->device=device;next->get=get;next->pass=pass;
-        next->depth_test=depth_test;next->depth_write=depth_write;
+        next->depth_test=depth_test;next->depth_write=depth_write;next->blend=blend_;
         next->keyed=!object_keys.empty();
         const bool compatible=state_ && state_->device==device && state_->get==get && state_->pass==pass;
         if(compatible) next->grid_pipeline=state_->grid_pipeline;
-        if(compatible && state_->depth_test==depth_test && state_->depth_write==depth_write) next->pipelines=state_->pipelines;
+        if(compatible && state_->depth_test==depth_test && state_->depth_write==depth_write && state_->blend==blend_)
+            next->pipelines=state_->pipelines;
         std::unordered_map<uint32_t,const State::Item*> prior;
         std::unordered_map<const std::vector<uint32_t>*,std::shared_ptr<VulkanSceneTextures>> shared_images;
         if(compatible) for(const auto& item:state_->items)
@@ -179,11 +181,11 @@ bool VulkanDrawPackets::initialize(VkDevice device,PFN_vkGetDeviceProcAddr get,
             auto& ready=photograph?pipelines.photographs_ready:pipelines.triangles_ready;
             if(item.geometry->triangles && !ready) {
                 if(!triangles.initialize(device,get,pass,depth_test,SceneTopology::triangles,layout,
-                    photograph?SceneBlend::alpha:SceneBlend::opaque,cache_,depth_write)) throw std::runtime_error(triangles.status());
+                    photograph?SceneBlend::alpha:blend_,cache_,depth_write)) throw std::runtime_error(triangles.status());
                 ready=true;
             }
             if(item.geometry->lines && !pipelines.lines_ready) {
-                if(!pipelines.lines.initialize(device,get,pass,depth_test,SceneTopology::lines,layout,SceneBlend::opaque,cache_,depth_write))
+                if(!pipelines.lines.initialize(device,get,pass,depth_test,SceneTopology::lines,layout,blend_,cache_,depth_write))
                     throw std::runtime_error(pipelines.lines.status());
                 pipelines.lines_ready=true;
             }
