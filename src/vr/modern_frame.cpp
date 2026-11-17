@@ -13,6 +13,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <initializer_list>
 #include <stdexcept>
 namespace starfox::vr {
 namespace {
@@ -422,15 +423,27 @@ void ModernFrame::prepare(const GameSceneSnapshot& previous,const GameSceneSnaps
             // Venom's and Macbeth's haze colour from this background's own sky art: half
             // its mean, half its brightest third (the glowing clouds). Once
             // per background, retried until the level has loaded the art.
+            // Meteor (BG_1_4; EX's BG_1_14) gets a near-black haze to match
+            // its dark ground and starry sky.
             if(fog_background_!=scene.background_id) {
-                fog_colour_.reset();
-                bool venom=false;
-                if(inputs.symbols) {
+                fog_colour_.reset();meteor_fog_=false;
+                const auto is_background=[&](std::initializer_list<const char*> names) {
+                    if(!inputs.symbols) return false;
                     const auto& lists=inputs.symbols->find("BGLISTS");
-                    for(const char* name:{"BG_1_6A","BG_3_7A","BG_3_5"}) // Venom 1 and 3, Macbeth
+                    for(const char* name:names)
                         for(const auto value:inputs.symbols->find(name))
                             if(!lists.empty() && value>lists.front() && (value&0xff0000U)==(lists.front()&0xff0000U)
-                                && uint16_t(value-lists.front())==scene.background_id) venom=true;
+                                && uint16_t(value-lists.front())==scene.background_id) return true;
+                    return false;
+                };
+                const bool venom=is_background({"BG_1_6A","BG_3_7A","BG_3_5"}); // Venom 1 and 3, Macbeth
+                if(is_background({"BG_1_4","BG_1_14"})) {
+                    static const auto meteor=[] {
+                        std::array<float,3> c{.075F,.075F,.085F};
+                        if(const char* text=std::getenv("STARFOX_MODERN_METEOR_FOG")) std::sscanf(text,"%f,%f,%f",&c[0],&c[1],&c[2]);
+                        return c;
+                    }();
+                    fog_colour_=meteor;meteor_fog_=true;
                 }
                 if(venom) {
                     // Every opaque pixel of the BG2 sky art (tile map ->
@@ -497,7 +510,15 @@ void ModernFrame::prepare(const GameSceneSnapshot& previous,const GameSceneSnaps
             if(const char* text=std::getenv("STARFOX_MODERN_FOG")) std::sscanf(text,"%f,%f",&d[0],&d[1]);
             return d;
         }();
-        Fog haze;haze.start=distances[0];haze.end=distances[1];
+        // Meteor's ground is already black from about 800 units out, so its
+        // haze starts nearer and rises from the ground into the sky band.
+        static const auto meteor_distances=[] {
+            std::array<float,2> d{600.F,3000.F};
+            if(const char* text=std::getenv("STARFOX_MODERN_METEOR_FOG_RANGE")) std::sscanf(text,"%f,%f",&d[0],&d[1]);
+            return d;
+        }();
+        const auto& range=meteor_fog_?meteor_distances:distances;
+        Fog haze;haze.start=range[0];haze.end=range[1];
         const float fade=float(std::min(unsigned(current.display_brightness),15U))/15.F;
         for(unsigned c=0;c<3;++c) {
             float v=(*fog_colour_)[c]*fade;

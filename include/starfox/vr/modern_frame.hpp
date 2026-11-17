@@ -126,10 +126,11 @@ public:
     // Orbital planets below the limb (the Venom airspace): their cloud field
     // scrolls past over the ball, like a Mode 7 floor. Bits 18-31 of
     // both values above carry its phase (one noise period per 16384).
-    // Venom's surfaces: a haze in the colour of their cloud band that is
-    // full where the cartridge's objects appear (about 3,000 source units
-    // ahead), hiding the pop-in. Colour in the target encoding, faded with
-    // the display; distances in source units. Unset elsewhere.
+    // Venom's and Macbeth's surfaces: a haze in the colour of their cloud band
+    // (Meteor's: near-black, to match its dark ground and sky) that is full
+    // where the cartridge's objects appear (about 3,000 source units ahead),
+    // hiding the pop-in. Colour in the target encoding, faded with the
+    // display; distances in source units. Unset elsewhere.
     struct Fog {std::array<float,4> colour{};float start{},end{};};
     std::optional<Fog> fog;
     // Flat first person: MHUD wing lines. Reticle as geometry, blended as
@@ -166,5 +167,6 @@ private:
     bool background_interpolated_{};
     std::optional<uint16_t> fog_background_;
     std::optional<std::array<float,3>> fog_colour_;
+    bool meteor_fog_{};
 };
 }
