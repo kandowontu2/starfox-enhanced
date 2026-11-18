@@ -241,6 +241,36 @@ void place_landscape_ground(DrawPacket&,float ground_y,bool gpu=false);
 [[nodiscard]] DrawPacket water_surface_packet(const simulation::SnesPpuState&,
     const BackgroundTileOptions&,float height,bool srgb=false);
 [[nodiscard]] Matrix4 water_height_motion(float previous_height,float current_height,double alpha);
+// Titania's bridge as real geometry. The cartridge paints it as one Mode 1
+// BG2 picture: open water to the horizon with the dark deck running away
+// down the middle, and the bridge's overhead span (with its darker centre
+// ridge) running away above, both drawn one column per row from the centre
+// column, for an eye `view - top` below the span and `bottom - view` above
+// the deck (cartridge Y, down). The deck and span widths come from the art's
+// slopes at those heights, so they line up with what the cartridge drew.
+// Endless strips along Z, an endless water plane at the deck's height in the
+// art's own colours, its horizon haze as bands at the distances the art's
+// rows paint. Model space: source units, +Y up, Y 0 at cartridge Y 0, the
+// eye's Z at 0; place with nucleus_room_model(camera x, camera y, 0, 0).
+// Draw it like the layer it replaces: behind every object.
+// Empty when the art does not read as that picture.
+[[nodiscard]] DrawPacket water_bridge_packet(const simulation::SnesPpuState&,unsigned brightness,bool srgb,
+    float top,float bottom,float view);
+[[nodiscard]] bool is_water_bridge(const DrawPacket&) noexcept;
+// Venom 2's colony (BG_2_6A) as real geometry. The cartridge paints a
+// one-sided corridor in Mode 1 BG2 (tunnel tables pick one of two art pages
+// per row by camera Z): a ceiling, a floor with a centre line, a wall on the
+// right and the left side open onto BG3. Each edge is fitted as a line
+// through the vanishing point and placed at `height` units (the authored
+// eye height, both ways) as a width; the pages become bands along Z at the
+// distances the current rows paint them. Model space: source units, +Y up,
+// Y 0 at cartridge Y 0, the eye's Z at 0 for the camera Z it was built for;
+// place with nucleus_room_model(camera x, camera y, camera z, that Z). The
+// open side is left empty so BG3 shows through, as on the cartridge.
+// Empty when the art does not read that way.
+[[nodiscard]] DrawPacket colony_corridor_packet(const simulation::SnesPpuState&,unsigned brightness,bool srgb,
+    float top,float bottom);
+[[nodiscard]] bool is_colony_corridor(const DrawPacket&) noexcept;
 // Orbital horizon: preserve the authored vertical band instead of clamping
 // its final texture row over a hemisphere. Unique upper rows remain unique.
 [[nodiscard]] DrawPacket space_horizon_sphere_packet(const simulation::SnesPpuState&,

@@ -31,6 +31,7 @@ public:
     bool exit_requested{}; // EXIT GAME confirmed: the host ends the OpenXR session.
     unsigned model_effect{},world_effect{},model_intensity{100},world_intensity{100};
     unsigned asteroid_models{}; // render::AsteroidModels.
+    bool projectile_models{}; // 3D PROJECTILES (render::substitute_projectile_model).
     render::AsteroidModels asteroid_model_mode() const noexcept {
         return asteroid_models<render::asteroid_model_mode_count
             ?static_cast<render::AsteroidModels>(asteroid_models):render::AsteroidModels::sprite;
@@ -68,7 +69,7 @@ public:
                 |(steer_sensitivity_index<<3)),uint8_t(crosshair_colour),
             uint8_t(swap_face_buttons),uint8_t(infinite_bombs),uint8_t(unsigned(infinite_boost)|(unsigned(infinite_lives)<<1)),
             uint8_t(model_effect),uint8_t(world_effect),uint8_t(model_intensity),uint8_t(world_intensity),
-            uint8_t(asteroid_models),uint8_t(unsigned(modern_renderer)|(unsigned(dynamic_lighting)<<1))};
+            uint8_t(asteroid_models),uint8_t(unsigned(modern_renderer)|(unsigned(dynamic_lighting)<<1)|(unsigned(projectile_models)<<2))};
     }
     bool restore_preferences(std::span<const uint8_t> bytes) noexcept {
         if((bytes.size()!=16 && bytes.size()!=20 && bytes.size()!=21 && bytes.size()!=22) || bytes[0]!='S' || bytes[1]!='F' || bytes[2]!='V'
@@ -76,7 +77,7 @@ public:
             || bytes[9]>100 || bytes[10]>100 || bytes[12]>=8) return false;
         if(bytes.size()!=(bytes[4]>=7?22U:bytes[4]>=6?21U:bytes[4]>=4?20U:16U)) return false;
         if(bytes[4]>=6 && bytes[20]>=render::asteroid_model_mode_count) return false;
-        if(bytes[4]>=7 && bytes[21]>3) return false;
+        if(bytes[4]>=7 && bytes[21]>7) return false;
         if(bytes[4]>=4) {
             for(unsigned i:{16U,17U}) {
                 bool valid=false;for(auto effect:supported_effects) valid|=bytes[i]==effect;
@@ -102,11 +103,12 @@ public:
         asteroid_models=bytes[4]>=6?bytes[20]:0;
         modern_renderer=bytes[4]>=7 && (bytes[21]&1)!=0;
         dynamic_lighting=bytes[4]>=7 && (bytes[21]&2)!=0;
+        projectile_models=bytes[4]>=7 && (bytes[21]&4)!=0;
         return true;
     }
     // Main page rows: 0..3 settings, 4 RESUME/START GAME, 5 PREVIEW, 6 EXIT GAME.
     static constexpr unsigned exit_row=6;
-    unsigned row_count() const noexcept {return page==Page::exit_confirmation?2:page==Page::main?7:page==Page::options?10:page==Page::three_d?(ray_tracing_available?6:5)+(modern_available?2:0):page==Page::two_d?5:7;}
+    unsigned row_count() const noexcept {return page==Page::exit_confirmation?2:page==Page::main?7:page==Page::options?10:page==Page::three_d?(ray_tracing_available?7:6)+(modern_available?2:0):page==Page::two_d?5:7;}
     unsigned first_visible_row() const noexcept {return selection<6?0:selection-5;}
     VrControls gameplay_controls(VrControls controls) const noexcept {
         // Native mapping is Y=fire, X=boost, A=bomb, B=brake.
@@ -169,8 +171,9 @@ public:
                 else if(selection==3 && ray_tracing_available) {ray_tracing=!ray_tracing;}
                 else if(selection==(ray_tracing_available?4U:3U))
                     asteroid_models=(asteroid_models+1)%render::asteroid_model_mode_count;
-                else if(modern_available && selection==(ray_tracing_available?5U:4U)) modern_renderer=!modern_renderer;
-                else if(modern_available && selection==(ray_tracing_available?6U:5U)) dynamic_lighting=!dynamic_lighting;
+                else if(selection==(ray_tracing_available?5U:4U)) projectile_models=!projectile_models;
+                else if(modern_available && selection==(ray_tracing_available?6U:5U)) modern_renderer=!modern_renderer;
+                else if(modern_available && selection==(ray_tracing_available?7U:6U)) dynamic_lighting=!dynamic_lighting;
                 else {page=Page::options;selection=6;}
             } else if(page==Page::two_d) {
                 if(selection==0) world_effect=next_style(world_effect,true);
@@ -209,6 +212,7 @@ public:
             if(models && ray_tracing_available) rows.push_back(std::string("RAY TRACING: ")+(ray_tracing?"ON":"OFF"));
             if(models) rows.push_back("3D ASTEROIDS: "+std::string(render::asteroid_model_names[
                 static_cast<std::size_t>(asteroid_model_mode())]));
+            if(models) rows.push_back(std::string("3D PROJECTILES: ")+(projectile_models?"ON":"OFF"));
             if(models && modern_available) {
                 rows.push_back(std::string("MODERN RENDERER: ")+(modern_renderer?"ON":"OFF")
                     +(modern_renderer!=modern_running?" NEXT START":""));

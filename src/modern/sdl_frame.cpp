@@ -126,7 +126,7 @@ bool SdlFrameRenderer::record_shadows(SDL_GPUCommandBuffer* command,const vr::Ey
         // The landscape ground where the cartridge draws shadows; the 3D
         // corridor and the boss room always.
         return (settings.cartridge_shadows && vr::is_landscape_ground(packet)) || vr::is_tunnel_corridor(packet)
-            || vr::is_nucleus_room(packet) || vr::is_nucleus_floor(packet);
+            || vr::is_nucleus_room(packet) || vr::is_nucleus_floor(packet) || vr::is_water_bridge(packet) || vr::is_colony_corridor(packet);
     });
     const bool sun=toward_light && receiver && !settings.no_shadows;
     const auto eye=reversed_depth_camera(camera);
@@ -271,7 +271,7 @@ bool SdlFrameRenderer::record(SDL_GPUCommandBuffer* command,SDL_GPURenderPass* p
             for(const auto& packet:f.backgrounds) {
                 if(packet.geometry.vertex_view().empty() && packet.geometry.line_view().empty()) continue;
                 const bool solid=vr::is_landscape_ground(packet) || vr::is_tunnel_corridor(packet)
-                    || vr::is_nucleus_room(packet) || vr::is_nucleus_floor(packet);
+                    || vr::is_nucleus_room(packet) || vr::is_nucleus_floor(packet) || vr::is_water_bridge(packet) || vr::is_colony_corridor(packet);
                 if(!backgrounds_.record_range(command,pass,pipelines_,solid?background_camera:backdrop_camera,item,1))
                     return fail("background");
                 ++item;

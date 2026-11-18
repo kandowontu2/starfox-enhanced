@@ -20,7 +20,9 @@ RayEmitters::RayEmitters(const assets::SymbolMap& symbols) {
     // strategies; ring shots and plasma balls by shape. Lasers are the
     // existing renderer's emissive beam shapes (starfox_pc.cpp emissive_beam_shapes).
     shapes({"ELASER2","ELASER2_S2","ELASER2A","OVALBEAM","LASERLINE","LASER_0"},beam_shapes_);
-    shapes({"PLASMA","LARGEPLASMA","RINGLASER","PLAYERBEAM"},plasma_shapes_);
+    // BOUNCYBALL is the plasma ball in flight (fire_plasma); LARGEPLASMA is its
+    // set-piece twin.
+    shapes({"PLASMA","LARGEPLASMA","BOUNCYBALL","RINGLASER","PLAYERBEAM"},plasma_shapes_);
     const auto strategies=[&](std::initializer_list<const char*> names,std::unordered_set<uint32_t>& into) {
         for(const auto* name:names) for(const auto address:symbols.find(name)) into.insert(address);
     };

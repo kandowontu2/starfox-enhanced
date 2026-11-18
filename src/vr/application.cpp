@@ -953,6 +953,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                     // compile or upload invisible game resources while it is open.
                     if(!startup.open || startup.preview) {
                     live->models.set_asteroid_models(startup.asteroid_model_mode());
+                    live->models.set_projectile_models(startup.projectile_models);
                     // Each game session has its own models; the overrides outlive them.
                     if(modern) live->models.set_texture_overrides(texture_overrides.empty()?nullptr:&texture_overrides);
                     auto packets=live->models.assemble_world_interpolated(*live->history->previous(),*live->history->current(),alpha,srgb,true);
@@ -1147,7 +1148,8 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                             // cartridge draws shadows, the corridor and the boss room.
                             const bool receivers=std::any_of(modern_frame.backgrounds.begin(),modern_frame.backgrounds.end(),[&](const auto& packet) {
                                 return (snapshot->shadows_enabled && starfox::vr::is_landscape_ground(packet)) || starfox::vr::is_tunnel_corridor(packet)
-                                    || starfox::vr::is_nucleus_room(packet) || starfox::vr::is_nucleus_floor(packet);
+                                    || starfox::vr::is_nucleus_room(packet) || starfox::vr::is_nucleus_floor(packet)
+                                    || starfox::vr::is_water_bridge(packet) || starfox::vr::is_colony_corridor(packet);
                             });
                             const bool shadowless=rt_traced && emitters.shadowless(*snapshot);
                             starfox::vr::VulkanRayShadows::Settings settings;

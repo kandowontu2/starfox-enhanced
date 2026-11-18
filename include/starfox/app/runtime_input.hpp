@@ -240,6 +240,7 @@ struct PregameSettings {
     std::uint16_t window_width{},window_height{};
     bool hipoly_arwings{}; // Optional key HIPOLY_ARWINGS; MODERN draws the ending Arwing.
     bool dynamic_lighting{}; // Optional key DYNAMIC_LIGHTING; MODERN's ray-traced shadows and lights.
+    bool projectile_models{}; // Optional key PROJECTILE_MODELS; 3D PROJECTILES.
 
     [[nodiscard]] bool operator==(const PregameSettings&) const = default;
 };

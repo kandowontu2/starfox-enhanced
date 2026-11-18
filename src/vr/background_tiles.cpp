@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <cmath>
 #include <numbers>
+#include <map>
 #include <optional>
 #include <span>
 #include <mutex>
@@ -1118,6 +1119,254 @@ DrawPacket water_surface_packet(const simulation::SnesPpuState& ppu,
         }
     }
     return packet;
+}
+namespace {
+constexpr uint32_t water_bridge_marker=4098U;
+}
+DrawPacket water_bridge_packet(const simulation::SnesPpuState& source,unsigned brightness,bool srgb,
+    float top,float bottom,float view) {
+    DrawPacket packet;
+    if(brightness>15) throw std::invalid_argument("Invalid bridge brightness");
+    if(!(top<view && view<bottom)) throw std::invalid_argument("Invalid bridge heights");
+    if(!(source.main_screen&2) || source.background_mode!=1) return packet;
+    // The art itself (camera independent): the 512-column tile map, centre
+    // column 256. The horizon row is where open water starts at the far edge.
+    const auto ink=[&](int x,int y) {return bg2_art_index(source,x,y);};
+    int horizon=-1;
+    for(int row=1;row<512 && horizon<0;++row) if(!ink(0,row-1) && ink(0,row) && ink(511,row)) horizon=row;
+    if(horizon<0) return packet;
+    const auto half_run=[&](int row) {
+        const auto centre=ink(256,row);
+        if(!centre) return 0;
+        int left=256;while(left>0 && ink(left-1,row)==centre) --left;
+        int right=256;while(right<511 && ink(right+1,row)==centre) ++right;
+        return (right-left+1)/2;
+    };
+    // The span: its main colour is the commonest ink in the rows above the
+    // horizon (its row-by-row shading is fixed to the screen, so drop it);
+    // its edge sits one column further out per row.
+    std::array<unsigned,256> votes{};
+    double span_wk=0,span_kk=0;int ridge_row=-1;
+    // The apex's last row or two can be blank.
+    int start=horizon-1;while(start>horizon-4 && start>0 && !ink(256,start)) --start;
+    for(int row=start;row>=std::max(0,horizon-200);--row) {
+        if(!ink(256,row)) break;
+        const double k=horizon-row-.5;
+        int left=256;while(left>0 && ink(left-1,row)) --left;
+        const double w=256-left;
+        span_wk+=w*k;span_kk+=k*k;
+        for(int x=left;x<=256;++x) ++votes[ink(x,row)];
+        ridge_row=row;
+    }
+    const double deck_height=bottom-view,span_height=view-top;
+    double deck_wk=0,deck_kk=0;
+    for(int row=horizon;row<std::min(512,horizon+200);++row) {
+        if(!ink(0,row)) break;
+        const double k=row-horizon+.5;
+        deck_wk+=half_run(row)*k;deck_kk+=k*k;
+    }
+    if(span_kk<=0 || deck_kk<=0 || ridge_row<0) return packet;
+    const unsigned span_ink=unsigned(std::max_element(votes.begin()+1,votes.end())-votes.begin());
+    const double deck_half=deck_wk/deck_kk*deck_height,span_half=span_wk/span_kk*span_height;
+    if(!(deck_half>1) || !(span_half>1)) return packet;
+    // The ridge: the band of another ink about the centre on the span's
+    // nearest row, as a width at that row's distance.
+    unsigned ridge_ink=ink(256,ridge_row);
+    double ridge_half=0;
+    if(ridge_ink!=span_ink) {
+        int left=256;while(left>0 && ink(left-1,ridge_row)==ridge_ink) --left;
+        ridge_half=(256-left)/(horizon-ridge_row-.5)*span_height;
+    }
+    const auto colour=[&](unsigned index){return source_backdrop_colour(source.cgram[index&255U],brightness,srgb);};
+    constexpr float far=-8388608.F,behind=8192.F,side=8388608.F;
+    const float deck_y=-bottom,span_y=-top;
+    // Water bands: one per run of equal rows at the far edge, from the
+    // distance its nearest row paints to its farthest; the last runs on
+    // under the eye and behind it.
+    struct Band {double near,far;unsigned index;};
+    std::vector<Band> bands;
+    const auto distance=[&](double rows){return rows>0?deck_height*256./rows:1e9;};
+    for(int row=horizon;row<std::min(512,horizon+200);) {
+        const auto index=ink(0,row);
+        if(!index) break;
+        int end=row;while(end+1<std::min(512,horizon+200) && ink(0,end+1)==index) ++end;
+        bands.push_back({distance(end+1-horizon),distance(row-horizon),index});
+        row=end+1;
+    }
+    if(bands.empty()) return packet;
+    bands.back().near=-behind;
+    for(const auto& band:bands) {
+        const float z0=std::max(far,float(-band.far)),z1=float(-band.near);
+        if(z1>z0) push_flat(packet,std::array<std::array<float,3>,4>{{{-side,deck_y,z1},{side,deck_y,z1},{side,deck_y,z0},{-side,deck_y,z0}}},
+            colour(band.index));
+    }
+    const auto strip=[&](float half,float y,unsigned index) {
+        push_flat(packet,std::array<std::array<float,3>,4>{{{-half,y,behind},{half,y,behind},{half,y,far},{-half,y,far}}},colour(index));
+    };
+    strip(float(deck_half),deck_y,ink(256,horizon+8));
+    strip(float(span_half),span_y,span_ink);
+    if(ridge_half>.25) strip(float(ridge_half),span_y,ridge_ink);
+    packet.geometry.texels.assign(16,0);
+    packet.geometry.texels[7]=water_bridge_marker;
+    packet.model=nucleus_room_model(0,view,0,0);
+    return packet;
+}
+namespace {
+constexpr uint32_t colony_marker=4099U;
+// A least-squares line t = a + b row through (row, t) samples.
+struct LineFit {
+    double n{},sx{},sy{},sxx{},sxy{};
+    void add(double x,double y) {n+=1;sx+=x;sy+=y;sxx+=x*x;sxy+=x*y;}
+    [[nodiscard]] std::optional<std::array<double,2>> line() const {
+        const double d=n*sxx-sx*sx;
+        if(n<8 || std::abs(d)<1e-9) return std::nullopt;
+        const double b=(n*sxy-sx*sy)/d;return std::array<double,2>{(sy-b*sx)/n,b};
+    }
+};
+}
+DrawPacket colony_corridor_packet(const simulation::SnesPpuState& source,unsigned brightness,bool srgb,
+    float top,float bottom) {
+    DrawPacket packet;
+    if(brightness>15) throw std::invalid_argument("Invalid colony brightness");
+    if(!(top<bottom)) throw std::invalid_argument("Invalid colony heights");
+    if(!source.tunnel_scene || !(source.main_screen&2) || source.background_mode!=1) return packet;
+    const double height=(bottom-top)*.5;
+    // The art as the screen shows it with the per-row offsets centred; each
+    // row's page is its scanline scroll (the cartridge's tunnel table).
+    auto ppu=source;
+    ppu.bg2_horizontal_offsets.fill(128);ppu.bg2_horizontal_offsets_enabled=true;
+    const auto pages=source.bg2_scanline_scroll_y;
+    const bool per_row=source.bg2_scanline_scroll_enabled;
+    const auto art=[&](int16_t page,int row,int column) {
+        ppu.bg2_scanline_scroll_y.fill(page);ppu.bg2_scanline_scroll_enabled=true;
+        return render::tunnel_border_index(ppu,unsigned(std::clamp(row,0,223)),unsigned(std::clamp(column,0,255)));
+    };
+    const auto page_of=[&](int row){return per_row?pages[size_t(row)]:int16_t(source.bg2_scroll_y);};
+    // The ceiling's right edge (the same on both pages) gives the vanishing
+    // row and the ceiling's width.
+    LineFit ceiling_right;
+    for(int row=0;row<104;++row) {
+        const auto page=page_of(row);
+        const auto centre=art(page,row,128);
+        if(!centre) continue;
+        int right=128;while(right<255 && art(page,row,right+1)==centre) ++right;
+        if(right<255) ceiling_right.add(row+.5,right+1.-128.);
+    }
+    const auto c=ceiling_right.line();
+    if(!c || !((*c)[1]<0)) return packet;
+    const double vp=-(*c)[0]/(*c)[1];
+    if(vp<60 || vp>170) return packet;
+    const double ceiling_half=-(*c)[1]*height;
+    // Each page's own floor: its extent either side (each edge a line
+    // through the vanishing row), and its centre line.
+    // The art's haze near the vanishing row is fixed to the screen; colours
+    // come from rows far from it.
+    struct Page {
+        unsigned ceiling{},floor{},line{},wall{};
+        double floor_left{},floor_right{},line_half{};bool valid{};
+    };
+    std::map<int16_t,Page> looks;
+    const int deep=221;
+    const auto look=[&](int16_t page) -> const Page& {
+        auto found=looks.find(page);
+        if(found!=looks.end()) return found->second;
+        Page result;
+        result.ceiling=art(page,2,128);
+        result.floor=art(page,deep,160);
+        result.line=art(page,deep,128);
+        result.wall=art(page,int(vp),255);
+        if(result.line!=result.floor) {
+            int left=128,right=128;
+            while(left>0 && art(page,deep,left-1)==result.line) --left;
+            while(right<255 && art(page,deep,right+1)==result.line) ++right;
+            result.line_half=(right-left+1)*.5/(deep+.5-vp)*height;
+        } else result.line=0;
+        LineFit right_edge,left_edge;
+        for(int row=int(std::ceil(vp))+4;row<224;++row) {
+            // This row's own floor shade (the haze grades it by row).
+            const auto shade=art(page,row,160);
+            if(!shade || shade==result.wall) continue;
+            int right=160;while(right<255 && art(page,row,right+1)==shade) ++right;
+            int left=160;
+            while(left>0) {
+                const auto next=art(page,row,left-1);
+                if(next!=shade && !(result.line && next==result.line)) break;
+                --left;
+            }
+            if(right<255) right_edge.add(row+.5-vp,right+1.-128.);
+            if(left>0) left_edge.add(row+.5-vp,128.-left);
+        }
+        // Edges through the vanishing row: width = slope x rows below it.
+        const auto slope=[](const LineFit& fit) -> std::optional<double> {
+            if(fit.n<8 || fit.sxx<=0) return std::nullopt;
+            return fit.sxy/fit.sxx;
+        };
+        const auto right_slope=slope(right_edge),left_slope=slope(left_edge);
+        result.floor_right=right_slope?*right_slope*height:ceiling_half;
+        // No left edge on screen: the floor runs on past the view.
+        result.floor_left=left_slope?-*left_slope*height:-ceiling_half*4.;
+        result.valid=right_slope.has_value() && result.floor!=0;
+        return looks.emplace(page,result).first->second;
+    };
+    const double ceiling_vp=vp,floor_vp=vp;
+    for(int row=0;row<224;++row) if(!look(page_of(row)).valid && row>vp+4) return packet;
+    const auto colour=[&](unsigned index){return source_backdrop_colour(source.cgram[index&255U],brightness,srgb);};
+    constexpr float far=-8388608.F,behind=8192.F;
+    const float floor_y=-bottom,ceiling_y=-top;
+    // Bands: runs of rows on one page, from the distance the nearest row of
+    // the run paints to its farthest. The nearest run continues behind the
+    // eye and the farthest to the horizon.
+    struct Band {float z0,z1;int16_t page;};
+    const auto bands=[&](bool ceiling) {
+        std::vector<Band> result;
+        const double vp=ceiling?ceiling_vp:floor_vp;
+        const int first=ceiling?0:int(std::ceil(vp));
+        const int last=ceiling?int(std::floor(vp))-1:223;
+        const auto distance=[&](double row){const double k=std::abs(row-vp);return k>.25?height*256./k:1e7;};
+        // Walk from the far rows (by the horizon) to the near ones.
+        const int step=ceiling?-1:1;
+        int row=ceiling?last:first;
+        while(ceiling?row>=first:row<=last) {
+            const auto page=page_of(row);
+            int end=row;while((ceiling?end-1>=first:end+1<=last) && page_of(end+step)==page) end+=step;
+            const double row_far=ceiling?row+1.:double(row),row_near=ceiling?double(end):end+1.;
+            result.push_back({float(-distance(row_far)),float(-distance(row_near)),page});
+            row=end+step;
+        }
+        if(!result.empty()) {result.front().z0=far;result.back().z1=behind;}
+        return result;
+    };
+    const auto floor_bands=bands(false),ceiling_bands=bands(true);
+    if(floor_bands.empty() || ceiling_bands.empty()) return packet;
+    const auto quad=[&](float x0,float x1,float y,float z0,float z1,unsigned index) {
+        push_flat(packet,std::array<std::array<float,3>,4>{{{x0,y,z1},{x1,y,z1},{x1,y,z0},{x0,y,z0}}},colour(index));
+    };
+    constexpr float side=8388608.F;
+    for(const auto& band:ceiling_bands) {
+        const auto& page=look(band.page);
+        quad(float(-ceiling_half),float(ceiling_half),ceiling_y,band.z0,band.z1,page.ceiling);
+    }
+    for(const auto& band:floor_bands) {
+        const auto& page=look(band.page);
+        quad(float(page.floor_left),float(page.floor_right),floor_y,band.z0,band.z1,page.floor);
+        if(page.line && page.line_half>.25) quad(float(-page.line_half),float(page.line_half),floor_y,band.z0,band.z1,page.line);
+        // The right wall over this band, from the floor's edge to the ceiling's.
+        if(page.wall) push_flat(packet,std::array<std::array<float,3>,4>{{{float(page.floor_right),floor_y,band.z1},
+            {float(ceiling_half),ceiling_y,band.z1},{float(ceiling_half),ceiling_y,band.z0},{float(page.floor_right),floor_y,band.z0}}},
+            colour(page.wall));
+    }
+    packet.geometry.texels.assign(16,0);
+    packet.geometry.texels[7]=colony_marker;
+    packet.model=nucleus_room_model(0,(top+bottom)*.5,0,0);
+    return packet;
+}
+bool is_colony_corridor(const DrawPacket& packet) noexcept {
+    const auto texels=packet.geometry.texel_view();
+    return texels.size()==16 && texels[7]==colony_marker && !packet.geometry.vertex_view().empty();
+}
+bool is_water_bridge(const DrawPacket& packet) noexcept {
+    const auto texels=packet.geometry.texel_view();
+    return texels.size()==16 && texels[7]==water_bridge_marker && !packet.geometry.vertex_view().empty();
 }
 Matrix4 water_height_motion(float previous_height,float current_height,double alpha) {
     if(!std::isfinite(previous_height) || !std::isfinite(current_height)

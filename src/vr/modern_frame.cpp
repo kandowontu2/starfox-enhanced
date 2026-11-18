@@ -425,8 +425,35 @@ void ModernFrame::prepare(const GameSceneSnapshot& previous,const GameSceneSnaps
             // per background, retried until the level has loaded the art.
             // Meteor (BG_1_4; EX's BG_1_14) gets a near-black haze to match
             // its dark ground and starry sky.
+            // Titania (BG_2_3A) takes its haze the same way, but its sky
+            // changes with the weather (mist, then night), so its colour is
+            // worked out again from the palette on every source tick.
+            // The colour from the art's ink counts and the current palette:
+            // half the art's mean, half its brightest third.
+            const auto sky_haze=[&]() -> std::optional<std::array<float,3>> {
+                const auto palette=render::decode_bgr555_palette(scene.ppu->cgram);
+                std::array<std::array<float,5>,128> inks{}; // r, g, b, luminance, pixels
+                double total=0;
+                for(unsigned i=0;i<128;++i) {
+                    const auto& c=palette[i];
+                    inks[i]={float(c.r),float(c.g),float(c.b),.2126F*c.r+.7152F*c.g+.0722F*c.b,float(fog_inks_[i])};
+                    total+=fog_inks_[i];
+                }
+                if(total<=256) return std::nullopt;
+                std::stable_sort(inks.begin(),inks.end(),[](const auto& a,const auto& b){return a[3]>b[3];});
+                std::array<double,3> mean{},bright{};
+                const double top=std::floor(total/3.);
+                double taken=0;
+                for(const auto& ink:inks) {
+                    const double share=std::clamp(top-taken,0.,double(ink[4]));
+                    taken+=ink[4];
+                    for(unsigned c=0;c<3;++c) {mean[c]+=ink[c]*ink[4]/total;bright[c]+=ink[c]*share/top;}
+                }
+                return std::array<float,3>{float((mean[0]+bright[0])/510.),float((mean[1]+bright[1])/510.),float((mean[2]+bright[2])/510.)};
+            };
+            if(fog_background_==scene.background_id && fog_tracks_palette_ && layers_rebuilt) fog_colour_=sky_haze();
             if(fog_background_!=scene.background_id) {
-                fog_colour_.reset();meteor_fog_=false;
+                fog_colour_.reset();meteor_fog_=false;fog_tracks_palette_=false;cloud_sky_=false;
                 const auto is_background=[&](std::initializer_list<const char*> names) {
                     if(!inputs.symbols) return false;
                     const auto& lists=inputs.symbols->find("BGLISTS");
@@ -436,7 +463,9 @@ void ModernFrame::prepare(const GameSceneSnapshot& previous,const GameSceneSnaps
                                 && uint16_t(value-lists.front())==scene.background_id) return true;
                     return false;
                 };
-                const bool venom=is_background({"BG_1_6A","BG_3_7A","BG_3_5"}); // Venom 1 and 3, Macbeth
+                const bool titania=is_background({"BG_2_3A"});
+                cloud_sky_=titania;
+                const bool venom=titania || is_background({"BG_1_6A","BG_3_7A","BG_3_5"}); // Venom 1 and 3, Macbeth
                 if(is_background({"BG_1_4","BG_1_14"})) {
                     static const auto meteor=[] {
                         std::array<float,3> c{.075F,.075F,.085F};
@@ -450,13 +479,12 @@ void ModernFrame::prepare(const GameSceneSnapshot& previous,const GameSceneSnaps
                     // 4bpp characters -> CGRAM); 16-pixel tiles use their
                     // four characters.
                     const auto& ppu=*scene.ppu;
-                    const auto palette=render::decode_bgr555_palette(ppu.cgram);
                     const auto word=[&](uint32_t address) {
                         const auto offset=(address&0x7fffU)*2U;
                         return uint16_t(ppu.vram[offset]|(ppu.vram[offset+1U]<<8U));
                     };
                     const unsigned entries=((ppu.bg2_screen_size&1U)?2U:1U)*((ppu.bg2_screen_size&2U)?2U:1U)*1024U;
-                    std::vector<std::array<float,4>> band; // r, g, b, luminance
+                    fog_inks_.fill(0U);
                     for(unsigned entry=0;entry<entries;++entry) {
                         const auto tile=word(ppu.bg2_screen_base+entry);
                         const unsigned characters=ppu.bg2_tile_size_16?4U:1U;
@@ -469,23 +497,13 @@ void ModernFrame::prepare(const GameSceneSnapshot& previous,const GameSceneSnaps
                                 for(unsigned x=0;x<8;++x) {
                                     const unsigned mask=0x80U>>x;
                                     const unsigned ink=((p0&mask)?1U:0U)|((p1&mask)?2U:0U)|((p2&mask)?4U:0U)|((p3&mask)?8U:0U);
-                                    if(!ink) continue;
-                                    const auto& c=palette[((tile>>10)&7U)*16U+ink];
-                                    band.push_back({float(c.r),float(c.g),float(c.b),.2126F*c.r+.7152F*c.g+.0722F*c.b});
+                                    if(ink) ++fog_inks_[((tile>>10)&7U)*16U+ink];
                                 }
                             }
                         }
                     }
-                    if(band.size()>256) {
-                        std::sort(band.begin(),band.end(),[](const auto& a,const auto& b){return a[3]>b[3];});
-                        std::array<float,3> mean{},bright{};
-                        const std::size_t top=band.size()/3;
-                        for(std::size_t i=0;i<band.size();++i) for(unsigned c=0;c<3;++c) {
-                            mean[c]+=band[i][c]/float(band.size());
-                            if(i<top) bright[c]+=band[i][c]/float(top);
-                        }
-                        fog_colour_=std::array<float,3>{(mean[0]+bright[0])/510.F,(mean[1]+bright[1])/510.F,(mean[2]+bright[2])/510.F};
-                    }
+                    fog_colour_=sky_haze();
+                    fog_tracks_palette_=titania && fog_colour_;
                 }
                 if(!venom || fog_colour_) fog_background_=scene.background_id;
             }
@@ -499,7 +517,13 @@ void ModernFrame::prepare(const GameSceneSnapshot& previous,const GameSceneSnaps
         // distance along the corridor.
         if(settings_.headset)
             for(auto& packet:backgrounds)
-                if(is_landscape_world(packet) || is_landscape_ground(packet) || is_tunnel_corridor(packet)) set_headset_mapping(packet);
+                if(is_landscape_world(packet) || is_landscape_ground(packet) || is_tunnel_corridor(packet)) {
+                    const bool dome=is_landscape_world(packet);
+                    set_headset_mapping(packet);
+                    // Titania's sky ends in cloud: the shader carries the cloud
+                    // tops on up the dome (scene.hlsl, word 3 = 2).
+                    if(dome && cloud_sky_ && fog_background_==current.background_id) packet.geometry.texels[3]=2;
+                }
         background_interpolated_=interpolated;
     }
     fog.reset();
@@ -742,6 +766,28 @@ void ModernFrame::prepare(const GameSceneSnapshot& previous,const GameSceneSnaps
             }
             model=multiply_matrix(seat,tunnel_corridor_model(blend(previous.camera.z,current.camera.z),
                 blend(previous.camera.x,current.camera.x),blend(previous.camera.y,current.camera.y),centre_y,centre_x));
+        }
+        if(is_colony_corridor(packet)) {
+            const bool continuous=!timing::camera_transform_is_discontinuous(previous.camera,current.camera);
+            const auto blend=[&](int32_t before,int32_t now) {
+                const double from=continuous?double(before):double(now);
+                return from+double(int16_t(uint16_t(now-int32_t(from))))*(continuous?alpha:1.);
+            };
+            // Its bands were placed for this tick's camera Z; between ticks
+            // they stay put in the world while the eye moves on.
+            model=multiply_matrix(seat,nucleus_room_model(blend(previous.camera.x,current.camera.x),
+                blend(previous.camera.y,current.camera.y),blend(previous.camera.z,current.camera.z),current.camera.z));
+        }
+        if(is_water_bridge(packet)) {
+            const bool continuous=!timing::camera_transform_is_discontinuous(previous.camera,current.camera);
+            const auto blend=[&](int32_t before,int32_t now) {
+                const double from=continuous?double(before):double(now);
+                return from+double(int16_t(uint16_t(now-int32_t(from))))*(continuous?alpha:1.);
+            };
+            // Fixed in the world across X and Y; endless along Z, its water
+            // bands at fixed distances from the eye.
+            model=multiply_matrix(seat,nucleus_room_model(blend(previous.camera.x,current.camera.x),
+                blend(previous.camera.y,current.camera.y),0,0));
         }
         if((is_nucleus_room(packet) || is_nucleus_floor(packet)) && current.background_nucleus) {
             const bool continuous=!timing::camera_transform_is_discontinuous(previous.camera,current.camera);

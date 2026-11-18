@@ -95,7 +95,11 @@ FrameLayers assemble_frame_layers(const GameSceneSnapshot& scene,const FrameLaye
         // An enhancement: on any failure keep the cartridge's own layer
         // rather than failing (and dropping out of) the whole frame.
         try {
-            corridor=tunnel_corridor_packet(*snapshot->ppu,snapshot->display_brightness,srgb,half_width);
+            // A corridor open on one side (Venom 2's colony) has its own build.
+            if(bounds && (bounds->walls&15U)!=15U)
+                corridor=colony_corridor_packet(*snapshot->ppu,snapshot->display_brightness,srgb,
+                    float(bounds->top),float(bounds->bottom));
+            else corridor=tunnel_corridor_packet(*snapshot->ppu,snapshot->display_brightness,srgb,half_width);
             if(corridor->geometry.vertex_view().empty()) corridor.reset();
         } catch(const std::exception& error) {
             static bool reported=false;
@@ -174,9 +178,22 @@ FrameLayers assemble_frame_layers(const GameSceneSnapshot& scene,const FrameLaye
             if(snapshot->landscape_grid_height<0)
                 place_landscape_ground(bg2,std::clamp(float(snapshot->landscape_grid_height)/256.F,-8.F,-.001F),true);
         }
-        else if(snapshot->background_water_surround)
-            bg2=water_surface_packet(*snapshot->ppu,background_options,
-                std::clamp(std::abs(float(snapshot->camera.y-snapshot->shadow_height))/256.F,.01F,8.F),srgb);
+        else if(snapshot->background_water_surround) {
+            // Titania's bridge as real geometry (MODERN), else the painting
+            // on a floor and a ceiling plane.
+            if(in.tunnel_corridor && snapshot->background_bridge) try {
+                const auto& bridge=*snapshot->background_bridge;
+                bg2=water_bridge_packet(*snapshot->ppu,snapshot->display_brightness,srgb,
+                    float(bridge.top),float(bridge.bottom),float(bridge.view));
+            } catch(const std::exception& error) {
+                static bool reported=false;
+                if(!reported) {std::fprintf(stderr,"modern: 3D bridge skipped: %s\n",error.what());reported=true;}
+                bg2=DrawPacket{};
+            }
+            if(bg2.geometry.vertex_view().empty())
+                bg2=water_surface_packet(*snapshot->ppu,background_options,
+                    std::clamp(std::abs(float(snapshot->camera.y-snapshot->shadow_height))/256.F,.01F,8.F),srgb);
+        }
         else bg2.model=packet.model;
         if(corridor) bg2=std::move(*corridor);
         // Space Armada's boss room as a room around the reactor: its ceiling

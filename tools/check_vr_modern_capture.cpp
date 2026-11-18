@@ -157,6 +157,9 @@ static starfox::vr::VrControls steer_controls(unsigned tick) {
     }();
     starfox::vr::VrControls controls;
     if(steer[2]>=0 && float(tick)>=steer[2]) controls.steer={steer[0],steer[1]};
+    // STARFOX_VR_FIRE=1: hold the trigger (alternate ticks, so the shots repeat).
+    static const bool fire=std::getenv("STARFOX_VR_FIRE")!=nullptr;
+    controls.fire=fire && (tick&1U)==0;
     return controls;
 }
 int main(int argc,char** argv) try {
@@ -181,6 +184,8 @@ int main(int argc,char** argv) try {
 
     simulation::GameSimulation game(rom,symbols,level,{},true);
     game.set_timing_mode(simulation::TimingMode::unlocked_20_fps);
+    // STARFOX_TEST_GOD_MODE=1 (starfox_pc's): an unattended ship survives a whole level.
+    if(const char* god=std::getenv("STARFOX_TEST_GOD_MODE")) game.set_god_mode(std::string_view(god)=="1");
     audio::Spc700Audio spc;audio::Msu1Audio msu;std::vector<int16_t> mixed;
     // Levels wait for their checkpoint; the intro (as application.cpp's
     // LiveGame does) and other screens start at once.
@@ -217,7 +222,11 @@ int main(int argc,char** argv) try {
             game.synchronize_apu_output_ports(spc.output_ports());
         }
         game.set_god_mode(true);
-        game.map().start(symbols.find(label).at(0),game.player());
+        // LABEL+N continues N bytes into the label's script (a local label, or
+        // the command after a mapjsr).
+        const std::string_view target(label);const auto plus=target.find('+');
+        const auto offset=plus==std::string_view::npos?0U:uint32_t(std::stoul(std::string(target.substr(plus+1))));
+        game.map().start(symbols.find(std::string(target.substr(0,plus))).at(0)+offset,game.player());
         game.map().advance_distance(1);
     }
     if(std::getenv("STARFOX_VR_FIRST_PERSON")) {
@@ -237,6 +246,7 @@ int main(int argc,char** argv) try {
         return spc.output_ports();
     },&history);
     vr::SourceModels models(rom,symbols,true,true);
+    if(const char* projectiles=std::getenv("STARFOX_TEST_PROJECTILE_MODELS")) models.set_projectile_models(std::string_view(projectiles)=="1");
     render::ScaledTextRenderer dialogue_layout(rom,symbols);
     // application.cpp's MODERN inputs (VR's own cockpit, no flat-screen
     // substitutes); the STARFOX_MODERN_* switches apply as they do there.
@@ -486,6 +496,15 @@ int main(int argc,char** argv) try {
                 if(std::getenv("STARFOX_VR_SCROLL") && tick+std::stoul(std::getenv("STARFOX_VR_SCROLL"))>=ticks)
                     std::cout<<"scroll tick="<<tick<<" bg2="<<current->ppu->bg2_scroll_x<<','<<current->ppu->bg2_scroll_y
                         <<" camera yaw="<<current->camera.yaw<<" pitch="<<current->camera.pitch<<" roll="<<current->camera.roll<<" hofs_en="<<current->ppu->bg2_horizontal_offsets_enabled<<" hofs112="<<current->ppu->bg2_horizontal_offsets[112]<<" vofs_en="<<current->ppu->bg2_vertical_offsets_enabled<<" cam_x="<<current->camera.x<<" cam_y="<<current->camera.y<<" cam_z="<<current->camera.z<<'\n';
+                // STARFOX_VR_BG2=1: the last tick's whole BG2 tile map (1024x1024 art
+                // pixels from 0,0) as <stem>-bg2.bmp, to see what lies off screen.
+                if(last && std::getenv("STARFOX_VR_BG2")) {
+                    const auto art=vr::bg2_art_image(*current->ppu,0,0,1024,1024);
+                    std::vector<unsigned char> rgba(art.size()*4U);
+                    for(std::size_t i=0;i<art.size();++i) for(unsigned c=0;c<4;++c) rgba[i*4U+c]=c==3?255:static_cast<unsigned char>(art[i]>>(c*8U));
+                    write_bmp(stem.string()+"-bg2.bmp",rgba,1024,1024);
+                    std::cout<<"bg2 scroll="<<current->ppu->bg2_scroll_x<<','<<current->ppu->bg2_scroll_y<<" vanishing="<<current->source_vanishing_point[1]<<std::endl;
+                }
                 // STARFOX_VR_ALPHA: the last tick drawn between source ticks, as a
                 // headset frame is (default 1, the tick itself).
                 const double alpha=last && std::getenv("STARFOX_VR_ALPHA")?std::stod(std::getenv("STARFOX_VR_ALPHA")):1.;

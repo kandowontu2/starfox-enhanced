@@ -1283,6 +1283,23 @@ int main(int argc, char** argv) {
             && !loaded_pregame.hipoly_arwings, "settings without HIPOLY_ARWINGS did not load the retail ship");
     }
     {
+        // PROJECTILE_MODELS is optional: it round-trips, and a file without
+        // it loads with the sprites.
+        auto projectiles = saved_pregame;projectiles.projectile_models = true;
+        require(starfox::app::save_pregame_settings(pregame_test_path, projectiles)
+            && starfox::app::load_pregame_settings(pregame_test_path, loaded_pregame)
+            && loaded_pregame == projectiles, "3D projectiles did not round-trip");
+        std::string kept;
+        {
+            std::ifstream saved{pregame_test_path};
+            for (std::string line; std::getline(saved, line);)
+                if (line.rfind("PROJECTILE_MODELS ", 0) != 0) kept += line + '\n';
+        }
+        std::ofstream{pregame_test_path} << kept;
+        require(starfox::app::load_pregame_settings(pregame_test_path, loaded_pregame)
+            && !loaded_pregame.projectile_models, "settings without PROJECTILE_MODELS did not load the sprites");
+    }
+    {
         // DYNAMIC_LIGHTING is optional: it round-trips, and a file without
         // it loads with the lighting off.
         auto lighting = saved_pregame;lighting.dynamic_lighting = true;

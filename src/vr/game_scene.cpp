@@ -193,6 +193,16 @@ GameSceneHistory::GameSceneHistory(const simulation::GameSimulation& game,
     if(!water.empty() && !background_lists.empty()
         && (water.front()&0xff0000U)==(background_lists.front()&0xff0000U))
         water_background_=static_cast<uint16_t>(water.front()-background_lists.front());
+    {
+        // Do not invent the bridge for source revisions without its constants.
+        const auto constant=[&](const char* name) -> std::optional<int16_t> {
+            const auto& value=symbols.find(name);
+            if(value.empty()) return std::nullopt;
+            return starfox::bit_cast<int16_t>(uint16_t(value.front()));
+        };
+        const auto top=constant("BRIDGE_MINY"),bottom=constant("BRIDGE_MAXY"),view=constant("BRIDGE_VIEWCY");
+        if(top && bottom && view && *top<*view && *view<*bottom) bridge_=SourceBridge{*top,*bottom,*view};
+    }
     for(size_t i=0;i<landscape_names.size();++i) {
         const auto& value=symbols.find(landscape_names[i]);
         if(!value.empty() && !background_lists.empty()
@@ -330,6 +340,7 @@ void GameSceneHistory::capture() {
     next->background_scroll_override=game_.map().peek_background_scroll_override();
     next->background_water_surround=next->ppu->background_mode==1 && water_background_!=0
         && game_.map().background()==water_background_;
+    if(next->background_water_surround) next->background_bridge=bridge_;
     // Only verified landscape atlases. Titania's water and tunnel
     // backgrounds use different projection schemes and must not join this set.
     if(next->ppu->background_mode==2) for(std::size_t i=0;i<landscape_backgrounds_.size();++i)

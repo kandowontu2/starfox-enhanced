@@ -807,8 +807,28 @@ float4 landscape_world_sample(Fragment input) {
         uint edge=texels[s+8]!=0?16:8;
         column=atan2(d.x,-d.z)*cylinder_columns(float(((texels[s+2]&1)!=0?64:32)*edge));
     }
+    float row=asfloat(texels[tail])-d.y/depth*256.;
+    // Headset skies that end in cloud (word 3 = 2; Titania, set by ModernFrame):
+    // the native screen's top row lies in the cloud tops, and holding it
+    // draws streaks up to the zenith. Above the cloud tops the band of wisps
+    // beneath them repeats instead, mirrored back and forth by elevation,
+    // each repeat moved sideways, thinning into the art's plain sky.
+    float sky_thin=0;
+    if(texels[s+3]==2U && d.y>0) {
+        const float band=48.;
+        float fold=asfloat(texels[tail+2])+4.;
+        float slope=(asfloat(texels[tail])-fold)/256.;
+        float above=(atan2(d.y,max(length(d.xz),1e-6))-atan(slope))*256.*(1.+slope*slope);
+        if(above>0) {
+            float repeat=floor(above/band);
+            float within=above-repeat*band;
+            row=fold+(fmod(repeat,2.)<1.?within:band-within);
+            column+=repeat*173.;
+            sky_thin=saturate(above/(band*4.5));
+        }
+    }
     float2 art=float2(asfloat(texels[tail+1])+column,
-        clamp(asfloat(texels[tail])-d.y/depth*256.,asfloat(texels[tail+2]),asfloat(texels[tail+3])));
+        clamp(row,asfloat(texels[tail+2]),asfloat(texels[tail+3])));
     float4 colour;
     if(filter_2d()) {
         float2 position=art-.5;float2 base=floor(position);
@@ -816,6 +836,9 @@ float4 landscape_world_sample(Fragment input) {
             tile_art_texel(s,int2(base)+int2(0,1),input.texture.w),tile_art_texel(s,int2(base)+int2(1,1),input.texture.w),
             position-base,(input.texture.w&2U)==0);
     } else colour=tile_art_texel(s,int2(floor(art)),input.texture.w);
+    // The plain sky: the art 40 rows above the screen's top row.
+    if(sky_thin>0)
+        colour=lerp(colour,tile_art_texel(s,int2(floor(float2(art.x,asfloat(texels[tail+2])-40.))),input.texture.w),sky_thin);
     // The dome below the horizon (only visible past the ground plane's far
     // edge) uses the same haze and the stripes' average shade, so that edge
     // does not crawl against the stepped art when the view rolls.

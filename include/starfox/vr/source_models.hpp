@@ -88,6 +88,8 @@ public:
     // HIGH POLY ARWINGS: draw the ending model (and its broken-wing
     // variants) for every player and teammate Arwing.
     void set_hipoly_arwings(bool enabled) noexcept {hipoly_arwings_=enabled;}
+    // 3D PROJECTILES: solid stand-ins for the round shot sprites.
+    void set_projectile_models(bool enabled) noexcept {projectile_models_=enabled;}
     // Replacement artwork for model textures (compute route), owned by the caller.
     void set_texture_overrides(const render::TextureOverrides* overrides) noexcept {texture_overrides_=overrides;}
     // Called for each texture of every shape drawn, with the 16 live model
@@ -118,6 +120,7 @@ private:
     bool compute_shadows_{true};
     render::AsteroidModels asteroid_models_{};
     bool hipoly_arwings_{};
+    bool projectile_models_{};
     const render::TextureOverrides* texture_overrides_{};
     TextureObserver texture_observer_;
     DrawPacket connected_grid_pose(const GameSceneSnapshot&,const timing::RenderTransform&,

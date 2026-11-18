@@ -168,5 +168,11 @@ private:
     std::optional<uint16_t> fog_background_;
     std::optional<std::array<float,3>> fog_colour_;
     bool meteor_fog_{};
+    // How many opaque sky-art pixels use each BG palette entry, and whether
+    // the haze follows the palette as it changes (Titania's weather).
+    std::array<uint32_t,128> fog_inks_{};
+    bool fog_tracks_palette_{};
+    // The headset sky's cloud tops continue up the dome (Titania).
+    bool cloud_sky_{};
 };
 }
