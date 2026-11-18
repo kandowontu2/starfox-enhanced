@@ -129,7 +129,7 @@ enum class PregamePage {
 inline constexpr std::array<std::uint8_t, 14> main_menu_order{
     0,1,2,3,43,4,5,6,20,21,47,14,15,16};
 inline constexpr std::array<std::uint8_t, 13> two_d_menu_order{8,18,36,37,38,39,40,41,13,24,44,46,23};
-inline constexpr std::array<std::uint8_t, 18> three_d_menu_order{42,7,11,9,30,78,17,79,82,80,81,12,22,35,33,34,45,23};
+inline constexpr std::array<std::uint8_t, 19> three_d_menu_order{42,7,11,9,30,78,17,79,82,83,80,81,12,22,35,33,34,45,23};
 inline constexpr std::array<std::uint8_t, 32> global_menu_order{
     29,72,32,71,76,77,10,65,66,28,70,27,73,74,61,62,67,63,68,48,49,50,52,53,54,55,56,57,69,59,60,23};
 #if defined(__3DS__)
@@ -152,6 +152,7 @@ inline constexpr bool modern_unsupported_row(unsigned row) noexcept {
     case 7: case 11: case 9: // AA QUALITY (as MSAA), VSYNC, RENDER UPSCALE
     case 79: case 80: case 81: // 3D ASTEROIDS, HIGH POLY ARWINGS, DYNAMIC LIGHTING
     case 82: // 3D PROJECTILES
+    case 83: // 3D EXPLOSIONS
     case 29: case 72: // RAY TRACING (sun shadows), SHADOW SOFTNESS
         return false;
     default: break;
@@ -522,6 +523,10 @@ public:
     // plasma ball sprites (render::substitute_projectile_model).
     [[nodiscard]] bool projectile_models() const noexcept { return projectile_models_; }
     void set_projectile_models(bool value) noexcept { projectile_models_ = value; }
+    // 3D EXPLOSIONS: layered stand-ins for the fire, smoke and explosion
+    // sprites (render::substitute_explosion_model).
+    [[nodiscard]] bool explosion_models() const noexcept { return explosion_models_; }
+    void set_explosion_models(bool value) noexcept { explosion_models_ = value; }
     // DYNAMIC LIGHTING (MODERN): ray-traced coloured lights from shots and
     // explosions, and the engine glow on the ground. MODERN's ray-traced
     // sun shadows follow RAY TRACING.
@@ -1383,6 +1388,7 @@ private:
     render::AsteroidModels asteroid_models_{};
     bool hipoly_arwings_{};
     bool projectile_models_{};
+    bool explosion_models_{};
     bool dynamic_lighting_{};
     std::uint8_t dlss_mode_{}; // Host quality preference, not emulated game state.
     std::uint8_t dlss45_mode_{};

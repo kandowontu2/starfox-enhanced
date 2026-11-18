@@ -181,15 +181,15 @@ int main() try {
         for(unsigned eye=0;eye<next.plan.eye_count;++eye)
             require(pica_draw_matrix(next.plan,eye,next.draws[0])==pica_screen_matrix(top_width),"Screen menu acquired stereo disparity");
     }
-    // Preserve the full shared 83-label range, including the merged asteroid,
-    // high-poly Arwing, dynamic lighting, and 3D projectile rows. Constructor validation above also covers the
+    // Preserve the full shared 84-label range, including the merged asteroid,
+    // high-poly Arwing, dynamic lighting, 3D projectile and 3D explosion rows. Constructor validation above also covers the
     // real source page IDs.
     const auto main_state=state;state.page=simulation::PregamePage::three_d;state.rows.clear();
-    for(unsigned id=0;id<83;++id) state.rows.push_back({std::uint8_t(id),"ROW","UNAVAILABLE",false});
-    state.selection=82;require(menu.update(state),"Full source label range rejected");
+    for(unsigned id=0;id<84;++id) state.rows.push_back({std::uint8_t(id),"ROW","UNAVAILABLE",false});
+    state.selection=83;require(menu.update(state),"Full source label range rejected");
     validate_pica_frame(menu.frame(plan),dashboard);
-    require(menu.state().selection==82 && menu.state().rows.size()==83,"Merged source row was dropped or relabeled");
-    auto too_many=state;too_many.rows.push_back({83,"INVALID","",false});
+    require(menu.state().selection==83 && menu.state().rows.size()==84,"Merged source row was dropped or relabeled");
+    auto too_many=state;too_many.rows.push_back({84,"INVALID","",false});
     rejects([&]{menu.update(too_many);});require(menu.state()==state,"Oversized source page partly replaced menu");
     state=main_state;menu.update(state);
     state.preview=true;require(menu.update(state),"Preview UI opacity did not update");

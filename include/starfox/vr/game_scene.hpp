@@ -260,6 +260,11 @@ private:
     std::array<uint32_t,4> outside_cruiser_strategies_{};
     std::optional<SourceNucleusRoom> nucleus_room_; // centre_z holds the ring's offset ahead of PLAYER_POSZ
     uint32_t player_posz_address_{};
+    // BOSSFLAGS and its bf_dying bit: GSTRATS init_strats_l calls
+    // bossflash_l (full cyan added to BG1-3 and the backdrop) every other
+    // frame while a boss is dying. MODERN leaves that flash out.
+    uint32_t boss_flags_address_{};
+    uint8_t boss_dying_bit_{};
     std::array<uint32_t,3> dust_addresses_{};
     std::array<uint32_t,3> cockpit_hud_addresses_{}; // HUDROT, M_HUDCOLOUR, M_HUDFLAGS (optional)
     std::shared_ptr<const GameSceneSnapshot> older_,previous_,current_;

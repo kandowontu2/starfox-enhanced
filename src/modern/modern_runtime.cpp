@@ -322,6 +322,7 @@ bool ModernRuntime::present(SDL_Renderer* renderer,double alpha,int requested_wi
         s.models.set_asteroid_models(s.history.game().asteroid_models());
         s.models.set_hipoly_arwings(s.history.game().hipoly_arwings());
         s.models.set_projectile_models(s.history.game().projectile_models());
+        s.models.set_explosion_models(s.history.game().explosion_models());
         // RAY TRACING turns on the ray-traced sun shadows and DYNAMIC
         // LIGHTING the coloured lights and engine glow; the
         // STARFOX_MODERN_RT_* switches still force them for testing.

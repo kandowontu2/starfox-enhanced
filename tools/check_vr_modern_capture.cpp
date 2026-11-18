@@ -247,6 +247,7 @@ int main(int argc,char** argv) try {
     },&history);
     vr::SourceModels models(rom,symbols,true,true);
     if(const char* projectiles=std::getenv("STARFOX_TEST_PROJECTILE_MODELS")) models.set_projectile_models(std::string_view(projectiles)=="1");
+    if(const char* explosions=std::getenv("STARFOX_TEST_EXPLOSION_MODELS")) models.set_explosion_models(std::string_view(explosions)=="1");
     render::ScaledTextRenderer dialogue_layout(rom,symbols);
     // application.cpp's MODERN inputs (VR's own cockpit, no flat-screen
     // substitutes); the STARFOX_MODERN_* switches apply as they do there.
@@ -593,7 +594,11 @@ int main(int argc,char** argv) try {
                 }
                 require(layers.upload(frame),layers.status());
                 vr::VulkanModernLayers::apply_fog(fog,frame,.05F);
-                if(!last) {require(SDL_SubmitGPUCommandBuffer(command),"Submit SDL prepare");continue;}
+                // STARFOX_VR_FROM_TICK=N: also draw and write every tick from N
+                // (<stem>-tTICK-vr.bmp / -sdl.bmp), to follow a short event.
+                static const long from_tick=std::getenv("STARFOX_VR_FROM_TICK")?std::stol(std::getenv("STARFOX_VR_FROM_TICK")):-1;
+                const bool each=from_tick>=0 && long(tick)>=from_tick && !last;
+                if(!last && !each) {require(SDL_SubmitGPUCommandBuffer(command),"Submit SDL prepare");continue;}
 
                 // SDL: modern_runtime.cpp's present() without the window.
                 require(flat.record_filtered_layers(command,camera),flat.status());
@@ -665,6 +670,11 @@ int main(int argc,char** argv) try {
                     if(!layers.record_filter(cmd,eye)) throw std::runtime_error("Vulkan xBRZ layer failed: "+layers.status());
                 });};
                 redraw();
+                if(each) {
+                    const auto name=stem.string()+"-t"+std::to_string(tick);
+                    write_bmp(name+"-vr.bmp",vr_pixels,width,height);
+                    write_bmp(name+"-sdl.bmp",sdl_pixels,width,height);
+                }
             }
             if(const char* repeat=std::getenv("STARFOX_VR_TIME")) {
                 double fastest=1e9,fastest_frame=1e9;

@@ -784,10 +784,10 @@ void ModernFrame::prepare(const GameSceneSnapshot& previous,const GameSceneSnaps
                 const double from=continuous?double(before):double(now);
                 return from+double(int16_t(uint16_t(now-int32_t(from))))*(continuous?alpha:1.);
             };
-            // Fixed in the world across X and Y; endless along Z, its water
-            // bands at fixed distances from the eye.
+            // Fixed in the world: its stripes were laid for this tick's
+            // camera Z and stay put between ticks while the eye moves on.
             model=multiply_matrix(seat,nucleus_room_model(blend(previous.camera.x,current.camera.x),
-                blend(previous.camera.y,current.camera.y),0,0));
+                blend(previous.camera.y,current.camera.y),blend(previous.camera.z,current.camera.z),current.camera.z));
         }
         if((is_nucleus_room(packet) || is_nucleus_floor(packet)) && current.background_nucleus) {
             const bool continuous=!timing::camera_transform_is_discontinuous(previous.camera,current.camera);

@@ -954,6 +954,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                     if(!startup.open || startup.preview) {
                     live->models.set_asteroid_models(startup.asteroid_model_mode());
                     live->models.set_projectile_models(startup.projectile_models);
+                    live->models.set_explosion_models(startup.explosion_models);
                     // Each game session has its own models; the overrides outlive them.
                     if(modern) live->models.set_texture_overrides(texture_overrides.empty()?nullptr:&texture_overrides);
                     auto packets=live->models.assemble_world_interpolated(*live->history->previous(),*live->history->current(),alpha,srgb,true);

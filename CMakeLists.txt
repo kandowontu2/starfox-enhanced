@@ -316,6 +316,7 @@ add_library(starfox_core
     src/render/face_material.cpp
     src/render/asteroid_models.cpp
     src/render/projectile_models.cpp
+    src/render/explosion_models.cpp
     src/render/sprite_renderer.cpp
     src/simulation/math.cpp
     src/simulation/dust_system.cpp
@@ -2285,6 +2286,16 @@ if(STARFOX_BUILD_TESTS)
        AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/upstream-ultrastarfox/SYMBOLS.TXT")
         add_test(NAME starfox_upstream_asteroid_models
             COMMAND starfox_asteroid_models_tests
+                    "${CMAKE_CURRENT_SOURCE_DIR}/upstream-ultrastarfox/SF.SFC"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/upstream-ultrastarfox/SYMBOLS.TXT")
+    endif()
+    add_executable(starfox_explosion_models_tests tests/explosion_models_tests.cpp)
+    target_link_libraries(starfox_explosion_models_tests PRIVATE starfox_core)
+    add_test(NAME starfox_explosion_models_tests COMMAND starfox_explosion_models_tests)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/upstream-ultrastarfox/SF.SFC"
+       AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/upstream-ultrastarfox/SYMBOLS.TXT")
+        add_test(NAME starfox_upstream_explosion_models
+            COMMAND starfox_explosion_models_tests
                     "${CMAKE_CURRENT_SOURCE_DIR}/upstream-ultrastarfox/SF.SFC"
                     "${CMAKE_CURRENT_SOURCE_DIR}/upstream-ultrastarfox/SYMBOLS.TXT")
     endif()

@@ -264,9 +264,9 @@ void original_menu_tests() {
         }
         menu.page=Page::options;menu.selection=6;click();require(menu.page==Page::three_d && !menu.ray_tracing);
         // Hosts without MODERN (the Steam Frame app) show no MODERN rows.
-        require(menu.row_count()==6 && menu.labels().back()=="BACK");
+        require(menu.row_count()==7 && menu.labels().back()=="BACK");
         menu.modern_available=true;
-        require(menu.row_count()==8 && menu.labels().back()=="BACK" && !menu.preview);
+        require(menu.row_count()==9 && menu.labels().back()=="BACK" && !menu.preview);
         click();require(menu.model_effect==1 && !menu.ray_tracing);
         menu.selection=2;click();require(menu.preview);menu.sample(press,true);require(menu.preview);
         click();require(!menu.preview);
@@ -277,17 +277,20 @@ void original_menu_tests() {
         click();require(menu.asteroid_models==0 && menu.labels()[3]=="3D ASTEROIDS: SPRITE");
         menu.selection=4;click();require(menu.projectile_models && menu.labels()[4]=="3D PROJECTILES: ON");
         click();require(!menu.projectile_models && menu.labels()[4]=="3D PROJECTILES: OFF");
+        menu.selection=5;click();require(menu.explosion_models && menu.labels()[5]=="3D EXPLOSIONS: ON");
+        click();require(!menu.explosion_models && menu.labels()[5]=="3D EXPLOSIONS: OFF");
         // MODERN applies at the next start; dynamic lighting at once.
-        menu.selection=5;click();require(menu.modern_renderer && menu.labels()[5]=="MODERN RENDERER: ON NEXT START");
-        menu.modern_running=true;require(menu.labels()[5]=="MODERN RENDERER: ON");
-        menu.selection=6;click();require(menu.dynamic_lighting && menu.labels()[6]=="DYNAMIC LIGHTING: ON");
-        menu.selection=7;click();require(!menu.ray_tracing && menu.page==Page::options);
-        menu.ray_tracing_available=true;click();require(menu.page==Page::three_d && menu.row_count()==9);
+        menu.selection=6;click();require(menu.modern_renderer && menu.labels()[6]=="MODERN RENDERER: ON NEXT START");
+        menu.modern_running=true;require(menu.labels()[6]=="MODERN RENDERER: ON");
+        menu.selection=7;click();require(menu.dynamic_lighting && menu.labels()[7]=="DYNAMIC LIGHTING: ON");
+        menu.selection=8;click();require(!menu.ray_tracing && menu.page==Page::options);
+        menu.ray_tracing_available=true;click();require(menu.page==Page::three_d && menu.row_count()==10);
         menu.selection=3;click();require(menu.ray_tracing);
         menu.sample(press,true);require(menu.ray_tracing);
         menu.selection=4;click();require(menu.asteroid_models==1 && menu.page==Page::three_d);
         menu.selection=5;click();require(menu.projectile_models && menu.page==Page::three_d);
-        menu.selection=8;click();require(menu.page==Page::options && menu.selection==6);
+        menu.selection=6;click();require(menu.explosion_models && menu.page==Page::three_d);
+        menu.selection=9;click();require(menu.page==Page::options && menu.selection==6);
         menu.selection=7;click();require(menu.page==Page::two_d);
         click();require(menu.world_effect==4);
         menu.selection=1;click();require(menu.world_intensity==0);
@@ -323,13 +326,13 @@ void original_menu_tests() {
         require(restored.preferences()==preferences);
         require(restored.steer_sensitivity_index==1);
         require(restored.asteroid_models==1 && restored.asteroid_model_mode()==starfox::render::AsteroidModels::super_fx_low);
-        require(restored.projectile_models);
+        require(restored.projectile_models && restored.explosion_models);
         require(restored.ray_tracing && !restored.ray_tracing_available);
         require(restored.enhanced_sky);
         require(restored.modern_renderer && restored.dynamic_lighting);
         require(!restored.ray_tracing_enabled());
         restored.page=Page::three_d;
-        require(restored.row_count()==6 && restored.labels().back()=="BACK" && !restored.preview);
+        require(restored.row_count()==7 && restored.labels().back()=="BACK" && !restored.preview);
         restored.ray_tracing_available=true;
         require(restored.ray_tracing_enabled());
         restored.ray_tracing=false;
@@ -353,8 +356,8 @@ void original_menu_tests() {
         std::array<uint8_t,21> version6{};std::copy(preferences.begin(),preferences.begin()+21,version6.begin());
         version6[4]=6;
         require(migrated.restore_preferences(version6) && !migrated.modern_renderer && !migrated.dynamic_lighting
-            && !migrated.projectile_models && migrated.asteroid_models==1);
-        auto bad_version7=preferences;bad_version7[21]=8;
+            && !migrated.projectile_models && !migrated.explosion_models && migrated.asteroid_models==1);
+        auto bad_version7=preferences;bad_version7[21]=16;
         require(!migrated.restore_preferences(bad_version7));
         // Exercise the very same bounded file loader used by application.cpp.
         // In particular, v6 must not be rejected by a stale 16/20-byte gate.

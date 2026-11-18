@@ -1124,7 +1124,7 @@ namespace {
 constexpr uint32_t water_bridge_marker=4098U;
 }
 DrawPacket water_bridge_packet(const simulation::SnesPpuState& source,unsigned brightness,bool srgb,
-    float top,float bottom,float view) {
+    float top,float bottom,float view,int32_t camera_x,int32_t camera_y,int32_t camera_z,float vanishing_row) {
     DrawPacket packet;
     if(brightness>15) throw std::invalid_argument("Invalid bridge brightness");
     if(!(top<view && view<bottom)) throw std::invalid_argument("Invalid bridge heights");
@@ -1195,15 +1195,78 @@ DrawPacket water_bridge_packet(const simulation::SnesPpuState& source,unsigned b
     }
     if(bands.empty()) return packet;
     bands.back().near=-behind;
+    // Stripes fixed in the world, 128 units light and 128 at 80% shade (in
+    // linear light), as on the planet grounds; past `reach` they would be
+    // finer than a pixel, so the water there takes their average.
+    constexpr double stripe=128.,reach=16384.;
+    const double eye=double(uint16_t(camera_z));
+    const double light_shade=1.,dark_shade=srgb?.8:std::pow(.8,1./2.2),mean_shade=srgb?.9:std::pow(.9,1./2.2);
+    const auto shaded=[&](unsigned index,double shade) {
+        auto rgba=colour(index);for(unsigned c=0;c<3;++c) rgba[c]=float(rgba[c]*shade);return rgba;
+    };
     for(const auto& band:bands) {
-        const float z0=std::max(far,float(-band.far)),z1=float(-band.near);
-        if(z1>z0) push_flat(packet,std::array<std::array<float,3>,4>{{{-side,deck_y,z1},{side,deck_y,z1},{side,deck_y,z0},{-side,deck_y,z0}}},
-            colour(band.index));
+        // Model Z runs from the far edge (z0) to the near one (z1).
+        const double z0=std::max(double(far),-band.far),z1=-band.near;
+        if(!(z1>z0)) continue;
+        const auto water=[&](double a,double b,double shade) {
+            push_flat(packet,std::array<std::array<float,3>,4>{{{-side,deck_y,float(b)},{side,deck_y,float(b)},
+                {side,deck_y,float(a)},{-side,deck_y,float(a)}}},shaded(band.index,shade));
+        };
+        const double split=std::max(z0,-reach);
+        if(split>z0) water(z0,split,mean_shade);
+        // World Z is the eye's world Z minus model Z.
+        double z=split;
+        while(z<z1) {
+            // The stripe holding the world just beyond z, and where it ends.
+            const double cell=std::floor((eye-z-1e-6)/stripe);
+            const double end=std::min(z1,eye-cell*stripe);
+            water(z,end,(int64_t(cell)&1)?dark_shade:light_shade);
+            z=end;
+        }
+    }
+    // The deck (the span's shadow on the water), bent by the water wave:
+    // each screen row's offset less the camera's sideways term
+    // (128 + camera X x rows below the horizon / eye height), at that row's
+    // distance. A positive offset scrolls the picture left.
+    const double eye_height=std::max(1.,double(bottom)-double(camera_y));
+    const auto deck_colour=colour(ink(256,horizon+8));
+    struct Bend {double z,x;};
+    std::vector<Bend> bends;
+    const bool wave=source.bg2_horizontal_offsets_enabled;
+    for(int row=223;row>=0;--row) {
+        const double k=row+.5-double(vanishing_row);
+        if(k<1.) break;
+        double shift=0;
+        if(wave) shift=double(source.bg2_horizontal_offsets[size_t(row)])-128.-double(camera_x)*k/eye_height;
+        // Rows a few pixels off are the wave; larger ones are something else.
+        if(std::abs(shift)>12.) shift=0;
+        bends.push_back({-deck_height*256./k,shift});
+    }
+    // The offsets are whole pixels; at headset resolution their steps show
+    // as jogs. Smooth the wave over a few rows, then turn pixels into units
+    // at each row's distance.
+    {
+        std::vector<double> smooth(bends.size());
+        for(std::size_t i=0;i<bends.size();++i) {
+            double sum=0;int count=0;
+            for(std::size_t j=i>=3?i-3:0;j<std::min(bends.size(),i+4);++j) {sum+=bends[j].x;++count;}
+            smooth[i]=count?sum/count:0.;
+        }
+        for(std::size_t i=0;i<bends.size();++i) bends[i].x=-smooth[i]*(-bends[i].z)/256.; // A pixel spans distance / 256 units.
+    }
+    if(bends.empty()) bends.push_back({0.,0.});
+    // Nearer than the bottom row and beyond the farthest: held straight.
+    bends.insert(bends.begin(),{double(behind),bends.front().x});
+    bends.push_back({double(far),bends.back().x});
+    for(std::size_t i=0;i+1<bends.size();++i) {
+        const auto& a=bends[i];const auto& b=bends[i+1];
+        const float half=float(deck_half);
+        push_flat(packet,std::array<std::array<float,3>,4>{{{float(a.x)-half,deck_y,float(a.z)},{float(a.x)+half,deck_y,float(a.z)},
+            {float(b.x)+half,deck_y,float(b.z)},{float(b.x)-half,deck_y,float(b.z)}}},deck_colour);
     }
     const auto strip=[&](float half,float y,unsigned index) {
         push_flat(packet,std::array<std::array<float,3>,4>{{{-half,y,behind},{half,y,behind},{half,y,far},{-half,y,far}}},colour(index));
     };
-    strip(float(deck_half),deck_y,ink(256,horizon+8));
     strip(float(span_half),span_y,span_ink);
     if(ridge_half>.25) strip(float(ridge_half),span_y,ridge_ink);
     packet.geometry.texels.assign(16,0);
@@ -1225,7 +1288,7 @@ struct LineFit {
 };
 }
 DrawPacket colony_corridor_packet(const simulation::SnesPpuState& source,unsigned brightness,bool srgb,
-    float top,float bottom) {
+    float top,float bottom,int32_t camera_z) {
     DrawPacket packet;
     if(brightness>15) throw std::invalid_argument("Invalid colony brightness");
     if(!(top<bottom)) throw std::invalid_argument("Invalid colony heights");
@@ -1336,8 +1399,51 @@ DrawPacket colony_corridor_packet(const simulation::SnesPpuState& source,unsigne
         if(!result.empty()) {result.front().z0=far;result.back().z1=behind;}
         return result;
     };
-    const auto floor_bands=bands(false),ceiling_bands=bands(true);
+    auto floor_bands=bands(false),ceiling_bands=bands(true);
     if(floor_bands.empty() || ceiling_bands.empty()) return packet;
+    // The cartridge's table swaps the two pages every 128 units of world Z
+    // (one 256-unit cycle), locked to the camera's Z. Bands cut from this
+    // tick's rows jump a row's worth each tick and stop where the rows run
+    // out near the horizon; lay them in the world instead. The phase comes
+    // from the near band edges, where a row is finest.
+    {
+        constexpr double half_period=128.;
+        const double eye=double(uint16_t(camera_z));
+        double sum_cos=0,sum_sin=0;
+        for(std::size_t i=0;i+1<floor_bands.size();++i) {
+            const double edge=-double(floor_bands[i].z1); // Distance of the far band's near edge.
+            if(edge>900. || edge<100.) continue;
+            const double angle=2*std::numbers::pi*std::fmod(eye+edge,half_period)/half_period;
+            const double weight=1./edge;
+            sum_cos+=std::cos(angle)*weight;sum_sin+=std::sin(angle)*weight;
+        }
+        std::vector<int16_t> seen;
+        for(const auto& band:floor_bands) if(std::find(seen.begin(),seen.end(),band.page)==seen.end()) seen.push_back(band.page);
+        if(std::hypot(sum_cos,sum_sin)>0 && seen.size()==2) {
+            double phase=std::atan2(sum_sin,sum_cos)/(2*std::numbers::pi)*half_period;
+            if(phase<0) phase+=half_period;
+            // Which page holds which parity: the nearest full run on screen.
+            const auto& nearest=floor_bands.size()>1?floor_bands[floor_bands.size()-2]:floor_bands.back();
+            const double middle=eye-.5*(double(nearest.z0)+double(nearest.z1));
+            const auto parity=[&](double world){return int64_t(std::floor((world-phase)/half_period))&1;};
+            const int16_t near_page=nearest.page,other_page=seen[0]==near_page?seen[1]:seen[0];
+            const int64_t near_parity=parity(middle);
+            // The wider floor carries on to the horizon past the last band.
+            const int16_t far_page=look(seen[0]).floor_left<look(seen[1]).floor_left?seen[0]:seen[1];
+            constexpr double reach=24576.;
+            std::vector<Band> world;
+            double edge=std::floor((eye-behind-phase)/half_period)*half_period+phase;
+            while(edge<eye+reach) {
+                const double next=edge+half_period;
+                const auto page=parity(edge+1.)==near_parity?near_page:other_page;
+                // Model Z is the eye's world Z minus the world Z.
+                world.push_back({float(-(next-eye)),float(-(edge-eye)),page});
+                edge=next;
+            }
+            world.push_back({far,float(-(edge-eye)),far_page});
+            floor_bands=world;ceiling_bands=std::move(world);
+        }
+    }
     const auto quad=[&](float x0,float x1,float y,float z0,float z1,unsigned index) {
         push_flat(packet,std::array<std::array<float,3>,4>{{{x0,y,z1},{x1,y,z1},{x1,y,z0},{x0,y,z0}}},colour(index));
     };

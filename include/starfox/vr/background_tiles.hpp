@@ -250,12 +250,18 @@ void place_landscape_ground(DrawPacket&,float ground_y,bool gpu=false);
 // slopes at those heights, so they line up with what the cartridge drew.
 // Endless strips along Z, an endless water plane at the deck's height in the
 // art's own colours, its horizon haze as bands at the distances the art's
-// rows paint. Model space: source units, +Y up, Y 0 at cartridge Y 0, the
-// eye's Z at 0; place with nucleus_room_model(camera x, camera y, 0, 0).
+// rows paint, and alternate stripes along Z at 80% shade (the planet
+// ground's moving stripes, 128 units each) fixed in the world. The deck is
+// the span's shadow on the water: it bends with the cartridge's per-row
+// water wave (the horizontal offsets left over once the camera's own
+// sideways term is taken out), row by row, as the cartridge's does.
+// Model space: source units, +Y up, Y 0 at cartridge Y 0, the eye's Z at 0
+// for camera_z; place with nucleus_room_model(camera x, camera y, camera z,
+// camera_z). `vanishing_row` is the screen row of the horizon.
 // Draw it like the layer it replaces: behind every object.
 // Empty when the art does not read as that picture.
 [[nodiscard]] DrawPacket water_bridge_packet(const simulation::SnesPpuState&,unsigned brightness,bool srgb,
-    float top,float bottom,float view);
+    float top,float bottom,float view,int32_t camera_x=0,int32_t camera_y=0,int32_t camera_z=0,float vanishing_row=111.5F);
 [[nodiscard]] bool is_water_bridge(const DrawPacket&) noexcept;
 // Venom 2's colony (BG_2_6A) as real geometry. The cartridge paints a
 // one-sided corridor in Mode 1 BG2 (tunnel tables pick one of two art pages
@@ -269,7 +275,7 @@ void place_landscape_ground(DrawPacket&,float ground_y,bool gpu=false);
 // open side is left empty so BG3 shows through, as on the cartridge.
 // Empty when the art does not read that way.
 [[nodiscard]] DrawPacket colony_corridor_packet(const simulation::SnesPpuState&,unsigned brightness,bool srgb,
-    float top,float bottom);
+    float top,float bottom,int32_t camera_z=0);
 [[nodiscard]] bool is_colony_corridor(const DrawPacket&) noexcept;
 // Orbital horizon: preserve the authored vertical band instead of clamping
 // its final texture row over a hemisphere. Unique upper rows remain unique.

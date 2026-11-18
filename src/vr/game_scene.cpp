@@ -4,8 +4,10 @@
 #include "starfox/assets/shape_decoder.hpp"
 #include <algorithm>
 #include <bit>
+#include <cstdlib>
 #include <limits>
 #include <stdexcept>
+#include <string_view>
 
 namespace starfox::vr {
 std::array<std::optional<SourceCorridor>,source_corridor_count> source_corridors(const assets::SymbolMap& symbols) {
@@ -148,6 +150,9 @@ GameSceneHistory::GameSceneHistory(const simulation::GameSimulation& game,
         for(const auto value:symbols.find("BOSS_8_1C")) if(value<0x10000U) {reactor=value;break;}
         for(const auto address:symbols.find("PLAYER_POSZ"))
             if((address>>16U)==0 || (address>>16U)==0x7eU) {player_posz_address_=address;break;}
+        for(const auto address:symbols.find("BOSSFLAGS"))
+            if((address>>16U)==0 || (address>>16U)==0x7eU) {boss_flags_address_=address;break;}
+        if(const auto bit=first("BF_DYING"); bit && *bit<256U) boss_dying_bit_=uint8_t(*bit);
         bool found=false;
         for(std::size_t i=0;const char* name:{"BG_1_3D","BG_1_3DA"}) {
             const auto& value=symbols.find(name);
@@ -471,6 +476,19 @@ void GameSceneHistory::capture() {
             next->background_star_sphere=true;
     next->circle=game_.circle_effect_state();
     next->colour_math=game_.colour_math_effect_state();
+    {
+        // The boss-dying flash (bossflash_l: add 0,31,31 on BG1-3 and the
+        // backdrop) turns a headset's whole view cyan every other frame
+        // while a boss blows up. Leave it out; the player-hit flash, which
+        // uses the same colour, is kept (it never coincides with bf_dying).
+        // STARFOX_MODERN_BOSS_FLASH=1 keeps the cartridge's flash.
+        static const bool keep=[] {const char* value=std::getenv("STARFOX_MODERN_BOSS_FLASH");return value && std::string_view(value)=="1";}();
+        const auto& math=next->colour_math;
+        if(!keep && math.active && !math.subtract && !math.half && math.red==0 && math.green==31 && math.blue==31
+            && boss_flags_address_ && boss_dying_bit_
+            && (game_.map().read_native_byte(boss_flags_address_)&boss_dying_bit_)!=0)
+            next->colour_math={};
+    }
     next->ex_title_logo_screen=next->meters.extended
         && next->flow==simulation::GameFlowState::title
         && ex_title_intro_background_!=0

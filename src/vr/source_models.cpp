@@ -1,5 +1,6 @@
 #include "starfox/vr/source_models.hpp"
 #include "starfox/render/projectile_models.hpp"
+#include "starfox/render/explosion_models.hpp"
 #include "starfox/compat/bit_cast.hpp"
 #include <stdexcept>
 #include <cstdlib>
@@ -619,6 +620,7 @@ SourceModelPackets SourceModels::assemble_poses(const GameSceneSnapshot& scene,s
             if(!shadow) {
                 if(const auto* model=render::substitute_asteroid_model(lod->second,pose,asteroid_models_)) drawn=model;
                 else if(const auto* projectile=render::substitute_projectile_model(lod->second,pose,projectile_models_)) drawn=projectile;
+                else if(const auto* explosion=render::substitute_explosion_model(lod->second,pose,explosion_models_)) drawn=explosion;
             }
             if(texture_observer_ && !shadow) for(const auto& texture:drawn->textures) texture_observer_(texture,scene.model_palette);
             const uint32_t pass_key=uint32_t(item.handle)|(shadow?source_shadow_pass:0U);
