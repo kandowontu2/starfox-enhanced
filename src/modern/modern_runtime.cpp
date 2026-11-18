@@ -222,7 +222,8 @@ bool ModernRuntime::draws(const simulation::GameSimulation& game) noexcept {
     return flat_frame_supported(game.in_setup_menu(),game.runtime_options_open(),game.stereo_output());
 }
 bool ModernRuntime::present(SDL_Renderer* renderer,double alpha,int requested_width,int requested_height,const char* capture_path,
-    const HostOverlay& overlay,const HostOverlay& dialog,const vr::StageTallyLayer* tally) {
+    const HostOverlay& overlay,const HostOverlay& dialog,const vr::StageTallyLayer* tally,
+    const std::function<void(SDL_Renderer*)>& before_present) {
     auto& s=*state_;
     try {
         require(renderer!=nullptr,"MODERN needs a renderer");
@@ -569,6 +570,11 @@ bool ModernRuntime::present(SDL_Renderer* renderer,double alpha,int requested_wi
         };
         draw_overlay(overlay,s.overlay,"overlay");
         draw_overlay(dialog,s.dialog,"dialog");
+        if(before_present) {
+            SDL_SetRenderLogicalPresentation(renderer,0,0,SDL_LOGICAL_PRESENTATION_DISABLED);
+            SDL_SetRenderViewport(renderer,nullptr);SDL_SetRenderClipRect(renderer,nullptr);
+            before_present(renderer);
+        }
         const bool presented=SDL_RenderPresent(renderer);
         require(presented,"Present MODERN frame");
         status_.clear();return true;

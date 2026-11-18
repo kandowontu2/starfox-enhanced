@@ -112,20 +112,35 @@ bool SdlScenePipelines::initialize(SDL_GPUDevice* device,SDL_GPUTextureFormat co
         require(device!=nullptr,"Missing SDL GPU device");
         const auto formats=SDL_GetGPUShaderFormats(device);
         const bool dxil=(formats&SDL_GPU_SHADERFORMAT_DXIL)!=0;
-        require(dxil || (formats&SDL_GPU_SHADERFORMAT_SPIRV)!=0,"MODERN scene shaders need a SPIR-V or DXIL backend");
+        const bool spirv=!dxil && (formats&SDL_GPU_SHADERFORMAT_SPIRV)!=0;
+#if defined(__APPLE__)
+        // Metal: MSL cross-compiled offline (tools/generate_modern_shaders.py).
+        const bool msl=!dxil && !spirv && (formats&SDL_GPU_SHADERFORMAT_MSL)!=0;
+#else
+        constexpr bool msl=false;
+#endif
+        require(dxil || spirv || msl,"MODERN scene shaders need a SPIR-V, DXIL or Metal backend");
         const auto create=[&](SDL_GPUShaderStage stage) {
             const bool vertex=stage==SDL_GPU_SHADERSTAGE_VERTEX;
             SDL_GPUShaderCreateInfo info{};
+            info.entrypoint=vertex?shader::vertex_entry:shader::fragment_entry;
             if(dxil) {
                 info.code=vertex?shader::dxil_vertex:shader::dxil_fragment;
                 info.code_size=vertex?sizeof(shader::dxil_vertex):sizeof(shader::dxil_fragment);
                 info.format=SDL_GPU_SHADERFORMAT_DXIL;
-            } else {
+            } else if(spirv) {
                 info.code=vertex?shader::spirv_vertex:shader::spirv_fragment;
                 info.code_size=vertex?sizeof(shader::spirv_vertex):sizeof(shader::spirv_fragment);
                 info.format=SDL_GPU_SHADERFORMAT_SPIRV;
             }
-            info.entrypoint=vertex?shader::vertex_entry:shader::fragment_entry;
+#if defined(__APPLE__)
+            else if(msl) {
+                info.code=reinterpret_cast<const Uint8*>(vertex?shader::msl_vertex:shader::msl_fragment);
+                info.code_size=(vertex?sizeof(shader::msl_vertex):sizeof(shader::msl_fragment))-1;
+                info.format=SDL_GPU_SHADERFORMAT_MSL;
+                info.entrypoint=vertex?shader::msl_vertex_entry:shader::msl_fragment_entry;
+            }
+#endif
             // Fragment: slot 0 texels, 1-2 shadow casters; uniform slot 1 fog and shadow.
             info.stage=stage;info.num_storage_buffers=vertex?1:3;info.num_uniform_buffers=2;
             auto* created=SDL_CreateGPUShader(device,&info);

@@ -51,7 +51,33 @@ SDL_GPUComputePipeline* SdlSourceStages::get(SDL_GPUDevice* device,unsigned stag
     const auto formats=SDL_GetGPUShaderFormats(device);
     const bool spirv=(formats&SDL_GPU_SHADERFORMAT_SPIRV)!=0;
     const bool dxil=!spirv && (formats&SDL_GPU_SHADERFORMAT_DXIL)!=0;
-    if(!spirv && !dxil) {status_="MODERN source stages need a SPIR-V or DXIL backend";return nullptr;}
+#if defined(__APPLE__)
+    // Metal: upstream's portable MSL (desktop gpu_clip/gpu_projection/gpu_bsp
+    // use it the same way). Its buffer slots assume these same counts:
+    // settings, then the read-only inputs, then the outputs, in region order.
+    const bool msl=!spirv && !dxil && (formats&SDL_GPU_SHADERFORMAT_MSL)!=0;
+    if(msl) {
+        SDL_GPUComputePipelineCreateInfo info{};
+        const char* source=nullptr;
+        switch(stage) {
+        case 0: source=render::spans_shader::metal;break;
+        case 1: source=render::clip_continuous_shader::metal;break;
+        case 2: source=render::continuous_shader::metal;break;
+        case 3: source=render::continuous_visibility_shader::metal;break;
+        default: source=render::bsp_shader::metal;break;
+        }
+        info.format=SDL_GPU_SHADERFORMAT_MSL;info.entrypoint="main0";
+        info.code=reinterpret_cast<const Uint8*>(source);info.code_size=std::strlen(source);
+        info.num_readonly_storage_buffers=stage_inputs[stage];
+        info.num_readwrite_storage_buffers=stage_counts[stage]-stage_inputs[stage]-1;
+        info.num_uniform_buffers=1;
+        info.threadcount_x=stage_lanes[stage];info.threadcount_y=info.threadcount_z=1;
+        pipelines_[stage]=SDL_CreateGPUComputePipeline(device,&info);
+        if(!pipelines_[stage]) status_=sdl_error("Create MODERN source stage");
+        return pipelines_[stage];
+    }
+#endif
+    if(!spirv && !dxil) {status_="MODERN source stages need a SPIR-V, DXIL or Metal backend";return nullptr;}
     // Same shader selection as desktop gpu_clip.cpp, including Intel's
     // compact continuous-clip DXIL.
     const bool intel=dxil && SDL_GetNumberProperty(SDL_GetGPUDeviceProperties(device),"starfox.gpu.vendor_id",0)==0x8086;

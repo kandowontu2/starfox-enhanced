@@ -2146,6 +2146,15 @@ public:
             {float(safe.x),float(safe.y),float(safe.x+safe.w),float(safe.y+safe.h)},
             touch_layout_config_?*touch_layout_config_:starfox::app::TouchLayoutConfig{});
     }
+    // The on-screen buttons over a frame the MODERN renderer composed, placed
+    // in window coordinates exactly as present_rgba_pixels places them.
+    void draw_touch_controls_over_frame() {
+        const auto layout=touch_layout();
+        if(!SDL_SetRenderLogicalPresentation(renderer_,int(layout.width),
+            int(layout.height),SDL_LOGICAL_PRESENTATION_STRETCH))
+            throw std::runtime_error(SDL_GetError());
+        draw_touch_overlay(renderer_,layout,touch_editor_active_,touch_editor_selected_);
+    }
     void set_touch_layout_config(const starfox::app::TouchLayoutConfig* config) noexcept {
         touch_layout_config_=config;
     }
@@ -12377,7 +12386,13 @@ int main(int argc, char** argv) {
                 // Same internal raster as the existing renderer: canvas x scale.
                 if(modern->present(window.renderer(),interpolation_alpha,
                     int(display_width*render_scale),int(snes_height*render_scale),
-                    modern_capture.empty()?nullptr:modern_capture.c_str(),fps_overlay,dialog,tally?&*tally:nullptr)) {
+                    modern_capture.empty()?nullptr:modern_capture.c_str(),fps_overlay,dialog,tally?&*tally:nullptr,
+                    // On-screen buttons (Android/iOS), as the existing
+                    // presentation decides them (presentation_effects).
+                    touch_controls_enabled() && (touch_controls.visible()
+                        || std::getenv("STARFOX_TEST_TOUCH_OVERLAY")!=nullptr)
+                        ?std::function<void(SDL_Renderer*)>([&window](SDL_Renderer*) {window.draw_touch_controls_over_frame();})
+                        :std::function<void(SDL_Renderer*)>{})) {
                     if(!advance_frozen_frame) live_fps.record_frame(std::chrono::steady_clock::now());
                     if(presented_frames==0) startup_trace->mark("first game/menu frame presented");
                     complete_presentation();

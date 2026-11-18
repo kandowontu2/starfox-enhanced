@@ -37,26 +37,47 @@ bool SdlLayerFilter::initialize(SDL_GPUDevice* device,SDL_GPUTextureFormat colou
         if(!pipelines_.initialize(device,colour,depth,true)) throw std::runtime_error(pipelines_.status());
         const auto formats=SDL_GetGPUShaderFormats(device);
         const bool dxil=(formats&SDL_GPU_SHADERFORMAT_DXIL)!=0;
-        if(!dxil && !(formats&SDL_GPU_SHADERFORMAT_SPIRV)) throw std::runtime_error("MODERN layer filter needs a SPIR-V or DXIL backend");
-        const auto format=dxil?SDL_GPU_SHADERFORMAT_DXIL:SDL_GPU_SHADERFORMAT_SPIRV;
+#if defined(__APPLE__)
+        // Metal: MSL cross-compiled offline (tools/generate_modern_shaders.py).
+        const bool msl=!dxil && !(formats&SDL_GPU_SHADERFORMAT_SPIRV) && (formats&SDL_GPU_SHADERFORMAT_MSL)!=0;
+#else
+        constexpr bool msl=false;
+#endif
+        if(!dxil && !msl && !(formats&SDL_GPU_SHADERFORMAT_SPIRV)) throw std::runtime_error("MODERN layer filter needs a SPIR-V, DXIL or Metal backend");
+        const auto format=dxil?SDL_GPU_SHADERFORMAT_DXIL:msl?SDL_GPU_SHADERFORMAT_MSL:SDL_GPU_SHADERFORMAT_SPIRV;
+        // Picks this backend's payload and entry point for one stage.
+        const auto use=[&](auto& info,const unsigned char* spirv_code,std::size_t spirv_size,
+            const unsigned char* dxil_code,std::size_t dxil_size,const char* entry,[[maybe_unused]] const char* msl_code,
+            [[maybe_unused]] std::size_t msl_size,[[maybe_unused]] const char* msl_entry) {
+            info.format=format;info.entrypoint=entry;
+            info.code=dxil?dxil_code:spirv_code;info.code_size=dxil?dxil_size:spirv_size;
+#if defined(__APPLE__)
+            if(msl) {info.code=reinterpret_cast<const Uint8*>(msl_code);info.code_size=msl_size-1;info.entrypoint=msl_entry;}
+#endif
+        };
+#if defined(__APPLE__)
+#define STARFOX_LAYER_MSL(stage) code::msl_##stage,sizeof(code::msl_##stage),code::msl_##stage##_entry
+#else
+#define STARFOX_LAYER_MSL(stage) nullptr,0,nullptr
+#endif
         SDL_GPUComputePipelineCreateInfo compute{};
-        compute.format=format;compute.entrypoint="filter_main";
-        compute.code=dxil?code::dxil_compute:code::spirv_compute;
-        compute.code_size=dxil?sizeof(code::dxil_compute):sizeof(code::spirv_compute);
+        use(compute,code::spirv_compute,sizeof(code::spirv_compute),code::dxil_compute,sizeof(code::dxil_compute),
+            "filter_main",STARFOX_LAYER_MSL(compute));
         compute.num_readonly_storage_textures=1;compute.num_readonly_storage_buffers=1;
         compute.num_readwrite_storage_textures=1;compute.num_uniform_buffers=1;
         compute.threadcount_x=8;compute.threadcount_y=8;compute.threadcount_z=1;
         compute_=SDL_CreateGPUComputePipeline(device,&compute);
         require(compute_,"Create MODERN layer filter");
         SDL_GPUShaderCreateInfo shader{};
-        shader.format=format;shader.stage=SDL_GPU_SHADERSTAGE_VERTEX;shader.entrypoint="composite_vertex";
-        shader.code=dxil?code::dxil_vertex:code::spirv_vertex;
-        shader.code_size=dxil?sizeof(code::dxil_vertex):sizeof(code::spirv_vertex);
+        shader.stage=SDL_GPU_SHADERSTAGE_VERTEX;
+        use(shader,code::spirv_vertex,sizeof(code::spirv_vertex),code::dxil_vertex,sizeof(code::dxil_vertex),
+            "composite_vertex",STARFOX_LAYER_MSL(vertex));
         vertex_=SDL_CreateGPUShader(device,&shader);
         require(vertex_,"Create MODERN layer composite vertex shader");
-        shader.stage=SDL_GPU_SHADERSTAGE_FRAGMENT;shader.entrypoint="composite_fragment";shader.num_samplers=1;shader.num_uniform_buffers=1;
-        shader.code=dxil?code::dxil_fragment:code::spirv_fragment;
-        shader.code_size=dxil?sizeof(code::dxil_fragment):sizeof(code::spirv_fragment);
+        shader.stage=SDL_GPU_SHADERSTAGE_FRAGMENT;shader.num_samplers=1;shader.num_uniform_buffers=1;
+        use(shader,code::spirv_fragment,sizeof(code::spirv_fragment),code::dxil_fragment,sizeof(code::dxil_fragment),
+            "composite_fragment",STARFOX_LAYER_MSL(fragment));
+#undef STARFOX_LAYER_MSL
         fragment_=SDL_CreateGPUShader(device,&shader);
         require(fragment_,"Create MODERN layer composite fragment shader");
         SDL_GPUSamplerCreateInfo sampler{};

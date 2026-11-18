@@ -83,8 +83,19 @@ bool SdlRayShadows::record(SDL_GPUDevice* device,SDL_GPUCommandBuffer* command,c
             info.format=spirv?SDL_GPU_SHADERFORMAT_SPIRV:SDL_GPU_SHADERFORMAT_DXIL;
             info.code=spirv?ray_shadow_shader::spirv_compute:ray_shadow_shader::dxil_compute;
             info.code_size=spirv?sizeof(ray_shadow_shader::spirv_compute):sizeof(ray_shadow_shader::dxil_compute);
-            require(spirv || (formats&SDL_GPU_SHADERFORMAT_DXIL)!=0,"MODERN ray shadows need SPIR-V or DXIL");
             info.entrypoint="main";
+#if defined(__APPLE__)
+            // Metal: MSL cross-compiled offline (tools/generate_modern_shaders.py).
+            const bool msl=!spirv && !(formats&SDL_GPU_SHADERFORMAT_DXIL) && (formats&SDL_GPU_SHADERFORMAT_MSL)!=0;
+            if(msl) {
+                info.format=SDL_GPU_SHADERFORMAT_MSL;info.entrypoint=ray_shadow_shader::msl_compute_entry;
+                info.code=reinterpret_cast<const Uint8*>(ray_shadow_shader::msl_compute);
+                info.code_size=sizeof(ray_shadow_shader::msl_compute)-1;
+            }
+#else
+            constexpr bool msl=false;
+#endif
+            require(spirv || msl || (formats&SDL_GPU_SHADERFORMAT_DXIL)!=0,"MODERN ray shadows need SPIR-V, DXIL or Metal");
             info.num_readonly_storage_buffers=2;info.num_readwrite_storage_buffers=2;info.num_uniform_buffers=1;
             info.threadcount_x=64;info.threadcount_y=info.threadcount_z=1;
             pipeline_=SDL_CreateGPUComputePipeline(device,&info);

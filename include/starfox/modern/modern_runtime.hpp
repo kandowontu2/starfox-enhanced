@@ -4,6 +4,7 @@
 #include "starfox/vr/frame_layers.hpp"
 #include "starfox/render/scaled_text_renderer.hpp"
 #include <SDL3/SDL_render.h>
+#include <functional>
 #include <memory>
 #include <string>
 namespace starfox::modern {
@@ -45,8 +46,12 @@ public:
     // drawn frame is also written as BMP (without `overlay` or `dialog`).
     // `dialog` is the host's EXIT GAME? / save-slot box, drawn over overlay.
     // `tally` is the stage-clear tally, drawn with the frame's 2D layers.
+    // `before_present` draws last, over everything, on the window (no target,
+    // no logical presentation; MODERN restores the renderer state after):
+    // the host's on-screen touch buttons on Android and iOS.
     bool present(SDL_Renderer*,double alpha,int width=0,int height=0,const char* capture_path=nullptr,
-        const HostOverlay& overlay={},const HostOverlay& dialog={},const vr::StageTallyLayer* tally=nullptr);
+        const HostOverlay& overlay={},const HostOverlay& dialog={},const vr::StageTallyLayer* tally=nullptr,
+        const std::function<void(SDL_Renderer*)>& before_present={});
     const std::string& status() const noexcept {return status_;}
     // Compute-route models skipped this frame (warp/axis not yet ported).
     std::size_t unsupported_models() const noexcept;
