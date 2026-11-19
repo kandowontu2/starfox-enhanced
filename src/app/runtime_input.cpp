@@ -983,6 +983,10 @@ bool load_pregame_settings(
             // Optional: absent means the sprites.
             if (value < 0 || value > 1) return false;
             loaded.explosion_models = value != 0;
+        } else if (name == "MODERN_DISPLAY_RESOLUTION") {
+            // Optional: absent means RENDER UPSCALE's own scale.
+            if (value < 0 || value > 1) return false;
+            loaded.modern_display_resolution = value != 0;
         } else if (name == "EFFECT_INTENSITY") {
             if (value < 0 || value > 100) return false;
             loaded.effect_intensity = static_cast<std::uint8_t>(value);
@@ -1261,7 +1265,8 @@ bool save_pregame_settings(
            << "HIPOLY_ARWINGS " << static_cast<unsigned>(settings.hipoly_arwings) << '\n'
            << "DYNAMIC_LIGHTING " << static_cast<unsigned>(settings.dynamic_lighting) << '\n'
            << "PROJECTILE_MODELS " << static_cast<unsigned>(settings.projectile_models) << '\n'
-           << "EXPLOSION_MODELS " << static_cast<unsigned>(settings.explosion_models) << '\n';
+           << "EXPLOSION_MODELS " << static_cast<unsigned>(settings.explosion_models) << '\n'
+           << "MODERN_DISPLAY_RESOLUTION " << static_cast<unsigned>(settings.modern_display_resolution) << '\n';
     if (!output) return false;
     const auto bytes = output.str();
     AtomicFile file{path};

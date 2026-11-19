@@ -35,6 +35,8 @@ bool SdlLayerFilter::initialize(SDL_GPUDevice* device,SDL_GPUTextureFormat colou
         if(!device) throw std::runtime_error("Missing SDL GPU device");
         device_=device;colour_=colour;depth_format_=depth;
         if(!pipelines_.initialize(device,colour,depth,true)) throw std::runtime_error(pipelines_.status());
+        // The filtered 2D layers draw opaque and subtract (Adreno log).
+        pipelines_.set_warm_keys({0U,16U});
         const auto formats=SDL_GetGPUShaderFormats(device);
         const bool dxil=(formats&SDL_GPU_SHADERFORMAT_DXIL)!=0;
 #if defined(__APPLE__)

@@ -7119,6 +7119,9 @@ int main(int argc, char** argv) {
         require(!missing_msu_game.msu1_available()
                     && !missing_msu_game.msu1_music(),
                 "missing MSU-1 companion did not disable its menu option");
+        require(missing_msu_game.take_msu1_import_request()
+                    && !missing_msu_game.take_msu1_import_request(),
+                "confirming a missing MSU-1 companion did not request one once");
         starfox::audio::Spc700Audio boot_audio;
         bool heard_start_sound = false;
         const auto drive_boot = [&](const starfox::input::TickInput& input) {

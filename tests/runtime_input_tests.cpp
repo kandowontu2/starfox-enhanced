@@ -1317,6 +1317,23 @@ int main(int argc, char** argv) {
             && !loaded_pregame.explosion_models, "settings without EXPLOSION_MODELS did not load the sprites");
     }
     {
+        // MODERN_DISPLAY_RESOLUTION is optional: it round-trips, and a file
+        // without it keeps RENDER UPSCALE's own scale.
+        auto display = saved_pregame;display.modern_display_resolution = true;
+        require(starfox::app::save_pregame_settings(pregame_test_path, display)
+            && starfox::app::load_pregame_settings(pregame_test_path, loaded_pregame)
+            && loaded_pregame == display, "MODERN display resolution did not round-trip");
+        std::string kept;
+        {
+            std::ifstream saved{pregame_test_path};
+            for (std::string line; std::getline(saved, line);)
+                if (line.rfind("MODERN_DISPLAY_RESOLUTION ", 0) != 0) kept += line + '\n';
+        }
+        std::ofstream{pregame_test_path} << kept;
+        require(starfox::app::load_pregame_settings(pregame_test_path, loaded_pregame)
+            && !loaded_pregame.modern_display_resolution, "settings without MODERN_DISPLAY_RESOLUTION did not keep the scale");
+    }
+    {
         // DYNAMIC_LIGHTING is optional: it round-trips, and a file without
         // it loads with the lighting off.
         auto lighting = saved_pregame;lighting.dynamic_lighting = true;

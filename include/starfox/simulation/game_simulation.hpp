@@ -527,6 +527,10 @@ public:
     // sprites (render::substitute_explosion_model).
     [[nodiscard]] bool explosion_models() const noexcept { return explosion_models_; }
     void set_explosion_models(bool value) noexcept { explosion_models_ = value; }
+    // RENDER UPSCALE's DISPLAY step (MODERN only): MODERN renders at the
+    // screen's own resolution instead of canvas x render scale.
+    [[nodiscard]] bool modern_display_resolution() const noexcept { return modern_display_resolution_; }
+    void set_modern_display_resolution(bool value) noexcept { modern_display_resolution_ = value; }
     // DYNAMIC LIGHTING (MODERN): ray-traced coloured lights from shots and
     // explosions, and the engine glow on the ground. MODERN's ray-traced
     // sun shadows follow RAY TRACING.
@@ -690,6 +694,11 @@ public:
     void set_msu1_available(bool available) noexcept {
         msu1_available_ = available;
         if (!available) msu1_music_ = false;
+    }
+    // MSU-1 MUSIC confirmed (A or SELECT) while the pack is missing: a host
+    // with a file picker offers one. Returns the request and clears it.
+    [[nodiscard]] bool take_msu1_import_request() noexcept {
+        return std::exchange(msu1_import_requested_, false);
     }
     [[nodiscard]] bool rumble() const noexcept { return rumble_; }
     void set_rumble(bool enabled) noexcept { rumble_ = enabled; }
@@ -1389,6 +1398,7 @@ private:
     bool hipoly_arwings_{};
     bool projectile_models_{};
     bool explosion_models_{};
+    bool modern_display_resolution_{};
     bool dynamic_lighting_{};
     std::uint8_t dlss_mode_{}; // Host quality preference, not emulated game state.
     std::uint8_t dlss45_mode_{};
@@ -1417,6 +1427,7 @@ private:
     bool modern_available_{};
     bool msu1_music_{};
     bool msu1_available_{true};
+    bool msu1_import_requested_{};
     bool rumble_{true};
     std::uint8_t music_volume_{100U};
     std::uint8_t sfx_volume_{100U};

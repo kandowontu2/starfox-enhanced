@@ -3,8 +3,12 @@
 #include "starfox/vr/backdrop_texture.hpp"
 #include "starfox/vr/source_models.hpp"
 #include "modern/shaders/generated/scene_sdl.hpp"
+#include <SDL3/SDL_log.h>
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <stdexcept>
 #include <unordered_map>
@@ -74,6 +78,7 @@ vr::SceneConstants sdl_scene_constants(const vr::EyeCamera& camera) noexcept {
 }
 SdlScenePipelines::~SdlScenePipelines() {release();}
 void SdlScenePipelines::release() noexcept {
+    drain();warmed_=false;
     if(device_) {
         for(auto& [key,pipeline]:pipelines_) SDL_ReleaseGPUGraphicsPipeline(device_,pipeline);
         if(vertex_) SDL_ReleaseGPUShader(device_,vertex_);
@@ -89,6 +94,8 @@ void SdlScenePipelines::bind_fragment_storage(SDL_GPURenderPass* pass,SDL_GPUBuf
 void SdlScenePipelines::set_sample_count(SDL_GPUSampleCount samples) noexcept {
     if(samples==samples_) return;
     // Callers change targets between frames, after the last pass using them.
+    // Background builds use samples_: finish them first, then start again.
+    drain();warmed_=false;
     if(device_) for(auto& [key,pipeline]:pipelines_) SDL_ReleaseGPUGraphicsPipeline(device_,pipeline);
     pipelines_.clear();samples_=samples;
 }
@@ -160,6 +167,40 @@ SDL_GPUGraphicsPipeline* SdlScenePipelines::get(SceneTopology topology,SceneBlen
     const unsigned key=unsigned(topology)|(unsigned(depth_test)<<1)|(unsigned(depth_test && depth_write)<<2)|(unsigned(blend)<<3)
         |(unsigned(painter)<<7);
     if(const auto found=pipelines_.find(key);found!=pipelines_.end()) return found->second;
+    // The first request (targets and sample count now known) starts the
+    // usual states in parallel; this one then waits only for its own.
+    if(!warmed_) {warmed_=true;prewarm();}
+    if(const auto pending=pending_.find(key);pending!=pending_.end()) {
+        auto* pipeline=pending->second.get();pending_.erase(pending);
+        if(!pipeline) {status_="Create MODERN scene pipeline (background)";return nullptr;}
+        pipelines_.emplace(key,pipeline);return pipeline;
+    }
+    auto* pipeline=create(key);
+    if(!pipeline) {status_=sdl_error("Create MODERN scene pipeline");return nullptr;}
+    pipelines_.emplace(key,pipeline);
+    return pipeline;
+}
+void SdlScenePipelines::prewarm() {
+    for(const unsigned key:warm_keys_) {
+        if(pipelines_.contains(key) || pending_.contains(key)) continue;
+        // SDL_CreateGPUGraphicsPipeline may run on any thread (the presenter's
+        // worker does the same); create() only reads members that stay fixed
+        // until drain().
+        pending_.emplace(key,std::async(std::launch::async,[this,key] {return create(key);}));
+    }
+}
+void SdlScenePipelines::drain() noexcept {
+    for(auto& [key,pending]:pending_) {
+        SDL_GPUGraphicsPipeline* pipeline=nullptr;
+        try {pipeline=pending.get();} catch(...) {}
+        if(pipeline && !pipelines_.emplace(key,pipeline).second) SDL_ReleaseGPUGraphicsPipeline(device_,pipeline);
+    }
+    pending_.clear();
+}
+SDL_GPUGraphicsPipeline* SdlScenePipelines::create(unsigned key) const {
+    const auto topology=(key&1U)?SceneTopology::lines:SceneTopology::triangles;
+    const bool depth_test=(key>>1)&1U,depth_write=(key>>2)&1U,painter=(key>>7)&1U;
+    const auto blend=static_cast<SceneBlend>((key>>3)&15U);
     using V=vr::SceneVertex;
     const SDL_GPUVertexAttribute attributes[]{
         {0,0,SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3,uint32_t(offsetof(V,position))},
@@ -211,9 +252,17 @@ SDL_GPUGraphicsPipeline* SdlScenePipelines::get(SceneTopology topology,SceneBlen
     info.depth_stencil_state.enable_depth_write=depth_test && depth_write;
     info.target_info.color_target_descriptions=&target;info.target_info.num_color_targets=1;
     info.target_info.depth_stencil_format=depth_;info.target_info.has_depth_stencil_target=true;
+    const auto started=std::chrono::steady_clock::now();
     auto* pipeline=SDL_CreateGPUGraphicsPipeline(device_,&info);
-    if(!pipeline) {status_=sdl_error("Create MODERN scene pipeline");return nullptr;}
-    pipelines_.emplace(key,pipeline);
+    if(!pipeline) return nullptr;
+    // Each draw state compiles the large scene shader again: about 2 s each
+    // on phones. Report it (logcat / Xcode console on mobile).
+    const double ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();
+#if defined(__ANDROID__) || defined(SDL_PLATFORM_IOS)
+    SDL_Log("MODERN scene pipeline %u created in %.0f ms",key,ms);
+#else
+    if(std::getenv("STARFOX_TRACE_MODERN")) std::fprintf(stderr,"modern-pipeline: key=%u %.0f ms\n",key,ms);
+#endif
     return pipeline;
 }
 struct SdlDrawPackets::State {

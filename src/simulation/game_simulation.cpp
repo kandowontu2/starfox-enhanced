@@ -1662,6 +1662,9 @@ GameTickResult GameSimulation::tick_pregame_menu(
         switch (pregame_selection_) {
         case 5U:
             if (msu1_available_) msu1_music_ = !msu1_music_;
+            else if ((menu_input.pressed
+                    & (starfox::input::a | starfox::input::select)) != 0U)
+                msu1_import_requested_ = true;
             break;
         case 6U: rumble_ = !rumble_; break;
         case 7U: {
@@ -1678,18 +1681,24 @@ GameTickResult GameSimulation::tick_pregame_menu(
             const auto available = kHighRenderScales && gpu_fast()
                 ? kRenderScales.size()
                 : std::min(kRenderScales.size(), standard_render_scale_count);
+            // MODERN adds DISPLAY after the largest scale: the screen's own
+            // resolution. render_scale_ keeps the last scale for the others.
+            const bool display_step = modern_renderer();
+            const auto steps = available + (display_step ? 1U : 0U);
             const auto found = std::find(
                 kRenderScales.begin(), kRenderScales.end(), render_scale_);
-            auto index = found == kRenderScales.end()
+            auto index = display_step && modern_display_resolution_ ? available
+                : found == kRenderScales.end()
                 ? std::size_t{}
                 : std::min(static_cast<std::size_t>(
                     std::distance(kRenderScales.begin(), found)), available - 1U);
             if ((menu_input.pressed & starfox::input::left) != 0U) {
-                index = (index + available - 1U) % available;
+                index = (index + steps - 1U) % steps;
             } else {
-                index = (index + 1U) % available;
+                index = (index + 1U) % steps;
             }
-            render_scale_ = kRenderScales[index];
+            modern_display_resolution_ = index == available;
+            if (!modern_display_resolution_) render_scale_ = kRenderScales[index];
             break;
         }
         case 8U: {

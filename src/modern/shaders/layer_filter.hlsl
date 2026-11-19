@@ -18,7 +18,7 @@ uint4 sourceCell(int2 p) {
     p=clamp(p,int2(0,0),int2(sourceWidth-1,sourceHeight-1));
     return uint4(filterSource.Load(int3(p,0))*255+.5);
 }
-#include "../../render/shaders/xbrz_compute.hlsli"
+#include "xbrz_layer.hlsli"
 #include "../../render/shaders/edge_corners.hlsli"
 uint4 filterSample(uint2 p,uint factor) {
     if(filter==5) {
