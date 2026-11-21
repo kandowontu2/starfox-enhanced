@@ -250,6 +250,28 @@ std::uint8_t tunnel_border_index(const simulation::SnesPpuState& ppu,
     return result;
 }
 
+std::uint8_t mode1_layer_index(const simulation::SnesPpuState& ppu,unsigned layer,
+    unsigned screen_x,unsigned screen_y) noexcept {
+    if(layer!=2U && layer!=3U) return 0;
+    const bool bg3=layer==3U;
+    if(!(ppu.main_screen&(bg3?4U:2U))) return 0;
+    const auto size=bg3?ppu.bg3_screen_size:ppu.bg2_screen_size;
+    const bool large=bg3?ppu.bg3_tile_size_16:ppu.bg2_tile_size_16;
+    const unsigned width=(size&1U)?64U:32U,height=(size&2U)?64U:32U,edge=large?16U:8U;
+    const unsigned x=(screen_x+unsigned(bg3?ppu.bg3_scroll_x:ppu.bg2_scroll_x))&(width*edge-1);
+    const unsigned y=(screen_y+unsigned(bg3?ppu.bg3_scroll_y:ppu.bg2_scroll_y))&(height*edge-1);
+    const unsigned tx=x/edge,ty=y/edge;
+    const unsigned entry=((ty/32)*(width/32)+tx/32)*1024+(ty%32)*32+tx%32;
+    const auto tile=vram_word(ppu,unsigned(bg3?ppu.bg3_screen_base:ppu.bg2_screen_base)+entry);
+    const auto sample=tile_sample(tile,int(x),int(y),large);
+    if(bg3) {
+        const auto ink=tile_pixel_2bpp(ppu,ppu.bg3_character_base,sample.tile,sample.x,sample.y);
+        return ink?std::uint8_t(((tile>>10)&7U)*4U+ink):std::uint8_t(0);
+    }
+    const auto ink=tile_pixel_4bpp(ppu,ppu.bg2_character_base,sample.tile,sample.x,sample.y);
+    return ink?std::uint8_t(((tile>>10)&7U)*16U+ink):std::uint8_t(0);
+}
+
 std::uint8_t tunnel_wall_index(const simulation::SnesPpuState& ppu) noexcept {
     return tunnel_border_index(ppu,112,0);
 }

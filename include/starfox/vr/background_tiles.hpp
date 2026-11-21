@@ -137,6 +137,20 @@ void set_headset_mapping(DrawPacket&) noexcept;
 [[nodiscard]] Matrix4 tunnel_corridor_model(double camera_z,double camera_x,double camera_y,
     double centre_y=-60.,double centre_x=0.) noexcept;
 [[nodiscard]] DrawPacket tunnel_surround_packet(const std::array<float,4>& colour);
+// Opaque quads around the 256x224 PPU screen (screen pixel coordinates, for
+// the PPU layer transform): the cartridge has nothing past its edges, so a
+// wider view must not show models that the 4:3 screen cut off.
+[[nodiscard]] DrawPacket screen_surround_packet(const std::array<float,4>& colour);
+// Untextured, and past the screen edges: the sprite layer's xBRZ pass (which
+// covers only the screen) must draw it directly, as replacement art.
+[[nodiscard]] bool is_screen_surround(const DrawPacket&) noexcept;
+// The boss roll call's window, as a room: the screen area where BG3's frame
+// is open and BG2's gradient shows, extruded into a box around the boss at
+// `depth` source units (camera space; model matrix in source units, 1/256 m).
+// Its walls take the gradient's rows by height. `centre` is the projection
+// centre in screen pixels. Empty when no window is found.
+[[nodiscard]] DrawPacket boss_roll_room_packet(const simulation::SnesPpuState& ppu,
+    unsigned brightness,bool srgb,std::array<float,2> centre,double depth);
 // Space Armada's boss room as a real room around the reactor. The cartridge
 // paints it as one fixed BG2 picture (ceiling and floor bands, a dark far
 // wall); the 3D room puts that wall on the ring the BOSS_8_4 wall panels
@@ -277,6 +291,12 @@ void place_landscape_ground(DrawPacket&,float ground_y,bool gpu=false);
 [[nodiscard]] DrawPacket colony_corridor_packet(const simulation::SnesPpuState&,unsigned brightness,bool srgb,
     float top,float bottom,int32_t camera_z=0);
 [[nodiscard]] bool is_colony_corridor(const DrawPacket&) noexcept;
+// The colony road's distance haze: its bands darken into the art's colour at
+// the vanishing point between these distances (source units), and the
+// models fog to it (ModernFrame::fog). The colour is in the target
+// encoding; nullopt for any other packet.
+inline constexpr double colony_haze_start=1800.,colony_haze_end=3600.;
+[[nodiscard]] std::optional<std::array<float,3>> colony_corridor_haze(const DrawPacket&) noexcept;
 // Orbital horizon: preserve the authored vertical band instead of clamping
 // its final texture row over a hemisphere. Unique upper rows remain unique.
 [[nodiscard]] DrawPacket space_horizon_sphere_packet(const simulation::SnesPpuState&,

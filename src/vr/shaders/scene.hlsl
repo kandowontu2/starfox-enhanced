@@ -154,11 +154,42 @@ Fragment scene_vertex(Vertex input) {
 }
 #include "scene_colour.hlsli"
 float4 styled_colour(float4 colour) {return scene_styled_colour(colour,camera.effects);}
+// 3D EXPLOSIONS particles (vr::ExplosionParticles): value noise for a puff's
+// ragged, billowing edge.
+float particle_hash(float2 p) {return frac(sin(dot(p,float2(127.1,311.7)))*43758.5453);}
+float particle_noise(float2 p) {
+    float2 i=floor(p),f=p-i;f=f*f*(3.-2.*f);
+    return lerp(lerp(particle_hash(i),particle_hash(i+float2(1,0)),f.x),
+        lerp(particle_hash(i+float2(0,1)),particle_hash(i+1.),f.x),f.y);
+}
+// A particle: uv -1..1 across the quad; texture.z = 1 | style << 1 (0 fire,
+// 1 smoke) | seed << 8. Fire (added): colour -> odd_color (hotter) toward the
+// middle. Smoke (alpha): odd_color (shade) below -> colour (lit) above.
+// Alpha = color.a times the puff's soft, noisy coverage.
+float4 particle_colour(Fragment input,float radius) {
+    uint seed=(input.texture.z>>8)&255U;
+    bool smoke=((input.texture.z>>1)&7U)==1U;
+    float angle=float(seed)*.0245437;
+    float2x2 turn=float2x2(cos(angle),-sin(angle),sin(angle),cos(angle));
+    float2 p=mul(turn,input.perspective_uv)*1.6+float(seed)*float2(1.37,2.91);
+    float n=particle_noise(p)*.65+particle_noise(p*2.3+5.2)*.35;
+    float r=sqrt(radius);
+    float shape=r+(n-.5)*(smoke?.7:.5);
+    float coverage=1.-smoothstep(smoke?.35:.25,.95,shape);
+    if(coverage<=0.) discard;
+    if(smoke) {
+        float light=saturate(.55+.45*input.perspective_uv.y+(n-.5)*.8);
+        return float4(lerp(input.odd_color.rgb,input.color.rgb,light),input.color.a*coverage);
+    }
+    float core=saturate((1.-shape)*1.4);
+    return float4(lerp(input.color.rgb,input.odd_color.rgb,core*core),input.color.a*coverage);
+}
 float4 fragment_solid_raw(Fragment input) {
     if(input.visible==0) discard;
     if((input.texture.w&4096)!=0) {
         float radius=dot(input.perspective_uv,input.perspective_uv);
         if(radius>1.) discard;
+        if((input.texture.z&1U)!=0) return particle_colour(input,radius);
         // A glow decal (vr::ModernFrame::engine_glow): texture.y = 1 + the
         // edge's start (fraction of the radius) x 65534, fading to the rim.
         if(input.texture.y!=0) {
@@ -250,6 +281,9 @@ Fragment scene_vertex_textured(Vertex input) {
     const float3 authored_position=input.position;
     const float2 authored_billboard=input.billboard;
     uint grid_visible=1;
+    // Fragment.visible bit 2: a resident model with faint coloured lights
+    // (its palette flags' bit 8; vr::SourceModels' 3D asteroids).
+    uint faint_lights=0;
     [branch] if((input.texture.w&268435456U)!=0) {
         float ground_y=asfloat(texels[input.texture.x+272+16384]);
         float radial=length(input.position.xz);
@@ -291,6 +325,7 @@ Fragment scene_vertex_textured(Vertex input) {
         // ordered occurrence. Never confuse this slot with a source face ID.
         uint start=input.texture.x,slot=input.texture.y;
         bool unclipped=(input.texture.w&4194304U)!=0;
+        faint_lights=(texels[start+15]&8U)!=0?2U:0U;
         uint result=texels[start+1],capacity=texels[start+4];
         uint count=texels[result];
         bool valid=texels[result+1]==0 && count<=capacity && slot<count;
@@ -528,6 +563,7 @@ Fragment scene_vertex_textured(Vertex input) {
     }
     Fragment output=scene_vertex(input);
     output.visible &= grid_visible;
+    if(output.visible!=0) output.visible|=faint_lights;
     [branch] if((input.texture.w&8)!=0) {
         if((texels[input.texture.x+15]&0x80000000U)!=0) {
             // Palette probes are constant across the entire sphere. Decode
@@ -766,7 +802,9 @@ float4 landscape_world_sample(Fragment input) {
     uint s=input.texture.x;
     uint tail=s+272+16384;
     float3 d=input.surface_position;
-    bool cylindrical=texels[s+3]!=0;
+    // Word 3: bit 1 the headset's cylindrical mapping, bit 2 the cloud-top
+    // repeat (below).
+    bool cylindrical=(texels[s+3]&1U)!=0;
     // Source X/Z on the world-fixed ground plane.
     float2 source_plane=float2(d.x,-d.z);
     float alternate=0;
@@ -808,13 +846,13 @@ float4 landscape_world_sample(Fragment input) {
         column=atan2(d.x,-d.z)*cylinder_columns(float(((texels[s+2]&1)!=0?64:32)*edge));
     }
     float row=asfloat(texels[tail])-d.y/depth*256.;
-    // Headset skies that end in cloud (word 3 = 2; Titania, set by ModernFrame):
+    // Skies that end in cloud (word 3 bit 2; Titania, set by ModernFrame):
     // the native screen's top row lies in the cloud tops, and holding it
     // draws streaks up to the zenith. Above the cloud tops the band of wisps
     // beneath them repeats instead, mirrored back and forth by elevation,
     // each repeat moved sideways, thinning into the art's plain sky.
     float sky_thin=0;
-    if(texels[s+3]==2U && d.y>0) {
+    if((texels[s+3]&2U)!=0 && d.y>0) {
         const float band=48.;
         float fold=asfloat(texels[tail+2])+4.;
         float slope=(asfloat(texels[tail])-fold)/256.;

@@ -566,7 +566,8 @@ int main() try {
             require(vr::source_span_upload_image(expanded,occurrence_arena,expanded_image,error));
             expanded.warp_expanded=false;
             require(!vr::layout_source_span_model(expanded,256,256,128*1024*1024,65536,occurrence_arena,error));
-            occurrence.graphics_palette_flags=8;
+            // Bit 8 is the 3D asteroids' faint lights; 16 is unassigned.
+            occurrence.graphics_palette_flags=16;
             require(!vr::layout_source_span_model(occurrence,256,256,128*1024*1024,65536,occurrence_arena,error));
         }
         require(!vr::layout_source_span_model(model,3,256,128*1024*1024,65536,arena,error));

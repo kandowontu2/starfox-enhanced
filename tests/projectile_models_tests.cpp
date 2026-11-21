@@ -130,7 +130,7 @@ int main(int argc, char** argv) {
             const auto source = decoder.decode(low_address(symbols, item.shape, true), {},
                 static_cast<std::uint16_t>(low_address(symbols, item.colour, false)));
             std::set<const Shape*> models;
-            std::size_t vertex_count = 0;
+            std::size_t vertex_count = 0, most_vertices = 0, fewest_vertices = 256;
             for (std::uint32_t frame = 0; frame < 8U; ++frame) {
                 const std::string name = std::string{item.shape} + " frame " + std::to_string(frame);
                 RenderPose sprite;
@@ -161,9 +161,13 @@ int main(int argc, char** argv) {
                         name + " model overflows its sprite");
                 }
                 require(reach > 128.0 * 0.6, name + " model is much smaller than its sprite");
-                // Frames of one animation share a mesh layout.
+                // Frames of one animation share a body mesh; only the
+                // sprite's stray arcs (a few ribbons) come and go.
                 if (vertex_count == 0U) vertex_count = model->vertices.size();
-                require(model->vertices.size() == vertex_count, name + " mesh differs from the first frame's");
+                require(model->vertices.size() + 64U >= vertex_count && model->vertices.size() <= vertex_count + 64U,
+                    name + " mesh differs from the first frame's beyond its arcs");
+                most_vertices = std::max(most_vertices, model->vertices.size());
+                fewest_vertices = std::min(fewest_vertices, model->vertices.size());
                 if (std::string_view{item.shape} == "RINGLASER") {
                     // A ring keeps its hole: nothing near the middle.
                     for (const auto& vertex : model->vertices) {
@@ -174,6 +178,9 @@ int main(int argc, char** argv) {
                 models.insert(model);
             }
             require(models.size() == item.frames, std::string{item.shape} + " should have one model per animation frame");
+            // The plasma ball's red frame keeps its yellow arcs; the blue one has none.
+            if (std::string_view{item.shape} == "LARGEPLASMA" || std::string_view{item.shape} == "BOUNCYBALL")
+                require(most_vertices > fewest_vertices, std::string{item.shape} + " lost the red frame's arcs");
         }
     }
     std::cout << "projectile model tests passed\n";

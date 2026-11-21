@@ -428,6 +428,11 @@ public:
     [[nodiscard]] std::optional<std::uint16_t>
         model_colour_table_override() const noexcept;
     void set_god_mode(bool enabled) noexcept;
+    // Invincibility: God Mode's survival (the cartridge's PSF3_NOCOLLISIONS)
+    // without its bomb changes: Nova Bombs keep their count, cadence and A
+    // to detonate. The menu's GOD MODE row cycles OFF, ON, INVINCIBILITY.
+    [[nodiscard]] bool invincibility() const noexcept { return invincibility_; }
+    void set_invincibility(bool enabled) noexcept;
     [[nodiscard]] bool infinite_bombs() const noexcept { return infinite_bombs_; }
     [[nodiscard]] bool infinite_lives() const noexcept { return infinite_lives_; }
     void set_infinite_lives(bool value) noexcept { infinite_lives_ = value; }
@@ -523,8 +528,8 @@ public:
     // plasma ball sprites (render::substitute_projectile_model).
     [[nodiscard]] bool projectile_models() const noexcept { return projectile_models_; }
     void set_projectile_models(bool value) noexcept { projectile_models_ = value; }
-    // 3D EXPLOSIONS: layered stand-ins for the fire, smoke and explosion
-    // sprites (render::substitute_explosion_model).
+    // 3D EXPLOSIONS (MODERN only): the fire, smoke and explosion sprites
+    // become particles (vr::ExplosionParticles).
     [[nodiscard]] bool explosion_models() const noexcept { return explosion_models_; }
     void set_explosion_models(bool value) noexcept { explosion_models_ = value; }
     // RENDER UPSCALE's DISPLAY step (MODERN only): MODERN renders at the
@@ -1359,6 +1364,7 @@ private:
     std::uint8_t runtime_options_video_phase_{};
     Experience experience_{Experience::original};
     bool god_mode_{};
+    bool invincibility_{};
     bool show_fps_{};
     AntiAliasingMode anti_aliasing_mode_{AntiAliasingMode::off};
     std::uint8_t aa_type_{};

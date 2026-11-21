@@ -20,9 +20,11 @@ struct RenderPose;
 // concentric colour bands. The bomb is a low-poly faceted gem standing out
 // of a rounded halo ring. The ring laser is a torus, and the oval beam is the
 // orb stretched to the sprite's tilted ellipse.
-// Faces are unlit solid palette slots, as the glowing sprites were. Every
-// frame of an animation gets its own model with the same mesh layout, so
-// the cartridge's colour cycle still drives the animation.
+// Stray arcs beside the ball (the plasma ball's red frame) become thin
+// ribbons tipped through its depth. Faces are unlit solid palette slots, as
+// the glowing sprites were. Every frame of an animation gets its own model
+// with the same body mesh, so the cartridge's colour cycle still drives the
+// animation; the arcs come and go with their frames.
 //
 // When `pose` draws `source` as one of those sprite frames, returns the
 // model and rewrites `pose` to draw it at the sprite's size, facing the

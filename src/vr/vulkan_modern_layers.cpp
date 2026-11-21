@@ -1,4 +1,5 @@
 #include "starfox/vr/vulkan_modern_layers.hpp"
+#include "starfox/vr/background_tiles.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -11,7 +12,7 @@ constexpr Matrix4 identity{1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
 void VulkanModernLayers::initialize(VkDevice device,PFN_vkGetDeviceProcAddr get,
     const VkPhysicalDeviceMemoryProperties& memory,VkRenderPass pass,VulkanPipelineCache* cache,bool srgb) {
     device_=device;get_=get;memory_=memory;pass_=pass;cache_=cache;
-    for(auto* layer:{&stars_,&backgrounds_,&textures_,&tunnel_surround_,&sprites_,&reticle_,&engine_glow_,&cockpit_}) layer->set_pipeline_cache(cache);
+    for(auto* layer:{&stars_,&backgrounds_,&textures_,&tunnel_surround_,&sprites_,&reticle_,&engine_glow_,&cockpit_,&smoke_particles_,&fire_particles_}) layer->set_pipeline_cache(cache);
     static const bool xbrz=[] {
         const char* value=std::getenv("STARFOX_MODERN_XBRZ");return !(value && std::string_view(value)=="0");
     }();
@@ -57,6 +58,7 @@ bool VulkanModernLayers::upload(const ModernFrame& plan) {
                 // through the xBRZ layer, replacement art drawn as it is.
                 std::vector<DrawPacket> native,replaced;
                 for(const auto& packet:plan.sprites) {
+                    if(is_screen_surround(packet)) {replaced.push_back(packet);continue;}
                     const auto vertices=packet.geometry.vertex_view();
                     std::vector<SceneVertex> kept,moved;
                     for(std::size_t i=0;i+2<vertices.size();i+=3) {
@@ -93,6 +95,14 @@ bool VulkanModernLayers::upload(const ModernFrame& plan) {
             engine_glow_.set_blend(plan.engine_glow->blend);
             if(!engine_glow_.initialize(device_,get_,memory_,pass_,std::span(&plan.engine_glow->packet,1),{},true,false))
                 throw std::runtime_error(engine_glow_.status());
+        }
+        for(auto [layer,active,source]:{std::tuple{&smoke_particles_,&smoke_active_,&plan.smoke_particles},
+                std::tuple{&fire_particles_,&fire_active_,&plan.fire_particles}}) {
+            *active=source->has_value();
+            if(!*active) continue;
+            layer->set_blend((*source)->blend);
+            if(!layer->initialize(device_,get_,memory_,pass_,std::span(&(*source)->packet,1),{},true,false))
+                throw std::runtime_error(layer->status());
         }
         upload_overlay(circle_,plan.circle);
         upload_overlay(colour_math_,plan.colour_math);
@@ -140,7 +150,11 @@ bool VulkanModernLayers::record_backgrounds(VkCommandBuffer command,VkExtent2D e
     return tunnel_surround_.record(command,extent,world);
 }
 bool VulkanModernLayers::record_after_world(VkCommandBuffer command,VkExtent2D extent,const EyeCamera& camera) const {
-    return !engine_glow_active_ || engine_glow_.record(command,extent,fogged(camera,0));
+    if(engine_glow_active_ && !engine_glow_.record(command,extent,fogged(camera,0))) return false;
+    // Smoke takes the world's haze (mode 1), as the objects it replaces;
+    // added fire would only add the haze colour, so it stays clear.
+    if(smoke_active_ && !smoke_particles_.record(command,extent,fogged(camera,1))) return false;
+    return !fire_active_ || fire_particles_.record(command,extent,fogged(camera,0));
 }
 bool VulkanModernLayers::record_below_hud(VkCommandBuffer command,VkExtent2D extent,const EyeCamera& camera) const {
     // MHUD above the world, below the circle and the HUD (as SdlFrameRenderer).

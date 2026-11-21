@@ -8395,7 +8395,7 @@ int main(int argc, char** argv) {
                 static_cast<std::uint8_t>(game.timing_mode()),
                 game.presentation_fps(),
                 static_cast<std::uint8_t>(game.display_mode()),
-                game.god_mode(),
+                static_cast<std::uint8_t>(game.invincibility() ? 2U : game.god_mode() ? 1U : 0U),
                 game.show_fps(),
                 static_cast<std::uint8_t>(game.anti_aliasing_mode()),
                 game.enhanced_graphics(),
@@ -8484,7 +8484,8 @@ int main(int argc, char** argv) {
                     game.set_display_mode(static_cast<
                         starfox::simulation::DisplayMode>(*forced_display - '0'));
             }
-            game.set_god_mode(saved_pregame.god_mode);
+            game.set_god_mode(saved_pregame.god_mode == 1U);
+            game.set_invincibility(saved_pregame.god_mode == 2U);
             game.set_show_fps(saved_pregame.show_fps);
             if(std::getenv("STARFOX_TEST_FRAMES")) {
                 if(const auto* fps=std::getenv("STARFOX_TEST_SHOW_FPS"))
@@ -8801,7 +8802,8 @@ int main(int argc, char** argv) {
             }
         }
         if (menu_preview) {
-            game.set_god_mode(saved_pregame.god_mode);
+            game.set_god_mode(saved_pregame.god_mode == 1U);
+            game.set_invincibility(saved_pregame.god_mode == 2U);
             game.enable_menu_preview();
         }
         if (std::exchange(launch_game_after_preview, false)) {
@@ -9003,8 +9005,14 @@ int main(int argc, char** argv) {
             if (const auto* label = std::getenv("STARFOX_TEST_MAP_JUMP")) {
                 // After the level's own setup, continue its map script at an
                 // authored label (e.g. LEVEL1_END: Venom's final-base demo).
+                // LABEL+N continues N bytes into the label's script (the
+                // command after a mapjsr), as starfox_vr_modern_capture does.
                 game.set_god_mode(true);
-                game.map().start(symbols.find(label).at(0), game.player());
+                const std::string_view target(label);
+                const auto plus = target.find('+');
+                const auto offset = plus == std::string_view::npos ? 0U
+                    : static_cast<std::uint32_t>(std::stoul(std::string(target.substr(plus + 1))));
+                game.map().start(symbols.find(std::string(target.substr(0, plus))).at(0) + offset, game.player());
                 game.map().advance_distance(1);
             }
             if (std::getenv("STARFOX_TEST_TITANIA_END") || std::getenv("STARFOX_TEST_ARMADA_APPROACH")) {
@@ -10379,6 +10387,7 @@ int main(int argc, char** argv) {
                 if (event.type == SDL_EVENT_KEY_DOWN
                     && !remap_menu.active
                     && starfox::app::InputBindings::matches_god_mode_shortcut(event.key)) {
+                    game.set_invincibility(false);
                     game.set_god_mode(!game.god_mode());
                     window.show_temporary_status(game.god_mode()
                         ? "GOD MODE ON" : "GOD MODE OFF");
@@ -11846,7 +11855,7 @@ int main(int argc, char** argv) {
                     if (game.pregame_page() == starfox::simulation::PregamePage::cheats) {
                         draw_centred("CHEATS", 27, 10U);
                         constexpr std::array<std::string_view, 3> lasers{"SINGLE", "DUAL", "BEAM"};
-                        draw_row("GOD MODE", game.god_mode() ? "ON" : "OFF", 55, game.pregame_selection() == 0U);
+                        draw_row("GOD MODE", game.invincibility() ? "INVINCIBILITY" : game.god_mode() ? "ON" : "OFF", 55, game.pregame_selection() == 0U);
                         draw_row("LEVEL SELECT", game.selected_level_name(), 70, game.pregame_selection() == 1U);
                         draw_row("DEFAULT LASER", lasers[game.default_laser()], 85, game.pregame_selection() == 2U);
                         draw_row("INFINITE BOMBS", game.infinite_bombs() ? "ON" : "OFF", 100, game.pregame_selection() == 3U);
@@ -12066,7 +12075,9 @@ int main(int argc, char** argv) {
                             game.pregame_selection()==79U);
                         draw_graphics_row("3D PROJECTILES", on_off(game.projectile_models()), row_y[82],
                             game.pregame_selection()==82U);
-                        draw_graphics_row("3D EXPLOSIONS", on_off(game.explosion_models()), row_y[83],
+                        draw_graphics_row("3D EXPLOSIONS",
+                            !game.modern_renderer() ? std::string_view{"MODERN ONLY"}
+                                : on_off(game.explosion_models()), row_y[83],
                             game.pregame_selection()==83U);
                         draw_graphics_row("HIGH POLY ARWINGS",
                             !game.modern_renderer() ? std::string_view{"MODERN ONLY"}
@@ -14997,9 +15008,6 @@ int main(int argc, char** argv) {
                 } else if (const auto* projectile = starfox::render::substitute_projectile_model(
                         found->second, pose, game.projectile_models())) {
                     drawn_shape = projectile;
-                } else if (const auto* explosion = starfox::render::substitute_explosion_model(
-                        found->second, pose, game.explosion_models())) {
-                    drawn_shape = explosion;
                 }
                 auto* surfaces = &target == &superfx_frame && surface_effects
                     ? &superfx_surfaces : nullptr;

@@ -18,6 +18,11 @@ class RowWorkers;
 [[nodiscard]] std::uint8_t tunnel_border_index(
     const simulation::SnesPpuState& ppu,
     unsigned screen_y, unsigned screen_x) noexcept;
+// Mode 1's BG2 (4bpp) or BG3 (2bpp) CGRAM index at a 256x224 screen pixel,
+// with the layer's plain scroll registers; 0 where transparent or disabled.
+[[nodiscard]] std::uint8_t mode1_layer_index(
+    const simulation::SnesPpuState& ppu, unsigned layer,
+    unsigned screen_x, unsigned screen_y) noexcept;
 
 enum class TilePriorityPass {
     all,

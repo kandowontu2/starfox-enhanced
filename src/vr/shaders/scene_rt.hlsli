@@ -198,9 +198,10 @@ float3 point_lighting(float3 colour,float3 surface,float3 normal,bool ground,boo
 }
 // Lighting for one receiver pixel (both renderers). `mode` 2: the
 // background, i.e. the landscape's ground plane, the 3D corridor (tile layer
-// marked 2048) and the Space Armada boss room's wall, floor and ceiling
-// (flat vertices; texels[7] 4096/4097); 1: the world's models, every face
-// except billboards and source lines. `sun`: sun shadows on these receivers.
+// marked 2048), and the flat-vertex rooms: the Space Armada boss room's
+// wall, floor and ceiling, Titania's bridge and the colony corridor
+// (texels[7] 4096-4099); 1: the world's models, every face except
+// billboards and source lines. `sun`: sun shadows on these receivers.
 // `surface` and `normal` come from shadow_native_position and its screen
 // derivatives, taken before the fragment may discard.
 float4 ray_lighting(Fragment input,float4 colour,float3 surface,float3 normal,uint mode,bool sun) {
@@ -210,7 +211,9 @@ float4 ray_lighting(Fragment input,float4 colour,float3 surface,float3 normal,ui
             uint flags=texels[input.texture.x+7];
             ground=(flags&4096U)!=0 && (flags&16384U)!=0;
             receiver=ground || flags==2048U;
-        } else receiver=input.texture.w==0 && input.texture.x==0 && (texels[7]==4096U || texels[7]==4097U);
+        // Flat background packets: the boss room (4096 wall, 4097 floor),
+        // Titania's bridge (4098) and the colony corridor (4099).
+        } else receiver=input.texture.w==0 && input.texture.x==0 && texels[7]>=4096U && texels[7]<=4099U;
     } else if(mode==1 && colour.a!=0) receiver=(input.texture.w&4U)==0;
     float length_squared=dot(normal,normal);
     if(receiver && length_squared>1e-12) {
@@ -228,7 +231,18 @@ float4 ray_lighting(Fragment input,float4 colour,float3 surface,float3 normal,ui
             else if(dot(normal,shadow_light.xyz)>.02) shade=shadow_coverage(surface+(normal+shadow_light.xyz)*bias);
         }
         colour.rgb*=1.-shade*(1.-shadow_params.z);
-        if(light_params.x>0) colour.rgb=point_lighting(colour.rgb,surface,normal,ground,mode==2);
+        if(light_params.x>0) {
+            float3 lit=point_lighting(colour.rgb,surface,normal,ground,mode==2);
+            // Faint receivers (Fragment.visible bit 2, the 3D asteroids):
+            // a third of the light, mostly as plain brightness, so a lit
+            // grey rock stays grey beside the orange breakable kind.
+            if((input.visible&2U)!=0) {
+                float3 added=lit-colour.rgb;
+                float brightness=dot(added,float3(.2126,.7152,.0722));
+                lit=colour.rgb+lerp(brightness.xxx,added,.25)*.35;
+            }
+            colour.rgb=lit;
+        }
     }
     return colour;
 }

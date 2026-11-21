@@ -229,6 +229,22 @@ int main(int argc,char** argv) try {
         game.map().start(symbols.find(std::string(target.substr(0,plus))).at(0)+offset,game.player());
         game.map().advance_distance(1);
     }
+    // STARFOX_TEST_ENDING=1 (starfox_pc's fixture): the real post-Andross
+    // ending with a full route history (scores and the six bosses), from
+    // FINALMAP_END. TICKS then count from the ending's start.
+    if(std::getenv("STARFOX_TEST_ENDING")) {
+        const auto symbol=[&](const char* name) {return symbols.find(name).at(0);};
+        constexpr std::array<unsigned,6> scores{100,90,80,70,60,100};
+        constexpr std::array bosses{"BOSS11","BOSS12","BOSS13","BOSS14","BOSS15","BOSSFINAL"};
+        game.map().write_native_word(symbol("SPECPTR"),uint16_t(scores.size()));
+        for(std::size_t i=0;i<scores.size();++i) {
+            game.map().write_native_byte(symbol("SPECBUF")+uint32_t(i),uint8_t(scores[i]));
+            game.map().write_native_word(symbol("BOSS_SEQ")+uint32_t(2*i),uint16_t(symbol(bosses[i])-symbol("ENDSEQBOSS")));
+        }
+        game.map().write_native_word(symbol("BOSS_PTR"),uint16_t(2*bosses.size()));
+        game.set_god_mode(true);
+        game.start_map("FINALMAP_END");
+    }
     if(std::getenv("STARFOX_VR_FIRST_PERSON")) {
         for(unsigned tick=0;tick<40;++tick) {
             input::TickInput press{};
@@ -247,7 +263,9 @@ int main(int argc,char** argv) try {
     },&history);
     vr::SourceModels models(rom,symbols,true,true);
     if(const char* projectiles=std::getenv("STARFOX_TEST_PROJECTILE_MODELS")) models.set_projectile_models(std::string_view(projectiles)=="1");
-    if(const char* explosions=std::getenv("STARFOX_TEST_EXPLOSION_MODELS")) models.set_explosion_models(std::string_view(explosions)=="1");
+    if(const char* explosions=std::getenv("STARFOX_TEST_EXPLOSION_MODELS")) models.set_explosion_models(std::string_view(explosions)!="0");
+    if(const char* asteroids=std::getenv("STARFOX_TEST_ASTEROID_MODELS"))
+        models.set_asteroid_models(static_cast<render::AsteroidModels>(std::clamp(std::atoi(asteroids),0,int(render::asteroid_model_mode_count)-1)));
     render::ScaledTextRenderer dialogue_layout(rom,symbols);
     // application.cpp's MODERN inputs (VR's own cockpit, no flat-screen
     // substitutes); the STARFOX_MODERN_* switches apply as they do there.
@@ -530,6 +548,10 @@ int main(int argc,char** argv) try {
                 if(last && std::getenv("STARFOX_VR_OBJECTS")) {
                     const auto& p=game.objects().at(game.player());
                     std::cout<<"objects bg="<<current->background_id<<" flow="<<int(current->flow)<<" camera-player=("<<int(current->camera.x)-int(p.world_x)<<","<<int(current->camera.y)-int(p.world_y)<<","<<int(std::int16_t(std::uint16_t(current->camera.z-p.world_z)))<<") ground="<<int(current->shadow_height)-int(current->camera.y)<<" mhud="<<std::hex<<current->cockpit_hud_roll<<std::dec<<'\n';
+                    {const auto& w=current->wipe;const auto& q=*current->ppu;
+                    std::cout<<"wipe active="<<w.active<<" logic="<<int(w.logic)<<" rows 0/40/96/150/191 l-r=";
+                    for(int row:{0,40,96,150,191}) std::cout<<w.left[size_t(row)]<<'-'<<w.right[size_t(row)]<<' ';
+                    std::cout<<"mode="<<int(q.background_mode)<<" bg3hi="<<q.bg3_high_priority<<" tm="<<int(q.main_screen)<<'\n';}
                     for(const auto handle:game.objects().active_handles()) {
                         const auto& o=game.objects().at(handle);
                         std::cout<<"  handle="<<handle<<" shape="<<symbol_name(o.shape,true)<<" strat="<<symbol_name(o.strategy_address,false)

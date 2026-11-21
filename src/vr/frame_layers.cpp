@@ -108,6 +108,7 @@ FrameLayers assemble_frame_layers(const GameSceneSnapshot& scene,const FrameLaye
         }
     }
     bool nucleus_room=false; // Space Armada's 3D boss room replaced the tunnel art.
+    std::optional<DrawPacket> roll_frame; // The boss roll call's BG3 frame, drawn over the models.
     const bool intro_sky=!snapshot->ppu->tunnel_scene
         && snapshot->flow==simulation::GameFlowState::intro
         && !snapshot->meters.extended && snapshot->background_unique_top_rows==224;
@@ -274,6 +275,26 @@ FrameLayers assemble_frame_layers(const GameSceneSnapshot& scene,const FrameLaye
                 next_backgrounds.insert(next_backgrounds.begin()+std::ptrdiff_t(bg2_index),std::move(bg3));
             else if(snapshot->background_water_surround)
                 next_backgrounds.insert(next_backgrounds.end()-1,std::move(bg3));
+            else if(snapshot->boss_roll && snapshot->ppu->bg3_high_priority) {
+                // ENDSEQ's frame and text sit above the 3D bitmap: the window
+                // they leave open is what clips the boss, so draw them in front.
+                // Behind it, the window's gradient becomes a room around the
+                // boss, at the depth of the models in view.
+                std::vector<double> depths;
+                for(const auto& object:snapshot->objects)
+                    if(object.source_pose.z>64 && std::isfinite(object.source_pose.z)) depths.push_back(object.source_pose.z);
+                static const bool room_enabled=[] {
+                    const char* value=std::getenv("STARFOX_MODERN_BOSS_ROLL_ROOM");return !(value && std::string_view(value)=="0");
+                }();
+                if(room_enabled && !depths.empty() && bg3.model[0]!=0 && bg3.model[5]!=0) {
+                    std::nth_element(depths.begin(),depths.begin()+std::ptrdiff_t(depths.size()/2),depths.end());
+                    const std::array<float,2> centre{-bg3.model[12]/bg3.model[0],-bg3.model[13]/bg3.model[5]};
+                    auto room=boss_roll_room_packet(*snapshot->ppu,snapshot->display_brightness,srgb,
+                        centre,std::clamp(depths[depths.size()/2],256.,16384.));
+                    if(!room.geometry.vertex_view().empty()) next_backgrounds.push_back(std::move(room));
+                }
+                roll_frame=std::move(bg3);
+            }
             else if(in.bg3_behind_bg2 && !snapshot->ppu->bg3_high_priority && bg2_index<next_backgrounds.size())
                 // SNES Mode 1: BG3 shows only through BG2's transparent pixels
                 // unless its priority bit is set (EX 4-4's tunnel wall art).
@@ -316,6 +337,13 @@ FrameLayers assemble_frame_layers(const GameSceneSnapshot& scene,const FrameLaye
         for(auto& foreground:next_sprites) foreground.model=packet.model;
     }
     const auto ppu_transform=packet.model;
+    if(roll_frame) {
+        // Over the models: the frame's open window, and nothing past the screen.
+        auto surround=screen_surround_packet(source_backdrop_colour(snapshot->ppu->cgram[0],snapshot->display_brightness,srgb));
+        surround.model=roll_frame->model;
+        next_sprites.insert(next_sprites.begin(),std::move(*roll_frame));
+        next_sprites.insert(next_sprites.begin(),std::move(surround));
+    }
     next_sprites.push_back(std::move(bitmap));
     next_sprites.push_back(std::move(packet));
     next_sprites.push_back(std::move(meters));

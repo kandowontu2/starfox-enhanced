@@ -1,5 +1,6 @@
 #pragma once
 #include "starfox/vr/frame_layers.hpp"
+#include "starfox/vr/explosion_particles.hpp"
 #include "starfox/vr/scene_camera.hpp"
 #include "starfox/vr/scene_types.hpp"
 #include "starfox/vr/source_models.hpp"
@@ -141,6 +142,10 @@ public:
     // The engine glow: drawn after the world, depth-tested without writing
     // depth, added (Overlay::blend), so objects in front cover it.
     std::optional<Overlay> engine_glow;
+    // 3D EXPLOSIONS as particles (world.explosions, ExplosionParticles):
+    // smoke (alpha blended, back to front) then fire (added), both after the
+    // world and the engine glow, depth-tested without writing depth.
+    std::optional<Overlay> smoke_particles,fire_particles;
     // Head-locked normalized-device shutter (identity camera).
     std::optional<DrawPacket> shutter;
 private:
@@ -149,6 +154,7 @@ private:
     std::vector<uint16_t> offscreen_props_;
     Settings settings_;
     EngineGlowSettings engine_glow_settings_;
+    ExplosionParticles explosion_particles_;
     std::function<std::optional<ModernImage>(const std::string&)> load_image_;
     std::function<void(uint16_t,const simulation::SnesPpuState&,float,std::span<const uint32_t>)> observe_landscape_;
     std::optional<uint64_t> layer_revision_;

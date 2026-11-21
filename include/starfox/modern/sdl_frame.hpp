@@ -110,7 +110,7 @@ private:
     SDL_GPUDevice* device_{};
     SdlScenePipelines pipelines_;
     SdlUploadBatch uploads_;
-    SdlDrawPackets stars_,backgrounds_,tunnel_,cockpit_,sprites_,reticle_,circle_,shutter_,textures_,colour_math_,replaced_sprites_,engine_glow_;
+    SdlDrawPackets stars_,backgrounds_,tunnel_,cockpit_,sprites_,reticle_,circle_,shutter_,textures_,colour_math_,replaced_sprites_,engine_glow_,smoke_particles_,fire_particles_;
     SdlLayerFilter layer_filter_;
     unsigned two_d_filter_{},target_width_{};
     bool filter_backgrounds_{},filter_sprites_{},sprites_split_{};

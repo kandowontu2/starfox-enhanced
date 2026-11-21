@@ -160,7 +160,7 @@ struct PregameSettings {
     std::uint8_t timing_mode{1U};
     std::uint16_t presentation_fps{60U};
     std::uint8_t display_mode{};
-    bool god_mode{};
+    std::uint8_t god_mode{}; // 0 off, 1 God Mode, 2 Invincibility (normal bombs).
     bool show_fps{};
     // 0=off, 1=light, 2=medium, 3=heavy.
     std::uint8_t anti_aliasing{};

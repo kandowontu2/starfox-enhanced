@@ -307,7 +307,7 @@ bool layout_source_span_model(const SourceSpanModel& model,uint64_t storage_alig
                 static_cast<uint32_t>(model.spans.width),static_cast<uint32_t>(model.spans.height),static_cast<uint32_t>(faces),
                 model.projection_settings[2]?static_cast<uint32_t>(vertices):0U}
             || model.tree!=std::array<uint32_t,4>{model.bsp.root,0,model.spans.count,model.bsp.work_limit}
-            || (model.graphics_wave_phase&0x7ff00000U) || (model.graphics_palette_flags&~7U)
+            || (model.graphics_wave_phase&0x7ff00000U) || (model.graphics_palette_flags&~15U)
             || ((model.graphics_palette_flags&4U) && model.spans.ordered_mode!=2))
             throw std::runtime_error("Inconsistent source shader settings");
         SourceSpanArenaLayout pending;

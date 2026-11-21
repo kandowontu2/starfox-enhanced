@@ -1,35 +1,34 @@
 #pragma once
 #include "starfox/assets/shape.hpp"
 #include <cstdint>
+#include <optional>
 
 namespace starfox::render {
 struct RenderPose;
 
-// 3D EXPLOSIONS: optional layered stand-ins for the fire, smoke and explosion
-// sprites, which read as flat cards in stereo. They are the large explosion
-// and fire frames (largeexpl1-8: EXPLOSION*, FIRE, FIREBREATH, BONFIRE), the
-// smoke frames (smoke1-6: SMOKE, LSMOKE, FOLSMOKE), the fireball frames and
-// the small explosion frame.
-//
-// Each model is a small cluster of camera-facing quads textured with the
-// sprite frame itself (so replacement art in textures\ applies to every
-// layer): the back quad is the sprite at full size in the sprite's own plane,
-// so from the front the silhouette is unchanged, and smaller copies, each
-// turned about the view axis, stand nearer the camera like the swell of a
-// fireball or a smoke puff. Every frame of an animation gets its own model
-// with the same mesh layout, so the cartridge's animation still drives it.
-//
-// When `pose` draws `source` as one of those sprite frames, returns the model
-// and rewrites `pose` to draw it at the sprite's size, facing the camera.
-// Otherwise returns nullptr and leaves `pose` untouched.
-const assets::Shape* substitute_explosion_model(const assets::Shape& source, RenderPose& pose, bool enabled);
+// 3D EXPLOSIONS: the fire, smoke and explosion sprites, which read as flat
+// cards in stereo, become particles in MODERN (vr::ExplosionParticles). They
+// are the large explosion and fire frames (largeexpl1-8: EXPLOSION*, FIRE,
+// FIREBREATH, BONFIRE), the smoke frames (smoke1-6: SMOKE, LSMOKE, FOLSMOKE),
+// the fireball frames and the small explosion frame, recognised by their
+// texels (asteroid_texture_hash).
 
-// Exposed for tests: the model for one sprite frame, or nullptr when the
-// texture is not a known fire, smoke or explosion frame.
-[[nodiscard]] const assets::Shape* explosion_model_for_texture(const assets::TextureImage& texture);
-
-// Exposed for tests: how many layers each model has, the size of each layer
-// relative to the sprite and its distance toward the camera relative to the
-// sprite's half width.
-inline constexpr std::size_t explosion_layer_count = 3;
+// Which animation a fire, smoke or explosion sprite frame belongs to, and
+// its frame within that animation.
+enum class ExplosionSpriteKind : std::uint8_t {
+    large,    // largeexpl1-8: EXPLOSION*, FIRE, FIREBREATH, BONFIRE (64x64)
+    smoke,    // smoke1-6: SMOKE, LSMOKE, FOLSMOKE (32x32)
+    fireball, // fireball1-3 (32x32)
+    small,    // expl9, expl10: EXPLOSION, EXPLODE_C (32x32)
+};
+struct ExplosionSpriteFrame {
+    ExplosionSpriteKind kind{};
+    std::uint8_t frame{}, frames{};
+    // The sprite's half width in its pose's units (source units).
+    double half_size{};
+};
+// When `pose` draws `source` as one of those sprite frames, which one.
+[[nodiscard]] std::optional<ExplosionSpriteFrame> explosion_sprite_frame(const assets::Shape& source, const RenderPose& pose);
+// Exposed for tests: the frame for one texture, without the size.
+[[nodiscard]] std::optional<ExplosionSpriteFrame> explosion_frame_for_texture(const assets::TextureImage& texture);
 }

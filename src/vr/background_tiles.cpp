@@ -768,6 +768,83 @@ Matrix4 tunnel_corridor_model(double camera_z,double camera_x,double camera_y,do
     const double y=std::abs(camera_y-centre_y)<32.?camera_y-centre_y:0.;
     return {scale,0,0,0,0,scale,0,0,0,0,scale,0,float(centre_x-camera_x)*scale,float(y)*scale,float(phase)*scale,1};
 }
+namespace {constexpr uint32_t screen_surround_marker=4200U;}
+DrawPacket boss_roll_room_packet(const simulation::SnesPpuState& ppu,
+    unsigned brightness,bool srgb,std::array<float,2> centre,double depth) {
+    DrawPacket packet;
+    if(!(depth>0) || !std::isfinite(depth) || !std::isfinite(centre[0]) || !std::isfinite(centre[1])) return packet;
+    // The window: BG3 open and BG2 drawn.
+    int left=256,right=-1,top=224,bottom=-1;
+    for(unsigned y=0;y<224;y+=2) for(unsigned x=0;x<256;x+=2) {
+        if(render::mode1_layer_index(ppu,3,x,y) || !render::mode1_layer_index(ppu,2,x,y)) continue;
+        left=std::min(left,int(x));right=std::max(right,int(x)+2);
+        top=std::min(top,int(y));bottom=std::max(bottom,int(y)+2);
+    }
+    if(right-left<16 || bottom-top<16) return packet;
+    // The gradient down the window's middle column.
+    const unsigned column=unsigned(left+right)/2U;
+    std::array<std::array<float,4>,224> rows{};
+    for(int y=top;y<bottom;++y) {
+        const auto index=render::mode1_layer_index(ppu,2,column,unsigned(y));
+        rows[size_t(y)]=source_backdrop_colour(ppu.cgram[index],brightness,srgb);
+    }
+    const auto shade=[&](double fraction,float light) {
+        const int y=std::clamp(int(std::lround(top+fraction*(bottom-top-1))),top,bottom-1);
+        auto c=rows[size_t(y)];for(int k=0;k<3;++k) c[size_t(k)]*=light;c[3]=1;return c;
+    };
+    // Camera space (x right, y down, z ahead), a little wider than the
+    // window at the boss's depth, from well in front of it to past it.
+    constexpr double margin=1.15;
+    const double half_w=(right-left)*.5*margin,half_h=(bottom-top)*.5*margin;
+    const double mid_x=(left+right)*.5-centre[0],mid_y=(top+bottom)*.5-centre[1];
+    const double x0=(mid_x-half_w)*depth/256.,x1=(mid_x+half_w)*depth/256.;
+    const double y0=(mid_y-half_h)*depth/256.,y1=(mid_y+half_h)*depth/256.;
+    const double z0=depth*.45,z1=depth*2.2;
+    const auto vertex=[&](double x,double y,double z,const std::array<float,4>& colour) {
+        SceneVertex v{};v.position[0]=float(x);v.position[1]=float(-y);v.position[2]=float(-z);
+        std::copy(colour.begin(),colour.end(),v.color);packet.geometry.vertices.push_back(v);
+    };
+    const auto quad=[&](std::array<std::array<double,3>,4> p,std::array<std::array<float,4>,4> c) {
+        for(unsigned i:{0U,1U,2U,0U,2U,3U}) vertex(p[i][0],p[i][1],p[i][2],c[i]);
+    };
+    constexpr int strips=24;
+    for(int i=0;i<strips;++i) {
+        const double f0=double(i)/strips,f1=double(i+1)/strips;
+        const double ya=y0+(y1-y0)*f0,yb=y0+(y1-y0)*f1;
+        // Back wall, full light; side walls a little darker.
+        quad({{{x0,ya,z1},{x1,ya,z1},{x1,yb,z1},{x0,yb,z1}}},{shade(f0,1),shade(f0,1),shade(f1,1),shade(f1,1)});
+        quad({{{x0,ya,z0},{x0,ya,z1},{x0,yb,z1},{x0,yb,z0}}},{shade(f0,.78F),shade(f0,.9F),shade(f1,.9F),shade(f1,.78F)});
+        quad({{{x1,ya,z1},{x1,ya,z0},{x1,yb,z0},{x1,yb,z1}}},{shade(f0,.9F),shade(f0,.78F),shade(f1,.78F),shade(f1,.9F)});
+    }
+    // Ceiling and floor take the gradient's ends, dimmer towards the front.
+    quad({{{x0,y0,z0},{x1,y0,z0},{x1,y0,z1},{x0,y0,z1}}},{shade(0,.7F),shade(0,.7F),shade(0,.9F),shade(0,.9F)});
+    quad({{{x0,y1,z1},{x1,y1,z1},{x1,y1,z0},{x0,y1,z0}}},{shade(1,.9F),shade(1,.9F),shade(1,.7F),shade(1,.7F)});
+    constexpr float scale=1.F/256.F;
+    packet.model={scale,0,0,0,0,scale,0,0,0,0,scale,0,0,0,0,1};
+    return packet;
+}
+DrawPacket screen_surround_packet(const std::array<float,4>& colour) {
+    for(auto value:colour) if(!std::isfinite(value) || value<0 || value>1)
+        throw std::invalid_argument("Invalid screen surround colour");
+    DrawPacket packet;
+    const auto quad=[&](float l,float t,float r,float b) {
+        const std::array<float,2> corners[4]{{l,t},{r,t},{r,b},{l,b}};
+        for(unsigned corner:{0U,1U,2U,0U,2U,3U}) {
+            SceneVertex vertex{};vertex.position[0]=corners[corner][0];vertex.position[1]=corners[corner][1];
+            std::copy(colour.begin(),colour.end(),vertex.color);vertex.color[3]=1;
+            packet.geometry.vertices.push_back(vertex);
+        }
+    };
+    constexpr float far=8192;
+    quad(-far,-far,0,224+far);quad(256,-far,256+far,224+far);
+    quad(0,-far,256,0);quad(0,224,256,224+far);
+    packet.geometry.texels.assign(16,0);packet.geometry.texels[7]=screen_surround_marker;
+    return packet;
+}
+bool is_screen_surround(const DrawPacket& packet) noexcept {
+    const auto texels=packet.geometry.texel_view();
+    return texels.size()==16 && texels[7]==screen_surround_marker;
+}
 DrawPacket tunnel_surround_packet(const std::array<float,4>& colour) {
     return tunnel_surround_packet(colour,colour,colour);
 }
@@ -1242,17 +1319,47 @@ DrawPacket water_bridge_packet(const simulation::SnesPpuState& source,unsigned b
         if(std::abs(shift)>12.) shift=0;
         bends.push_back({-deck_height*256./k,shift});
     }
-    // The offsets are whole pixels; at headset resolution their steps show
-    // as jogs. Smooth the wave over a few rows, then turn pixels into units
-    // at each row's distance.
-    {
-        std::vector<double> smooth(bends.size());
-        for(std::size_t i=0;i<bends.size();++i) {
-            double sum=0;int count=0;
-            for(std::size_t j=i>=3?i-3:0;j<std::min(bends.size(),i+4);++j) {sum+=bends[j].x;++count;}
-            smooth[i]=count?sum/count:0.;
+    // Turn pixels into units at each row's distance (a pixel spans
+    // distance / 256 units).
+    for(auto& bend:bends) bend.x=-bend.x*(-bend.z)/256.;
+    // The cartridge's wave (MHOFS.MC mwibbletunnel) is a sine table stepped
+    // along the rows' depth, drawn in whole pixels, so the rows step and the
+    // steps shift as the wave moves: jagged at headset resolution. Draw the
+    // sine itself instead: the least-squares fit of x = a sin(wz) + b cos(wz)
+    // + c over a range of wavelengths, through every row.
+    if(wave && bends.size()>=16) {
+        struct Fit {double error=1e300,w=0,a=0,b=0,c=0;} best;
+        // Solves the 3x3 normal equations in place (Gauss-Jordan); false if singular.
+        const auto solve=[](double (&m)[3][4]) {
+            for(int pivot=0;pivot<3;++pivot) {
+                int row=pivot;
+                for(int r=pivot+1;r<3;++r) if(std::abs(m[r][pivot])>std::abs(m[row][pivot])) row=r;
+                std::swap(m[row],m[pivot]);
+                if(std::abs(m[pivot][pivot])<1e-9) return false;
+                for(int r=0;r<3;++r) if(r!=pivot) {
+                    const double factor=m[r][pivot]/m[pivot][pivot];
+                    for(int c=pivot;c<4;++c) m[r][c]-=factor*m[pivot][c];
+                }
+            }
+            return true;
+        };
+        for(double wavelength=192.;wavelength<=12288.;wavelength*=1.04) {
+            const double w=2*3.14159265358979/wavelength;
+            double m[3][4]{};
+            for(const auto& bend:bends) {
+                const double f[3]{std::sin(w*bend.z),std::cos(w*bend.z),1.};
+                for(int r=0;r<3;++r) {for(int c=0;c<3;++c) m[r][c]+=f[r]*f[c];m[r][3]+=f[r]*bend.x;}
+            }
+            if(!solve(m)) continue;
+            const double a=m[0][3]/m[0][0],b=m[1][3]/m[1][1],c=m[2][3]/m[2][2];
+            double error=0;
+            for(const auto& bend:bends) {
+                const double d=a*std::sin(w*bend.z)+b*std::cos(w*bend.z)+c-bend.x;error+=d*d;
+            }
+            if(error<best.error) best={error,w,a,b,c};
         }
-        for(std::size_t i=0;i<bends.size();++i) bends[i].x=-smooth[i]*(-bends[i].z)/256.; // A pixel spans distance / 256 units.
+        if(best.w>0)
+            for(auto& bend:bends) bend.x=best.a*std::sin(best.w*bend.z)+best.b*std::cos(best.w*bend.z)+best.c;
     }
     if(bends.empty()) bends.push_back({0.,0.});
     // Nearer than the bottom row and beyond the farthest: held straight.
@@ -1444,8 +1551,35 @@ DrawPacket colony_corridor_packet(const simulation::SnesPpuState& source,unsigne
             floor_bands=world;ceiling_bands=std::move(world);
         }
     }
+    // The art fades the road into a dark haze at its vanishing point, which
+    // hides the set pieces the cartridge spawns about 3,800 units ahead (the
+    // exit gate at the end of Venom 2's road). Real geometry runs on to the
+    // horizon, so the haze returns as distance: bands darken into the art's
+    // own colour at the vanishing point, and ModernFrame fogs the models with
+    // it over the same distances (colony_corridor_haze).
+    const auto haze=[&] {
+        // The darkest of the centre column within 24 rows of the vanishing
+        // point, where the art's haze is deepest.
+        std::array<float,4> darkest{};float least=1e9F;
+        for(int offset=1;offset<=24;++offset) for(const int row:{int(std::floor(vp))-offset,int(std::ceil(vp))+offset}) {
+            if(row<0 || row>223) continue;
+            const auto c=colour(art(page_of(row),row,128));
+            const float luma=.2126F*c[0]+.7152F*c[1]+.0722F*c[2];
+            if(luma<least) {least=luma;darkest=c;}
+        }
+        return darkest;
+    }();
+    const auto hazed=[&](unsigned index,float z0,float z1) {
+        // By the band's near edge; the band to the horizon is all haze.
+        const double distance=z0<=far?1e9:-double(z1);
+        const double t=std::clamp((distance-colony_haze_start)/(colony_haze_end-colony_haze_start),0.,1.);
+        const float amount=float(t*t*(3.-2.*t));
+        auto c=colour(index);
+        for(int k=0;k<3;++k) c[size_t(k)]+=(haze[size_t(k)]-c[size_t(k)])*amount;
+        return c;
+    };
     const auto quad=[&](float x0,float x1,float y,float z0,float z1,unsigned index) {
-        push_flat(packet,std::array<std::array<float,3>,4>{{{x0,y,z1},{x1,y,z1},{x1,y,z0},{x0,y,z0}}},colour(index));
+        push_flat(packet,std::array<std::array<float,3>,4>{{{x0,y,z1},{x1,y,z1},{x1,y,z0},{x0,y,z0}}},hazed(index,z0,z1));
     };
     constexpr float side=8388608.F;
     for(const auto& band:ceiling_bands) {
@@ -1459,12 +1593,22 @@ DrawPacket colony_corridor_packet(const simulation::SnesPpuState& source,unsigne
         // The right wall over this band, from the floor's edge to the ceiling's.
         if(page.wall) push_flat(packet,std::array<std::array<float,3>,4>{{{float(page.floor_right),floor_y,band.z1},
             {float(ceiling_half),ceiling_y,band.z1},{float(ceiling_half),ceiling_y,band.z0},{float(page.floor_right),floor_y,band.z0}}},
-            colour(page.wall));
+            hazed(page.wall,band.z0,band.z1));
     }
     packet.geometry.texels.assign(16,0);
     packet.geometry.texels[7]=colony_marker;
+    // Words 8-11: the haze colour (target encoding) and a set flag.
+    for(int k=0;k<3;++k) packet.geometry.texels[size_t(8+k)]=starfox::bit_cast<uint32_t>(haze[size_t(k)]);
+    packet.geometry.texels[11]=1U;
     packet.model=nucleus_room_model(0,(top+bottom)*.5,0,0);
     return packet;
+}
+std::optional<std::array<float,3>> colony_corridor_haze(const DrawPacket& packet) noexcept {
+    if(!is_colony_corridor(packet)) return std::nullopt;
+    const auto texels=packet.geometry.texel_view();
+    if(texels[11]!=1U) return std::nullopt;
+    return std::array<float,3>{starfox::bit_cast<float>(texels[8]),starfox::bit_cast<float>(texels[9]),
+        starfox::bit_cast<float>(texels[10])};
 }
 bool is_colony_corridor(const DrawPacket& packet) noexcept {
     const auto texels=packet.geometry.texel_view();

@@ -14,10 +14,14 @@ std::array<std::optional<SourceCorridor>,source_corridor_count> source_corridors
     // BGS/PSTRATS use LTUNNEL for both Gekkou states: BG_5_2Z's entry
     // continues into BG_5_2A through WASHENT3. The scripted entry camera can
     // be outside these bounds; native_corridor_scene handles that separately.
+    // BG_2_6B (Venom 2's pipe run, CL_COLON) is not listed: the cartridge's
+    // pipe pieces are that tunnel, climbing about 1,300 units and back, so a
+    // straight box there hid every piece outside it and left the camera in an
+    // empty corridor beside the pipe it was flying through.
     struct Definition {const char* name;const char* prefix;std::uint8_t walls{15};};
     constexpr std::array<Definition,source_corridor_count> definitions{{
         {"BG_1_1I","LTUNNEL_"},{"BG_1_3B","MTUNNEL_"},{"BG_2_3C","STUNNEL_"},
-        {"BG_1_6B","LTUNNEL_"},{"BG_1_7A","LTUNNEL_"},{"BG_2_6B","LTUNNEL_"},
+        {"BG_1_6B","LTUNNEL_"},{"BG_1_7A","LTUNNEL_"},
         {"BG_2_6C","LTUNNEL_"},{"BG_3_4C","LTUNNEL_"},
         {"BG_5_2A","LTUNNEL_"},{"BG_5_2Z","LTUNNEL_"},
         {"BG_2_6A","COLONY_",14}}};
@@ -121,7 +125,9 @@ GameSceneHistory::GameSceneHistory(const simulation::GameSimulation& game,
         ex_title_intro_background_=static_cast<uint16_t>(title_intro.front()-background_lists.front());
     // BG_1_3E: Space Armada's exit into open space after the boss.
     constexpr std::array unique_names{"BG_2_2","BG_3_4B","BG_3_4D","BG_INTRO","BG_1_3I","BG_3_2","BG_1_3C","BG_1_3A","BG_1_3E"};
-    constexpr std::array orbital_names{"BG_1_5","BG_3_6","BG_5_1E","BG_5_1I","BG_2_2"};
+    // BG_1_7C: the ending's space demo, on the same LSB atlas as BG_1_5/BG_3_6.
+    // As a flat 224-row panel it showed the pink backdrop above and below.
+    constexpr std::array orbital_names{"BG_1_5","BG_3_6","BG_5_1E","BG_5_1I","BG_2_2","BG_1_7C"};
     for(size_t i=0;i<orbital_names.size();++i) {
         const auto& value=symbols.find(orbital_names[i]);
         if(!value.empty() && !background_lists.empty()
@@ -331,6 +337,7 @@ void GameSceneHistory::capture() {
         next->background_nucleus=room;
     }
     next->wipe=game_.window_wipe_state();
+    next->boss_roll=game_.boss_roll_active();
     if(next->ppu->background_mode==2) for(size_t i=0;i<unique_backgrounds_.size();++i)
         if(unique_backgrounds_[i]!=0 && game_.map().background()==unique_backgrounds_[i])
         {

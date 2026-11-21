@@ -14,6 +14,9 @@ public:
     enum class Page { main,options,cheats,three_d,two_d,exit_confirmation };
     Page page{Page::main};
     bool open{true},god_mode{},extended{},alternate_available{},runtime{};
+    // GOD MODE's third setting: survival without God Mode's bomb changes
+    // (stored as 2 in God Mode's preference byte; never both on).
+    bool invincibility{};
     bool infinite_bombs{},infinite_boost{},infinite_lives{},swap_face_buttons{};
     bool fixed_face_buttons{}; // Quest host policy; not a saved preference.
     bool unlocked_pace{true};
@@ -32,7 +35,7 @@ public:
     unsigned model_effect{},world_effect{},model_intensity{100},world_intensity{100};
     unsigned asteroid_models{}; // render::AsteroidModels.
     bool projectile_models{}; // 3D PROJECTILES (render::substitute_projectile_model).
-    bool explosion_models{}; // 3D EXPLOSIONS (render::substitute_explosion_model).
+    bool explosion_models{}; // 3D EXPLOSIONS (MODERN: particles, vr::ExplosionParticles).
     render::AsteroidModels asteroid_model_mode() const noexcept {
         return asteroid_models<render::asteroid_model_mode_count
             ?static_cast<render::AsteroidModels>(asteroid_models):render::AsteroidModels::sprite;
@@ -64,7 +67,7 @@ public:
     // Versioned preferences deliberately exclude navigation, level jumps and
     // cartridge availability. Those belong to the current session only.
     std::array<uint8_t,22> preferences() const noexcept {
-        return {'S','F','V','R',7,uint8_t(language),uint8_t(god_mode),
+        return {'S','F','V','R',7,uint8_t(language),uint8_t(invincibility?2U:god_mode?1U:0U),
             uint8_t(default_laser),uint8_t(msu_music),uint8_t(music_volume),
             uint8_t(sfx_volume),uint8_t(unsigned(unlocked_pace)|(unsigned(ray_tracing)<<1)|(unsigned(enhanced_sky)<<2)
                 |(steer_sensitivity_index<<3)),uint8_t(crosshair_colour),
@@ -91,7 +94,7 @@ public:
         if(bytes[4]>=5) {
             if((bytes[11]>>3)>=steer_sensitivities.size()) return false;
         } else if(bytes[11]>(bytes[4]==1?1:3)) return false;
-        language=bytes[5];god_mode=bytes[6];default_laser=bytes[7];msu_music=bytes[8];
+        language=bytes[5];god_mode=bytes[6]==1;invincibility=bytes[6]==2;default_laser=bytes[7];msu_music=bytes[8];
         music_volume=bytes[9];sfx_volume=bytes[10];unlocked_pace=(bytes[11]&1)!=0;
         ray_tracing=bytes[4]>=2 && (bytes[11]&2)!=0;
         enhanced_sky=bytes[4]>=5 && (bytes[11]&4)!=0;
@@ -185,7 +188,12 @@ public:
                 else if(selection==3) enhanced_sky=!enhanced_sky;
                 else {page=Page::options;selection=7;}
             } else {
-                if(selection==0) god_mode=!god_mode;
+                if(selection==0) {
+                    // OFF, ON, INVINCIBILITY.
+                    if(invincibility) invincibility=false;
+                    else if(god_mode) {god_mode=false;invincibility=true;}
+                    else god_mode=true;
+                }
                 else if(selection==1) {
                     const auto& choices=level_choices[extended?1:0];
                     if(!choices.empty()) {
@@ -224,7 +232,7 @@ public:
             }
             rows.push_back("BACK");return rows;
         }
-        if(page==Page::cheats) return {std::string("GOD MODE: ")+(god_mode?"ON":"OFF"),
+        if(page==Page::cheats) return {std::string("GOD MODE: ")+(invincibility?"INVINCIBILITY":god_mode?"ON":"OFF"),
             "LEVEL SELECT: "+level_name(),
             std::string("DEFAULT LASER: ")+(default_laser==2?"BEAM":default_laser==1?"DUAL":"SINGLE"),
             std::string("INFINITE BOMBS: ")+(infinite_bombs?"ON":"OFF"),

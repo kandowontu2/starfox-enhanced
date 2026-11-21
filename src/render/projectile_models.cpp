@@ -22,14 +22,15 @@ constexpr std::uint32_t kModelAddressBase = 0xfe0000U;
 constexpr double kTexelUnits = 16.0;
 constexpr double kPi = std::numbers::pi;
 
-enum class Kind : std::uint8_t {orb, bomb, ring, oval};
+// plasma: an orb whose arcs leave its outline (Sprite::detach_arcs).
+enum class Kind : std::uint8_t {orb, plasma, bomb, ring, oval};
 struct Known {std::uint32_t hash; Kind kind;};
 // render::asteroid_texture_hash of each 32x32 frame; Original and EX share
 // the texels (starfox_texture_dump's textures.csv lists them).
 constexpr std::array<Known, 11> kKnown{{
     {0x8949ee9aU, Kind::orb},  // PLAYERBEAM: the top laser upgrade's pulse.
-    {0xf8efc30bU, Kind::orb},  // Plasma ball, blue frame (plasma1).
-    {0x20168bcaU, Kind::orb},  // Plasma ball, red frame (plasma2).
+    {0xf8efc30bU, Kind::plasma}, // Plasma ball, blue frame (plasma1).
+    {0x20168bcaU, Kind::plasma}, // Plasma ball, red frame (plasma2).
     {0xf47bd953U, Kind::bomb}, // Nova Bomb frames (specialweapon1-3).
     {0x9fc9b2b1U, Kind::bomb},
     {0xf8ad755cU, Kind::bomb},
@@ -46,26 +47,140 @@ class Sprite {
 public:
     explicit Sprite(const assets::TextureImage& texture)
         : width_(static_cast<int>(texture.u_mask) + 1), height_(static_cast<int>(texture.v_mask) + 1),
-          texels_(texture.texels) {}
+          texels_(texture.texels), body_(static_cast<std::size_t>(width_ * height_), false),
+          arcs_(body_.size(), false) {
+        // The body: the opaque texels side-on (4-)connected to the one
+        // nearest the centre. Stray arcs one texel clear of the ball, such as
+        // the red plasma frame's, are not part of it.
+        int seed = -1;
+        double nearest = 1e9;
+        for (int row = 0; row < height_; ++row) {
+            for (int column = 0; column < width_; ++column) {
+                const auto distance = std::hypot(column + 0.5 - width_ / 2.0, row + 0.5 - height_ / 2.0);
+                if (texel(column, row) != 0U && distance < nearest) {nearest = distance; seed = row * width_ + column;}
+            }
+        }
+        std::vector<int> pending;
+        if (seed >= 0) {pending.push_back(seed); body_[static_cast<std::size_t>(seed)] = true;}
+        while (!pending.empty()) {
+            const auto index = pending.back();
+            pending.pop_back();
+            const auto column = index % width_, row = index / width_;
+            for (const auto& [dx, dy] : std::array<std::pair<int, int>, 4>{{{1, 0}, {-1, 0}, {0, 1}, {0, -1}}}) {
+                const auto x = column + dx, y = row + dy;
+                if (x < 0 || y < 0 || x >= width_ || y >= height_ || texel(x, y) == 0U) continue;
+                auto&& seen = body_[static_cast<std::size_t>(y * width_ + x)];
+                if (!seen) {seen = true; pending.push_back(y * width_ + x);}
+            }
+        }
+    }
     [[nodiscard]] std::uint8_t at(double x, double y) const noexcept {
+        return texel(static_cast<int>(std::floor(x + width_ / 2.0)), static_cast<int>(std::floor(y + height_ / 2.0)));
+    }
+    // Marks body texels as arcs when they lie in the rim (from `from` of the
+    // way out) but are not the rim's colours: arcs that touch the ball, such
+    // as the red plasma frame's yellow arc at 1 o'clock, which joins its dark
+    // red wall. The rim's colours are the most common in the outer quarter.
+    void detach_arcs(double from) {
+        std::array<std::size_t, 16> rim_votes{};
+        std::vector<int> candidates;
+        for (int row = 0; row < height_; ++row) {
+            for (int column = 0; column < width_; ++column) {
+                const auto index = row * width_ + column;
+                if (!body_[static_cast<std::size_t>(index)]) continue;
+                const auto x = column + 0.5 - width_ / 2.0, y = row + 0.5 - height_ / 2.0;
+                const auto outline = edge(std::atan2(y, x));
+                if (outline <= 0.0) continue;
+                const auto fraction = std::hypot(x, y) / outline;
+                if (fraction >= 0.75) ++rim_votes[texel(column, row)];
+                if (fraction >= from) candidates.push_back(index);
+            }
+        }
+        // The rim's two leading colours.
+        std::array<std::uint8_t, 2> rim{};
+        for (auto& slot : rim) {
+            slot = static_cast<std::uint8_t>(std::max_element(rim_votes.begin() + 1, rim_votes.end()) - rim_votes.begin());
+            rim_votes[slot] = 0U;
+        }
+        for (const auto index : candidates) {
+            const auto slot = texel(index % width_, index / width_);
+            if (slot != rim[0] && slot != rim[1]) arcs_[static_cast<std::size_t>(index)] = true;
+        }
+    }
+    // Whether the texel at a point is an arc detach_arcs found. The outline
+    // still includes them, so an arc crossing the wall leaves no notch.
+    [[nodiscard]] bool arc(double x, double y) const noexcept {
         const auto column = static_cast<int>(std::floor(x + width_ / 2.0));
         const auto row = static_cast<int>(std::floor(y + height_ / 2.0));
-        if (column < 0 || row < 0 || column >= width_ || row >= height_) return 0U;
-        const auto index = static_cast<std::size_t>(row * width_ + column);
-        return index < texels_.size() ? static_cast<std::uint8_t>(texels_[index] & 0x0fU) : 0U;
+        return column >= 0 && row >= 0 && column < width_ && row < height_
+            && arcs_[static_cast<std::size_t>(row * width_ + column)];
     }
-    // Distance from the centre to the outline along an angle: the last opaque
-    // texel before a gap of over a texel, so stray sparks off the ball (the
-    // red plasma frame's arcs) stay out of the outline.
+    // Whether the texel at a point belongs to the body.
+    [[nodiscard]] bool body(double x, double y) const noexcept {
+        const auto column = static_cast<int>(std::floor(x + width_ / 2.0));
+        const auto row = static_cast<int>(std::floor(y + height_ / 2.0));
+        return column >= 0 && row >= 0 && column < width_ && row < height_
+            && body_[static_cast<std::size_t>(row * width_ + column)];
+    }
+    // Distance from the centre to the body's outline along an angle: the last
+    // body texel before a gap of over a texel.
     [[nodiscard]] double edge(double angle) const noexcept {
         const auto c = std::cos(angle), s = std::sin(angle);
         double last = 0.0, gap = 0.0;
         bool seen = false;
         for (double r = 0.0; r < std::max(width_, height_) * 0.75; r += 0.25) {
-            if (at(r * c, r * s) != 0U) {last = r; gap = 0.0; seen = true;}
+            if (body(r * c, r * s)) {last = r; gap = 0.0; seen = true;}
             else if (seen && (gap += 0.25) > 1.25) break;
         }
         return seen ? last + 0.5 : 0.0;
+    }
+    // The sprite's stray arcs: opaque texels off the body (the
+    // plasma ball's yellow arcs at 1 and 8 o'clock), grouped into runs of
+    // nearby angles. Each arc has its texels' angle span, mean distance and
+    // most common slot.
+    struct Arc {double from{}, to{}, distance{}; std::uint8_t slot{};};
+    [[nodiscard]] std::vector<Arc> sparks() const {
+        struct Texel {double angle, distance; std::uint8_t slot;};
+        std::vector<Texel> texels;
+        for (int row = 0; row < height_; ++row) {
+            for (int column = 0; column < width_; ++column) {
+                const auto x = column + 0.5 - width_ / 2.0, y = row + 0.5 - height_ / 2.0;
+                const auto slot = at(x, y);
+                const auto angle = std::atan2(y, x);
+                if (slot != 0U && (!body(x, y) || arc(x, y))) texels.push_back({angle, std::hypot(x, y), slot});
+            }
+        }
+        std::vector<Arc> arcs;
+        if (texels.size() < 3U) return arcs;
+        std::sort(texels.begin(), texels.end(), [](const Texel& a, const Texel& b) {return a.angle < b.angle;});
+        // Start the runs after the widest empty gap, so none wraps past -pi.
+        std::size_t start = 0;
+        double widest = 0.0;
+        for (std::size_t i = 0; i < texels.size(); ++i) {
+            const auto next = texels[(i + 1U) % texels.size()].angle + (i + 1U == texels.size() ? 2.0 * kPi : 0.0);
+            if (next - texels[i].angle > widest) {widest = next - texels[i].angle; start = (i + 1U) % texels.size();}
+        }
+        std::vector<Texel> run;
+        const auto close_run = [&] {
+            if (run.size() >= 3U) {
+                Arc arc{run.front().angle, run.back().angle, 0.0, 0U};
+                std::array<std::size_t, 16> votes{};
+                for (const auto& texel : run) {arc.distance += texel.distance / static_cast<double>(run.size()); ++votes[texel.slot];}
+                arc.slot = static_cast<std::uint8_t>(std::max_element(votes.begin(), votes.end()) - votes.begin());
+                arcs.push_back(arc);
+            }
+            run.clear();
+        };
+        double unwrap = 0.0;
+        for (std::size_t n = 0; n < texels.size(); ++n) {
+            auto texel = texels[(start + n) % texels.size()];
+            if (n != 0U && start + n == texels.size()) unwrap = 2.0 * kPi;
+            texel.angle += unwrap;
+            if (!run.empty() && texel.angle - run.back().angle > 0.6) close_run();
+            run.push_back(texel);
+        }
+        close_run();
+        return arcs;
     }
     // Distance from the centre to a ring's hole edge along an angle: the
     // first opaque texel. Zero when the middle is filled.
@@ -139,8 +254,15 @@ public:
     }
     [[nodiscard]] int width() const noexcept {return width_;}
 private:
+    [[nodiscard]] std::uint8_t texel(int column, int row) const noexcept {
+        if (column < 0 || row < 0 || column >= width_ || row >= height_) return 0U;
+        const auto index = static_cast<std::size_t>(row * width_ + column);
+        return index < texels_.size() ? static_cast<std::uint8_t>(texels_[index] & 0x0fU) : 0U;
+    }
     int width_, height_;
     const std::vector<std::uint8_t>& texels_;
+    std::vector<bool> body_;
+    std::vector<bool> arcs_; // Arc texels inside the body (detach_arcs).
 };
 
 struct Point {double x{}, y{}, z{};};
@@ -337,6 +459,33 @@ assets::Shape build_orb(const Sprite& sprite, std::uint32_t address, bool traced
             builder.slot_face(rows[k][j], rows[k + 1U][next], rows[k][next], behind, slot);
         }
     }
+    // The sprite's stray arcs (the plasma ball's yellow arcs at 1 and 8
+    // o'clock) as thin ribbons at their own distance, each tipped through the
+    // ball's depth like part of a ring orbiting it: one end nearer the
+    // camera, the other further, alternating between arcs.
+    const auto arcs = sprite.sparks();
+    for (std::size_t n = 0; n < arcs.size() && n < 4U; ++n) {
+        // At least about 30 degrees long, so a short arc reads as a stroke.
+        auto arc = arcs[n];
+        if (const auto short_by = 0.5 - (arc.to - arc.from); short_by > 0.0) {
+            arc.from -= short_by / 2.0;
+            arc.to += short_by / 2.0;
+        }
+        const auto steps = std::clamp<std::size_t>(static_cast<std::size_t>((arc.to - arc.from) / 0.2) + 1U, 2U, 7U);
+        const auto tip = (n % 2U == 0U ? -0.4 : 0.4) * arc.distance;
+        std::vector<std::uint8_t> near_edge, far_edge;
+        for (std::size_t k = 0; k <= steps; ++k) {
+            const auto along = static_cast<double>(k) / static_cast<double>(steps);
+            const auto a = arc.from + (arc.to - arc.from) * along;
+            const auto z = tip * (2.0 * along - 1.0);
+            near_edge.push_back(builder.vertex((arc.distance - 1.0) * std::cos(a), (arc.distance - 1.0) * std::sin(a), z));
+            far_edge.push_back(builder.vertex((arc.distance + 1.0) * std::cos(a), (arc.distance + 1.0) * std::sin(a), z));
+        }
+        for (std::size_t k = 0; k < steps; ++k) {
+            builder.slot_face(near_edge[k], far_edge[k], far_edge[k + 1U], behind, arc.slot);
+            builder.slot_face(near_edge[k], far_edge[k + 1U], near_edge[k + 1U], behind, arc.slot);
+        }
+    }
     return builder.finish(address);
 }
 
@@ -469,7 +618,8 @@ const assets::Shape* model_for(const assets::TextureImage& texture) {
     const std::lock_guard lock{mutex};
     auto& model = models[hash];
     if (!model) {
-        const Sprite sprite{texture};
+        Sprite sprite{texture};
+        if (known->kind == Kind::plasma) sprite.detach_arcs(0.8);
         const auto address = kModelAddressBase + static_cast<std::uint32_t>(known - kKnown.begin());
         model = std::make_unique<assets::Shape>(known->kind == Kind::bomb ? build_bomb(sprite, address)
             : known->kind == Kind::ring ? build_ring(sprite, address)

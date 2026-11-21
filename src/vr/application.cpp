@@ -679,7 +679,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
     const bool initial_extended=live && live->game.peek_meter_state().extended;
     startup.extended=initial_extended;
     if(live) {
-        startup.language=live->game.language();startup.god_mode=live->game.god_mode();
+        startup.language=live->game.language();startup.god_mode=live->game.god_mode();startup.invincibility=live->game.invincibility();
         startup.default_laser=live->game.default_laser();
         startup.msu_available=live->game.msu1_available();startup.msu_music=live->game.msu1_music();
         startup.music_volume=live->game.music_volume();startup.sfx_volume=live->game.sfx_volume();
@@ -791,7 +791,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                     if(focused && !startup.open && !startup_release
                         && ((controls.menu && controls.select && (controls.menu_pressed || controls.select_pressed))
                             || paused_select)) {
-                        startup.language=live->game.language();startup.god_mode=live->game.god_mode();
+                        startup.language=live->game.language();startup.god_mode=live->game.god_mode();startup.invincibility=live->game.invincibility();
                         startup.default_laser=live->game.default_laser();
                         startup.msu_available=live->game.msu1_available();startup.msu_music=live->game.msu1_music();
                         startup.music_volume=live->game.music_volume();startup.sfx_volume=live->game.sfx_volume();
@@ -856,7 +856,7 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                     }
                     if(was_menu) {
                         live->game.set_language(uint8_t(startup.language));
-                        live->game.set_god_mode(startup.god_mode);
+                        live->game.set_god_mode(startup.god_mode);live->game.set_invincibility(startup.invincibility);
                         live->game.set_music_volume(uint8_t(startup.music_volume));
                         live->game.set_msu1_music(startup.msu_music);
                         live->game.set_timing_mode(startup.unlocked_pace?starfox::simulation::TimingMode::unlocked_20_fps
@@ -954,7 +954,8 @@ int starfox::vr::run_application(int argc,char** argv,const ApplicationHost& hos
                     if(!startup.open || startup.preview) {
                     live->models.set_asteroid_models(startup.asteroid_model_mode());
                     live->models.set_projectile_models(startup.projectile_models);
-                    live->models.set_explosion_models(startup.explosion_models);
+                    // Only MODERN draws the particles; elsewhere the sprites stay.
+                    live->models.set_explosion_models(modern && startup.explosion_models);
                     // Each game session has its own models; the overrides outlive them.
                     if(modern) live->models.set_texture_overrides(texture_overrides.empty()?nullptr:&texture_overrides);
                     auto packets=live->models.assemble_world_interpolated(*live->history->previous(),*live->history->current(),alpha,srgb,true);

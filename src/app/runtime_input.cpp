@@ -850,8 +850,8 @@ bool load_pregame_settings(
             loaded.display_mode = static_cast<std::uint8_t>(value);
             found[2] = value >= 0 && value <= 5;
         } else if (name == "GOD_MODE") {
-            loaded.god_mode = value != 0;
-            found[3] = value == 0 || value == 1;
+            loaded.god_mode = static_cast<std::uint8_t>(value);
+            found[3] = value >= 0 && value <= 2;
         } else if (name == "SHOW_FPS") {
             loaded.show_fps = value != 0;
             found[4] = value == 0 || value == 1;

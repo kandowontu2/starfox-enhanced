@@ -53,7 +53,7 @@ bool SdlFrameRenderer::initialize(SDL_GPUDevice* device,SDL_GPUTextureFormat col
     device_=device;status_="MODERN frame ready";return true;
 }
 void SdlFrameRenderer::release() noexcept {
-    for(auto* packets:{&stars_,&backgrounds_,&tunnel_,&cockpit_,&sprites_,&reticle_,&circle_,&shutter_,&textures_,&colour_math_,&replaced_sprites_,&engine_glow_}) packets->release();
+    for(auto* packets:{&stars_,&backgrounds_,&tunnel_,&cockpit_,&sprites_,&reticle_,&circle_,&shutter_,&textures_,&colour_math_,&replaced_sprites_,&engine_glow_,&smoke_particles_,&fire_particles_}) packets->release();
     layer_filter_.release();ray_shadows_.release();shadows_active_=false;
     frame_.reset();world_.release();uploads_.release();pipelines_.release();device_=nullptr;
 }
@@ -78,6 +78,7 @@ bool SdlFrameRenderer::prepare(SDL_GPUCommandBuffer* command,const vr::GameScene
             std::vector<vr::DrawPacket> native,replaced;
             if(filter_sprites_) {
                 for(const auto& packet:f.sprites) {
+                    if(vr::is_screen_surround(packet)) {replaced.push_back(packet);continue;}
                     const auto vertices=packet.geometry.vertex_view();
                     std::vector<vr::SceneVertex> kept,moved;
                     for(std::size_t i=0;i+2<vertices.size();i+=3) {
@@ -109,6 +110,10 @@ bool SdlFrameRenderer::prepare(SDL_GPUCommandBuffer* command,const vr::GameScene
             sdl_blend(f.colour_math->blend)),colour_math_.status());
         if(f.engine_glow) require(engine_glow_.initialize(device_,uploads_,std::span(&f.engine_glow->packet,1),{},true,false,
             sdl_blend(f.engine_glow->blend)),engine_glow_.status());
+        if(f.smoke_particles) require(smoke_particles_.initialize(device_,uploads_,std::span(&f.smoke_particles->packet,1),{},true,false,
+            sdl_blend(f.smoke_particles->blend)),smoke_particles_.status());
+        if(f.fire_particles) require(fire_particles_.initialize(device_,uploads_,std::span(&f.fire_particles->packet,1),{},true,false,
+            sdl_blend(f.fire_particles->blend)),fire_particles_.status());
         if(f.shutter) require(shutter_.initialize(device_,uploads_,std::span(&*f.shutter,1),{},false),shutter_.status());
         require(uploads_.flush(device_,command),uploads_.status());
         require(world_.initialize(device_,command,f.world,f.moving),world_.status());
@@ -288,6 +293,14 @@ bool SdlFrameRenderer::record(SDL_GPUCommandBuffer* command,SDL_GPURenderPass* p
     if(!world_.record(command,pass,pipelines_,camera)) return fail("world");
     push_fog(command,camera,0);
     if(f.engine_glow && !engine_glow_.record(command,pass,pipelines_,camera)) return fail("engine glow");
+    // 3D EXPLOSIONS particles: smoke in the world's haze like the objects it
+    // replaces; added fire would only add the haze colour, so it stays clear.
+    if(f.smoke_particles) {
+        push_fog(command,camera,1);
+        if(!smoke_particles_.record(command,pass,pipelines_,camera)) return fail("smoke particles");
+        push_fog(command,camera,0);
+    }
+    if(f.fire_particles && !fire_particles_.record(command,pass,pipelines_,camera)) return fail("fire particles");
     if(f.cockpit && !cockpit_.record(command,pass,pipelines_,screen)) return fail("cockpit HUD");
     if(f.circle && !f.circle->over_hud && !circle_.record(command,pass,pipelines_,screen)) return fail("circle");
     const vr::Matrix4 ndc{1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};

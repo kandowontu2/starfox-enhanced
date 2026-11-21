@@ -9,7 +9,6 @@
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
-#include <map>
 #include <set>
 #include <string>
 
@@ -24,42 +23,6 @@ void require(bool condition, const std::string& message) {
 
 using starfox::assets::Shape;
 using starfox::render::RenderPose;
-
-// Textured quads of the sprite frame itself, facing the camera with the
-// retail winding, one plane each, the back one the sprite's full square.
-void check_model(const Shape& shape, const starfox::assets::TextureImage& texture, const std::string& name) {
-    require(shape.faces.size() == starfox::render::explosion_layer_count, name + " has the wrong layer count");
-    require(shape.faces.size() == shape.visibilities.size(), name + " needs one facing test per face");
-    require(shape.bsp_root_address == 0U && shape.face_batches.empty(), name + " must draw from its face list");
-    require(shape.colour_words.size() == 1U && shape.colour_words.front() == texture.descriptor,
-        name + " must use the sprite frame's own descriptor");
-    require(shape.textures.size() == 1U && shape.textures.front().texels == texture.texels
-        && shape.textures.front().address == texture.address, name + " must sample the sprite frame's own texels");
-    const auto* material_texture = starfox::render::texture_for_colour(shape, 0, 0);
-    require(material_texture == &shape.textures.front(), name + " colour does not resolve to its texture");
-    const double half = (texture.u_mask + 1.0) / 2.0 * 16.0;
-    std::set<long long> depths;
-    double largest = 0;
-    for (std::size_t index = 0; index < shape.faces.size(); ++index) {
-        const auto& face = shape.faces[index];
-        require(face.vertex_indices.size() == 4U && !face.sprite, name + " layers must be quads");
-        require(face.visibility_index == static_cast<std::int16_t>(index), name + " face lost its own facing test");
-        require(face.normal.z == 127 && face.normal.x == 0 && face.normal.y == 0, name + " must face the camera");
-        const auto& a = shape.vertices[face.vertex_indices[0]];
-        const auto& b = shape.vertices[face.vertex_indices[1]];
-        const auto& c = shape.vertices[face.vertex_indices[2]];
-        const double winding = double(b.x - a.x) * (c.y - a.y) - double(b.y - a.y) * (c.x - a.x);
-        require(winding < 0.0, name + " winding disagrees with its normal");
-        for (const auto vertex : face.vertex_indices) {
-            const auto& v = shape.vertices[vertex];
-            require(v.z == a.z, name + " layer is not flat");
-            require(v.z <= 0, name + " layer stands behind the sprite");
-            largest = std::max(largest, std::hypot(double(v.x), double(v.y)));
-        }
-        require(depths.insert(a.z).second, name + " has two layers in one plane");
-    }
-    require(std::abs(largest - half * std::sqrt(2.0)) < 2.0, name + " back layer is not the sprite's square");
-}
 
 Shape sprite_shape(const starfox::assets::TextureImage& texture) {
     Shape shape;
@@ -85,31 +48,30 @@ std::uint32_t low_address(const starfox::assets::SymbolMap& symbols, const char*
 } // namespace
 
 int main(int argc, char** argv) {
-    // Unknown textures never substitute, and leave the pose alone.
+    // Unknown textures are not fire, smoke or explosions.
     starfox::assets::TextureImage blank;
     blank.descriptor = 0x4000U;
     blank.u_mask = blank.v_mask = 31U;
     blank.texels.assign(32U * 32U, 1U);
-    require(starfox::render::explosion_model_for_texture(blank) == nullptr, "an arbitrary texture matched a model");
-    const auto unknown = sprite_shape(blank);
+    require(!starfox::render::explosion_frame_for_texture(blank), "an arbitrary texture was recognised");
     RenderPose pose;
     pose.simple_scaled_sprite = true;
     pose.simple_sprite_world_size = 128;
-    require(starfox::render::substitute_explosion_model(unknown, pose, true) == nullptr
-        && pose.simple_scaled_sprite && pose.scale == 1.0 && !pose.use_rotation_matrix, "an unknown sprite was replaced");
+    require(!starfox::render::explosion_sprite_frame(sprite_shape(blank), pose), "an unknown sprite was recognised");
 
     if (argc == 3) {
-        // Every frame of the explosion, smoke and fireball animations has a
-        // layered model at the sprite's size, facing the camera.
+        // Every frame of the explosion, smoke and fireball animations is
+        // recognised as its own frame of the right animation, at the sprite's size.
         const auto rom = starfox::assets::RomImage::load(argv[1]);
         const auto symbols = starfox::assets::SymbolMap::load(argv[2]);
         const starfox::assets::ShapeDecoder decoder{rom, symbols};
-        struct Case { const char* shape; const char* colour; unsigned frames; };
-        for (const auto& item : std::array<Case, 3>{{{"EXPLOSION", "EXPLODE_C", 0U}, {"SMOKE", "SMOKE_C", 0U},
-                 {"FIREBALL", "FIREBALL_C", 3U}}}) {
+        using Kind = starfox::render::ExplosionSpriteKind;
+        struct Case { const char* shape; const char* colour; Kind kind; };
+        for (const auto& item : std::array<Case, 3>{{{"EXPLOSION", "EXPLODE_C", Kind::large}, {"SMOKE", "SMOKE_C", Kind::smoke},
+                 {"FIREBALL", "FIREBALL_C", Kind::fireball}}}) {
             const auto source = decoder.decode(low_address(symbols, item.shape, true), {},
                 static_cast<std::uint16_t>(low_address(symbols, item.colour, false)));
-            std::set<const Shape*> models;
+            std::set<unsigned> own; // Frames of the animation's own kind.
             for (std::uint32_t frame = 0; frame < 16U; ++frame) {
                 const std::string name = std::string{item.shape} + " frame " + std::to_string(frame);
                 RenderPose sprite;
@@ -118,28 +80,27 @@ int main(int argc, char** argv) {
                 sprite.colour_frame = frame;
                 const auto* texture = starfox::render::texture_for_colour(source, 0, frame);
                 require(texture != nullptr, name + " has no sprite texture");
-                auto off = sprite;
-                require(starfox::render::substitute_explosion_model(source, off, false) == nullptr && off.simple_scaled_sprite,
-                    name + " was replaced with 3D EXPLOSIONS off");
-                auto replaced = sprite;
-                const auto* model = starfox::render::substitute_explosion_model(source, replaced, true);
-                if (model == nullptr) {
+                const auto found = starfox::render::explosion_sprite_frame(source, sprite);
+                if (!found) {
                     std::cerr << name << " texel hash " << std::hex << starfox::render::asteroid_texture_hash(*texture)
                               << " descriptor " << texture->descriptor << std::dec << '\n';
                 }
-                require(model != nullptr, name + " has no 3D model");
-                require(model == starfox::render::explosion_model_for_texture(*texture), name + " picked another frame's model");
-                require(!replaced.simple_scaled_sprite && replaced.use_rotation_matrix
-                    && replaced.rotation_matrix == std::array<std::int16_t, 9>{32767, 0, 0, 0, 32767, 0, 0, 0, 32767},
-                    name + " does not face the camera");
-                check_model(*model, *texture, name);
-                // The back layer covers exactly the sprite's square.
-                const double half = (texture->u_mask + 1.0) / 2.0 * 16.0 * replaced.scale;
-                require(std::abs(half - 128.0) < 1.0, name + " is not the sprite's size");
-                models.insert(model);
+                require(found.has_value(), name + " was not recognised");
+                // The animations mix frame sets: EXPLODE_C ends on the small
+                // explosion's frames, SMOKE_C opens on a large then a small
+                // explosion frame. FIREBALL_C is fireball frames only.
+                const bool expected = found->kind == item.kind
+                    || (item.kind != Kind::fireball && (found->kind == Kind::large || found->kind == Kind::small));
+                require(expected && found->frame < found->frames, name + " recognised as another animation (kind "
+                    + std::to_string(int(found->kind)) + " frame " + std::to_string(int(found->frame)) + ")");
+                if (found->kind == item.kind) own.insert(found->frame);
+                const auto direct = starfox::render::explosion_frame_for_texture(*texture);
+                require(direct && direct->kind == found->kind && direct->frame == found->frame, name + " recognised differently per draw");
+                require(std::abs(found->half_size - 128.0) < 1.0, name + " is not the sprite's size");
             }
-            if (item.frames != 0U) require(models.size() == item.frames, std::string{item.shape} + " should have one model per frame");
-            else require(!models.empty(), std::string{item.shape} + " has no models");
+            require(!own.empty(), std::string{item.shape} + " never shows its own frames");
+            if (item.kind == Kind::fireball) require(own.size() == 3U, "FIREBALL should cycle three frames");
+            if (item.kind == Kind::smoke) require(own.size() == 6U, "SMOKE should show all six smoke frames");
         }
     }
     std::cout << "explosion model tests passed\n";

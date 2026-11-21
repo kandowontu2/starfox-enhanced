@@ -42,7 +42,7 @@ struct SourceCorridor {
     std::uint16_t background{};
     SourceCorridorBounds bounds;
 };
-inline constexpr std::size_t source_corridor_count=11;
+inline constexpr std::size_t source_corridor_count=10;
 
 // Space Armada's boss room (BG_1_3D/DA while the player is in it). The cartridge
 // paints the room as a fixed BG2 picture; its real wall is the ring the
@@ -120,6 +120,9 @@ struct GameSceneSnapshot {
     std::optional<SourceNucleusRoom> background_nucleus;
     bool background_space_horizon{};
     bool background_unique_space{};
+    // The ending's boss roll call (ENDSEQ): BG3's high-priority frame and
+    // text cover the 3D bitmap outside its window; BG2 is the window's gradient.
+    bool boss_roll{};
     std::array<unsigned,4> background_planet_rect{};
     bool background_orbital_planet{};
     bool background_orbital_thin{};
@@ -243,7 +246,7 @@ private:
     uint16_t sector_y_star_background_{};
     uint16_t asteroid_star_background_{};
     std::array<uint16_t,9> unique_backgrounds_{};
-    std::array<uint16_t,5> orbital_backgrounds_{};
+    std::array<uint16_t,6> orbital_backgrounds_{};
     std::array<uint16_t,4> ex_star_backgrounds_{};
     std::array<uint16_t,25> landscape_backgrounds_{};
     uint16_t water_background_{};

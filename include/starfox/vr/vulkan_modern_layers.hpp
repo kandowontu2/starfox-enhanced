@@ -52,7 +52,8 @@ public:
     bool record_stars(VkCommandBuffer,VkExtent2D,const EyeCamera&) const;
     bool record_backgrounds(VkCommandBuffer,VkExtent2D,const EyeCamera&,std::array<unsigned,2> world_effects={}) const;
     // Right after the world: the engine glow on the ground (ModernFrame::
-    // engine_glow; depth-tested, additive, writes no depth).
+    // engine_glow; depth-tested, additive, writes no depth), then the 3D
+    // EXPLOSIONS particles (smoke alpha blended, then fire added; the same).
     bool record_after_world(VkCommandBuffer,VkExtent2D,const EyeCamera&) const;
     bool record_below_hud(VkCommandBuffer,VkExtent2D,const EyeCamera&) const;
     bool record_hud(VkCommandBuffer,VkExtent2D,const EyeCamera&) const;
@@ -70,11 +71,11 @@ private:
     VkDevice device_{};PFN_vkGetDeviceProcAddr get_{};
     VkPhysicalDeviceMemoryProperties memory_{};VkRenderPass pass_{};
     VulkanPipelineCache* cache_{};
-    VulkanDrawPackets stars_,backgrounds_,textures_,tunnel_surround_,sprites_,reticle_,engine_glow_,cockpit_;
+    VulkanDrawPackets stars_,backgrounds_,textures_,tunnel_surround_,sprites_,reticle_,engine_glow_,cockpit_,smoke_particles_,fire_particles_;
     VulkanLayerFilter layer_filter_;
     bool filter_enabled_{};
     Overlay circle_,colour_math_,shutter_;
-    bool textures_active_{},reticle_active_{},engine_glow_active_{},cockpit_active_{};
+    bool textures_active_{},reticle_active_{},engine_glow_active_{},cockpit_active_{},smoke_active_{},fire_active_{};
     uint32_t landscape_heading_{},texture_mapping_{};
     std::string status_{"MODERN layers not initialized"};
 };

@@ -257,6 +257,7 @@ void ModernFrame::reset() noexcept {
     textures.clear();texture_models.clear();texture_mapping=landscape_heading=sky_turn=0;
     sky_yaw_.reset();sky_columns_=0;flow_revision_.reset();flow_ticks_=0;
     cockpit.reset();reticle.reset();circle.reset();colour_math.reset();shutter.reset();
+    smoke_particles.reset();fire_particles.reset();explosion_particles_.reset();
     layers_rebuilt=backgrounds_rebuilt=textures_rebuilt=false;
     layer_revision_.reset();texture_background_.reset();level_horizon_.reset();horizon_votes_.clear();
     level_background_=0;background_interpolated_=false;
@@ -377,6 +378,17 @@ void ModernFrame::prepare(const GameSceneSnapshot& previous,const GameSceneSnaps
                 world.packets[i].model[14]-=settings_.seat_setback;
     Matrix4 seat=identity_matrix;
     if(setback) seat[14]=-settings_.seat_setback;
+    // 3D EXPLOSIONS as particles, in source camera space like the objects.
+    smoke_particles.reset();fire_particles.reset();
+    if(!world.explosions.empty() || explosion_particles_.free_particles()!=0) {
+        explosion_particles_.update(previous,current,alpha,world.explosions);
+        render::RenderPose origin;origin.x=origin.y=origin.z=0;
+        if(const auto camera=game_model_matrix(origin,256)) {
+            auto particles=explosion_particles_.build(inputs.srgb,multiply_matrix(seat,*camera));
+            if(particles.smoke) smoke_particles=Overlay{std::move(*particles.smoke),SceneBlend::alpha};
+            if(particles.fire) fire_particles=Overlay{std::move(*particles.fire),SceneBlend::add};
+        }
+    } else explosion_particles_.reset();
     // 2D layers change only with the source snapshot (20 Hz).
     layers_rebuilt=!layer_revision_ || *layer_revision_!=current.revision;
     if(layers_rebuilt) {
@@ -515,15 +527,16 @@ void ModernFrame::prepare(const GameSceneSnapshot& previous,const GameSceneSnaps
         backgrounds=assemble_frame_layers(scene,background_inputs).backgrounds;
         // Headset views look all round: planet art by direction, corridor rows by
         // distance along the corridor.
-        if(settings_.headset)
-            for(auto& packet:backgrounds)
-                if(is_landscape_world(packet) || is_landscape_ground(packet) || is_tunnel_corridor(packet)) {
-                    const bool dome=is_landscape_world(packet);
-                    set_headset_mapping(packet);
-                    // Titania's sky ends in cloud: the shader carries the cloud
-                    // tops on up the dome (scene.hlsl, word 3 = 2).
-                    if(dome && cloud_sky_ && fog_background_==current.background_id) packet.geometry.texels[3]=2;
-                }
+        // Titania's sky ends in cloud: the shader carries the cloud tops on
+        // up the dome (scene.hlsl, word 3 bit 2), on a headset and on the
+        // flat view alike (climbing shows the sky above the art there too).
+        const bool cloud_sky=cloud_sky_ && fog_background_==current.background_id;
+        for(auto& packet:backgrounds) {
+            const bool dome=is_landscape_world(packet);
+            if(settings_.headset && (dome || is_landscape_ground(packet) || is_tunnel_corridor(packet)))
+                set_headset_mapping(packet);
+            if(dome && cloud_sky) packet.geometry.texels[3]|=2U;
+        }
         background_interpolated_=interpolated;
     }
     fog.reset();
@@ -552,8 +565,22 @@ void ModernFrame::prepare(const GameSceneSnapshot& previous,const GameSceneSnaps
         haze.colour[3]=haze.end>haze.start?1.F:0.F;
         if(haze.colour[3]>0) fog=haze;
     }
+    // Venom 2's colony road: the models fade in through the road's own haze
+    // (colony_corridor_haze), so set pieces spawned ahead come out of it
+    // instead of appearing on the open road. STARFOX_MODERN_COLONY_HAZE=0
+    // keeps them clear.
+    static const bool colony_haze=[] {
+        const char* value=std::getenv("STARFOX_MODERN_COLONY_HAZE");return !(value && std::string_view(value)=="0");
+    }();
+    if(!fog && colony_haze && gameplay_flow(current))
+        for(const auto& packet:backgrounds)
+            if(const auto colour=colony_corridor_haze(packet)) {
+                Fog haze;haze.start=float(colony_haze_start);haze.end=float(colony_haze_end);
+                haze.colour={(*colour)[0],(*colour)[1],(*colour)[2],1.F};
+                fog=haze;break;
+            }
     static const bool trace=std::getenv("STARFOX_TRACE_MODERN")!=nullptr;
-    if(trace) std::fprintf(stderr,"modern-frame tick=%llu alpha=%.3f bgid=%x corridor=%d nucleus=%d background=%s vp=%d,%d bg2=%d,%d vscroll=%d grid=%d atlas=%u hudrot=%04x mode=%u flags=%s%s%s%s%s%s roll=%d math=%d:%02x:%u,%u,%u%s%s bright=%u\n",
+    if(trace) std::fprintf(stderr,"modern-frame tick=%llu alpha=%.3f bgid=%x corridor=%d nucleus=%d background=%s vp=%d,%d bg2=%d,%d vscroll=%d grid=%d atlas=%u hudrot=%04x mode=%u flags=%s%s%s%s%s%s roll=%d math=%d:%02x:%u,%u,%u%s%s bright=%u explosions=%zu particles=%zu\n",
         static_cast<unsigned long long>(current.revision),alpha,unsigned(current.background_id),int(current.background_corridor.has_value()),int(current.background_nucleus.has_value()),
         presentation.ppu?"interpolated":layers_rebuilt?"tick":"retained",
         int(current.source_vanishing_point[0]),int(current.source_vanishing_point[1]),
@@ -565,7 +592,8 @@ void ModernFrame::prepare(const GameSceneSnapshot& previous,const GameSceneSnaps
         current.ppu->tunnel_scene?"tunnel ":"",current.background_orbital_planet?"orbital ":"",
         int(int16_t(current.camera.roll)),int(current.colour_math.active),unsigned(current.colour_math.affected_layers),
         unsigned(current.colour_math.red),unsigned(current.colour_math.green),unsigned(current.colour_math.blue),
-        current.colour_math.subtract?" sub":"",current.colour_math.half?" half":"",unsigned(current.display_brightness));
+        current.colour_math.subtract?" sub":"",current.colour_math.half?" half":"",unsigned(current.display_brightness),
+        world.explosions.size(),explosion_particles_.free_particles());
     if(trace && layers_rebuilt && current.background_landscape) {
         const auto fit=mode2_horizon_fit(*current.ppu);
         std::fprintf(stderr,"landscape world=%d vofs=%d hofs=%d flow=%d bg=%04x mode=%u shadow=%d dots=%d camera=%d,%d,%d pyr=%u,%u,%u scroll=%d,%d horizon=%.2f,%.4f grid=%d origin=%u\n",
@@ -642,7 +670,12 @@ void ModernFrame::prepare(const GameSceneSnapshot& previous,const GameSceneSnaps
         sky_turn=0;
         if(!settings_.headset && world_fixed_sky() && landscape_world && std::hypot(x,z)>1e-6) {
             const double yaw=std::atan2(z,x);
-            if(sky_yaw_) sky_columns_+=std::remainder(yaw-*sky_yaw_,2*pi)*sky_columns_per_radian;
+            // The planar art's horizon slides 1/cos(pitch) times as fast as
+            // a level view's per radian of yaw, as the 3D ground's does: a
+            // pitched camera (Corneria's entrance swings round looking ~40
+            // degrees up) otherwise turns the sky slower than the ground.
+            const double slide=1./std::max(std::cos(landscape.pitch),.25);
+            if(sky_yaw_) sky_columns_+=std::remainder(yaw-*sky_yaw_,2*pi)*sky_columns_per_radian*slide;
             sky_yaw_=yaw;
             // 4096 is a whole number of every BG2 art width (256-1024).
             sky_columns_=std::fmod(sky_columns_,4096.);
