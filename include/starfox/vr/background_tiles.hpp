@@ -137,6 +137,20 @@ void set_headset_mapping(DrawPacket&) noexcept;
 [[nodiscard]] Matrix4 tunnel_corridor_model(double camera_z,double camera_x,double camera_y,
     double centre_y=-60.,double centre_x=0.) noexcept;
 [[nodiscard]] DrawPacket tunnel_surround_packet(const std::array<float,4>& colour);
+// Opaque quads around the 256x224 PPU screen (screen pixel coordinates, for
+// the PPU layer transform): the cartridge has nothing past its edges, so a
+// wider view must not show models that the 4:3 screen cut off.
+[[nodiscard]] DrawPacket screen_surround_packet(const std::array<float,4>& colour);
+// Untextured, and past the screen edges: the sprite layer's xBRZ pass (which
+// covers only the screen) must draw it directly, as replacement art.
+[[nodiscard]] bool is_screen_surround(const DrawPacket&) noexcept;
+// The boss roll call's window, as a room: the screen area where BG3's frame
+// is open and BG2's gradient shows, extruded into a box around the boss at
+// `depth` source units (camera space; model matrix in source units, 1/256 m).
+// Its walls take the gradient's rows by height. `centre` is the projection
+// centre in screen pixels. Empty when no window is found.
+[[nodiscard]] DrawPacket boss_roll_room_packet(const simulation::SnesPpuState& ppu,
+    unsigned brightness,bool srgb,std::array<float,2> centre,double depth);
 // Space Armada's boss room as a real room around the reactor. The cartridge
 // paints it as one fixed BG2 picture (ceiling and floor bands, a dark far
 // wall); the 3D room puts that wall on the ring the BOSS_8_4 wall panels
@@ -241,6 +255,48 @@ void place_landscape_ground(DrawPacket&,float ground_y,bool gpu=false);
 [[nodiscard]] DrawPacket water_surface_packet(const simulation::SnesPpuState&,
     const BackgroundTileOptions&,float height,bool srgb=false);
 [[nodiscard]] Matrix4 water_height_motion(float previous_height,float current_height,double alpha);
+// Titania's bridge as real geometry. The cartridge paints it as one Mode 1
+// BG2 picture: open water to the horizon with the dark deck running away
+// down the middle, and the bridge's overhead span (with its darker centre
+// ridge) running away above, both drawn one column per row from the centre
+// column, for an eye `view - top` below the span and `bottom - view` above
+// the deck (cartridge Y, down). The deck and span widths come from the art's
+// slopes at those heights, so they line up with what the cartridge drew.
+// Endless strips along Z, an endless water plane at the deck's height in the
+// art's own colours, its horizon haze as bands at the distances the art's
+// rows paint, and alternate stripes along Z at 80% shade (the planet
+// ground's moving stripes, 128 units each) fixed in the world. The deck is
+// the span's shadow on the water: it bends with the cartridge's per-row
+// water wave (the horizontal offsets left over once the camera's own
+// sideways term is taken out), row by row, as the cartridge's does.
+// Model space: source units, +Y up, Y 0 at cartridge Y 0, the eye's Z at 0
+// for camera_z; place with nucleus_room_model(camera x, camera y, camera z,
+// camera_z). `vanishing_row` is the screen row of the horizon.
+// Draw it like the layer it replaces: behind every object.
+// Empty when the art does not read as that picture.
+[[nodiscard]] DrawPacket water_bridge_packet(const simulation::SnesPpuState&,unsigned brightness,bool srgb,
+    float top,float bottom,float view,int32_t camera_x=0,int32_t camera_y=0,int32_t camera_z=0,float vanishing_row=111.5F);
+[[nodiscard]] bool is_water_bridge(const DrawPacket&) noexcept;
+// Venom 2's colony (BG_2_6A) as real geometry. The cartridge paints a
+// one-sided corridor in Mode 1 BG2 (tunnel tables pick one of two art pages
+// per row by camera Z): a ceiling, a floor with a centre line, a wall on the
+// right and the left side open onto BG3. Each edge is fitted as a line
+// through the vanishing point and placed at `height` units (the authored
+// eye height, both ways) as a width; the pages become bands along Z at the
+// distances the current rows paint them. Model space: source units, +Y up,
+// Y 0 at cartridge Y 0, the eye's Z at 0 for the camera Z it was built for;
+// place with nucleus_room_model(camera x, camera y, camera z, that Z). The
+// open side is left empty so BG3 shows through, as on the cartridge.
+// Empty when the art does not read that way.
+[[nodiscard]] DrawPacket colony_corridor_packet(const simulation::SnesPpuState&,unsigned brightness,bool srgb,
+    float top,float bottom,int32_t camera_z=0);
+[[nodiscard]] bool is_colony_corridor(const DrawPacket&) noexcept;
+// The colony road's distance haze: its bands darken into the art's colour at
+// the vanishing point between these distances (source units), and the
+// models fog to it (ModernFrame::fog). The colour is in the target
+// encoding; nullopt for any other packet.
+inline constexpr double colony_haze_start=1800.,colony_haze_end=3600.;
+[[nodiscard]] std::optional<std::array<float,3>> colony_corridor_haze(const DrawPacket&) noexcept;
 // Orbital horizon: preserve the authored vertical band instead of clamping
 // its final texture row over a hemisphere. Unique upper rows remain unique.
 [[nodiscard]] DrawPacket space_horizon_sphere_packet(const simulation::SnesPpuState&,
@@ -248,6 +304,10 @@ void place_landscape_ground(DrawPacket&,float ground_y,bool gpu=false);
 // Original LSB atlas: stars above the horizon, planet across the entire lower hemisphere.
 [[nodiscard]] Matrix4 orbital_horizon_motion(float previous_scroll,float current_scroll,double alpha,
     bool thin_horizon=false,bool entry_horizon=false,bool gameplay=false);
+// Flat views: mark a native BG2 airspace layer so scene.hlsl continues the
+// planet below its limb as the scrolling orbital surface (the headset
+// sphere's), in the palette its surface rows use.
+void flat_orbital_surface(DrawPacket& bg2,const simulation::SnesPpuState&,bool thin_horizon,bool entry_horizon);
 [[nodiscard]] DrawPacket orbital_planet_sphere_packet(const simulation::SnesPpuState&,
     const BackgroundTileOptions&,bool srgb=false,bool thin_horizon=false,bool entry_horizon=false,bool gameplay=false);
 // Source Mode-1 title overlays, in painter order after models and before OAM.

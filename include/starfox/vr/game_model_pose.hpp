@@ -14,6 +14,12 @@ std::optional<Matrix4> source_layer_matrix(float vanish_x,float vanish_y,
     float distance_metres=2.F) noexcept;
 // Native EX menu pages move the model preview's vanishing point. Their
 // screen-space text must remain on one centered plane, independent of it.
+// Placed at source_ui_distance().
 std::optional<Matrix4> source_ui_layer_matrix(float vanish_x,float vanish_y,
     bool fixed_menu,bool inner_coordinates=false) noexcept;
+// The distance of the 2D layers (HUD, sprites, text) along their rays, in
+// world units: 2 by default. Process-wide, like set_scene_reversed_depth;
+// MODERN on a headset brings them in front of its enlarged world.
+void set_source_ui_distance(float) noexcept;
+[[nodiscard]] float source_ui_distance() noexcept;
 }

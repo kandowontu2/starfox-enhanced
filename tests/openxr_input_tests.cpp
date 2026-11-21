@@ -180,6 +180,30 @@ XrResult XRAPI_PTR locate(XrSpace,XrSpace,XrTime,XrSpaceLocation* out) {
 
 // The original runtime menu, exactly as the PCVR and Quest loop uses it.
 void original_menu_tests() {
+    {   // EXIT GAME: last main row, confirmed on its own page; NO returns to it.
+        StartupMenu menu;using Page=StartupMenu::Page;
+        VrControls press;press.fire=true;
+        const auto click=[&] {menu.sample({},true);menu.sample(press,true);};
+        menu.open_runtime();
+        require(menu.row_count()==7 && menu.labels().back()=="EXIT GAME");
+        menu.selection=StartupMenu::exit_row;click();
+        require(menu.page==Page::exit_confirmation && menu.selection==0 && menu.title()=="EXIT GAME?" && !menu.exit_requested);
+        click();require(menu.page==Page::main && menu.selection==StartupMenu::exit_row && !menu.exit_requested);
+        click();menu.selection=1;click();require(menu.exit_requested);
+    }
+    {   // Opened mid-flight by the Start+Select chord with the stick deflected:
+        // after a neutral sample the stick moves the selection down to EXIT GAME.
+        StartupMenu menu;
+        VrControls flying;flying.steer={.8F,.6F};
+        menu.open=false;menu.sample(flying,true);
+        VrControls chord=flying;chord.menu=chord.select=true;
+        menu.open_runtime();menu.sample(chord,true);menu.sample(chord,true);
+        require(menu.selection==4);
+        menu.sample({},true);
+        VrControls down;down.steer.y=-1;
+        menu.sample(down,true);require(menu.selection==5);
+        menu.sample({},true);menu.sample(down,true);require(menu.selection==6 && menu.first_visible_row()==1);
+    }
     {
         StartupMenu menu;using Page=StartupMenu::Page;
         VrControls press;press.fire=true;
@@ -229,7 +253,7 @@ void original_menu_tests() {
         menu.sample({},true);menu.sample(up,true);require(menu.selection==8);
         for(unsigned language=0;language<6;++language) {
             menu.language=language;
-            for(const auto page:{Page::main,Page::options,Page::cheats,Page::three_d,Page::two_d}) {
+            for(const auto page:{Page::main,Page::options,Page::cheats,Page::three_d,Page::two_d,Page::exit_confirmation}) {
                 menu.page=page;
                 require(menu.localized_labels().size()==menu.row_count());
                 for(const auto& label:menu.localized_labels()) require(!label.empty());
@@ -239,7 +263,10 @@ void original_menu_tests() {
             }
         }
         menu.page=Page::options;menu.selection=6;click();require(menu.page==Page::three_d && !menu.ray_tracing);
-        require(menu.row_count()==5 && menu.labels().back()=="BACK" && !menu.preview);
+        // Hosts without MODERN (the Steam Frame app) show no MODERN rows.
+        require(menu.row_count()==7 && menu.labels().back()=="BACK");
+        menu.modern_available=true;
+        require(menu.row_count()==9 && menu.labels().back()=="BACK" && !menu.preview);
         click();require(menu.model_effect==1 && !menu.ray_tracing);
         menu.selection=2;click();require(menu.preview);menu.sample(press,true);require(menu.preview);
         click();require(!menu.preview);
@@ -248,12 +275,22 @@ void original_menu_tests() {
         click();require(menu.labels()[3]=="3D ASTEROIDS: SUPER FX MEDIUM");
         click();require(menu.labels()[3]=="3D ASTEROIDS: SUPER FX HIGH");
         click();require(menu.asteroid_models==0 && menu.labels()[3]=="3D ASTEROIDS: SPRITE");
-        menu.selection=4;click();require(!menu.ray_tracing && menu.page==Page::options);
-        menu.ray_tracing_available=true;click();require(menu.page==Page::three_d && menu.row_count()==6);
+        menu.selection=4;click();require(menu.projectile_models && menu.labels()[4]=="3D PROJECTILES: ON");
+        click();require(!menu.projectile_models && menu.labels()[4]=="3D PROJECTILES: OFF");
+        menu.selection=5;click();require(menu.explosion_models && menu.labels()[5]=="3D EXPLOSIONS: ON");
+        click();require(!menu.explosion_models && menu.labels()[5]=="3D EXPLOSIONS: OFF");
+        // MODERN applies at the next start; dynamic lighting at once.
+        menu.selection=6;click();require(menu.modern_renderer && menu.labels()[6]=="MODERN RENDERER: ON NEXT START");
+        menu.modern_running=true;require(menu.labels()[6]=="MODERN RENDERER: ON");
+        menu.selection=7;click();require(menu.dynamic_lighting && menu.labels()[7]=="DYNAMIC LIGHTING: ON");
+        menu.selection=8;click();require(!menu.ray_tracing && menu.page==Page::options);
+        menu.ray_tracing_available=true;click();require(menu.page==Page::three_d && menu.row_count()==10);
         menu.selection=3;click();require(menu.ray_tracing);
         menu.sample(press,true);require(menu.ray_tracing);
         menu.selection=4;click();require(menu.asteroid_models==1 && menu.page==Page::three_d);
-        menu.selection=5;click();require(menu.page==Page::options && menu.selection==6);
+        menu.selection=5;click();require(menu.projectile_models && menu.page==Page::three_d);
+        menu.selection=6;click();require(menu.explosion_models && menu.page==Page::three_d);
+        menu.selection=9;click();require(menu.page==Page::options && menu.selection==6);
         menu.selection=7;click();require(menu.page==Page::two_d);
         click();require(menu.world_effect==4);
         menu.selection=1;click();require(menu.world_intensity==0);
@@ -289,11 +326,13 @@ void original_menu_tests() {
         require(restored.preferences()==preferences);
         require(restored.steer_sensitivity_index==1);
         require(restored.asteroid_models==1 && restored.asteroid_model_mode()==starfox::render::AsteroidModels::super_fx_low);
+        require(restored.projectile_models && restored.explosion_models);
         require(restored.ray_tracing && !restored.ray_tracing_available);
         require(restored.enhanced_sky);
+        require(restored.modern_renderer && restored.dynamic_lighting);
         require(!restored.ray_tracing_enabled());
         restored.page=Page::three_d;
-        require(restored.row_count()==5 && restored.labels().back()=="BACK" && !restored.preview);
+        require(restored.row_count()==7 && restored.labels().back()=="BACK" && !restored.preview);
         restored.ray_tracing_available=true;
         require(restored.ray_tracing_enabled());
         restored.ray_tracing=false;
@@ -311,6 +350,15 @@ void original_menu_tests() {
         // Version 6 carries the asteroid mode; a 20-byte record cannot claim it.
         auto short_version6=version4;short_version6[4]=6;
         require(!migrated.restore_preferences(short_version6));
+        // Version 7 adds MODERN, dynamic lighting and 3D projectiles; a
+        // version 6 record restores with all three off, and unknown bits are
+        // rejected.
+        std::array<uint8_t,21> version6{};std::copy(preferences.begin(),preferences.begin()+21,version6.begin());
+        version6[4]=6;
+        require(migrated.restore_preferences(version6) && !migrated.modern_renderer && !migrated.dynamic_lighting
+            && !migrated.projectile_models && !migrated.explosion_models && migrated.asteroid_models==1);
+        auto bad_version7=preferences;bad_version7[21]=16;
+        require(!migrated.restore_preferences(bad_version7));
         // Exercise the very same bounded file loader used by application.cpp.
         // In particular, v6 must not be rejected by a stale 16/20-byte gate.
         const auto file=std::filesystem::temp_directory_path()/
@@ -336,7 +384,7 @@ void original_menu_tests() {
         const auto before_invalid=from_disk.preferences();
         write_record(short_version6);require(!load_startup_preferences(from_disk,file));
         require(from_disk.preferences()==before_invalid);
-        std::array<uint8_t,22> oversized{};
+        std::array<uint8_t,23> oversized{};
         std::copy(preferences.begin(),preferences.end(),oversized.begin());
         write_record(oversized);require(!load_startup_preferences(from_disk,file));
         require(from_disk.preferences()==before_invalid);

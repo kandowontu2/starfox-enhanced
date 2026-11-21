@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <cmath>
 #include <numbers>
+#include <map>
 #include <optional>
 #include <span>
 #include <mutex>
@@ -574,7 +575,7 @@ std::optional<NucleusSurfaces> nucleus_surfaces(const simulation::SnesPpuState& 
     if(brightness>15) throw std::invalid_argument("Invalid nucleus room brightness");
     if(!(radius>0) || !(top<bottom) || !std::isfinite(eye_y) || !std::isfinite(camera_offset))
         throw std::invalid_argument("Invalid nucleus room dimensions");
-    if(!(source.main_screen&2) || source.background_mode!=2) return {};
+    if(!(source.main_screen&2) || (source.background_mode!=1 && source.background_mode!=2)) return {}; // Sector Z: Mode 1
     // The entry (BG_1_3DA) twists the camera through heights outside the
     // room; the eye only places the painting's bands, so keep it inside.
     eye_y=std::clamp(eye_y,top+1.F,bottom-1.F);
@@ -766,6 +767,83 @@ Matrix4 tunnel_corridor_model(double camera_z,double camera_x,double camera_y,do
     // art's eye-centred placement.
     const double y=std::abs(camera_y-centre_y)<32.?camera_y-centre_y:0.;
     return {scale,0,0,0,0,scale,0,0,0,0,scale,0,float(centre_x-camera_x)*scale,float(y)*scale,float(phase)*scale,1};
+}
+namespace {constexpr uint32_t screen_surround_marker=4200U;}
+DrawPacket boss_roll_room_packet(const simulation::SnesPpuState& ppu,
+    unsigned brightness,bool srgb,std::array<float,2> centre,double depth) {
+    DrawPacket packet;
+    if(!(depth>0) || !std::isfinite(depth) || !std::isfinite(centre[0]) || !std::isfinite(centre[1])) return packet;
+    // The window: BG3 open and BG2 drawn.
+    int left=256,right=-1,top=224,bottom=-1;
+    for(unsigned y=0;y<224;y+=2) for(unsigned x=0;x<256;x+=2) {
+        if(render::mode1_layer_index(ppu,3,x,y) || !render::mode1_layer_index(ppu,2,x,y)) continue;
+        left=std::min(left,int(x));right=std::max(right,int(x)+2);
+        top=std::min(top,int(y));bottom=std::max(bottom,int(y)+2);
+    }
+    if(right-left<16 || bottom-top<16) return packet;
+    // The gradient down the window's middle column.
+    const unsigned column=unsigned(left+right)/2U;
+    std::array<std::array<float,4>,224> rows{};
+    for(int y=top;y<bottom;++y) {
+        const auto index=render::mode1_layer_index(ppu,2,column,unsigned(y));
+        rows[size_t(y)]=source_backdrop_colour(ppu.cgram[index],brightness,srgb);
+    }
+    const auto shade=[&](double fraction,float light) {
+        const int y=std::clamp(int(std::lround(top+fraction*(bottom-top-1))),top,bottom-1);
+        auto c=rows[size_t(y)];for(int k=0;k<3;++k) c[size_t(k)]*=light;c[3]=1;return c;
+    };
+    // Camera space (x right, y down, z ahead), a little wider than the
+    // window at the boss's depth, from well in front of it to past it.
+    constexpr double margin=1.15;
+    const double half_w=(right-left)*.5*margin,half_h=(bottom-top)*.5*margin;
+    const double mid_x=(left+right)*.5-centre[0],mid_y=(top+bottom)*.5-centre[1];
+    const double x0=(mid_x-half_w)*depth/256.,x1=(mid_x+half_w)*depth/256.;
+    const double y0=(mid_y-half_h)*depth/256.,y1=(mid_y+half_h)*depth/256.;
+    const double z0=depth*.45,z1=depth*2.2;
+    const auto vertex=[&](double x,double y,double z,const std::array<float,4>& colour) {
+        SceneVertex v{};v.position[0]=float(x);v.position[1]=float(-y);v.position[2]=float(-z);
+        std::copy(colour.begin(),colour.end(),v.color);packet.geometry.vertices.push_back(v);
+    };
+    const auto quad=[&](std::array<std::array<double,3>,4> p,std::array<std::array<float,4>,4> c) {
+        for(unsigned i:{0U,1U,2U,0U,2U,3U}) vertex(p[i][0],p[i][1],p[i][2],c[i]);
+    };
+    constexpr int strips=24;
+    for(int i=0;i<strips;++i) {
+        const double f0=double(i)/strips,f1=double(i+1)/strips;
+        const double ya=y0+(y1-y0)*f0,yb=y0+(y1-y0)*f1;
+        // Back wall, full light; side walls a little darker.
+        quad({{{x0,ya,z1},{x1,ya,z1},{x1,yb,z1},{x0,yb,z1}}},{shade(f0,1),shade(f0,1),shade(f1,1),shade(f1,1)});
+        quad({{{x0,ya,z0},{x0,ya,z1},{x0,yb,z1},{x0,yb,z0}}},{shade(f0,.78F),shade(f0,.9F),shade(f1,.9F),shade(f1,.78F)});
+        quad({{{x1,ya,z1},{x1,ya,z0},{x1,yb,z0},{x1,yb,z1}}},{shade(f0,.9F),shade(f0,.78F),shade(f1,.78F),shade(f1,.9F)});
+    }
+    // Ceiling and floor take the gradient's ends, dimmer towards the front.
+    quad({{{x0,y0,z0},{x1,y0,z0},{x1,y0,z1},{x0,y0,z1}}},{shade(0,.7F),shade(0,.7F),shade(0,.9F),shade(0,.9F)});
+    quad({{{x0,y1,z1},{x1,y1,z1},{x1,y1,z0},{x0,y1,z0}}},{shade(1,.9F),shade(1,.9F),shade(1,.7F),shade(1,.7F)});
+    constexpr float scale=1.F/256.F;
+    packet.model={scale,0,0,0,0,scale,0,0,0,0,scale,0,0,0,0,1};
+    return packet;
+}
+DrawPacket screen_surround_packet(const std::array<float,4>& colour) {
+    for(auto value:colour) if(!std::isfinite(value) || value<0 || value>1)
+        throw std::invalid_argument("Invalid screen surround colour");
+    DrawPacket packet;
+    const auto quad=[&](float l,float t,float r,float b) {
+        const std::array<float,2> corners[4]{{l,t},{r,t},{r,b},{l,b}};
+        for(unsigned corner:{0U,1U,2U,0U,2U,3U}) {
+            SceneVertex vertex{};vertex.position[0]=corners[corner][0];vertex.position[1]=corners[corner][1];
+            std::copy(colour.begin(),colour.end(),vertex.color);vertex.color[3]=1;
+            packet.geometry.vertices.push_back(vertex);
+        }
+    };
+    constexpr float far=8192;
+    quad(-far,-far,0,224+far);quad(256,-far,256+far,224+far);
+    quad(0,-far,256,0);quad(0,224,256,224+far);
+    packet.geometry.texels.assign(16,0);packet.geometry.texels[7]=screen_surround_marker;
+    return packet;
+}
+bool is_screen_surround(const DrawPacket& packet) noexcept {
+    const auto texels=packet.geometry.texel_view();
+    return texels.size()==16 && texels[7]==screen_surround_marker;
 }
 DrawPacket tunnel_surround_packet(const std::array<float,4>& colour) {
     return tunnel_surround_packet(colour,colour,colour);
@@ -1119,6 +1197,427 @@ DrawPacket water_surface_packet(const simulation::SnesPpuState& ppu,
     }
     return packet;
 }
+namespace {
+constexpr uint32_t water_bridge_marker=4098U;
+}
+DrawPacket water_bridge_packet(const simulation::SnesPpuState& source,unsigned brightness,bool srgb,
+    float top,float bottom,float view,int32_t camera_x,int32_t camera_y,int32_t camera_z,float vanishing_row) {
+    DrawPacket packet;
+    if(brightness>15) throw std::invalid_argument("Invalid bridge brightness");
+    if(!(top<view && view<bottom)) throw std::invalid_argument("Invalid bridge heights");
+    if(!(source.main_screen&2) || source.background_mode!=1) return packet;
+    // The art itself (camera independent): the 512-column tile map, centre
+    // column 256. The horizon row is where open water starts at the far edge.
+    const auto ink=[&](int x,int y) {return bg2_art_index(source,x,y);};
+    int horizon=-1;
+    for(int row=1;row<512 && horizon<0;++row) if(!ink(0,row-1) && ink(0,row) && ink(511,row)) horizon=row;
+    if(horizon<0) return packet;
+    const auto half_run=[&](int row) {
+        const auto centre=ink(256,row);
+        if(!centre) return 0;
+        int left=256;while(left>0 && ink(left-1,row)==centre) --left;
+        int right=256;while(right<511 && ink(right+1,row)==centre) ++right;
+        return (right-left+1)/2;
+    };
+    // The span: its main colour is the commonest ink in the rows above the
+    // horizon (its row-by-row shading is fixed to the screen, so drop it);
+    // its edge sits one column further out per row.
+    std::array<unsigned,256> votes{};
+    double span_wk=0,span_kk=0;int ridge_row=-1;
+    // The apex's last row or two can be blank.
+    int start=horizon-1;while(start>horizon-4 && start>0 && !ink(256,start)) --start;
+    for(int row=start;row>=std::max(0,horizon-200);--row) {
+        if(!ink(256,row)) break;
+        const double k=horizon-row-.5;
+        int left=256;while(left>0 && ink(left-1,row)) --left;
+        const double w=256-left;
+        span_wk+=w*k;span_kk+=k*k;
+        for(int x=left;x<=256;++x) ++votes[ink(x,row)];
+        ridge_row=row;
+    }
+    const double deck_height=bottom-view,span_height=view-top;
+    double deck_wk=0,deck_kk=0;
+    for(int row=horizon;row<std::min(512,horizon+200);++row) {
+        if(!ink(0,row)) break;
+        const double k=row-horizon+.5;
+        deck_wk+=half_run(row)*k;deck_kk+=k*k;
+    }
+    if(span_kk<=0 || deck_kk<=0 || ridge_row<0) return packet;
+    const unsigned span_ink=unsigned(std::max_element(votes.begin()+1,votes.end())-votes.begin());
+    const double deck_half=deck_wk/deck_kk*deck_height,span_half=span_wk/span_kk*span_height;
+    if(!(deck_half>1) || !(span_half>1)) return packet;
+    // The ridge: the band of another ink about the centre on the span's
+    // nearest row, as a width at that row's distance.
+    unsigned ridge_ink=ink(256,ridge_row);
+    double ridge_half=0;
+    if(ridge_ink!=span_ink) {
+        int left=256;while(left>0 && ink(left-1,ridge_row)==ridge_ink) --left;
+        ridge_half=(256-left)/(horizon-ridge_row-.5)*span_height;
+    }
+    const auto colour=[&](unsigned index){return source_backdrop_colour(source.cgram[index&255U],brightness,srgb);};
+    constexpr float far=-8388608.F,behind=8192.F,side=8388608.F;
+    const float deck_y=-bottom,span_y=-top;
+    // Water bands: one per run of equal rows at the far edge, from the
+    // distance its nearest row paints to its farthest; the last runs on
+    // under the eye and behind it.
+    struct Band {double near,far;unsigned index;};
+    std::vector<Band> bands;
+    const auto distance=[&](double rows){return rows>0?deck_height*256./rows:1e9;};
+    for(int row=horizon;row<std::min(512,horizon+200);) {
+        const auto index=ink(0,row);
+        if(!index) break;
+        int end=row;while(end+1<std::min(512,horizon+200) && ink(0,end+1)==index) ++end;
+        bands.push_back({distance(end+1-horizon),distance(row-horizon),index});
+        row=end+1;
+    }
+    if(bands.empty()) return packet;
+    bands.back().near=-behind;
+    // Stripes fixed in the world, 128 units light and 128 at 80% shade (in
+    // linear light), as on the planet grounds; past `reach` they would be
+    // finer than a pixel, so the water there takes their average.
+    constexpr double stripe=128.,reach=16384.;
+    const double eye=double(uint16_t(camera_z));
+    const double light_shade=1.,dark_shade=srgb?.8:std::pow(.8,1./2.2),mean_shade=srgb?.9:std::pow(.9,1./2.2);
+    const auto shaded=[&](unsigned index,double shade) {
+        auto rgba=colour(index);for(unsigned c=0;c<3;++c) rgba[c]=float(rgba[c]*shade);return rgba;
+    };
+    for(const auto& band:bands) {
+        // Model Z runs from the far edge (z0) to the near one (z1).
+        const double z0=std::max(double(far),-band.far),z1=-band.near;
+        if(!(z1>z0)) continue;
+        const auto water=[&](double a,double b,double shade) {
+            push_flat(packet,std::array<std::array<float,3>,4>{{{-side,deck_y,float(b)},{side,deck_y,float(b)},
+                {side,deck_y,float(a)},{-side,deck_y,float(a)}}},shaded(band.index,shade));
+        };
+        const double split=std::max(z0,-reach);
+        if(split>z0) water(z0,split,mean_shade);
+        // World Z is the eye's world Z minus model Z.
+        double z=split;
+        while(z<z1) {
+            // The stripe holding the world just beyond z, and where it ends.
+            const double cell=std::floor((eye-z-1e-6)/stripe);
+            const double end=std::min(z1,eye-cell*stripe);
+            water(z,end,(int64_t(cell)&1)?dark_shade:light_shade);
+            z=end;
+        }
+    }
+    // The deck (the span's shadow on the water), bent by the water wave:
+    // each screen row's offset less the camera's sideways term
+    // (128 + camera X x rows below the horizon / eye height), at that row's
+    // distance. A positive offset scrolls the picture left.
+    const double eye_height=std::max(1.,double(bottom)-double(camera_y));
+    const auto deck_colour=colour(ink(256,horizon+8));
+    struct Bend {double z,x;};
+    std::vector<Bend> bends;
+    const bool wave=source.bg2_horizontal_offsets_enabled;
+    for(int row=223;row>=0;--row) {
+        const double k=row+.5-double(vanishing_row);
+        if(k<1.) break;
+        double shift=0;
+        if(wave) shift=double(source.bg2_horizontal_offsets[size_t(row)])-128.-double(camera_x)*k/eye_height;
+        // Rows a few pixels off are the wave; larger ones are something else.
+        if(std::abs(shift)>12.) shift=0;
+        bends.push_back({-deck_height*256./k,shift});
+    }
+    // Turn pixels into units at each row's distance (a pixel spans
+    // distance / 256 units).
+    for(auto& bend:bends) bend.x=-bend.x*(-bend.z)/256.;
+    // The cartridge's wave (MHOFS.MC mwibbletunnel) is a sine table stepped
+    // along the rows' depth, drawn in whole pixels, so the rows step and the
+    // steps shift as the wave moves: jagged at headset resolution. Draw the
+    // sine itself instead: the least-squares fit of x = a sin(wz) + b cos(wz)
+    // + c over a range of wavelengths, through every row.
+    if(wave && bends.size()>=16) {
+        struct Fit {double error=1e300,w=0,a=0,b=0,c=0;} best;
+        // Solves the 3x3 normal equations in place (Gauss-Jordan); false if singular.
+        const auto solve=[](double (&m)[3][4]) {
+            for(int pivot=0;pivot<3;++pivot) {
+                int row=pivot;
+                for(int r=pivot+1;r<3;++r) if(std::abs(m[r][pivot])>std::abs(m[row][pivot])) row=r;
+                std::swap(m[row],m[pivot]);
+                if(std::abs(m[pivot][pivot])<1e-9) return false;
+                for(int r=0;r<3;++r) if(r!=pivot) {
+                    const double factor=m[r][pivot]/m[pivot][pivot];
+                    for(int c=pivot;c<4;++c) m[r][c]-=factor*m[pivot][c];
+                }
+            }
+            return true;
+        };
+        for(double wavelength=192.;wavelength<=12288.;wavelength*=1.04) {
+            const double w=2*3.14159265358979/wavelength;
+            double m[3][4]{};
+            for(const auto& bend:bends) {
+                const double f[3]{std::sin(w*bend.z),std::cos(w*bend.z),1.};
+                for(int r=0;r<3;++r) {for(int c=0;c<3;++c) m[r][c]+=f[r]*f[c];m[r][3]+=f[r]*bend.x;}
+            }
+            if(!solve(m)) continue;
+            const double a=m[0][3]/m[0][0],b=m[1][3]/m[1][1],c=m[2][3]/m[2][2];
+            double error=0;
+            for(const auto& bend:bends) {
+                const double d=a*std::sin(w*bend.z)+b*std::cos(w*bend.z)+c-bend.x;error+=d*d;
+            }
+            if(error<best.error) best={error,w,a,b,c};
+        }
+        if(best.w>0)
+            for(auto& bend:bends) bend.x=best.a*std::sin(best.w*bend.z)+best.b*std::cos(best.w*bend.z)+best.c;
+    }
+    if(bends.empty()) bends.push_back({0.,0.});
+    // Nearer than the bottom row and beyond the farthest: held straight.
+    bends.insert(bends.begin(),{double(behind),bends.front().x});
+    bends.push_back({double(far),bends.back().x});
+    for(std::size_t i=0;i+1<bends.size();++i) {
+        const auto& a=bends[i];const auto& b=bends[i+1];
+        const float half=float(deck_half);
+        push_flat(packet,std::array<std::array<float,3>,4>{{{float(a.x)-half,deck_y,float(a.z)},{float(a.x)+half,deck_y,float(a.z)},
+            {float(b.x)+half,deck_y,float(b.z)},{float(b.x)-half,deck_y,float(b.z)}}},deck_colour);
+    }
+    const auto strip=[&](float half,float y,unsigned index) {
+        push_flat(packet,std::array<std::array<float,3>,4>{{{-half,y,behind},{half,y,behind},{half,y,far},{-half,y,far}}},colour(index));
+    };
+    strip(float(span_half),span_y,span_ink);
+    if(ridge_half>.25) strip(float(ridge_half),span_y,ridge_ink);
+    packet.geometry.texels.assign(16,0);
+    packet.geometry.texels[7]=water_bridge_marker;
+    packet.model=nucleus_room_model(0,view,0,0);
+    return packet;
+}
+namespace {
+constexpr uint32_t colony_marker=4099U;
+// A least-squares line t = a + b row through (row, t) samples.
+struct LineFit {
+    double n{},sx{},sy{},sxx{},sxy{};
+    void add(double x,double y) {n+=1;sx+=x;sy+=y;sxx+=x*x;sxy+=x*y;}
+    [[nodiscard]] std::optional<std::array<double,2>> line() const {
+        const double d=n*sxx-sx*sx;
+        if(n<8 || std::abs(d)<1e-9) return std::nullopt;
+        const double b=(n*sxy-sx*sy)/d;return std::array<double,2>{(sy-b*sx)/n,b};
+    }
+};
+}
+DrawPacket colony_corridor_packet(const simulation::SnesPpuState& source,unsigned brightness,bool srgb,
+    float top,float bottom,int32_t camera_z) {
+    DrawPacket packet;
+    if(brightness>15) throw std::invalid_argument("Invalid colony brightness");
+    if(!(top<bottom)) throw std::invalid_argument("Invalid colony heights");
+    if(!source.tunnel_scene || !(source.main_screen&2) || source.background_mode!=1) return packet;
+    const double height=(bottom-top)*.5;
+    // The art as the screen shows it with the per-row offsets centred; each
+    // row's page is its scanline scroll (the cartridge's tunnel table).
+    auto ppu=source;
+    ppu.bg2_horizontal_offsets.fill(128);ppu.bg2_horizontal_offsets_enabled=true;
+    const auto pages=source.bg2_scanline_scroll_y;
+    const bool per_row=source.bg2_scanline_scroll_enabled;
+    const auto art=[&](int16_t page,int row,int column) {
+        ppu.bg2_scanline_scroll_y.fill(page);ppu.bg2_scanline_scroll_enabled=true;
+        return render::tunnel_border_index(ppu,unsigned(std::clamp(row,0,223)),unsigned(std::clamp(column,0,255)));
+    };
+    const auto page_of=[&](int row){return per_row?pages[size_t(row)]:int16_t(source.bg2_scroll_y);};
+    // The ceiling's right edge (the same on both pages) gives the vanishing
+    // row and the ceiling's width.
+    LineFit ceiling_right;
+    for(int row=0;row<104;++row) {
+        const auto page=page_of(row);
+        const auto centre=art(page,row,128);
+        if(!centre) continue;
+        int right=128;while(right<255 && art(page,row,right+1)==centre) ++right;
+        if(right<255) ceiling_right.add(row+.5,right+1.-128.);
+    }
+    const auto c=ceiling_right.line();
+    if(!c || !((*c)[1]<0)) return packet;
+    const double vp=-(*c)[0]/(*c)[1];
+    if(vp<60 || vp>170) return packet;
+    const double ceiling_half=-(*c)[1]*height;
+    // Each page's own floor: its extent either side (each edge a line
+    // through the vanishing row), and its centre line.
+    // The art's haze near the vanishing row is fixed to the screen; colours
+    // come from rows far from it.
+    struct Page {
+        unsigned ceiling{},floor{},line{},wall{};
+        double floor_left{},floor_right{},line_half{};bool valid{};
+    };
+    std::map<int16_t,Page> looks;
+    const int deep=221;
+    const auto look=[&](int16_t page) -> const Page& {
+        auto found=looks.find(page);
+        if(found!=looks.end()) return found->second;
+        Page result;
+        result.ceiling=art(page,2,128);
+        result.floor=art(page,deep,160);
+        result.line=art(page,deep,128);
+        result.wall=art(page,int(vp),255);
+        if(result.line!=result.floor) {
+            int left=128,right=128;
+            while(left>0 && art(page,deep,left-1)==result.line) --left;
+            while(right<255 && art(page,deep,right+1)==result.line) ++right;
+            result.line_half=(right-left+1)*.5/(deep+.5-vp)*height;
+        } else result.line=0;
+        LineFit right_edge,left_edge;
+        for(int row=int(std::ceil(vp))+4;row<224;++row) {
+            // This row's own floor shade (the haze grades it by row).
+            const auto shade=art(page,row,160);
+            if(!shade || shade==result.wall) continue;
+            int right=160;while(right<255 && art(page,row,right+1)==shade) ++right;
+            int left=160;
+            while(left>0) {
+                const auto next=art(page,row,left-1);
+                if(next!=shade && !(result.line && next==result.line)) break;
+                --left;
+            }
+            if(right<255) right_edge.add(row+.5-vp,right+1.-128.);
+            if(left>0) left_edge.add(row+.5-vp,128.-left);
+        }
+        // Edges through the vanishing row: width = slope x rows below it.
+        const auto slope=[](const LineFit& fit) -> std::optional<double> {
+            if(fit.n<8 || fit.sxx<=0) return std::nullopt;
+            return fit.sxy/fit.sxx;
+        };
+        const auto right_slope=slope(right_edge),left_slope=slope(left_edge);
+        result.floor_right=right_slope?*right_slope*height:ceiling_half;
+        // No left edge on screen: the floor runs on past the view.
+        result.floor_left=left_slope?-*left_slope*height:-ceiling_half*4.;
+        result.valid=right_slope.has_value() && result.floor!=0;
+        return looks.emplace(page,result).first->second;
+    };
+    const double ceiling_vp=vp,floor_vp=vp;
+    for(int row=0;row<224;++row) if(!look(page_of(row)).valid && row>vp+4) return packet;
+    const auto colour=[&](unsigned index){return source_backdrop_colour(source.cgram[index&255U],brightness,srgb);};
+    constexpr float far=-8388608.F,behind=8192.F;
+    const float floor_y=-bottom,ceiling_y=-top;
+    // Bands: runs of rows on one page, from the distance the nearest row of
+    // the run paints to its farthest. The nearest run continues behind the
+    // eye and the farthest to the horizon.
+    struct Band {float z0,z1;int16_t page;};
+    const auto bands=[&](bool ceiling) {
+        std::vector<Band> result;
+        const double vp=ceiling?ceiling_vp:floor_vp;
+        const int first=ceiling?0:int(std::ceil(vp));
+        const int last=ceiling?int(std::floor(vp))-1:223;
+        const auto distance=[&](double row){const double k=std::abs(row-vp);return k>.25?height*256./k:1e7;};
+        // Walk from the far rows (by the horizon) to the near ones.
+        const int step=ceiling?-1:1;
+        int row=ceiling?last:first;
+        while(ceiling?row>=first:row<=last) {
+            const auto page=page_of(row);
+            int end=row;while((ceiling?end-1>=first:end+1<=last) && page_of(end+step)==page) end+=step;
+            const double row_far=ceiling?row+1.:double(row),row_near=ceiling?double(end):end+1.;
+            result.push_back({float(-distance(row_far)),float(-distance(row_near)),page});
+            row=end+step;
+        }
+        if(!result.empty()) {result.front().z0=far;result.back().z1=behind;}
+        return result;
+    };
+    auto floor_bands=bands(false),ceiling_bands=bands(true);
+    if(floor_bands.empty() || ceiling_bands.empty()) return packet;
+    // The cartridge's table swaps the two pages every 128 units of world Z
+    // (one 256-unit cycle), locked to the camera's Z. Bands cut from this
+    // tick's rows jump a row's worth each tick and stop where the rows run
+    // out near the horizon; lay them in the world instead. The phase comes
+    // from the near band edges, where a row is finest.
+    {
+        constexpr double half_period=128.;
+        const double eye=double(uint16_t(camera_z));
+        double sum_cos=0,sum_sin=0;
+        for(std::size_t i=0;i+1<floor_bands.size();++i) {
+            const double edge=-double(floor_bands[i].z1); // Distance of the far band's near edge.
+            if(edge>900. || edge<100.) continue;
+            const double angle=2*std::numbers::pi*std::fmod(eye+edge,half_period)/half_period;
+            const double weight=1./edge;
+            sum_cos+=std::cos(angle)*weight;sum_sin+=std::sin(angle)*weight;
+        }
+        std::vector<int16_t> seen;
+        for(const auto& band:floor_bands) if(std::find(seen.begin(),seen.end(),band.page)==seen.end()) seen.push_back(band.page);
+        if(std::hypot(sum_cos,sum_sin)>0 && seen.size()==2) {
+            double phase=std::atan2(sum_sin,sum_cos)/(2*std::numbers::pi)*half_period;
+            if(phase<0) phase+=half_period;
+            // Which page holds which parity: the nearest full run on screen.
+            const auto& nearest=floor_bands.size()>1?floor_bands[floor_bands.size()-2]:floor_bands.back();
+            const double middle=eye-.5*(double(nearest.z0)+double(nearest.z1));
+            const auto parity=[&](double world){return int64_t(std::floor((world-phase)/half_period))&1;};
+            const int16_t near_page=nearest.page,other_page=seen[0]==near_page?seen[1]:seen[0];
+            const int64_t near_parity=parity(middle);
+            // The wider floor carries on to the horizon past the last band.
+            const int16_t far_page=look(seen[0]).floor_left<look(seen[1]).floor_left?seen[0]:seen[1];
+            constexpr double reach=24576.;
+            std::vector<Band> world;
+            double edge=std::floor((eye-behind-phase)/half_period)*half_period+phase;
+            while(edge<eye+reach) {
+                const double next=edge+half_period;
+                const auto page=parity(edge+1.)==near_parity?near_page:other_page;
+                // Model Z is the eye's world Z minus the world Z.
+                world.push_back({float(-(next-eye)),float(-(edge-eye)),page});
+                edge=next;
+            }
+            world.push_back({far,float(-(edge-eye)),far_page});
+            floor_bands=world;ceiling_bands=std::move(world);
+        }
+    }
+    // The art fades the road into a dark haze at its vanishing point, which
+    // hides the set pieces the cartridge spawns about 3,800 units ahead (the
+    // exit gate at the end of Venom 2's road). Real geometry runs on to the
+    // horizon, so the haze returns as distance: bands darken into the art's
+    // own colour at the vanishing point, and ModernFrame fogs the models with
+    // it over the same distances (colony_corridor_haze).
+    const auto haze=[&] {
+        // The darkest of the centre column within 24 rows of the vanishing
+        // point, where the art's haze is deepest.
+        std::array<float,4> darkest{};float least=1e9F;
+        for(int offset=1;offset<=24;++offset) for(const int row:{int(std::floor(vp))-offset,int(std::ceil(vp))+offset}) {
+            if(row<0 || row>223) continue;
+            const auto c=colour(art(page_of(row),row,128));
+            const float luma=.2126F*c[0]+.7152F*c[1]+.0722F*c[2];
+            if(luma<least) {least=luma;darkest=c;}
+        }
+        return darkest;
+    }();
+    const auto hazed=[&](unsigned index,float z0,float z1) {
+        // By the band's near edge; the band to the horizon is all haze.
+        const double distance=z0<=far?1e9:-double(z1);
+        const double t=std::clamp((distance-colony_haze_start)/(colony_haze_end-colony_haze_start),0.,1.);
+        const float amount=float(t*t*(3.-2.*t));
+        auto c=colour(index);
+        for(int k=0;k<3;++k) c[size_t(k)]+=(haze[size_t(k)]-c[size_t(k)])*amount;
+        return c;
+    };
+    const auto quad=[&](float x0,float x1,float y,float z0,float z1,unsigned index) {
+        push_flat(packet,std::array<std::array<float,3>,4>{{{x0,y,z1},{x1,y,z1},{x1,y,z0},{x0,y,z0}}},hazed(index,z0,z1));
+    };
+    constexpr float side=8388608.F;
+    for(const auto& band:ceiling_bands) {
+        const auto& page=look(band.page);
+        quad(float(-ceiling_half),float(ceiling_half),ceiling_y,band.z0,band.z1,page.ceiling);
+    }
+    for(const auto& band:floor_bands) {
+        const auto& page=look(band.page);
+        quad(float(page.floor_left),float(page.floor_right),floor_y,band.z0,band.z1,page.floor);
+        if(page.line && page.line_half>.25) quad(float(-page.line_half),float(page.line_half),floor_y,band.z0,band.z1,page.line);
+        // The right wall over this band, from the floor's edge to the ceiling's.
+        if(page.wall) push_flat(packet,std::array<std::array<float,3>,4>{{{float(page.floor_right),floor_y,band.z1},
+            {float(ceiling_half),ceiling_y,band.z1},{float(ceiling_half),ceiling_y,band.z0},{float(page.floor_right),floor_y,band.z0}}},
+            hazed(page.wall,band.z0,band.z1));
+    }
+    packet.geometry.texels.assign(16,0);
+    packet.geometry.texels[7]=colony_marker;
+    // Words 8-11: the haze colour (target encoding) and a set flag.
+    for(int k=0;k<3;++k) packet.geometry.texels[size_t(8+k)]=starfox::bit_cast<uint32_t>(haze[size_t(k)]);
+    packet.geometry.texels[11]=1U;
+    packet.model=nucleus_room_model(0,(top+bottom)*.5,0,0);
+    return packet;
+}
+std::optional<std::array<float,3>> colony_corridor_haze(const DrawPacket& packet) noexcept {
+    if(!is_colony_corridor(packet)) return std::nullopt;
+    const auto texels=packet.geometry.texel_view();
+    if(texels[11]!=1U) return std::nullopt;
+    return std::array<float,3>{starfox::bit_cast<float>(texels[8]),starfox::bit_cast<float>(texels[9]),
+        starfox::bit_cast<float>(texels[10])};
+}
+bool is_colony_corridor(const DrawPacket& packet) noexcept {
+    const auto texels=packet.geometry.texel_view();
+    return texels.size()==16 && texels[7]==colony_marker && !packet.geometry.vertex_view().empty();
+}
+bool is_water_bridge(const DrawPacket& packet) noexcept {
+    const auto texels=packet.geometry.texel_view();
+    return texels.size()==16 && texels[7]==water_bridge_marker && !packet.geometry.vertex_view().empty();
+}
 Matrix4 water_height_motion(float previous_height,float current_height,double alpha) {
     if(!std::isfinite(previous_height) || !std::isfinite(current_height)
         || previous_height<.01F || current_height<.01F || previous_height>8.F || current_height>8.F || !std::isfinite(alpha))
@@ -1150,6 +1649,28 @@ Matrix4 orbital_horizon_motion(float previous_scroll,float current_scroll,double
     // correction on the planet layer, never on the eye camera or UI.
     if(gameplay && (entry || thin)) return {0,-1,0,0,c,0,s,0,-s,0,c,0,0,0,0,1};
     return {1,0,0,0,0,c,s,0,0,-s,c,0,0,0,0,1};
+}
+void flat_orbital_surface(DrawPacket& bg2,const simulation::SnesPpuState& source,bool thin_horizon,bool entry_horizon) {
+    auto& data=bg2.geometry.texels;
+    if(data.size()<272+16384 || bg2.geometry.vertex_view().empty()) return;
+    const unsigned horizon=entry_horizon?424U:thin_horizon?400U:384U;
+    const unsigned depth=entry_horizon?40U:thin_horizon?15U:80U;
+    // The surface rows' inks, probed where the headset sphere probes them
+    // (scene.hlsl's vertex stage): atlas rows below the limb, unscrolled.
+    auto ppu=source;
+    ppu.bg2_horizontal_offsets_enabled=false;ppu.bg2_scanline_scroll_enabled=false;
+    ppu.bg2_scroll_x=0;ppu.bg2_scroll_y=int16_t(horizon-100U);
+    std::array<uint32_t,2> inks{};
+    for(unsigned i=0;i<8;++i) {
+        const unsigned row=100U+unsigned(float(depth)*(.3F+.25F*float(i%3)));
+        const auto index=render::tunnel_border_index(ppu,row,29U+i*61U);
+        // Ink 0 (transparent) falls back to the darkest colour; skip it.
+        if(index%16U) inks[i/4]|=uint32_t(index)<<((i%4)*8);
+    }
+    data[7]|=65536U;
+    data.push_back(starfox::bit_cast<uint32_t>(float(horizon)));
+    data.push_back(starfox::bit_cast<uint32_t>(float(depth)));
+    data.push_back(inks[0]);data.push_back(inks[1]);
 }
 DrawPacket orbital_planet_sphere_packet(const simulation::SnesPpuState& ppu,
     const BackgroundTileOptions& options,bool srgb,bool thin_horizon,bool entry_horizon,bool gameplay) {

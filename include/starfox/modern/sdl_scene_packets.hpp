@@ -3,6 +3,7 @@
 #include "starfox/vr/draw_packet.hpp"
 #include "starfox/vr/scene_camera.hpp"
 #include <SDL3/SDL_gpu.h>
+#include <future>
 #include <map>
 #include <optional>
 #include <memory>
@@ -65,6 +66,12 @@ public:
     void set_painter(bool enabled) noexcept {painter_=enabled;}
     // Target sample count (MSAA); a change drops the cached pipelines.
     void set_sample_count(SDL_GPUSampleCount samples) noexcept;
+    // Pipeline keys (get()'s topology | depth test << 1 | depth write << 2 |
+    // blend << 3 | painter << 7) built in parallel on the first get() after
+    // initialize() or a sample count change. Each state compiles the whole
+    // scene shader (about 2 s each on an Adreno phone), so building them one
+    // at a time on first use froze play, e.g. at the first bomb.
+    void set_warm_keys(std::vector<unsigned> keys) {warm_keys_=std::move(keys);}
     // Fragment storage slots 1-2 (scene_sdl.hlsl): the ray-traced shadow
     // casters' triangles and objects for the next passes, or null for a small
     // placeholder (no shadow receivers). Draws bind all three slots through
@@ -85,6 +92,15 @@ private:
     unsigned brush_pixels_{1};
     std::array<float,4> brush_{};
     std::map<unsigned,SDL_GPUGraphicsPipeline*> pipelines_;
+    std::map<unsigned,std::future<SDL_GPUGraphicsPipeline*>> pending_;
+    // The states a flat MODERN level and its bombs use (an Adreno log of
+    // Corneria): opaque, add, subtract, half add/subtract and alpha without
+    // depth; depth-tested triangles and lines, also in painter mode.
+    std::vector<unsigned> warm_keys_{0U,6U,7U,8U,16U,24U,32U,40U,134U,135U};
+    bool warmed_{};
+    SDL_GPUGraphicsPipeline* create(unsigned key) const;
+    void prewarm();
+    void drain() noexcept;
     std::string status_{"Scene pipelines not initialized"};
 };
 // SDL_GPU equivalent of vr::VulkanDrawPackets: immutable per-packet geometry

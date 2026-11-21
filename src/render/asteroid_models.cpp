@@ -192,26 +192,31 @@ TextureMatch match_texture(const assets::TextureImage& texture) {
 
 } // namespace
 
-const assets::Shape* substitute_asteroid_model(
-    const assets::Shape& source, RenderPose& pose, AsteroidModels mode) {
-    if (mode == AsteroidModels::sprite || pose.explosion_progress != 0U) return nullptr;
-    const assets::TextureImage* texture = nullptr;
-    double half_size = 0.0;
+WholeObjectSprite whole_object_sprite(const assets::Shape& source, const RenderPose& pose) {
+    WholeObjectSprite sprite;
     if (pose.simple_scaled_sprite) {
-        texture = texture_for_colour(source, pose.simple_sprite_colour, pose.colour_frame);
-        half_size = static_cast<double>(pose.simple_sprite_world_size) / 2.0;
+        sprite.texture = texture_for_colour(source, pose.simple_sprite_colour, pose.colour_frame);
+        sprite.half_size = static_cast<double>(pose.simple_sprite_world_size) / 2.0;
     } else if (source.faces.size() == 1U && !source.faces.front().sprite
         && source.faces.front().vertex_indices.size() == 4U && source.frames.size() <= 1U) {
         // BIG_METEOR is a single textured quad rather than a scaled sprite.
-        texture = texture_for_colour(source, source.faces.front().colour_id, pose.colour_frame);
+        sprite.texture = texture_for_colour(source, source.faces.front().colour_id, pose.colour_frame);
         std::int32_t extent = 0;
         for (const auto& vertex : source.vertices) {
             extent = std::max({extent, std::abs(vertex.x), std::abs(vertex.y), std::abs(vertex.z)});
         }
-        half_size = static_cast<double>(extent)
+        sprite.half_size = static_cast<double>(extent)
             * static_cast<double>(std::uint32_t{1} << source.header.shift) * pose.scale;
     }
-    if (texture == nullptr || half_size <= 0.0) return nullptr;
+    if (sprite.half_size <= 0.0) sprite.texture = nullptr;
+    return sprite;
+}
+
+const assets::Shape* substitute_asteroid_model(
+    const assets::Shape& source, RenderPose& pose, AsteroidModels mode) {
+    if (mode == AsteroidModels::sprite || pose.explosion_progress != 0U) return nullptr;
+    const auto [texture, half_size] = whole_object_sprite(source, pose);
+    if (texture == nullptr) return nullptr;
     const auto match = match_texture(*texture);
     if (match.model == nullptr) return nullptr;
     pose.simple_scaled_sprite = false;

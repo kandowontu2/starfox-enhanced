@@ -896,14 +896,15 @@ void corridor_source_symbols() {
         "BG_1_6B $10800c\nBG_1_7A $10800f\nBG_2_6B $108012\nBG_2_6C $108015\n"
         "BG_3_4C $108018\nBG_5_2A $10801b\nBG_5_2Z $10801e\nBG_2_6A $108021\n";
     const auto resolved=vr::source_corridors(assets::SymbolMap::parse(backgrounds+constants));
-    for(unsigned i=0;i<10;++i) {
+    // BG_2_6B (background 18) is the pipe run, not a corridor.
+    for(unsigned i=0;i<9;++i) {
         const int width=i==1?90:i==2?60:120;
-        require(resolved[i] && resolved[i]->background==(i+1)*3
+        require(resolved[i] && resolved[i]->background==(i<5?i+1:i+2)*3
             && resolved[i]->bounds==vr::SourceCorridorBounds{std::int16_t(-width),std::int16_t(width),-120,0},
             "Source-linked corridor dimensions changed or Gekkou incorrectly used unused KTUNNEL bounds");
     }
-    require(resolved[10] && resolved[10]->background==33
-        && resolved[10]->bounds==vr::SourceCorridorBounds{-170,120,-120,0,14},
+    require(resolved[9] && resolved[9]->background==33
+        && resolved[9]->bounds==vr::SourceCorridorBounds{-170,120,-120,0,14},
         "Colony movement limit was incorrectly treated as a physical left wall");
     const auto incomplete=vr::source_corridors(assets::SymbolMap::parse(backgrounds+
         "KTUNNEL_MINX $ffff38\nKTUNNEL_MAXX $0000c8\nKTUNNEL_MINY $fffeca\nKTUNNEL_MAXY $000000\n"));

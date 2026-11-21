@@ -32,6 +32,12 @@ inline constexpr std::array<std::string_view, asteroid_model_mode_count>
 const assets::Shape* substitute_asteroid_model(
     const assets::Shape& source, RenderPose& pose, AsteroidModels mode);
 
+// The texture a whole-object sprite (or a lone textured quad such as
+// BIG_METEOR) draws this frame, and its world half-size; texture is nullptr
+// for any other shape. Shared by the 3D stand-ins.
+struct WholeObjectSprite {const assets::TextureImage* texture{}; double half_size{};};
+[[nodiscard]] WholeObjectSprite whole_object_sprite(const assets::Shape& source, const RenderPose& pose);
+
 // Exposed for tests.
 [[nodiscard]] std::uint32_t asteroid_texture_hash(const assets::TextureImage& texture) noexcept;
 // Full-detail model for a texture, or nullptr.

@@ -88,6 +88,7 @@ std::vector<std::uint8_t> GameSimulation::save_state() const {
     a(stereo_separation_,stereo_convergence_);
     a(stereo_crosshair_depth_);
     a(motion_blur_);
+    a(invincibility_);
     return state::pack(0x47414d01U, assets::crc32(rom_->bytes()), a.bytes());
 }
 
@@ -155,6 +156,7 @@ std::unique_ptr<GameSimulation> GameSimulation::restored_state(
         throw std::runtime_error("Invalid stereo rig");
     if(!a.empty()) a(result->motion_blur_);
     if(result->motion_blur_>3) throw std::runtime_error("Invalid motion blur");
+    if(!a.empty()) a(result->invincibility_); // Older archives default OFF.
     a.finish();
     if(legacy_stereo_menu && result->pregame_page_==PregamePage::stereo && result->pregame_selection_>=3U)
         ++result->pregame_selection_;
@@ -233,6 +235,9 @@ std::unique_ptr<GameSimulation> GameSimulation::restored_state(
     result->reflective_surfaces_ = reflective_surfaces_;
     result->asteroid_models_ = asteroid_models_;
     result->hipoly_arwings_ = hipoly_arwings_;
+    result->projectile_models_ = projectile_models_;
+    result->explosion_models_ = explosion_models_;
+    result->modern_display_resolution_ = modern_display_resolution_;
     result->dynamic_lighting_ = dynamic_lighting_;
     result->modern_available_ = modern_available_;
     result->gpu_renderer_ = gpu_renderer_;

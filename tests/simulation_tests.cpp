@@ -1927,17 +1927,26 @@ int main(int argc, char** argv) {
                     upstream_symbols.find("M_WINTABPTR").front();
                 const auto wipe_logic =
                     upstream_symbols.find("M_WINWBGLOG").front();
-                const auto wipe_left =
+                // TRANS.ASM feeds M_WINBUF2 to WH0 (left) and M_WINBUF to
+                // WH1 (right). Expected words come from running the
+                // cartridge's own MBUMWIPE in a Super FX interpreter.
+                const auto wipe_wh1 =
                     upstream_symbols.find("M_WINBUF").front();
-                const auto wipe_right =
+                const auto wipe_wh0 =
                     upstream_symbols.find("M_WINBUF2").front();
                 offsets_cpu.write16(wipe_pointer, static_cast<std::uint16_t>(
                     upstream_symbols.find("MSCRAMWIPE").front()));
                 launch("MBUMWIPE");
                 require((offsets_cpu.read16(wipe_logic) & 0xffU) == 0xaaU
-                            && offsets_cpu.read16(wipe_left) == 16U
-                            && offsets_cpu.read16(wipe_right) == 239U,
+                            && offsets_cpu.read16(wipe_wh0) == 16U
+                            && offsets_cpu.read16(wipe_wh1) == 239U
+                            && offsets_cpu.read16(wipe_wh0 + 191U * 2U) == 16U
+                            && offsets_cpu.read16(wipe_wh1 + 191U * 2U) == 239U,
                     "MBUMWIPE did not rasterize the source scanline window");
+                launch("MBUMWIPE");
+                require(offsets_cpu.read16(wipe_wh0 + 100U * 2U) == 16U
+                            && offsets_cpu.read16(wipe_wh1 + 100U * 2U) == 15U,
+                    "MBUMWIPE did not leave an equal row as the empty window WH0=x, WH1=x-1");
                 for (std::size_t frame = 1U;
                      offsets_cpu.read16(wipe_pointer) != 1U && frame < 20U;
                      ++frame) {
@@ -3744,6 +3753,51 @@ int main(int argc, char** argv) {
                         "native God Nuke damaged a player collision part");
             }
             require(detonated,"real God Nuke fixture never detonated");
+
+            // God Mode's 4-tick cadence must not turn the detonating press
+            // into a second launch: with a bomb in flight, A only detonates.
+            starfox::simulation::GameSimulation spam{upstream_rom,upstream_symbols,"LEVEL1_1"};
+            spam.set_god_mode(true);
+            for(unsigned tick=0;tick<360;++tick) static_cast<void>(spam.tick({}));
+            spam.map().write_native_byte(upstream_symbols.find("SPECIALDELAY").front(),1U);
+            const auto count_bombs=[&] {
+                unsigned count=0;
+                for(const auto handle:spam.objects().active_handles())
+                    if(spam.objects().at(handle).shape==bomb_shape) ++count;
+                return count;
+            };
+            static_cast<void>(spam.tick({starfox::input::a,starfox::input::a,0}));
+            require(count_bombs()==1U,"God Mode spam fixture did not fire a bomb");
+            for(unsigned tick=0;tick<8;++tick) static_cast<void>(spam.tick({}));
+            require(count_bombs()==1U,"God Mode spam fixture's bomb ended early");
+            static_cast<void>(spam.tick({starfox::input::a,starfox::input::a,0}));
+            require(count_bombs()==0U,"a second A press in God Mode launched another bomb instead of only detonating");
+
+            // Invincibility: God Mode's no-collision survival, but Nova Bombs
+            // stay retail: one is spent per launch and the cadence is not 4.
+            starfox::simulation::GameSimulation invincible{upstream_rom,upstream_symbols,"LEVEL1_1"};
+            invincible.set_invincibility(true);
+            for(unsigned tick=0;tick<360;++tick) static_cast<void>(invincible.tick({}));
+            const auto flags3=upstream_symbols.find("PSHIPFLAGS3").front();
+            const auto bombs=upstream_symbols.find("SPECWEPCNT").front();
+            const auto delay=upstream_symbols.find("SPECIALDELAY").front();
+            require(invincible.invincibility() && !invincible.god_mode()
+                && (invincible.map().read_native_byte(flags3)&0x08U)!=0U,
+                "Invincibility did not set the cartridge's no-collision flag");
+            invincible.map().write_native_word(bombs,2U);
+            invincible.map().write_native_byte(delay,1U);
+            static_cast<void>(invincible.tick({starfox::input::a,starfox::input::a,0}));
+            unsigned launched=0;
+            for(const auto handle:invincible.objects().active_handles())
+                if(invincible.objects().at(handle).shape==bomb_shape) ++launched;
+            require(launched==1U,"Invincibility fixture did not fire a bomb");
+            require(invincible.map().read_native_word(bombs)==1U,
+                "Invincibility kept the Nova Bomb it fired (God Mode's infinite bombs)");
+            require(invincible.map().read_native_byte(delay)>4U,
+                "Invincibility used God Mode's 4-tick bomb cadence");
+            invincible.set_invincibility(false);
+            require((invincible.map().read_native_byte(flags3)&0x08U)==0U,
+                "turning Invincibility off left the no-collision flag set");
         }
 
         {
@@ -7119,6 +7173,9 @@ int main(int argc, char** argv) {
         require(!missing_msu_game.msu1_available()
                     && !missing_msu_game.msu1_music(),
                 "missing MSU-1 companion did not disable its menu option");
+        require(missing_msu_game.take_msu1_import_request()
+                    && !missing_msu_game.take_msu1_import_request(),
+                "confirming a missing MSU-1 companion did not request one once");
         starfox::audio::Spc700Audio boot_audio;
         bool heard_start_sound = false;
         const auto drive_boot = [&](const starfox::input::TickInput& input) {
@@ -7371,9 +7428,20 @@ int main(int argc, char** argv) {
         drive_boot({0, starfox::input::a, 0});
         require(boot_game.asteroid_models() == starfox::render::AsteroidModels::sprite,
                 "3D ASTEROIDS did not wrap to SPRITE");
+        // 3D PROJECTILES and 3D EXPLOSIONS follow 3D ASTEROIDS, both OFF.
+        drive_boot({0, starfox::input::down, 0});
+        require(boot_game.pregame_selection() == 82U && !boot_game.projectile_models(),
+                "3D PROJECTILES did not follow 3D ASTEROIDS or was not OFF");
+        drive_boot({0, starfox::input::a, 0});
+        require(boot_game.projectile_models(), "3D PROJECTILES did not toggle on");
+        drive_boot({0, starfox::input::a, 0});
+        require(!boot_game.projectile_models(), "3D PROJECTILES did not toggle back");
+        drive_boot({0, starfox::input::down, 0});
+        require(boot_game.pregame_selection() == 83U && !boot_game.explosion_models(),
+                "3D EXPLOSIONS did not follow 3D PROJECTILES or was not OFF");
         drive_boot({0, starfox::input::down, 0});
         require(boot_game.pregame_selection() == 80U && !boot_game.hipoly_arwings(),
-                "HIGH POLY ARWINGS did not follow 3D ASTEROIDS or was not OFF");
+                "HIGH POLY ARWINGS did not follow 3D EXPLOSIONS or was not OFF");
         drive_boot({0, starfox::input::a, 0});
         require(boot_game.hipoly_arwings()
                 && boot_game.restored_state(boot_game.save_state())->hipoly_arwings(),

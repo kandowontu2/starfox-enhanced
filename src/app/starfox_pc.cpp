@@ -106,6 +106,8 @@ extern "C" void StarfoxPS5_HideSplashScreen(void);
 #include "starfox/render/sprite_renderer.hpp"
 #include "starfox/render/colour_math.hpp"
 #include "starfox/render/asteroid_models.hpp"
+#include "starfox/render/projectile_models.hpp"
+#include "starfox/render/explosion_models.hpp"
 #include "starfox/render/model_smoothing.hpp"
 #include "starfox/simulation/game_simulation.hpp"
 #include "starfox/simulation/math.hpp"
@@ -142,6 +144,7 @@ extern "C" void StarfoxPS5_HideSplashScreen(void);
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <iostream>
 #include <iterator>
 #include <limits>
@@ -1405,6 +1408,137 @@ std::filesystem::path find_msu1_pack(
     return candidates.front();
 }
 
+#if defined(STARFOX_HAS_EMBEDDED_ASSETS) && !defined(__SWITCH__) \
+    && !defined(SDL_PLATFORM_VITA) && !defined(STARFOX_PS5) && !defined(STARFOX_UWP)
+#define STARFOX_MSU1_PACK_PICKER 1
+// Copies a picked pack to `destination` and validates it there. Android and
+// iOS hand back a document the app may not read after a restart, so the
+// copy beside the other companions is what keeps the music.
+std::string copy_msu1_pack(const std::string& source,
+    const std::filesystem::path& destination, bool remove_source) {
+    auto partial = destination;
+    partial += ".partial";
+    std::string error;
+    auto* input = SDL_IOFromFile(source.c_str(), "rb");
+    if (input == nullptr) {
+        error = "unable to open " + source + ": " + SDL_GetError();
+    } else if (auto* output = SDL_IOFromFile(partial.string().c_str(), "wb");
+               output == nullptr) {
+        error = "unable to create " + partial.string() + ": " + SDL_GetError();
+        static_cast<void>(SDL_CloseIO(input));
+    } else {
+        std::vector<unsigned char> chunk(std::size_t{1U} << 20U);
+        for (;;) {
+            const auto count = SDL_ReadIO(input, chunk.data(), chunk.size());
+            if (count == 0U) {
+                if (SDL_GetIOStatus(input) == SDL_IO_STATUS_ERROR)
+                    error = std::string{"read failed: "} + SDL_GetError();
+                break;
+            }
+            if (SDL_WriteIO(output, chunk.data(), count) != count) {
+                error = std::string{"write failed: "} + SDL_GetError();
+                break;
+            }
+        }
+        static_cast<void>(SDL_CloseIO(input));
+        if (!SDL_CloseIO(output) && error.empty())
+            error = std::string{"write failed: "} + SDL_GetError();
+    }
+    std::error_code ignored;
+    if (remove_source) std::filesystem::remove(source, ignored);
+    if (error.empty() && !starfox::audio::Msu1Pack{partial}.available())
+        error = "the file is not a complete Starfox-MSU1.PAK";
+    if (error.empty()) {
+        std::filesystem::remove(destination, ignored);
+        std::error_code renamed;
+        std::filesystem::rename(partial, destination, renamed);
+        if (renamed) error = "unable to move the pack into place: " + renamed.message();
+    }
+    if (!error.empty()) std::filesystem::remove(partial, ignored);
+    return error;
+}
+
+// MSU-1 MUSIC's missing-pack row: the platform file picker, then the copy
+// on a worker thread so the game keeps drawing while 200+ MB move.
+class Msu1PackImport {
+public:
+    enum class Stage { idle, picking, copying, failed };
+    Msu1PackImport() = default;
+    Msu1PackImport(const Msu1PackImport&) = delete;
+    Msu1PackImport& operator=(const Msu1PackImport&) = delete;
+    ~Msu1PackImport() {
+        if (copy_.valid()) copy_.wait();
+        // A picker still open owns the state until its callback runs.
+        if (dialog_ != nullptr && dialog_->complete.load(std::memory_order_acquire))
+            delete dialog_;
+    }
+    [[nodiscard]] Stage stage() const noexcept { return stage_; }
+    void begin(SDL_Window* window) {
+        if (stage_ == Stage::picking || stage_ == Stage::copying) return;
+        delete dialog_;
+        dialog_ = new RuntimeInputDialogState;
+#if defined(SDL_PLATFORM_IOS)
+        void* ui_window = window == nullptr ? nullptr : SDL_GetPointerProperty(
+            SDL_GetWindowProperties(window), SDL_PROP_WINDOW_UIKIT_WINDOW_POINTER, nullptr);
+        starfox_ios_show_runtime_input_picker(ui_window,
+            ios_runtime_input_dialog_callback, dialog_);
+#elif defined(__ANDROID__)
+        // Android filters by MIME type and has none for .PAK: show everything.
+        SDL_ShowOpenFileDialog(runtime_input_dialog_callback, dialog_, window,
+            nullptr, 0, nullptr, false);
+#else
+        static constexpr std::array filters{
+            SDL_DialogFileFilter{"MSU-1 music pack", "pak"},
+            SDL_DialogFileFilter{"All files", "*"},
+        };
+        SDL_ShowOpenFileDialog(runtime_input_dialog_callback, dialog_, window,
+            filters.data(), static_cast<int>(filters.size()), nullptr, false);
+#endif
+        stage_ = Stage::picking;
+    }
+    // The installed pack's path once a picked file is copied and valid.
+    std::optional<std::filesystem::path> poll(const std::filesystem::path& destination) {
+        if (stage_ == Stage::picking && dialog_->complete.load(std::memory_order_acquire)) {
+            if (!dialog_->error.empty()) {
+                fail("file picker: " + dialog_->error);
+            } else if (dialog_->selection.empty()) {
+                stage_ = Stage::idle;
+            } else {
+#if defined(SDL_PLATFORM_IOS)
+                constexpr bool temporary = true; // The picker's sandbox copy.
+#else
+                constexpr bool temporary = false;
+#endif
+                copy_ = std::async(std::launch::async, copy_msu1_pack,
+                    dialog_->selection, destination, temporary);
+                stage_ = Stage::copying;
+            }
+        }
+        if (stage_ == Stage::copying
+            && copy_.wait_for(std::chrono::seconds{0}) == std::future_status::ready) {
+            const auto error = copy_.get();
+            if (error.empty()) {
+                stage_ = Stage::idle;
+                return destination;
+            }
+            fail(error);
+        }
+        return std::nullopt;
+    }
+private:
+    void fail(const std::string& error) {
+        stage_ = Stage::failed;
+        std::cerr << "MSU-1 pack import failed: " << error << '\n';
+#if defined(__ANDROID__) || defined(SDL_PLATFORM_IOS)
+        SDL_Log("MSU-1 pack import failed: %s", error.c_str());
+#endif
+    }
+    RuntimeInputDialogState* dialog_{};
+    std::future<std::string> copy_;
+    Stage stage_{Stage::idle};
+};
+#endif
+
 void write_asset_companion(
     const std::filesystem::path& path,
     std::span<const std::uint8_t> bytes) {
@@ -1628,6 +1762,11 @@ public:
             SDL_HINT_TOUCH_MOUSE_EVENTS, "0"));
         static_cast<void>(SDL_SetHint(
             SDL_HINT_VITA_ENABLE_BACK_TOUCH, "0"));
+#endif
+#if defined(__ANDROID__)
+        // Back (button or gesture) reaches the game as SDL_SCANCODE_AC_BACK
+        // (OPTIONS, then EXIT GAME?) instead of closing the activity.
+        static_cast<void>(SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1"));
 #endif
         if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD | SDL_INIT_AUDIO)) {
             throw std::runtime_error{std::string{"SDL_Init: "} + SDL_GetError()};
@@ -2143,6 +2282,15 @@ public:
         return starfox::app::TouchOverlayLayout::make(float(width),float(height),
             {float(safe.x),float(safe.y),float(safe.x+safe.w),float(safe.y+safe.h)},
             touch_layout_config_?*touch_layout_config_:starfox::app::TouchLayoutConfig{});
+    }
+    // The on-screen buttons over a frame the MODERN renderer composed, placed
+    // in window coordinates exactly as present_rgba_pixels places them.
+    void draw_touch_controls_over_frame() {
+        const auto layout=touch_layout();
+        if(!SDL_SetRenderLogicalPresentation(renderer_,int(layout.width),
+            int(layout.height),SDL_LOGICAL_PRESENTATION_STRETCH))
+            throw std::runtime_error(SDL_GetError());
+        draw_touch_overlay(renderer_,layout,touch_editor_active_,touch_editor_selected_);
     }
     void set_touch_layout_config(const starfox::app::TouchLayoutConfig* config) noexcept {
         touch_layout_config_=config;
@@ -7985,6 +8133,28 @@ int main(int argc, char** argv) {
             static_cast<starfox::render::RendererBackend>(saved_pregame.renderer_backend),gpu_guard,startup_sr_platform,
             saved_pregame.window_width,saved_pregame.window_height};
         window.set_startup_trace(&*startup_trace);
+#if defined(__ANDROID__)
+        // Going to the background (home, app switcher) is not a GPU failure,
+        // yet Android may then kill the process with no shutdown, and swiping
+        // the app away is how players close it. Clear the GPU journal while
+        // backgrounded and set it again on return, so only an interrupted
+        // foreground session starts the next launch in Software.
+        struct AndroidGuardLifecycle {
+            starfox::app::GpuLaunchGuard* guard{};
+            bool rearm{};
+            static bool SDLCALL watch(void* data,SDL_Event* event) {
+                auto& self=*static_cast<AndroidGuardLifecycle*>(data);
+                if(event->type==SDL_EVENT_DID_ENTER_BACKGROUND && self.guard->armed()) {
+                    self.guard->disarm();self.rearm=!self.guard->armed();
+                } else if(event->type==SDL_EVENT_WILL_ENTER_FOREGROUND && self.rearm) {
+                    self.rearm=false;static_cast<void>(self.guard->arm());
+                }
+                return true;
+            }
+            ~AndroidGuardLifecycle() {SDL_RemoveEventWatch(&watch,this);}
+        } android_guard_lifecycle{&android_gpu_guard};
+        SDL_AddEventWatch(&AndroidGuardLifecycle::watch,&android_guard_lifecycle);
+#endif
         const auto touch_layout_path=starfox::app::touch_layout_settings_path();
         starfox::app::TouchLayoutConfig touch_layout_config{};
         static_cast<void>(starfox::app::load_touch_layout(touch_layout_path,
@@ -8003,8 +8173,13 @@ int main(int argc, char** argv) {
 #endif
         std::string initial_map = "BOOT";
         if (const auto* test_map = std::getenv("STARFOX_TEST_MAP")) initial_map = test_map;
-        const auto msu1_pack=trace_startup_work("msu-pack-load",[&] {
+        // Not const: MSU-1 MUSIC's file picker installs a pack mid-session.
+        // Audio reads tracks on this thread, so replacing it here is safe.
+        auto msu1_pack=trace_startup_work("msu-pack-load",[&] {
             return starfox::audio::Msu1Pack{find_msu1_pack(executable_directory)};});
+#if defined(STARFOX_MSU1_PACK_PICKER)
+        Msu1PackImport msu1_import;
+#endif
 #if defined(STARFOX_HAS_EMBEDDED_ASSETS)
         auto embedded_runtime_assets = trace_startup_work("runtime-assets-load",[&] {
             return load_or_compile_runtime_assets(executable_directory,
@@ -8220,7 +8395,7 @@ int main(int argc, char** argv) {
                 static_cast<std::uint8_t>(game.timing_mode()),
                 game.presentation_fps(),
                 static_cast<std::uint8_t>(game.display_mode()),
-                game.god_mode(),
+                static_cast<std::uint8_t>(game.invincibility() ? 2U : game.god_mode() ? 1U : 0U),
                 game.show_fps(),
                 static_cast<std::uint8_t>(game.anti_aliasing_mode()),
                 game.enhanced_graphics(),
@@ -8278,6 +8453,9 @@ int main(int argc, char** argv) {
                 window.fixed_window_size()[0],window.fixed_window_size()[1],
                 game.hipoly_arwings(),
                 game.dynamic_lighting(),
+                game.projectile_models(),
+                game.explosion_models(),
+                game.modern_display_resolution(),
             };
         };
         {
@@ -8306,7 +8484,8 @@ int main(int argc, char** argv) {
                     game.set_display_mode(static_cast<
                         starfox::simulation::DisplayMode>(*forced_display - '0'));
             }
-            game.set_god_mode(saved_pregame.god_mode);
+            game.set_god_mode(saved_pregame.god_mode == 1U);
+            game.set_invincibility(saved_pregame.god_mode == 2U);
             game.set_show_fps(saved_pregame.show_fps);
             if(std::getenv("STARFOX_TEST_FRAMES")) {
                 if(const auto* fps=std::getenv("STARFOX_TEST_SHOW_FPS"))
@@ -8493,6 +8672,9 @@ int main(int argc, char** argv) {
             game.set_asteroid_models(saved_pregame.asteroid_models);
             game.set_hipoly_arwings(saved_pregame.hipoly_arwings);
             game.set_dynamic_lighting(saved_pregame.dynamic_lighting);
+            game.set_projectile_models(saved_pregame.projectile_models);
+            game.set_explosion_models(saved_pregame.explosion_models);
+            game.set_modern_display_resolution(saved_pregame.modern_display_resolution);
             game.set_language(saved_pregame.language);
             if (const auto* language = std::getenv("STARFOX_TEST_LANGUAGE"))
                 game.set_language(static_cast<std::uint8_t>(std::atoi(language)));
@@ -8545,6 +8727,14 @@ int main(int argc, char** argv) {
                 game.set_hipoly_arwings(std::atoi(hipoly) != 0);
             if (const auto* lighting = std::getenv("STARFOX_TEST_DYNAMIC_LIGHTING"))
                 game.set_dynamic_lighting(std::atoi(lighting) != 0);
+            if (const auto* projectiles = std::getenv("STARFOX_TEST_PROJECTILE_MODELS"))
+                game.set_projectile_models(std::atoi(projectiles) != 0);
+            if (const auto* explosions = std::getenv("STARFOX_TEST_EXPLOSION_MODELS"))
+                game.set_explosion_models(std::atoi(explosions) != 0);
+            if (const auto* display = std::getenv("STARFOX_TEST_MODERN_DISPLAY_RESOLUTION"))
+                game.set_modern_display_resolution(std::atoi(display) != 0);
+            if (const auto* laser = std::getenv("STARFOX_TEST_DEFAULT_LASER")) // 0 SINGLE, 1 DUAL, 2 BEAM.
+                game.set_default_laser(static_cast<std::uint8_t>(std::atoi(laser)));
             if (const auto* separated = std::getenv("STARFOX_TEST_SEPARATED_MODELS"))
                 game.set_smooth_polys(std::atoi(separated) != 0);
             if (saved_pregame.effect == static_cast<std::uint8_t>(starfox::render::Effect::bloom)
@@ -8612,7 +8802,8 @@ int main(int argc, char** argv) {
             }
         }
         if (menu_preview) {
-            game.set_god_mode(saved_pregame.god_mode);
+            game.set_god_mode(saved_pregame.god_mode == 1U);
+            game.set_invincibility(saved_pregame.god_mode == 2U);
             game.enable_menu_preview();
         }
         if (std::exchange(launch_game_after_preview, false)) {
@@ -8814,8 +9005,14 @@ int main(int argc, char** argv) {
             if (const auto* label = std::getenv("STARFOX_TEST_MAP_JUMP")) {
                 // After the level's own setup, continue its map script at an
                 // authored label (e.g. LEVEL1_END: Venom's final-base demo).
+                // LABEL+N continues N bytes into the label's script (the
+                // command after a mapjsr), as starfox_vr_modern_capture does.
                 game.set_god_mode(true);
-                game.map().start(symbols.find(label).at(0), game.player());
+                const std::string_view target(label);
+                const auto plus = target.find('+');
+                const auto offset = plus == std::string_view::npos ? 0U
+                    : static_cast<std::uint32_t>(std::stoul(std::string(target.substr(plus + 1))));
+                game.map().start(symbols.find(std::string(target.substr(0, plus))).at(0) + offset, game.player());
                 game.map().advance_distance(1);
             }
             if (std::getenv("STARFOX_TEST_TITANIA_END") || std::getenv("STARFOX_TEST_ARMADA_APPROACH")) {
@@ -9657,6 +9854,20 @@ int main(int argc, char** argv) {
             // UI, must uncover VideoOut. The platform retries failed hides.
             StarfoxPS5_HideSplashScreen();
 #endif
+#if defined(__ANDROID__) || defined(SDL_PLATFORM_IOS)
+            // Phones: report hitches (first-use shader builds, renderer
+            // hand-offs) in logcat / the Xcode console.
+            {
+                static auto last_presented=std::chrono::steady_clock::now();
+                const auto now=std::chrono::steady_clock::now();
+                const double gap_ms=std::chrono::duration<double,std::milli>(now-last_presented).count();
+                last_presented=now;
+                if(gap_ms>150.0 && presented_frames!=0)
+                    SDL_Log("Slow frame: %.0f ms (flow %d, frame %s, options %d, modern %d)",gap_ms,
+                        int(game.flow_state()),std::to_string(presented_frames).c_str(),
+                        int(game.runtime_options_open()),int(game.modern_renderer()));
+            }
+#endif
             ++presented_frames;
         };
         std::uint64_t source_logic_frames = 0;
@@ -9826,6 +10037,7 @@ int main(int argc, char** argv) {
         sync_modern();
         bool modern_failure_reported=false;
         std::string modern_failure_reason;
+        bool modern_live_logged=false;
 #endif
         // EXIT GAME? and the save-slot window, drawn into one 112x40 bitmap that
         // both presentations show (MODERN as an overlay on a dark panel).
@@ -10003,11 +10215,38 @@ int main(int argc, char** argv) {
                     : action.buttons == 6 ? SDL_SCANCODE_F1 : SDL_SCANCODE_RETURN;
                 SDL_PushEvent(&key);
             }
+#if defined(STARFOX_MSU1_PACK_PICKER)
+            if (game.take_msu1_import_request())
+                msu1_import.begin(SDL_GetRenderWindow(window.renderer()));
+            if (const auto added = msu1_import.poll(writable_runtime_directory(executable_directory)
+                    / starfox::audio::msu1_pack_filename)) {
+                msu1_pack = starfox::audio::Msu1Pack{*added};
+                game.set_msu1_available(msu1_pack.available());
+                game.set_msu1_music(msu1_pack.available());
+            }
+#else
+            static_cast<void>(game.take_msu1_import_request());
+#endif
             bool toggle_frame_freeze{};
             bool step_frame_forward{};
             bool step_frame_backward{};
             SDL_Event event;
             while (SDL_PollEvent(&event)) {
+                // Android Back (button or gesture), one level out at a time:
+                // gameplay -> OPTIONS -> EXIT GAME?; the pre-game menu goes
+                // straight to EXIT GAME?, and Back there answers NO.
+                if(event.type==SDL_EVENT_KEY_DOWN && !event.key.repeat
+                    && event.key.scancode==SDL_SCANCODE_AC_BACK
+                    && !remap_menu.active && !hud_editor.active && !touch_editor.active
+                    && !state_slot_window && !frame_frozen) {
+                    if(exit_confirmation) exit_confirmation=false;
+                    else if(game.runtime_options_open() || game.in_setup_menu()) {
+                        exit_confirmation=true;exit_yes_selected=false;input.reset();
+                    } else if(game.toggle_runtime_options()) {
+                        audio.set_paused(game.runtime_options_open());input.reset();
+                    }
+                    continue;
+                }
                 if(event.type==SDL_EVENT_KEY_DOWN && !event.key.repeat
                     && event.key.scancode==SDL_SCANCODE_F1
                     && (event.key.mod&(SDL_KMOD_CTRL|SDL_KMOD_ALT|SDL_KMOD_SHIFT))==0
@@ -10148,6 +10387,7 @@ int main(int argc, char** argv) {
                 if (event.type == SDL_EVENT_KEY_DOWN
                     && !remap_menu.active
                     && starfox::app::InputBindings::matches_god_mode_shortcut(event.key)) {
+                    game.set_invincibility(false);
                     game.set_god_mode(!game.god_mode());
                     window.show_temporary_status(game.god_mode()
                         ? "GOD MODE ON" : "GOD MODE OFF");
@@ -11615,7 +11855,7 @@ int main(int argc, char** argv) {
                     if (game.pregame_page() == starfox::simulation::PregamePage::cheats) {
                         draw_centred("CHEATS", 27, 10U);
                         constexpr std::array<std::string_view, 3> lasers{"SINGLE", "DUAL", "BEAM"};
-                        draw_row("GOD MODE", game.god_mode() ? "ON" : "OFF", 55, game.pregame_selection() == 0U);
+                        draw_row("GOD MODE", game.invincibility() ? "INVINCIBILITY" : game.god_mode() ? "ON" : "OFF", 55, game.pregame_selection() == 0U);
                         draw_row("LEVEL SELECT", game.selected_level_name(), 70, game.pregame_selection() == 1U);
                         draw_row("DEFAULT LASER", lasers[game.default_laser()], 85, game.pregame_selection() == 2U);
                         draw_row("INFINITE BOMBS", game.infinite_bombs() ? "ON" : "OFF", 100, game.pregame_selection() == 3U);
@@ -11737,7 +11977,7 @@ int main(int argc, char** argv) {
                             : game.pregame_page() == starfox::simulation::PregamePage::two_d
                                 ? "2D OPTIONS" : game.pregame_page()==starfox::simulation::PregamePage::global
                                     ? "GLOBAL ENHANCEMENTS" : "3D OPTIONS", 27, 10U);
-                        std::array<std::int32_t, 82> row_y;
+                        std::array<std::int32_t, 84> row_y;
                         row_y.fill(-1);
                         const auto selected_row=std::size_t(std::find(visual_order.begin(),visual_order.end(),game.pregame_selection())-visual_order.begin());
                         const auto first_visible=!main_page && visual_order.size()>14
@@ -11814,7 +12054,16 @@ int main(int argc, char** argv) {
                             row_y[4], game.pregame_selection() == 4U);
                         const auto msu1_value = game.msu1_available()
                             ? on_off(game.msu1_music())
+#if defined(STARFOX_MSU1_PACK_PICKER)
+                            : msu1_import.stage() == Msu1PackImport::Stage::picking
+                                || msu1_import.stage() == Msu1PackImport::Stage::copying
+                            ? std::string_view{"ADDING..."}
+                            : msu1_import.stage() == Msu1PackImport::Stage::failed
+                            ? std::string_view{"INVALID - ADD"}
+                            : std::string_view{"NOT FOUND - ADD"};
+#else
                             : std::string_view{"NOT FOUND"};
+#endif
                         draw_graphics_row("MSU-1 MUSIC", msu1_value,
                             row_y[5], game.pregame_selection() == 5U);
                         draw_graphics_row("RUMBLE", on_off(game.rumble()), row_y[6],
@@ -11824,6 +12073,12 @@ int main(int argc, char** argv) {
                         draw_graphics_row("3D ASTEROIDS", starfox::render::asteroid_model_names[
                             static_cast<std::size_t>(game.asteroid_models())], row_y[79],
                             game.pregame_selection()==79U);
+                        draw_graphics_row("3D PROJECTILES", on_off(game.projectile_models()), row_y[82],
+                            game.pregame_selection()==82U);
+                        draw_graphics_row("3D EXPLOSIONS",
+                            !game.modern_renderer() ? std::string_view{"MODERN ONLY"}
+                                : on_off(game.explosion_models()), row_y[83],
+                            game.pregame_selection()==83U);
                         draw_graphics_row("HIGH POLY ARWINGS",
                             !game.modern_renderer() ? std::string_view{"MODERN ONLY"}
                                 : on_off(game.hipoly_arwings()), row_y[80],
@@ -11842,7 +12097,8 @@ int main(int argc, char** argv) {
                             two_d_filter_name(game.two_d_filter()), row_y[8],
                             game.pregame_selection() == 8U);
                         draw_graphics_row("RENDER UPSCALE",
-                            std::string(render_scale_name(game.render_scale())), row_y[9],
+                            game.modern_renderer() && game.modern_display_resolution() ? std::string("DISPLAY")
+                                : std::string(render_scale_name(game.render_scale())), row_y[9],
                             game.pregame_selection() == 9U);
                         draw_graphics_row("ENHANCED LIGHTING",
                             std::array<std::string_view, 4>{
@@ -11955,8 +12211,16 @@ int main(int argc, char** argv) {
                 }
             }
             };
-            const bool plain_setup=game.flow_state()==starfox::simulation::GameFlowState::pregame_menu
-                && !game.menu_preview() && !editor_preview && !menu_peek;
+#if defined(__ANDROID__) || defined(SDL_PLATFORM_IOS)
+            // Phones: MODERN's in-game OPTIONS are plain UI too. Their live
+            // preview needs the existing renderer, whose first start-up froze
+            // an Adreno phone for about 20 s; MODERN resumes on close.
+            const bool modern_options=game.modern_renderer() && game.runtime_options_open();
+#else
+            constexpr bool modern_options=false;
+#endif
+            const bool plain_setup=((game.flow_state()==starfox::simulation::GameFlowState::pregame_menu
+                && !game.menu_preview()) || modern_options) && !editor_preview && !menu_peek;
             if(plain_setup && !window.leia_active()) {
                 // Preview OFF has no native-SDK scene or tracking work. The
                 // module remains optional/cached, but release its live host.
@@ -12358,12 +12622,36 @@ int main(int argc, char** argv) {
                         tally->face_at[teammate]={16+80*int(teammate),96};
                     }
                 }
-                // Same internal raster as the existing renderer: canvas x scale.
+                // Same internal raster as the existing renderer: canvas x scale,
+                // or with RENDER UPSCALE's DISPLAY step the largest picture at
+                // the canvas's aspect that fits the screen, one texel per pixel.
+                int modern_width=int(display_width*render_scale),modern_height=int(snes_height*render_scale);
+                if(game.modern_display_resolution()) {
+                    int output_w=0,output_h=0;
+                    if(SDL_GetRenderOutputSize(window.renderer(),&output_w,&output_h) && output_w>0 && output_h>0) {
+                        const double fit=std::min(double(output_w)/double(display_width),double(output_h)/double(snes_height));
+                        modern_width=std::max(1,int(std::lround(display_width*fit)));
+                        modern_height=std::max(1,int(std::lround(snes_height*fit)));
+                    }
+                }
                 if(modern->present(window.renderer(),interpolation_alpha,
-                    int(display_width*render_scale),int(snes_height*render_scale),
-                    modern_capture.empty()?nullptr:modern_capture.c_str(),fps_overlay,dialog,tally?&*tally:nullptr)) {
+                    modern_width,modern_height,
+                    modern_capture.empty()?nullptr:modern_capture.c_str(),fps_overlay,dialog,tally?&*tally:nullptr,
+                    // On-screen buttons (Android/iOS), as the existing
+                    // presentation decides them (presentation_effects).
+                    touch_controls_enabled() && (touch_controls.visible()
+                        || std::getenv("STARFOX_TEST_TOUCH_OVERLAY")!=nullptr)
+                        ?std::function<void(SDL_Renderer*)>([&window](SDL_Renderer*) {window.draw_touch_controls_over_frame();})
+                        :std::function<void(SDL_Renderer*)>{})) {
                     if(!advance_frozen_frame) live_fps.record_frame(std::chrono::steady_clock::now());
                     if(presented_frames==0) startup_trace->mark("first game/menu frame presented");
+                    if(!modern_live_logged) {
+                        modern_live_logged=true;
+                        startup_trace->mark("MODERN frame presented");
+#if defined(__ANDROID__) || defined(SDL_PLATFORM_IOS)
+                        SDL_Log("MODERN frame presented (%dx%d internal)",modern_width,modern_height);
+#endif
+                    }
                     complete_presentation();
                     if(test_frames!=0 && presented_frames>=test_frames) {
                         if(modern->unsupported_models()) std::cerr<<"modern: unsupported warp/axis models in final frame="<<modern->unsupported_models()<<'\n';
@@ -12375,6 +12663,12 @@ int main(int argc, char** argv) {
                 if(!modern_failure_reported || modern->status()!=modern_failure_reason) {
                     std::cerr<<"modern: falling back to the existing renderer (flow "<<int(game.flow_state())<<", frame "
                         <<presented_frames<<"): "<<modern->status()<<std::endl;
+                    startup_trace->mark("MODERN fallback: "+std::string(modern->status()));
+#if defined(__ANDROID__) || defined(SDL_PLATFORM_IOS)
+                    // Phones have no visible stderr: logcat / the Xcode console.
+                    SDL_Log("MODERN fallback (flow %d, frame %s): %s",int(game.flow_state()),
+                        std::to_string(presented_frames).c_str(),modern->status().c_str());
+#endif
                     modern_failure_reported=true;modern_failure_reason=modern->status();
                 }
             }
@@ -14711,6 +15005,9 @@ int main(int argc, char** argv) {
                 if (const auto* model = starfox::render::substitute_asteroid_model(
                         found->second, pose, game.asteroid_models())) {
                     drawn_shape = model;
+                } else if (const auto* projectile = starfox::render::substitute_projectile_model(
+                        found->second, pose, game.projectile_models())) {
+                    drawn_shape = projectile;
                 }
                 auto* surfaces = &target == &superfx_frame && surface_effects
                     ? &superfx_surfaces : nullptr;

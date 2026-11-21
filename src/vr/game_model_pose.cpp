@@ -4,11 +4,14 @@
 #include <limits>
 #include <numbers>
 namespace starfox::vr {
+namespace {float ui_distance=2.F;}
+void set_source_ui_distance(float distance) noexcept {if(std::isfinite(distance) && distance>0) ui_distance=distance;}
+float source_ui_distance() noexcept {return ui_distance;}
 std::optional<Matrix4> source_ui_layer_matrix(float vanish_x,float vanish_y,
     bool fixed_menu,bool inner_coordinates) noexcept {
     if(fixed_menu) {vanish_x=112;vanish_y=96;}
     const float guard=inner_coordinates?0.F:16.F;
-    return source_layer_matrix(vanish_x+guard,vanish_y+guard);
+    return source_layer_matrix(vanish_x+guard,vanish_y+guard,ui_distance);
 }
 std::optional<Matrix4> source_layer_matrix(float vanish_x,float vanish_y,float distance) noexcept {
     if(!std::isfinite(vanish_x) || !std::isfinite(vanish_y)

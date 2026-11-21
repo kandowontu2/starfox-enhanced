@@ -160,7 +160,7 @@ struct PregameSettings {
     std::uint8_t timing_mode{1U};
     std::uint16_t presentation_fps{60U};
     std::uint8_t display_mode{};
-    bool god_mode{};
+    std::uint8_t god_mode{}; // 0 off, 1 God Mode, 2 Invincibility (normal bombs).
     bool show_fps{};
     // 0=off, 1=light, 2=medium, 3=heavy.
     std::uint8_t anti_aliasing{};
@@ -240,6 +240,10 @@ struct PregameSettings {
     std::uint16_t window_width{},window_height{};
     bool hipoly_arwings{}; // Optional key HIPOLY_ARWINGS; MODERN draws the ending Arwing.
     bool dynamic_lighting{}; // Optional key DYNAMIC_LIGHTING; MODERN's ray-traced shadows and lights.
+    bool projectile_models{}; // Optional key PROJECTILE_MODELS; 3D PROJECTILES.
+    bool explosion_models{}; // Optional key EXPLOSION_MODELS; 3D EXPLOSIONS.
+    // Optional key MODERN_DISPLAY_RESOLUTION; RENDER UPSCALE's DISPLAY step.
+    bool modern_display_resolution{};
 
     [[nodiscard]] bool operator==(const PregameSettings&) const = default;
 };

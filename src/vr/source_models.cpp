@@ -1,4 +1,7 @@
 #include "starfox/vr/source_models.hpp"
+#include "starfox/render/projectile_models.hpp"
+#include "starfox/render/explosion_models.hpp"
+#include "starfox/render/asteroid_models.hpp"
 #include "starfox/compat/bit_cast.hpp"
 #include <stdexcept>
 #include <cstdlib>
@@ -150,6 +153,10 @@ SourceModels::SourceModels(const assets::RomImage& rom,const assets::SymbolMap& 
     for(unsigned i=0;const char* name:{"MYSHIP_4","MYSHIP_L","MYSHIP_R","MYSHIP_B"}) flight_shapes_[i++]=static_cast<uint16_t>(symbol(name));
     for(unsigned i=0;const char* name:{"MYZOOM_4","MYZOOM_L","MYZOOM_R","MYZOOM_B"})
         pass_through_shapes_[i++]=static_cast<uint16_t>(symbol(name));
+    for(unsigned i=0;const char* name:{"SMOKE","LSMOKE","FOLSMOKE"}) smoke_shapes_[i++]=static_cast<uint16_t>(symbol(name));
+    for(unsigned i=0;const char* name:{"FIRE","FIREBREATH"}) fire_shapes_[i++]=static_cast<uint16_t>(symbol(name));
+    fireball_shape_=static_cast<uint16_t>(symbol("FIREBALL"));
+    boost_shape_=static_cast<uint16_t>(symbol("BOOSTSHAPE"));
     for(unsigned i=0;const char* name:{"PIPE_0","PIPE_1","PIPE_2","PIPE_3","PIPE_4","PIPE_5","PIPE_6","PIPE_8","PIPE_8_0","PIPE_9","PIPE_9_0"})
         depth_enclosure_shapes_[i++]=static_cast<uint16_t>(symbol(name));
     intro_showcase_strategies_={symbol("ZACOINTRO_ISTRAT"),symbol("ZACO2INTRO_ISTRAT"),
@@ -614,8 +621,47 @@ SourceModelPackets SourceModels::assemble_poses(const GameSceneSnapshot& scene,s
             }
             // Optional 3D asteroids replace whole-object sprites before any
             // geometry is built, so every VR path draws them as solids.
+            // 3D EXPLOSIONS as particles: the sprite (and its shadow) gives
+            // way to the renderer's particles. STARFOX_MODERN_PARTICLE_SPRITES=1
+            // keeps drawing the sprite as well (for comparisons).
+            // A boost flame (BOOSTSHAPE) is one sprite too: its two frames
+            // alternate, so it becomes a blue jet of the same particles.
+            if(explosion_models_ && boost_shape_ && uint16_t(object.shape)==boost_shape_) {
+                const auto sprite=render::whole_object_sprite(lod->second,pose);
+                if(sprite.texture && sprite.half_size>0) {
+                    if(!shadow) {
+                        render::ExplosionSpriteFrame frame{render::ExplosionSpriteKind::fireball,
+                            uint8_t(pose.colour_frame&1U),2,sprite.half_size};
+                        result.explosions.push_back({uint16_t(item.handle),item.presentation.generation,
+                            ExplosionSource::boost,frame,{pose.x,pose.y,pose.z}});
+                    }
+                    static const bool keep_sprite=[] {
+                        const char* value=std::getenv("STARFOX_MODERN_PARTICLE_SPRITES");
+                        return value && std::string_view(value)=="1";
+                    }();
+                    if(!keep_sprite) continue;
+                }
+            }
+            if(explosion_models_) if(const auto frame=render::explosion_sprite_frame(lod->second,pose)) {
+                static const bool keep_sprite=[] {
+                    const char* value=std::getenv("STARFOX_MODERN_PARTICLE_SPRITES");
+                    return value && std::string_view(value)=="1";
+                }();
+                if(!shadow) {
+                    const auto shape16=static_cast<uint16_t>(object.shape);
+                    const auto listed=[&](const auto& shapes) {return std::find(shapes.begin(),shapes.end(),shape16)!=shapes.end();};
+                    const auto source=listed(smoke_shapes_)?ExplosionSource::smoke:listed(fire_shapes_)?ExplosionSource::fire
+                        :shape16==fireball_shape_?ExplosionSource::fireball:ExplosionSource::explosion;
+                    result.explosions.push_back({uint16_t(item.handle),item.presentation.generation,source,*frame,{pose.x,pose.y,pose.z}});
+                }
+                if(!keep_sprite) continue;
+            }
             const assets::Shape* drawn=&lod->second;
-            if(!shadow) if(const auto* model=render::substitute_asteroid_model(lod->second,pose,asteroid_models_)) drawn=model;
+            bool asteroid_model=false;
+            if(!shadow) {
+                if(const auto* model=render::substitute_asteroid_model(lod->second,pose,asteroid_models_)) {drawn=model;asteroid_model=true;}
+                else if(const auto* projectile=render::substitute_projectile_model(lod->second,pose,projectile_models_)) drawn=projectile;
+            }
             if(texture_observer_ && !shadow) for(const auto& texture:drawn->textures) texture_observer_(texture,scene.model_palette);
             const uint32_t pass_key=uint32_t(item.handle)|(shadow?source_shadow_pass:0U);
             if(compute_solids_ && !(cpu_pilot_rig && !shadow && (item.handle==scene.player
@@ -656,7 +702,16 @@ SourceModelPackets SourceModels::assemble_poses(const GameSceneSnapshot& scene,s
                         [](auto primitive){return primitive==render::PackedPrimitive::polygon
                             || primitive==render::PackedPrimitive::line
                             || primitive==render::PackedPrimitive::sprite;})) {
-                    prepared.graphics_palette_flags=(srgb?3U:1U)|(warp?4U:0U);
+                    // 8: 3D asteroids take DYNAMIC LIGHTING's coloured lights
+                    // faintly, so grey (solid) rock never reads as orange
+                    // (breakable) rock (scene_rt.hlsli ray_lighting).
+                    // STARFOX_MODERN_FAINT_ASTEROID_LIGHTS=0 lights them fully.
+                    static const bool faint_asteroids=[] {
+                        const char* value=std::getenv("STARFOX_MODERN_FAINT_ASTEROID_LIGHTS");
+                        return !(value && std::string_view(value)=="0");
+                    }();
+                    prepared.graphics_palette_flags=(srgb?3U:1U)|(warp?4U:0U)
+                        |(asteroid_model && faint_asteroids?8U:0U);
                     prepared.graphics_unclipped=ordinary;
                     if(!graphics_palette) {
                         graphics_palette.emplace();

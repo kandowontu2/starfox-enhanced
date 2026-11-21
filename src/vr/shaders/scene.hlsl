@@ -32,10 +32,11 @@ bool reversed_depth() {return camera.projection[2][2]==0;}
 static bool source_line_overlay=false;
 static uint source_overlay_level=0;
 uint overlay_level(uint face_word) {return (face_word&16U)!=0?max(1U,(face_word>>8)&7U):0U;}
-// Two-colour source dither. VR keeps the checkerboard; MODERN defines
-// STARFOX_SCENE_RESOLVE_DITHER and shows the pair's linear-light average,
-// which is what the desktop's anti-aliasing resolves the checker to (a
-// 1-pixel checker scaled to the window in gamma space reads dark instead).
+// Two-colour source dither. VR keeps the checkerboard; MODERN shows the
+// pair's linear-light average, which is what the desktop's anti-aliasing
+// resolves the checker to (a 1-pixel checker scaled to the window in gamma
+// space reads dark instead): always where STARFOX_SCENE_RESOLVE_DITHER is
+// defined (the flat renderer), on a headset with camera.effects.w bit 1.
 float3 dither_linear(float3 c) {return select(c<=.04045,c/12.92,pow((c+.055)/1.055,2.4));}
 float3 dither_encoded(float3 c) {return select(c<=.0031308,c*12.92,1.055*pow(c,1./2.4)-.055);}
 // Smooth 2D filtering (camera.effects.w bit 0, MODERN): blend four source
@@ -53,12 +54,11 @@ float4 bilinear_resolve(float4 a,float4 b,float4 c,float4 d,float2 f,bool gamma_
     return float4(gamma_encoded?dither_encoded(rgb):rgb,1);
 }
 float4 dither_colour(float4 even,float4 odd,bool odd_cell,bool gamma_encoded) {
-#ifdef STARFOX_SCENE_RESOLVE_DITHER
+#ifndef STARFOX_SCENE_RESOLVE_DITHER
+    if((camera.effects.w&2U)==0) return odd_cell?odd:even;
+#endif
     if(!gamma_encoded) return (even+odd)*.5;
     return float4(dither_encoded((dither_linear(even.rgb)+dither_linear(odd.rgb))*.5),(even.a+odd.a)*.5);
-#else
-    return odd_cell?odd:even;
-#endif
 }
 struct Vertex {
     [[vk::location(0)]] float3 position : SCENE_INPUT(0,POSITION);
@@ -104,7 +104,9 @@ struct Fragment {
 };
 float4 tile_background_sample(Fragment input);
 #include "scene_geometry.hlsli"
-Fragment vertex_main(Vertex input) {
+// The vertex stages' shared bodies, wrapped by vertex_main and
+// vertex_textured_main (at the end: the headset's add the line brush).
+Fragment scene_vertex(Vertex input) {
     Fragment output;
     float3 position;uint visible;
     float4 eye_position=scene_eye_position(input,position,visible);
@@ -152,11 +154,42 @@ Fragment vertex_main(Vertex input) {
 }
 #include "scene_colour.hlsli"
 float4 styled_colour(float4 colour) {return scene_styled_colour(colour,camera.effects);}
+// 3D EXPLOSIONS particles (vr::ExplosionParticles): value noise for a puff's
+// ragged, billowing edge.
+float particle_hash(float2 p) {return frac(sin(dot(p,float2(127.1,311.7)))*43758.5453);}
+float particle_noise(float2 p) {
+    float2 i=floor(p),f=p-i;f=f*f*(3.-2.*f);
+    return lerp(lerp(particle_hash(i),particle_hash(i+float2(1,0)),f.x),
+        lerp(particle_hash(i+float2(0,1)),particle_hash(i+1.),f.x),f.y);
+}
+// A particle: uv -1..1 across the quad; texture.z = 1 | style << 1 (0 fire,
+// 1 smoke) | seed << 8. Fire (added): colour -> odd_color (hotter) toward the
+// middle. Smoke (alpha): odd_color (shade) below -> colour (lit) above.
+// Alpha = color.a times the puff's soft, noisy coverage.
+float4 particle_colour(Fragment input,float radius) {
+    uint seed=(input.texture.z>>8)&255U;
+    bool smoke=((input.texture.z>>1)&7U)==1U;
+    float angle=float(seed)*.0245437;
+    float2x2 turn=float2x2(cos(angle),-sin(angle),sin(angle),cos(angle));
+    float2 p=mul(turn,input.perspective_uv)*1.6+float(seed)*float2(1.37,2.91);
+    float n=particle_noise(p)*.65+particle_noise(p*2.3+5.2)*.35;
+    float r=sqrt(radius);
+    float shape=r+(n-.5)*(smoke?.7:.5);
+    float coverage=1.-smoothstep(smoke?.35:.25,.95,shape);
+    if(coverage<=0.) discard;
+    if(smoke) {
+        float light=saturate(.55+.45*input.perspective_uv.y+(n-.5)*.8);
+        return float4(lerp(input.odd_color.rgb,input.color.rgb,light),input.color.a*coverage);
+    }
+    float core=saturate((1.-shape)*1.4);
+    return float4(lerp(input.color.rgb,input.odd_color.rgb,core*core),input.color.a*coverage);
+}
 float4 fragment_solid_raw(Fragment input) {
     if(input.visible==0) discard;
     if((input.texture.w&4096)!=0) {
         float radius=dot(input.perspective_uv,input.perspective_uv);
         if(radius>1.) discard;
+        if((input.texture.z&1U)!=0) return particle_colour(input,radius);
         // A glow decal (vr::ModernFrame::engine_glow): texture.y = 1 + the
         // edge's start (fraction of the radius) x 65534, fading to the rim.
         if(input.texture.y!=0) {
@@ -175,8 +208,30 @@ float4 fragment_solid_raw(Fragment input) {
     }
     return input.color;
 }
+// MODERN's distance haze (vr::ModernFrame::fog), shared by the flat renderer
+// (scene_sdl.hlsl's SdlFog) and the headset (STARFOX_SCENE_FOG's SceneFog):
+// colour in the target encoding (a = strength); params x/y = start/end
+// distance (source units), z = near plane x 256 (reversed depth: distance =
+// z / depth).
+float4 fog_by_distance(float4 colour,float depth,float4 fog_colour,float4 fog_params) {
+    if(fog_colour.a==0 || colour.a==0) return colour;
+    float distance=fog_params.z/max(depth,1e-9);
+    float amount=saturate((distance-fog_params.x)/max(fog_params.y-fog_params.x,1.))*fog_colour.a;
+    return float4(lerp(colour.rgb,fog_colour.rgb,amount),colour.a);
+}
+#if defined(STARFOX_SCENE_FOG)
+// The headset's haze (vr::VulkanSceneFog, set 1). Mode per draw in
+// camera.effects.w bits 2-3: 0 off, 1 every fragment, 2 the landscape.
+[[vk::binding(0,1)]] cbuffer SceneFog {float4 scene_fog_colour;float4 scene_fog_params;};
+uint scene_fog_mode() {return (camera.effects.w>>2)&3U;}
+#endif
 float4 fragment_main(Fragment input) : SV_Target0 {
-    return styled_colour(fragment_solid_raw(input));
+    float4 colour=styled_colour(fragment_solid_raw(input));
+#if defined(STARFOX_SCENE_FOG)
+    // Untextured faces are never landscape (mode 2 leaves them clear).
+    if(scene_fog_mode()==1) colour=fog_by_distance(colour,input.position.z,scene_fog_colour,scene_fog_params);
+#endif
+    return colour;
 }
 #if defined(STARFOX_SDL_SCENE_VERTEX)
 StructuredBuffer<uint> texels : register(t0,space0);
@@ -222,10 +277,13 @@ float3 tile_horizon(uint start) {
     float slope=count>1 && denominator!=0?(count*sum_xy-sum_x*sum_y)/denominator:0;
     return float3((sum_y-slope*sum_x)/count,slope,1);
 }
-Fragment vertex_textured_main(Vertex input) {
+Fragment scene_vertex_textured(Vertex input) {
     const float3 authored_position=input.position;
     const float2 authored_billboard=input.billboard;
     uint grid_visible=1;
+    // Fragment.visible bit 2: a resident model with faint coloured lights
+    // (its palette flags' bit 8; vr::SourceModels' 3D asteroids).
+    uint faint_lights=0;
     [branch] if((input.texture.w&268435456U)!=0) {
         float ground_y=asfloat(texels[input.texture.x+272+16384]);
         float radial=length(input.position.xz);
@@ -267,6 +325,7 @@ Fragment vertex_textured_main(Vertex input) {
         // ordered occurrence. Never confuse this slot with a source face ID.
         uint start=input.texture.x,slot=input.texture.y;
         bool unclipped=(input.texture.w&4194304U)!=0;
+        faint_lights=(texels[start+15]&8U)!=0?2U:0U;
         uint result=texels[start+1],capacity=texels[start+4];
         uint count=texels[result];
         bool valid=texels[result+1]==0 && count<=capacity && slot<count;
@@ -502,8 +561,9 @@ Fragment vertex_textured_main(Vertex input) {
         input.position=surround_grid?smooth_point:float3(smooth_point.xy,min(smooth_point.z,12287));
         input.billboard*=min(distance,12287.)/256.;
     }
-    Fragment output=vertex_main(input);
+    Fragment output=scene_vertex(input);
     output.visible &= grid_visible;
+    if(output.visible!=0) output.visible|=faint_lights;
     [branch] if((input.texture.w&8)!=0) {
         if((texels[input.texture.x+15]&0x80000000U)!=0) {
             // Palette probes are constant across the entire sphere. Decode
@@ -742,7 +802,9 @@ float4 landscape_world_sample(Fragment input) {
     uint s=input.texture.x;
     uint tail=s+272+16384;
     float3 d=input.surface_position;
-    bool cylindrical=texels[s+3]!=0;
+    // Word 3: bit 1 the headset's cylindrical mapping, bit 2 the cloud-top
+    // repeat (below).
+    bool cylindrical=(texels[s+3]&1U)!=0;
     // Source X/Z on the world-fixed ground plane.
     float2 source_plane=float2(d.x,-d.z);
     float alternate=0;
@@ -783,8 +845,28 @@ float4 landscape_world_sample(Fragment input) {
         uint edge=texels[s+8]!=0?16:8;
         column=atan2(d.x,-d.z)*cylinder_columns(float(((texels[s+2]&1)!=0?64:32)*edge));
     }
+    float row=asfloat(texels[tail])-d.y/depth*256.;
+    // Skies that end in cloud (word 3 bit 2; Titania, set by ModernFrame):
+    // the native screen's top row lies in the cloud tops, and holding it
+    // draws streaks up to the zenith. Above the cloud tops the band of wisps
+    // beneath them repeats instead, mirrored back and forth by elevation,
+    // each repeat moved sideways, thinning into the art's plain sky.
+    float sky_thin=0;
+    if((texels[s+3]&2U)!=0 && d.y>0) {
+        const float band=48.;
+        float fold=asfloat(texels[tail+2])+4.;
+        float slope=(asfloat(texels[tail])-fold)/256.;
+        float above=(atan2(d.y,max(length(d.xz),1e-6))-atan(slope))*256.*(1.+slope*slope);
+        if(above>0) {
+            float repeat=floor(above/band);
+            float within=above-repeat*band;
+            row=fold+(fmod(repeat,2.)<1.?within:band-within);
+            column+=repeat*173.;
+            sky_thin=saturate(above/(band*4.5));
+        }
+    }
     float2 art=float2(asfloat(texels[tail+1])+column,
-        clamp(asfloat(texels[tail])-d.y/depth*256.,asfloat(texels[tail+2]),asfloat(texels[tail+3])));
+        clamp(row,asfloat(texels[tail+2]),asfloat(texels[tail+3])));
     float4 colour;
     if(filter_2d()) {
         float2 position=art-.5;float2 base=floor(position);
@@ -792,6 +874,9 @@ float4 landscape_world_sample(Fragment input) {
             tile_art_texel(s,int2(base)+int2(0,1),input.texture.w),tile_art_texel(s,int2(base)+int2(1,1),input.texture.w),
             position-base,(input.texture.w&2U)==0);
     } else colour=tile_art_texel(s,int2(floor(art)),input.texture.w);
+    // The plain sky: the art 40 rows above the screen's top row.
+    if(sky_thin>0)
+        colour=lerp(colour,tile_art_texel(s,int2(floor(float2(art.x,asfloat(texels[tail+2])-40.))),input.texture.w),sky_thin);
     // The dome below the horizon (only visible past the ground plane's far
     // edge) uses the same haze and the stripes' average shade, so that edge
     // does not crawl against the stepped art when the view rolls.
@@ -877,6 +962,8 @@ float4 landscape_texture_sample(Fragment input) {
     if((input.texture.w&2U)!=0) colour.rgb=dither_linear(colour.rgb);
     return colour.a<.5?0:float4(colour.rgb,1);
 }
+// The atlas row the last tile_background_sample read (per invocation).
+static int background_atlas_row;
 float4 tile_background_sample(Fragment input) {
     uint start=input.texture.x;
     if((texels[start+7]&32768U)!=0 && (texels[start+7]&4096U)!=0) return landscape_texture_sample(input);
@@ -973,6 +1060,7 @@ float4 tile_background_sample(Fragment input) {
         return tile_colour(start,input.border_index,input.texture.w);
     }
     uint2 tile_position=uint2(source)&uint2(((screen_size&1)!=0?64:32)*edge-1,((screen_size&2)!=0?64:32)*edge-1);
+    background_atlas_row=int(tile_position.y);
     if((texels[start+15]&0x8000000U)!=0 && tile_position.x>=336 && tile_position.x<392
         && tile_position.y>=320 && tile_position.y<384) tile_position.x&=127U;
     if((texels[start+15]&0x1000000U)!=0 && (original_x<0 || original_x>=512)
@@ -1072,12 +1160,111 @@ float orbital_noise(float3 p) {
     return lerp(lerp(lerp(a.x,a.y,f.x),lerp(a.z,a.w,f.x),f.y),
         lerp(lerp(b.x,b.y,f.x),lerp(b.z,b.w,f.x),f.y),f.z);
 }
+// orbital_noise wrapped every `period` cells along Z (a seamless flow).
+float orbital_hash_tiled(int3 cell,int period) {
+    cell.z=((cell.z%period)+period)%period;
+    return orbital_hash(cell);
+}
+float orbital_noise_tiled(float3 p,int period) {
+    int3 cell=int3(floor(p));float3 f=frac(p);f=f*f*(3-2*f);
+    float4 a=float4(orbital_hash_tiled(cell,period),orbital_hash_tiled(cell+int3(1,0,0),period),
+        orbital_hash_tiled(cell+int3(0,1,0),period),orbital_hash_tiled(cell+int3(1,1,0),period));
+    float4 b=float4(orbital_hash_tiled(cell+int3(0,0,1),period),orbital_hash_tiled(cell+int3(1,0,1),period),
+        orbital_hash_tiled(cell+int3(0,1,1),period),orbital_hash_tiled(cell+int3(1,1,1),period));
+    return lerp(lerp(lerp(a.x,a.y,f.x),lerp(a.z,a.w,f.x),f.y),
+        lerp(lerp(b.x,b.y,f.x),lerp(b.z,b.w,f.x),f.y),f.z);
+}
+// The airspace planet's surface below its limb: the view direction meets
+// a ball, whose cloud field scrolls like a Mode 7 floor in the source's
+// own palette range (low..high). Shared by the headset sphere and the
+// flat view's BG2 layer.
+float3 orbital_surface(float3 direction,float3 low,float3 high) {
+    // A ball seen from orbit, bent to fit the authored limb (an HDMA-style
+    // per-line remap rather than strict optics): depression 0..90 degrees is
+    // squeezed into .36..90, just inside the ball's own limb at .3 (eye at
+    // altitude 1, cos .3 = R/(R+1)). Surface features crowd and shrink
+    // towards the horizon all the way round, like a planet's curve, yet stop
+    // short of the tangent, where the surface would stand still.
+    // The surface map is azimuthal equidistant about the nadir: arc length
+    // along the ball, in the direction of the view's heading.
+    const float limb=.3,radius=cos(limb)/(1-cos(limb));
+    float down=asin(saturate(-direction.y));
+    const float edge=limb+.06;
+    float bent=edge+down*(1-edge/1.5707963);
+    float beta=1.5707963-bent; // the ray's angle from the nadir
+    float arc=radius*(asin(min((radius+1)*sin(beta)/radius,1.))-beta);
+    float2 heading=direction.xz/max(length(direction.xz),.0001);
+    // The surface scrolls beneath like a Mode 7 floor (camera.effects.z bits
+    // 18-31, ModernFrame): fast below, slowing into the limb. Periodic along
+    // the flow (96 cells, each octave a whole multiple), so the phase wraps
+    // without a jump. Ahead is -Z: features rise from the limb to the eye.
+    float flow=float(camera.effects.z>>18)/16384.;
+    float2 map=heading*arc*8;
+    float3 q=float3(map.x,0,map.y-flow*96.);
+    // Octaves finer than a pixel (by area, so the limb's vertical squeeze
+    // alone doesn't erase them) fade to their mean: the limb settles into the
+    // palette's middle band, a thin haze, instead of crawling.
+    float2 dx=ddx(map),dy=ddy(map);
+    float footprint=sqrt(abs(dx.x*dy.y-dx.y*dy.x));
+    q+=float3(orbital_noise_tiled(q*.25+11,24),0,orbital_noise_tiled(q*.25+37,24))*.8
+        *(1-smoothstep(.35,.9,footprint*.25));
+    float clouds=lerp(orbital_noise_tiled(q,96),.5,smoothstep(.35,.9,footprint))*.5
+        +lerp(orbital_noise_tiled(q*2+7.3,192),.5,smoothstep(.35,.9,footprint*2))*.25
+        +lerp(orbital_noise_tiled(q*4-4.1,384),.5,smoothstep(.35,.9,footprint*4))*.15
+        +lerp(orbital_noise_tiled(q*8+19.7,768),.5,smoothstep(.35,.9,footprint*8))*.1;
+    // Palette steps retain the source's crisp colour boundaries. The former
+    // low-frequency continuous gradient looked like a blurred enlargement.
+    float band_coordinate=saturate((clouds-.25)*2)*7;
+    // Hard palette thresholds crawl across pixels when either eye moves.
+    // Antialias only each boundary over its screen-space pixel footprint;
+    // interiors retain the crisp palette steps instead of a global blur.
+    float band_width=clamp(fwidth(band_coordinate),.0001,1.);
+    float bands=(floor(band_coordinate)+smoothstep(.5-band_width*.5,
+        .5+band_width*.5,frac(band_coordinate)))/7;
+    return lerp(low,high,bands);
+}
+// Flat views draw the airspace planet as its native BG2 layer
+// (background_tiles flat_orbital_surface, control 7 bit 16): rows below the
+// limb (atlas row `horizon`) become the scrolling surface, rows below the
+// native screen continuing it. The source's 16 rows/degree are compressed
+// into a steeper floor, like a Mode 7 perspective table, so the flow reads
+// on a flat screen; the ball's curve and the layer's roll still apply.
+float4 flat_orbital_surface(Fragment input,float4 authored,float y) {
+    uint start=input.texture.x;
+    uint base=start+272+16384+(texels[start+10]!=0?448:0)+((texels[start+7]&1024U)!=0?5:0);
+    float horizon=asfloat(texels[base]);
+    float3 low=1,high=0;
+    [unroll] for(uint i=0;i<8;++i) {
+        uint index=(texels[base+2+i/4]>>((i%4)*8))&255;
+        if(index==0) continue;
+        float3 colour=tile_colour(start,index,input.texture.w).rgb;
+        low=min(low,colour);high=max(high,colour);
+    }
+    if(any(low>high)) return authored;
+    Fragment probe=input;probe.uv.y=clamp(y,0.,223.99);
+    tile_background_sample(probe);
+    float row=float(background_atlas_row)+frac(probe.uv.y);
+    float below=fmod(row-horizon+512.,512.);
+    float rows=below+max(y-223.99,0.);
+    // 48 rows per radian below the limb, easing towards straight down (and
+    // +-90 degrees sideways) however far a widescreen, rolled or diving view
+    // reaches past the native screen: no row where the surface stops.
+    float down=1.5707963*(1-exp(-rows/(48.*1.5707963)));
+    float heading=atan((input.uv.x-128.)/192.);
+    float3 direction=float3(sin(heading)*cos(down),-sin(down),-cos(heading)*cos(down));
+    float3 surface=orbital_surface(direction,low,high);
+    if(below>=128.) return authored; // above the limb: sky
+    // The limb's glow line stays authored; the surface takes over beneath.
+    float blend=smoothstep(3.,8.,rows);
+    return float4(lerp(authored.rgb,surface,max(blend,1-authored.a)),1);
+}
 float4 tile_background(Fragment input) {
     uint flags=texels[input.texture.x+15];
     // Overscanned layers (BackgroundTileOptions::overscan): above the 224
     // source rows repeat the first row (open space); below, reflect back and
     // forth through the last 12 rows (the airspace planet's surface sits just
     // below its limb) so the surface keeps its texture.
+    float orbital_row_y=input.uv.y; // before the overscan reflection below
     if((texels[input.texture.x+7]&8192U)!=0) {
         if(input.uv.y<0) input.uv.y=0;
         else if(input.uv.y>=224) {float t=fmod(input.uv.y-224.,24.);input.uv.y=223.99-(t<12.?t:24.-t);}
@@ -1096,6 +1283,7 @@ float4 tile_background(Fragment input) {
             sample.uv=base+1.5;float4 d=tile_background_sample(sample);
             colour=bilinear_resolve(a,b,c,d,position-base,(input.texture.w&2U)==0);
         } else colour=tile_background_sample(input);
+        if((texels[input.texture.x+7]&65536U)!=0) colour=flat_orbital_surface(input,colour,orbital_row_y);
         if(colour.a==0) discard;
         return colour;
     }
@@ -1110,8 +1298,24 @@ float4 tile_background(Fragment input) {
     // Only a few rows below the limb are useful; the hemisphere is continued
     // independently instead of stretching those rows towards the nadir.
     sample.uv=float2(128+atan2(direction.x,-direction.z)*512,
-        max(0.,horizon-latitude*512));
-    float blend=smoothstep(0.,min(.045,depth/1024.),-latitude);
+        horizon-latitude*512);
+    // Headset star parallax (ModernFrame): above the limb the stars turn back
+    // part of the sky's sideways turn, so they lag the planet's surface.
+    if((camera.effects.z&0x30000U)==0 && latitude>0)
+        sample.uv.x+=float(int(camera.effects.z<<16)>>16)/65536.*6.28318530718*512;
+    // The atlas's stars end some way above the limb (the airspace's art is
+    // only a band of sky). Mirror that band, 48..192 rows above the limb,
+    // back and forth up to the zenith, so the starfield never stops.
+    {
+        float above=horizon-48.-sample.uv.y;
+        if(above>0) {
+            float t=fmod(above,288.);
+            sample.uv.y=horizon-48.-(t<144.?t:288.-t);
+        }
+    }
+    // Only the authored limb (its glow line) stays; the moving surface takes
+    // over right beneath it (its still rows read as a frozen band).
+    float blend=smoothstep(min(.008,depth/2048.),min(.02,depth/1024.),-latitude);
     float4 authored=blend<1?tile_background_sample(sample):float4(0,0,0,1);
     if(blend==0) {
         if(authored.a==0) discard;
@@ -1121,26 +1325,7 @@ float4 tile_background(Fragment input) {
     // then continue its colours as a detailed world-locked cloud field, not a
     // stretched cap or rows of repeated atlas tiles. Sample interior colours
     // only: neither the bright limb nor a unique sky planet is repeated.
-    float3 low=input.orbital_low,high=input.orbital_high;
-    // Three-dimensional noise avoids the vertical streaks caused by flattening
-    // the sphere onto X/Z near the horizon, and has no longitude/pole seam.
-    // Mild three-dimensional domain variation breaks up the regular noise
-    // cells without introducing a spherical UV seam or a pinched centre.
-    float3 p=direction*32;
-    p+=float3(orbital_noise(direction*3+11),orbital_noise(direction*3+23),
-        orbital_noise(direction*3+37))*.8;
-    float clouds=orbital_noise(p)*.5+orbital_noise(p*2.13+7.3)*.25
-        +orbital_noise(p*4.37-4.1)*.15+orbital_noise(p*8.71+19.7)*.1;
-    // Palette steps retain the source's crisp colour boundaries. The former
-    // low-frequency continuous gradient looked like a blurred enlargement.
-    float band_coordinate=saturate((clouds-.25)*2)*7;
-    // Hard palette thresholds crawl across pixels when either eye moves.
-    // Antialias only each boundary over its screen-space pixel footprint;
-    // interiors retain the crisp palette steps instead of a global blur.
-    float band_width=clamp(fwidth(band_coordinate),.0001,1.);
-    float bands=(floor(band_coordinate)+smoothstep(.5-band_width*.5,
-        .5+band_width*.5,frac(band_coordinate)))/7;
-    float3 continuation=lerp(low,high,bands);
+    float3 continuation=orbital_surface(direction,input.orbital_low,input.orbital_high);
     return float4(lerp(authored.rgb,continuation,max(blend,1-authored.a)),1);
 }
 // Sprites share one palette/VRAM payload. Vertex texture.y packs OBSEL and
@@ -1465,6 +1650,101 @@ float4 fragment_textured_raw(Fragment input) {
         color.rgb=select(color.rgb<=.04045,color.rgb/12.92,pow((color.rgb+.055)/1.055,2.4));
     return color;
 }
-float4 fragment_textured_main(Fragment input) : SV_Target0 {
-    return styled_colour(fragment_textured_raw(input));
+// fog_by_distance by mode: 0 off, 1 every fragment, 2 the landscape: its
+// ground by distance and its sky dome by height above the horizon (full at
+// it, clear 56 art rows up), so the haze hangs over the horizon as well as in
+// front of it.
+float4 scene_fog(Fragment input,float4 colour,uint mode,float4 fog_colour,float4 fog_params) {
+    if(mode==0 || fog_colour.a==0 || colour.a==0) return colour;
+    if(mode==2) {
+        uint flags=texels[input.texture.x+7];
+        if((input.texture.w&8U)==0 || (flags&4096U)==0) return colour;
+        if((flags&16384U)==0) {
+            // The sky dome (landscape_world_sample's art rows above the horizon).
+            float3 d=input.surface_position;
+            float rows=d.y/max(-d.z,length(d)*.02)*256.;
+            float amount=pow(1.-saturate(rows/56.),1.5)*fog_colour.a;
+            return float4(lerp(colour.rgb,fog_colour.rgb,amount),colour.a);
+        }
+    }
+    return fog_by_distance(colour,input.position.z,fog_colour,fog_params);
 }
+#if defined(STARFOX_SCENE_RT)
+// The headset's ray-traced sun shadows and coloured lights
+// (vr::VulkanRayShadows, set 2). Casters are expanded once per frame in seat
+// space (the source camera's native axes before the head pose); each eye
+// rebuilds its pixels' seat positions with its own inverse clip transform.
+// The receivers per draw are the haze's (scene_fog_mode: 2 the background,
+// 1 the world's models); the eye is camera.effects.w bit 4.
+// shadow_params x = on (1) or off (0), y = caster objects, z = brightness
+// kept in shadow, w = sun samples; shadow_light xyz = toward the sun (seat,
+// native), w = ray start offset per unit of distance; shadow_target z = the
+// sun's angular radius; ray_flags x/y = sun shadows on the background/models;
+// ray_targets = each eye's target size; ray_eyes = each eye's position;
+// shadow_unproject = four rows per eye (clip to seat space); light_params
+// and point_lights as scene_sdl.hlsl's SdlFog.
+[[vk::binding(0,2)]] cbuffer SceneRays {
+    float4 shadow_params;float4 shadow_light;float4 shadow_target;float4 ray_flags;
+    float4 ray_targets;float4 ray_eyes[2];float4 shadow_unproject[8];
+    float4 light_params;float4 point_lights[64];
+};
+[[vk::binding(1,2)]] StructuredBuffer<float4> shadow_triangles;
+[[vk::binding(2,2)]] ByteAddressBuffer shadow_objects;
+uint ray_eye_index() {return (camera.effects.w>>4)&1U;}
+float4 ray_clip(float4 position) {
+    // Vulkan clip space is Y down, as the eye's viewport.
+    float2 size=ray_eye_index()==0?ray_targets.xy:ray_targets.zw;
+    return float4(position.x/size.x*2.-1.,position.y/size.y*2.-1.,position.z,1);
+}
+float4 ray_unproject_row(uint row) {return shadow_unproject[ray_eye_index()*4+row];}
+float3 ray_eye() {return ray_eyes[ray_eye_index()].xyz;}
+#include "scene_rt.hlsli"
+#endif
+float4 fragment_textured_main(Fragment input) : SV_Target0 {
+#if defined(STARFOX_SCENE_RT)
+    // Receivers need the face's plane before anything may discard: flat
+    // faces, so screen derivatives of the rebuilt position give it.
+    const uint ray_mode=shadow_params.x!=0?scene_fog_mode():0;
+    float3 surface=0,normal=0;
+    if(ray_mode!=0) {
+        surface=shadow_native_position(input.position);
+        normal=cross(ddx(surface),ddy(surface));
+    }
+#endif
+    float4 colour=styled_colour(fragment_textured_raw(input));
+#if defined(STARFOX_SCENE_RT)
+    colour=ray_lighting(input,colour,surface,normal,ray_mode,(ray_mode==2?ray_flags.x:ray_flags.y)!=0);
+#endif
+#if defined(STARFOX_SCENE_FOG)
+    colour=scene_fog(input,colour,scene_fog_mode(),scene_fog_colour,scene_fog_params);
+#endif
+    return colour;
+}
+// MODERN on a headset: source lines one source pixel thick, as the desktop
+// paints each line point as a square (the flat renderer's SdlLineBrush).
+// Line draws repeat 2N-1 times (vr::scene_line_instances), N the target
+// pixels per source pixel (camera.effects.w bits 8-19, 4.4) rounded: instance
+// i < N shifts i pixels right, later ones shift down. A target pixel in clip
+// units per w follows from the same scale: the eye has 256 x that many pixels
+// per unit tangent, which the projection's diagonal maps to 2 clip units.
+Fragment headset_line_brush(Fragment output,uint instance) {
+    if(instance==0) return output;
+    float source_pixel=float((camera.effects.w>>8)&4095U)/16.;
+    uint pixels=uint(clamp(floor(source_pixel+.5),1.,64.));
+    float2 step=2.*float2(abs(camera.projection[0][0]),abs(camera.projection[1][1]))/(512.*source_pixel);
+    float2 shift=instance<pixels?float2(instance,0):float2(0,instance-pixels+1);
+    output.position.xy+=shift*step*output.position.w;
+    return output;
+}
+#if defined(STARFOX_SDL_SCENE_VERTEX) || defined(STARFOX_SDL_SCENE_FRAGMENT)
+// The flat renderer (its own SdlLineBrush) and the calibrated display.
+Fragment vertex_main(Vertex input) {return scene_vertex(input);}
+Fragment vertex_textured_main(Vertex input) {return scene_vertex_textured(input);}
+#else
+Fragment vertex_main(Vertex input,uint instance : SV_InstanceID) {
+    return headset_line_brush(scene_vertex(input),instance);
+}
+Fragment vertex_textured_main(Vertex input,uint instance : SV_InstanceID) {
+    return headset_line_brush(scene_vertex_textured(input),instance);
+}
+#endif

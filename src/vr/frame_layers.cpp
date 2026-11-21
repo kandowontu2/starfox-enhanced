@@ -95,7 +95,11 @@ FrameLayers assemble_frame_layers(const GameSceneSnapshot& scene,const FrameLaye
         // An enhancement: on any failure keep the cartridge's own layer
         // rather than failing (and dropping out of) the whole frame.
         try {
-            corridor=tunnel_corridor_packet(*snapshot->ppu,snapshot->display_brightness,srgb,half_width);
+            // A corridor open on one side (Venom 2's colony) has its own build.
+            if(bounds && (bounds->walls&15U)!=15U)
+                corridor=colony_corridor_packet(*snapshot->ppu,snapshot->display_brightness,srgb,
+                    float(bounds->top),float(bounds->bottom),snapshot->camera.z);
+            else corridor=tunnel_corridor_packet(*snapshot->ppu,snapshot->display_brightness,srgb,half_width);
             if(corridor->geometry.vertex_view().empty()) corridor.reset();
         } catch(const std::exception& error) {
             static bool reported=false;
@@ -103,17 +107,8 @@ FrameLayers assemble_frame_layers(const GameSceneSnapshot& scene,const FrameLaye
             corridor.reset();
         }
     }
-    if(snapshot->ppu->tunnel_scene && !corridor && !in.flat_tunnel_extension) {
-        const auto border=[&](unsigned y,unsigned x) {
-            const auto ink=render::tunnel_border_index(*snapshot->ppu,y,x);
-            return source_backdrop_colour(snapshot->ppu->cgram[ink],snapshot->display_brightness,srgb);
-        };
-        auto surround=tunnel_surround_packet(border(112,0),border(4,128),border(219,128));
-        surround.model=source_layer_matrix(
-            float(snapshot->source_vanishing_point[0])+16.F,
-            float(snapshot->source_vanishing_point[1])+16.F).value();
-        out.tunnel_surround.push_back(std::move(surround));
-    }
+    bool nucleus_room=false; // Space Armada's 3D boss room replaced the tunnel art.
+    std::optional<DrawPacket> roll_frame; // The boss roll call's BG3 frame, drawn over the models.
     const bool intro_sky=!snapshot->ppu->tunnel_scene
         && snapshot->flow==simulation::GameFlowState::intro
         && !snapshot->meters.extended && snapshot->background_unique_top_rows==224;
@@ -145,9 +140,18 @@ FrameLayers assemble_frame_layers(const GameSceneSnapshot& scene,const FrameLaye
             // Rolled as geometry: reach past the view so no corner shows the
             // backdrop (the airspace's planet surface below its limb).
             auto horizon_options=space_options;
-            if(in.space_roll_geometry) horizon_options.overscan=512;
+            // The airspace's surface also reaches past a rolled, diving
+            // 32:9 view's corners.
+            if(in.space_roll_geometry) horizon_options.overscan=snapshot->background_orbital_planet?1024:512;
             bg2=background_tile_packet(*snapshot->ppu,BackgroundLayer::bg2,horizon_options,srgb);
             bg2.model=packet.model;
+            // The airspace planet's surface: the headset's scrolling field
+            // below the native limb (STARFOX_MODERN_ORBITAL_FLOW=0: native).
+            static const bool flat_surface=[] {
+                const char* value=std::getenv("STARFOX_MODERN_ORBITAL_FLOW");return !(value && std::string_view(value)=="0");
+            }();
+            if(flat_surface && snapshot->background_orbital_planet)
+                flat_orbital_surface(bg2,*snapshot->ppu,snapshot->background_orbital_thin,snapshot->background_orbital_entry);
         }
         else if(!snapshot->ppu->tunnel_scene && snapshot->background_space_horizon)
             bg2=snapshot->background_orbital_planet
@@ -175,15 +179,32 @@ FrameLayers assemble_frame_layers(const GameSceneSnapshot& scene,const FrameLaye
             if(snapshot->landscape_grid_height<0)
                 place_landscape_ground(bg2,std::clamp(float(snapshot->landscape_grid_height)/256.F,-8.F,-.001F),true);
         }
-        else if(snapshot->background_water_surround)
-            bg2=water_surface_packet(*snapshot->ppu,background_options,
-                std::clamp(std::abs(float(snapshot->camera.y-snapshot->shadow_height))/256.F,.01F,8.F),srgb);
+        else if(snapshot->background_water_surround) {
+            // Titania's bridge as real geometry (MODERN), else the painting
+            // on a floor and a ceiling plane.
+            if(in.tunnel_corridor && snapshot->background_bridge) try {
+                const auto& bridge=*snapshot->background_bridge;
+                bg2=water_bridge_packet(*snapshot->ppu,snapshot->display_brightness,srgb,
+                    float(bridge.top),float(bridge.bottom),float(bridge.view),
+                    snapshot->camera.x,snapshot->camera.y,snapshot->camera.z,
+                    float(snapshot->source_vanishing_point[1])+16.F-.5F);
+            } catch(const std::exception& error) {
+                static bool reported=false;
+                if(!reported) {std::fprintf(stderr,"modern: 3D bridge skipped: %s\n",error.what());reported=true;}
+                bg2=DrawPacket{};
+            }
+            if(bg2.geometry.vertex_view().empty())
+                bg2=water_surface_packet(*snapshot->ppu,background_options,
+                    std::clamp(std::abs(float(snapshot->camera.y-snapshot->shadow_height))/256.F,.01F,8.F),srgb);
+        }
         else bg2.model=packet.model;
         if(corridor) bg2=std::move(*corridor);
         // Space Armada's boss room as a room around the reactor: its ceiling
-        // and floor (drawn first) and the drum wall over their edges.
+        // and floor (drawn first) and the drum wall over their edges. Sector Z
+        // fights the same boss in the same room in Mode 1 (BG_1_3D); its
+        // 4bpp BG2 painting reads the same way.
         std::optional<DrawPacket> nucleus_floor;
-        if(in.tunnel_corridor && snapshot->background_nucleus && snapshot->ppu->background_mode==2) {
+        if(in.tunnel_corridor && snapshot->background_nucleus) {
             const auto& room=*snapshot->background_nucleus;
             const float offset=float(int16_t(uint16_t(room.centre_z-snapshot->camera.z)));
             try {
@@ -204,7 +225,7 @@ FrameLayers assemble_frame_layers(const GameSceneSnapshot& scene,const FrameLaye
                         reactor_x,reactor_z,turn,16);
                     if(!floor.geometry.vertex_view().empty()) {
                         bg2=std::move(packet);
-                        nucleus_floor=std::move(floor);
+                        nucleus_floor=std::move(floor);nucleus_room=true;
                     }
                 }
             } catch(const std::exception& error) {
@@ -244,17 +265,56 @@ FrameLayers assemble_frame_layers(const GameSceneSnapshot& scene,const FrameLaye
             background_options.scroll_override.reset();
             auto plain_options=background_options;plain_options.scroll_fraction=in.bg3_scroll_fraction;
             auto bg3=background_tile_packet(*snapshot->ppu,BackgroundLayer::bg3,plain_options,srgb);
-            if(snapshot->background_water_surround)
+            // Venom 2's colony looks out over the city (BG3) through its open
+            // side: like the bridge's surround, it belongs at infinity.
+            const bool colony_view=bg2_index<next_backgrounds.size() && is_colony_corridor(next_backgrounds[bg2_index]);
+            if(snapshot->background_water_surround || colony_view)
                 bg3=water_surround_packet(*snapshot->ppu,background_options,srgb);
             else bg3.model=packet.model;
-            if(snapshot->background_water_surround)
+            if(colony_view)
+                next_backgrounds.insert(next_backgrounds.begin()+std::ptrdiff_t(bg2_index),std::move(bg3));
+            else if(snapshot->background_water_surround)
                 next_backgrounds.insert(next_backgrounds.end()-1,std::move(bg3));
+            else if(snapshot->boss_roll && snapshot->ppu->bg3_high_priority) {
+                // ENDSEQ's frame and text sit above the 3D bitmap: the window
+                // they leave open is what clips the boss, so draw them in front.
+                // Behind it, the window's gradient becomes a room around the
+                // boss, at the depth of the models in view.
+                std::vector<double> depths;
+                for(const auto& object:snapshot->objects)
+                    if(object.source_pose.z>64 && std::isfinite(object.source_pose.z)) depths.push_back(object.source_pose.z);
+                static const bool room_enabled=[] {
+                    const char* value=std::getenv("STARFOX_MODERN_BOSS_ROLL_ROOM");return !(value && std::string_view(value)=="0");
+                }();
+                if(room_enabled && !depths.empty() && bg3.model[0]!=0 && bg3.model[5]!=0) {
+                    std::nth_element(depths.begin(),depths.begin()+std::ptrdiff_t(depths.size()/2),depths.end());
+                    const std::array<float,2> centre{-bg3.model[12]/bg3.model[0],-bg3.model[13]/bg3.model[5]};
+                    auto room=boss_roll_room_packet(*snapshot->ppu,snapshot->display_brightness,srgb,
+                        centre,std::clamp(depths[depths.size()/2],256.,16384.));
+                    if(!room.geometry.vertex_view().empty()) next_backgrounds.push_back(std::move(room));
+                }
+                roll_frame=std::move(bg3);
+            }
             else if(in.bg3_behind_bg2 && !snapshot->ppu->bg3_high_priority && bg2_index<next_backgrounds.size())
                 // SNES Mode 1: BG3 shows only through BG2's transparent pixels
                 // unless its priority bit is set (EX 4-4's tunnel wall art).
                 next_backgrounds.insert(next_backgrounds.begin()+std::ptrdiff_t(bg2_index),std::move(bg3));
             else next_backgrounds.push_back(std::move(bg3));
         }
+    }
+    // The cartridge's colours around its view, where the tunnel art has no
+    // 3D replacement; around the corridor or the boss room they would frame
+    // it in a window.
+    if(snapshot->ppu->tunnel_scene && !corridor && !nucleus_room && !in.flat_tunnel_extension) {
+        const auto border=[&](unsigned y,unsigned x) {
+            const auto ink=render::tunnel_border_index(*snapshot->ppu,y,x);
+            return source_backdrop_colour(snapshot->ppu->cgram[ink],snapshot->display_brightness,srgb);
+        };
+        auto surround=tunnel_surround_packet(border(112,0),border(4,128),border(219,128));
+        surround.model=source_layer_matrix(
+            float(snapshot->source_vanishing_point[0])+16.F,
+            float(snapshot->source_vanishing_point[1])+16.F).value();
+        out.tunnel_surround.push_back(std::move(surround));
     }
     if(in.backgrounds_only) return out;
     DrawPacket bitmap;
@@ -277,6 +337,13 @@ FrameLayers assemble_frame_layers(const GameSceneSnapshot& scene,const FrameLaye
         for(auto& foreground:next_sprites) foreground.model=packet.model;
     }
     const auto ppu_transform=packet.model;
+    if(roll_frame) {
+        // Over the models: the frame's open window, and nothing past the screen.
+        auto surround=screen_surround_packet(source_backdrop_colour(snapshot->ppu->cgram[0],snapshot->display_brightness,srgb));
+        surround.model=roll_frame->model;
+        next_sprites.insert(next_sprites.begin(),std::move(*roll_frame));
+        next_sprites.insert(next_sprites.begin(),std::move(surround));
+    }
     next_sprites.push_back(std::move(bitmap));
     next_sprites.push_back(std::move(packet));
     next_sprites.push_back(std::move(meters));

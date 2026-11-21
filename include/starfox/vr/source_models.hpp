@@ -4,6 +4,7 @@
 #include "starfox/assets/shape_decoder.hpp"
 #include "starfox/assets/hipoly_arwing.hpp"
 #include "starfox/render/asteroid_models.hpp"
+#include "starfox/render/explosion_models.hpp"
 #include "starfox/vr/scene_interpolation.hpp"
 #include "starfox/vr/source_span_model.hpp"
 #include "starfox/render/texture_overrides.hpp"
@@ -27,6 +28,28 @@ struct SourceComputeModel {
     std::shared_ptr<const SourceWarpInputs> warp;
     std::shared_ptr<const SourceAxisInputs> axis;
 };
+// 3D EXPLOSIONS as particles: a fire, smoke or explosion sprite that the
+// renderer replaces with particles (vr::ExplosionParticles) instead of drawing.
+// The object behind an emitter, by shape. The cartridge's animations mix
+// frame sets (SMOKE's starts with a large-explosion flash; EXPLODE_C ends on
+// the small explosion's frames), so the shape, not the frame, decides how it
+// throws off particles.
+enum class ExplosionSource : uint8_t {
+    explosion, // EXPLOSION* and anything unlisted: one burst, then smoke
+    smoke,     // SMOKE, LSMOKE, FOLSMOKE: a puff of a trail
+    fire,      // FIRE, FIREBREATH: standing flames
+    fireball,  // FIREBALL: a flying ball of fire
+    boost,     // BOOSTSHAPE: a ship's blue boost flame (boost2/laserfire2)
+};
+struct SourceExplosionEmitter {
+    uint16_t handle{};
+    uint64_t generation{};
+    ExplosionSource source{};
+    render::ExplosionSpriteFrame frame;
+    // The sprite's centre: source camera space (Y down, +Z forward), source
+    // units, interpolated like every other object's pose.
+    std::array<double,3> position{};
+};
 struct SourceModelPackets {
     std::vector<DrawPacket> packets;
     // Low 16 bits identify the source object; upper bits identify extra passes.
@@ -49,6 +72,8 @@ struct SourceModelPackets {
     // cartridge's sort, whose per-shape offsets let a far section's wall cut
     // through a near one. Their overlapping walls flicker depth-tested.
     std::vector<uint16_t> depth_enclosures;
+    // Fire, smoke and explosion sprites left out for particles.
+    std::vector<SourceExplosionEmitter> explosions;
 };
 // Completed-tick model assembly only. Pending entries must be handled before
 // presenting a complete game scene; they must never be silently discarded.
@@ -88,6 +113,12 @@ public:
     // HIGH POLY ARWINGS: draw the ending model (and its broken-wing
     // variants) for every player and teammate Arwing.
     void set_hipoly_arwings(bool enabled) noexcept {hipoly_arwings_=enabled;}
+    // 3D PROJECTILES: solid stand-ins for the round shot sprites.
+    void set_projectile_models(bool enabled) noexcept {projectile_models_=enabled;}
+    // 3D EXPLOSIONS (MODERN only: only vr::ModernFrame draws the particles):
+    // leave the fire, smoke and explosion sprites out and list them in
+    // SourceModelPackets::explosions.
+    void set_explosion_models(bool enabled) noexcept {explosion_models_=enabled;}
     // Replacement artwork for model textures (compute route), owned by the caller.
     void set_texture_overrides(const render::TextureOverrides* overrides) noexcept {texture_overrides_=overrides;}
     // Called for each texture of every shape drawn, with the 16 live model
@@ -118,6 +149,8 @@ private:
     bool compute_shadows_{true};
     render::AsteroidModels asteroid_models_{};
     bool hipoly_arwings_{};
+    bool projectile_models_{};
+    bool explosion_models_{};
     const render::TextureOverrides* texture_overrides_{};
     TextureObserver texture_observer_;
     DrawPacket connected_grid_pose(const GameSceneSnapshot&,const timing::RenderTransform&,
@@ -136,6 +169,10 @@ private:
     // MYZOOM_4/L/R/B: the cockpit -> chase view zoom ship, kept on top of the
     // objects drawn before it (SourceModelPackets::ships).
     std::array<uint16_t,4> pass_through_shapes_{};
+    // 3D EXPLOSIONS emitter shapes: SMOKE, LSMOKE, FOLSMOKE; FIRE, FIREBREATH; FIREBALL.
+    std::array<uint16_t,3> smoke_shapes_{};
+    std::array<uint16_t,2> fire_shapes_{};
+    uint16_t fireball_shape_{},boost_shape_{};
     std::array<uint16_t,11> depth_enclosure_shapes_{};
     std::array<uint32_t,4> intro_showcase_strategies_{};
     assets::ShapeDecoder decoder_;

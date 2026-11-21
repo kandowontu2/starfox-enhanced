@@ -11,18 +11,31 @@
 namespace starfox::vr {
 class StartupMenu {
 public:
-    enum class Page { main,options,cheats,three_d,two_d };
+    enum class Page { main,options,cheats,three_d,two_d,exit_confirmation };
     Page page{Page::main};
     bool open{true},god_mode{},extended{},alternate_available{},runtime{};
+    // GOD MODE's third setting: survival without God Mode's bomb changes
+    // (stored as 2 in God Mode's preference byte; never both on).
+    bool invincibility{};
     bool infinite_bombs{},infinite_boost{},infinite_lives{},swap_face_buttons{};
     bool fixed_face_buttons{}; // Quest host policy; not a saved preference.
     bool unlocked_pace{true};
     bool msu_available{},msu_music{};
     bool ray_tracing{},ray_tracing_available{};
     bool enhanced_sky{};
+    // MODERN: the flat MODERN renderer's frame on the headset. Pipelines are
+    // set up for it at launch, so a change applies at the next start;
+    // modern_running (session only) is what this launch uses. The rows show
+    // only where the host draws MODERN (modern_available, session only).
+    bool modern_renderer{},modern_running{},modern_available{};
+    // MODERN's dynamic lighting on the headset: the engine glow on the ground.
+    bool dynamic_lighting{};
     bool preview{}; // Session-only: never resume a game into preview automatically.
+    bool exit_requested{}; // EXIT GAME confirmed: the host ends the OpenXR session.
     unsigned model_effect{},world_effect{},model_intensity{100},world_intensity{100};
     unsigned asteroid_models{}; // render::AsteroidModels.
+    bool projectile_models{}; // 3D PROJECTILES (render::substitute_projectile_model).
+    bool explosion_models{}; // 3D EXPLOSIONS (MODERN: particles, vr::ExplosionParticles).
     render::AsteroidModels asteroid_model_mode() const noexcept {
         return asteroid_models<render::asteroid_model_mode_count
             ?static_cast<render::AsteroidModels>(asteroid_models):render::AsteroidModels::sprite;
@@ -53,21 +66,22 @@ public:
     std::array<std::vector<unsigned>,2> level_choices{{{0},{0}}};
     // Versioned preferences deliberately exclude navigation, level jumps and
     // cartridge availability. Those belong to the current session only.
-    std::array<uint8_t,21> preferences() const noexcept {
-        return {'S','F','V','R',6,uint8_t(language),uint8_t(god_mode),
+    std::array<uint8_t,22> preferences() const noexcept {
+        return {'S','F','V','R',7,uint8_t(language),uint8_t(invincibility?2U:god_mode?1U:0U),
             uint8_t(default_laser),uint8_t(msu_music),uint8_t(music_volume),
             uint8_t(sfx_volume),uint8_t(unsigned(unlocked_pace)|(unsigned(ray_tracing)<<1)|(unsigned(enhanced_sky)<<2)
                 |(steer_sensitivity_index<<3)),uint8_t(crosshair_colour),
             uint8_t(swap_face_buttons),uint8_t(infinite_bombs),uint8_t(unsigned(infinite_boost)|(unsigned(infinite_lives)<<1)),
             uint8_t(model_effect),uint8_t(world_effect),uint8_t(model_intensity),uint8_t(world_intensity),
-            uint8_t(asteroid_models)};
+            uint8_t(asteroid_models),uint8_t(unsigned(modern_renderer)|(unsigned(dynamic_lighting)<<1)|(unsigned(projectile_models)<<2)|(unsigned(explosion_models)<<3))};
     }
     bool restore_preferences(std::span<const uint8_t> bytes) noexcept {
-        if((bytes.size()!=16 && bytes.size()!=20 && bytes.size()!=21) || bytes[0]!='S' || bytes[1]!='F' || bytes[2]!='V'
-            || bytes[3]!='R' || (bytes[4]<1 || bytes[4]>6) || bytes[5]>=6 || bytes[7]>=3
+        if((bytes.size()!=16 && bytes.size()!=20 && bytes.size()!=21 && bytes.size()!=22) || bytes[0]!='S' || bytes[1]!='F' || bytes[2]!='V'
+            || bytes[3]!='R' || (bytes[4]<1 || bytes[4]>7) || bytes[5]>=6 || bytes[7]>=3
             || bytes[9]>100 || bytes[10]>100 || bytes[12]>=8) return false;
-        if(bytes.size()!=(bytes[4]>=6?21U:bytes[4]>=4?20U:16U)) return false;
+        if(bytes.size()!=(bytes[4]>=7?22U:bytes[4]>=6?21U:bytes[4]>=4?20U:16U)) return false;
         if(bytes[4]>=6 && bytes[20]>=render::asteroid_model_mode_count) return false;
+        if(bytes[4]>=7 && bytes[21]>15) return false;
         if(bytes[4]>=4) {
             for(unsigned i:{16U,17U}) {
                 bool valid=false;for(auto effect:supported_effects) valid|=bytes[i]==effect;
@@ -80,7 +94,7 @@ public:
         if(bytes[4]>=5) {
             if((bytes[11]>>3)>=steer_sensitivities.size()) return false;
         } else if(bytes[11]>(bytes[4]==1?1:3)) return false;
-        language=bytes[5];god_mode=bytes[6];default_laser=bytes[7];msu_music=bytes[8];
+        language=bytes[5];god_mode=bytes[6]==1;invincibility=bytes[6]==2;default_laser=bytes[7];msu_music=bytes[8];
         music_volume=bytes[9];sfx_volume=bytes[10];unlocked_pace=(bytes[11]&1)!=0;
         ray_tracing=bytes[4]>=2 && (bytes[11]&2)!=0;
         enhanced_sky=bytes[4]>=5 && (bytes[11]&4)!=0;
@@ -91,9 +105,15 @@ public:
         model_effect=bytes[4]>=4?bytes[16]:0;world_effect=bytes[4]>=4?bytes[17]:0;
         model_intensity=bytes[4]>=4?bytes[18]:100;world_intensity=bytes[4]>=4?bytes[19]:100;
         asteroid_models=bytes[4]>=6?bytes[20]:0;
+        modern_renderer=bytes[4]>=7 && (bytes[21]&1)!=0;
+        dynamic_lighting=bytes[4]>=7 && (bytes[21]&2)!=0;
+        projectile_models=bytes[4]>=7 && (bytes[21]&4)!=0;
+        explosion_models=bytes[4]>=7 && (bytes[21]&8)!=0;
         return true;
     }
-    unsigned row_count() const noexcept {return page==Page::main?6:page==Page::options?10:page==Page::three_d?(ray_tracing_available?6:5):page==Page::two_d?5:7;}
+    // Main page rows: 0..3 settings, 4 RESUME/START GAME, 5 PREVIEW, 6 EXIT GAME.
+    static constexpr unsigned exit_row=6;
+    unsigned row_count() const noexcept {return page==Page::exit_confirmation?2:page==Page::main?7:page==Page::options?10:page==Page::three_d?(ray_tracing_available?8:7)+(modern_available?2:0):page==Page::two_d?5:7;}
     unsigned first_visible_row() const noexcept {return selection<6?0:selection-5;}
     VrControls gameplay_controls(VrControls controls) const noexcept {
         // Native mapping is Y=fire, X=boost, A=bomb, B=brake.
@@ -134,6 +154,10 @@ public:
                 else if(selection==3) {page=Page::options;selection=0;}
                 else if(selection==4) open=false;
                 else if(selection==5) preview=!preview;
+                else if(selection==exit_row) {page=Page::exit_confirmation;selection=0;}
+            } else if(page==Page::exit_confirmation) {
+                if(selection==1) exit_requested=true;
+                else {page=Page::main;selection=exit_row;}
             } else if(page==Page::options) {
                 if(selection==0) {page=Page::cheats;selection=0;}
                 else if(selection==1) crosshair_colour=(crosshair_colour+1)%8;
@@ -152,6 +176,10 @@ public:
                 else if(selection==3 && ray_tracing_available) {ray_tracing=!ray_tracing;}
                 else if(selection==(ray_tracing_available?4U:3U))
                     asteroid_models=(asteroid_models+1)%render::asteroid_model_mode_count;
+                else if(selection==(ray_tracing_available?5U:4U)) projectile_models=!projectile_models;
+                else if(selection==(ray_tracing_available?6U:5U)) explosion_models=!explosion_models;
+                else if(modern_available && selection==(ray_tracing_available?7U:6U)) modern_renderer=!modern_renderer;
+                else if(modern_available && selection==(ray_tracing_available?8U:7U)) dynamic_lighting=!dynamic_lighting;
                 else {page=Page::options;selection=6;}
             } else if(page==Page::two_d) {
                 if(selection==0) world_effect=next_style(world_effect,true);
@@ -160,7 +188,12 @@ public:
                 else if(selection==3) enhanced_sky=!enhanced_sky;
                 else {page=Page::options;selection=7;}
             } else {
-                if(selection==0) god_mode=!god_mode;
+                if(selection==0) {
+                    // OFF, ON, INVINCIBILITY.
+                    if(invincibility) invincibility=false;
+                    else if(god_mode) {god_mode=false;invincibility=true;}
+                    else god_mode=true;
+                }
                 else if(selection==1) {
                     const auto& choices=level_choices[extended?1:0];
                     if(!choices.empty()) {
@@ -177,8 +210,9 @@ public:
             ++revision;
         }
     }
-    std::string title() const {return page==Page::cheats?"CHEATS":page==Page::options?"OPTIONS":page==Page::three_d?"3D OPTIONS":page==Page::two_d?"2D OPTIONS":"STAR FOX ENHANCED";}
+    std::string title() const {return page==Page::exit_confirmation?"EXIT GAME?":page==Page::cheats?"CHEATS":page==Page::options?"OPTIONS":page==Page::three_d?"3D OPTIONS":page==Page::two_d?"2D OPTIONS":"STAR FOX ENHANCED";}
     std::vector<std::string> labels() const {
+        if(page==Page::exit_confirmation) return {"NO / BACK","YES / EXIT GAME"};
         if(page==Page::three_d || page==Page::two_d) {
             const bool models=page==Page::three_d;
             std::vector<std::string> rows{
@@ -189,9 +223,16 @@ public:
             if(models && ray_tracing_available) rows.push_back(std::string("RAY TRACING: ")+(ray_tracing?"ON":"OFF"));
             if(models) rows.push_back("3D ASTEROIDS: "+std::string(render::asteroid_model_names[
                 static_cast<std::size_t>(asteroid_model_mode())]));
+            if(models) rows.push_back(std::string("3D PROJECTILES: ")+(projectile_models?"ON":"OFF"));
+            if(models) rows.push_back(std::string("3D EXPLOSIONS: ")+(explosion_models?"ON":"OFF"));
+            if(models && modern_available) {
+                rows.push_back(std::string("MODERN RENDERER: ")+(modern_renderer?"ON":"OFF")
+                    +(modern_renderer!=modern_running?" NEXT START":""));
+                rows.push_back(std::string("DYNAMIC LIGHTING: ")+(dynamic_lighting?"ON":"OFF"));
+            }
             rows.push_back("BACK");return rows;
         }
-        if(page==Page::cheats) return {std::string("GOD MODE: ")+(god_mode?"ON":"OFF"),
+        if(page==Page::cheats) return {std::string("GOD MODE: ")+(invincibility?"INVINCIBILITY":god_mode?"ON":"OFF"),
             "LEVEL SELECT: "+level_name(),
             std::string("DEFAULT LASER: ")+(default_laser==2?"BEAM":default_laser==1?"DUAL":"SINGLE"),
             std::string("INFINITE BOMBS: ")+(infinite_bombs?"ON":"OFF"),
@@ -207,7 +248,7 @@ public:
         return {std::string("EXPERIENCE: ")+(extended?"STARFOX EX":"ORIGINAL")+(runtime?" (LOCKED)":alternate_available?"":" (ONLY)"),
             std::string("PACE/SPEED: ")+(unlocked_pace?"UNLOCKED 20 HZ":"ORIGINAL"),
             std::string("MSU-1 MUSIC: ")+(msu_available?(msu_music?"ON":"OFF"):"NOT FOUND"),
-            "OPTIONS",runtime?"RESUME":"START GAME",std::string("PREVIEW: ")+(preview?"ON":"OFF")};
+            "OPTIONS",runtime?"RESUME":"START GAME",std::string("PREVIEW: ")+(preview?"ON":"OFF"),"EXIT GAME"};
     }
     std::array<std::u32string_view,2> localized_help() const {
         constexpr std::array<std::array<std::u32string_view,2>,6> help{{

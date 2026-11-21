@@ -1,4 +1,5 @@
 #include "starfox/modern/sdl_frame.hpp"
+#include "starfox/render/texture_override_files.hpp"
 #include "starfox/compat/bit_cast.hpp"
 #include "starfox/vr/background_tiles.hpp"
 #include <algorithm>
@@ -12,18 +13,9 @@ namespace {
 void require(bool ok,const std::string& what) {if(!ok) throw std::runtime_error(what);}
 // PNG (or BMP) to RGBA words with red in the low byte; empty when absent.
 std::optional<vr::ModernImage> load_rgba(const std::string& path) {
-    SDL_Surface* loaded=SDL_LoadSurface(path.c_str());
-    if(!loaded) return {};
-    SDL_Surface* rgba=SDL_ConvertSurface(loaded,SDL_PIXELFORMAT_ABGR8888);
-    SDL_DestroySurface(loaded);
-    if(!rgba) return {};
-    vr::ModernImage image{unsigned(rgba->w),unsigned(rgba->h),{}};
-    if(image.width==0 || image.height==0 || image.width>8192 || image.height>8192) {SDL_DestroySurface(rgba);return {};}
-    image.pixels.resize(std::size_t(image.width)*image.height);
-    for(unsigned y=0;y<image.height;++y)
-        std::memcpy(image.pixels.data()+std::size_t(y)*image.width,static_cast<const uint8_t*>(rgba->pixels)+std::size_t(y)*rgba->pitch,image.width*4U);
-    SDL_DestroySurface(rgba);
-    return image;
+    auto image=render::load_rgba_image(path);
+    if(!image) return {};
+    return vr::ModernImage{image->width,image->height,std::move(image->rgba)};
 }
 SceneBlend sdl_blend(vr::SceneBlend blend) {
     switch(blend) {
@@ -61,7 +53,7 @@ bool SdlFrameRenderer::initialize(SDL_GPUDevice* device,SDL_GPUTextureFormat col
     device_=device;status_="MODERN frame ready";return true;
 }
 void SdlFrameRenderer::release() noexcept {
-    for(auto* packets:{&stars_,&backgrounds_,&tunnel_,&cockpit_,&sprites_,&reticle_,&circle_,&shutter_,&textures_,&colour_math_,&replaced_sprites_,&engine_glow_}) packets->release();
+    for(auto* packets:{&stars_,&backgrounds_,&tunnel_,&cockpit_,&sprites_,&reticle_,&circle_,&shutter_,&textures_,&colour_math_,&replaced_sprites_,&engine_glow_,&smoke_particles_,&fire_particles_}) packets->release();
     layer_filter_.release();ray_shadows_.release();shadows_active_=false;
     frame_.reset();world_.release();uploads_.release();pipelines_.release();device_=nullptr;
 }
@@ -86,6 +78,7 @@ bool SdlFrameRenderer::prepare(SDL_GPUCommandBuffer* command,const vr::GameScene
             std::vector<vr::DrawPacket> native,replaced;
             if(filter_sprites_) {
                 for(const auto& packet:f.sprites) {
+                    if(vr::is_screen_surround(packet)) {replaced.push_back(packet);continue;}
                     const auto vertices=packet.geometry.vertex_view();
                     std::vector<vr::SceneVertex> kept,moved;
                     for(std::size_t i=0;i+2<vertices.size();i+=3) {
@@ -117,6 +110,10 @@ bool SdlFrameRenderer::prepare(SDL_GPUCommandBuffer* command,const vr::GameScene
             sdl_blend(f.colour_math->blend)),colour_math_.status());
         if(f.engine_glow) require(engine_glow_.initialize(device_,uploads_,std::span(&f.engine_glow->packet,1),{},true,false,
             sdl_blend(f.engine_glow->blend)),engine_glow_.status());
+        if(f.smoke_particles) require(smoke_particles_.initialize(device_,uploads_,std::span(&f.smoke_particles->packet,1),{},true,false,
+            sdl_blend(f.smoke_particles->blend)),smoke_particles_.status());
+        if(f.fire_particles) require(fire_particles_.initialize(device_,uploads_,std::span(&f.fire_particles->packet,1),{},true,false,
+            sdl_blend(f.fire_particles->blend)),fire_particles_.status());
         if(f.shutter) require(shutter_.initialize(device_,uploads_,std::span(&*f.shutter,1),{},false),shutter_.status());
         require(uploads_.flush(device_,command),uploads_.status());
         require(world_.initialize(device_,command,f.world,f.moving),world_.status());
@@ -134,7 +131,7 @@ bool SdlFrameRenderer::record_shadows(SDL_GPUCommandBuffer* command,const vr::Ey
         // The landscape ground where the cartridge draws shadows; the 3D
         // corridor and the boss room always.
         return (settings.cartridge_shadows && vr::is_landscape_ground(packet)) || vr::is_tunnel_corridor(packet)
-            || vr::is_nucleus_room(packet) || vr::is_nucleus_floor(packet);
+            || vr::is_nucleus_room(packet) || vr::is_nucleus_floor(packet) || vr::is_water_bridge(packet) || vr::is_colony_corridor(packet);
     });
     const bool sun=toward_light && receiver && !settings.no_shadows;
     const auto eye=reversed_depth_camera(camera);
@@ -279,7 +276,7 @@ bool SdlFrameRenderer::record(SDL_GPUCommandBuffer* command,SDL_GPURenderPass* p
             for(const auto& packet:f.backgrounds) {
                 if(packet.geometry.vertex_view().empty() && packet.geometry.line_view().empty()) continue;
                 const bool solid=vr::is_landscape_ground(packet) || vr::is_tunnel_corridor(packet)
-                    || vr::is_nucleus_room(packet) || vr::is_nucleus_floor(packet);
+                    || vr::is_nucleus_room(packet) || vr::is_nucleus_floor(packet) || vr::is_water_bridge(packet) || vr::is_colony_corridor(packet);
                 if(!backgrounds_.record_range(command,pass,pipelines_,solid?background_camera:backdrop_camera,item,1))
                     return fail("background");
                 ++item;
@@ -296,6 +293,14 @@ bool SdlFrameRenderer::record(SDL_GPUCommandBuffer* command,SDL_GPURenderPass* p
     if(!world_.record(command,pass,pipelines_,camera)) return fail("world");
     push_fog(command,camera,0);
     if(f.engine_glow && !engine_glow_.record(command,pass,pipelines_,camera)) return fail("engine glow");
+    // 3D EXPLOSIONS particles: smoke in the world's haze like the objects it
+    // replaces; added fire would only add the haze colour, so it stays clear.
+    if(f.smoke_particles) {
+        push_fog(command,camera,1);
+        if(!smoke_particles_.record(command,pass,pipelines_,camera)) return fail("smoke particles");
+        push_fog(command,camera,0);
+    }
+    if(f.fire_particles && !fire_particles_.record(command,pass,pipelines_,camera)) return fail("fire particles");
     if(f.cockpit && !cockpit_.record(command,pass,pipelines_,screen)) return fail("cockpit HUD");
     if(f.circle && !f.circle->over_hud && !circle_.record(command,pass,pipelines_,screen)) return fail("circle");
     const vr::Matrix4 ndc{1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};

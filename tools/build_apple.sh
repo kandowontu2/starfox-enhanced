@@ -38,6 +38,8 @@ if [[ "${platform}" == "ios" ]]; then metal_sdk=iphoneos; fi
 python3 "${source_root}/tools/check_portable_metal_effects.py" --sdk "${metal_sdk}" \
     --output-directory "${build_root}/generated/portable-effects"
 python3 "${source_root}/tools/check_metal_rt_shaders.py" --sdk "${metal_sdk}"
+# MODERN renderer (SDL_GPU on Metal): its MSL and the compute-route shaders.
+python3 "${source_root}/tools/check_modern_metal_shaders.py" --sdk "${metal_sdk}"
 cmake --build "${build_root}" --config Release --target starfox_pc
 
 if [[ "${platform}" == "macos" ]]; then

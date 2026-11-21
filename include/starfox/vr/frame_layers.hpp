@@ -49,8 +49,8 @@ struct FrameLayerInputs {
     // fractional parts of interpolated BG2/BG3 scroll and the interpolated
     // Mode 2 horizon. Applied to the plain native tile layers only.
     std::optional<std::array<float,2>> bg2_scroll_fraction,bg3_scroll_fraction,mode2_horizon;
-    // Flat first-person view: draw MHUD's wing indicators (VR uses its own
-    // cockpit instead). Required by renderers that draw them.
+    // First-person view: MHUD's wing indicators (ModernFrame::cockpit; the
+    // Steam Frame app uses its own cockpit instead). Required to draw them.
     const simulation::TrigTables* trigonometry{};
     // Widescreen HUD (desktop anchor_edge_hud): source pixels to move the
     // top/bottom HUD bands outward, left-half groups left and right-half

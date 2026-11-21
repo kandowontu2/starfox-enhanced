@@ -27,6 +27,9 @@ struct ApplicationHost {
     // menu and controls. Every other host keeps the original loop.
     bool steam_frame{};
     std::filesystem::path cartridge_save_path;
+    // MODERN's replacement artwork (tex_*, face_*, obj_*, bg_*_sky/ground
+    // PNGs, as the flat renderer's <exe>/textures/); empty = none.
+    std::filesystem::path texture_directory;
     // Optional per-submitted-frame CSV. Supplying a path enables bounded
     // profiling; desktop hosts choose the frame limit explicitly.
     std::optional<std::filesystem::path> profile_csv_path;

@@ -1,5 +1,6 @@
 #pragma once
 #include "starfox/vr/frame_layers.hpp"
+#include "starfox/vr/explosion_particles.hpp"
 #include "starfox/vr/scene_camera.hpp"
 #include "starfox/vr/scene_types.hpp"
 #include "starfox/vr/source_models.hpp"
@@ -37,6 +38,18 @@ EyeCamera reversed_depth_camera(EyeCamera) noexcept;
 // depth), then everything else depth-tested against them. Moving objects
 // (`moving` handles), line-only objects and non-object passes never qualify.
 std::vector<bool> painter_scenery(const SourceModelPackets&,std::span<const uint16_t> moving);
+// MODERN's world size on a headset. The cartridge's world is 256 source
+// units per metre: its ship flies ~12 cm above the 3D ground with the camera
+// ~1.5 m behind it and corridor walls ~35 cm away, so at that scale the
+// stereo depth is a toy diorama under the player's nose. A headset draws it
+// this many times larger (8 by default: the ground ~1 m below the eyes, the
+// ship ~14 m ahead) by shrinking the eyes' separation and head motion
+// instead (EyeCamera units per metre = 1/scale), with the 2D layers (HUD,
+// sprites, text) 3 m in front, before the world rather than behind the
+// ship. STARFOX_VR_WORLD_SCALE=1..64 overrides it (1 = the cartridge's scale).
+[[nodiscard]] float headset_world_scale() noexcept;
+// The 2D layers' distance for that scale (set_source_ui_distance), world units.
+[[nodiscard]] inline float headset_ui_distance() noexcept {return 3.F/headset_world_scale();}
 // Replacement landscape artwork (RGBA words, red in the low byte).
 struct ModernImage {unsigned width{},height{};std::vector<uint32_t> pixels;};
 // MODERN's per-frame scene, free of any graphics API: which packets to draw,
@@ -88,6 +101,9 @@ public:
     // Sprites, HUD and the tunnel surround: rebuilt once per source tick.
     bool layers_rebuilt{};
     std::vector<DrawPacket> tunnel_surround,sprites;
+    // The sprites' canvas placement (source_ui_layer_matrix): 256x224 PPU
+    // pixels to world, for drawing them as one filtered layer.
+    Matrix4 sprite_layer=identity_matrix;
     // Backgrounds: rebuilt per tick or at display rate while they scroll;
     // their models are updated every frame.
     bool backgrounds_rebuilt{};
@@ -108,10 +124,14 @@ public:
     // with the ground (16ths of a source column, mod 4096 | 1<<17); zero
     // with STARFOX_MODERN_FIXED_SKY=0 (the cartridge's own screen art).
     uint32_t sky_turn{};
-    // Venom's surfaces: a haze in the colour of their cloud band that is
-    // full where the cartridge's objects appear (about 3,000 source units
-    // ahead), hiding the pop-in. Colour in the target encoding, faded with
-    // the display; distances in source units. Unset elsewhere.
+    // Orbital planets below the limb (the Venom airspace): their cloud field
+    // scrolls past over the ball, like a Mode 7 floor. Bits 18-31 of
+    // both values above carry its phase (one noise period per 16384).
+    // Venom's and Macbeth's surfaces: a haze in the colour of their cloud band
+    // (Meteor's: near-black, to match its dark ground and sky) that is full
+    // where the cartridge's objects appear (about 3,000 source units ahead),
+    // hiding the pop-in. Colour in the target encoding, faded with the
+    // display; distances in source units. Unset elsewhere.
     struct Fog {std::array<float,4> colour{};float start{},end{};};
     std::optional<Fog> fog;
     // Flat first person: MHUD wing lines. Reticle as geometry, blended as
@@ -122,11 +142,19 @@ public:
     // The engine glow: drawn after the world, depth-tested without writing
     // depth, added (Overlay::blend), so objects in front cover it.
     std::optional<Overlay> engine_glow;
+    // 3D EXPLOSIONS as particles (world.explosions, ExplosionParticles):
+    // smoke (alpha blended, back to front) then fire (added), both after the
+    // world and the engine glow, depth-tested without writing depth.
+    std::optional<Overlay> smoke_particles,fire_particles;
     // Head-locked normalized-device shutter (identity camera).
     std::optional<DrawPacket> shutter;
 private:
+    // Set pieces the cartridge parks just outside its own view (see prepare).
+    const assets::SymbolMap* prop_symbols_{};
+    std::vector<uint16_t> offscreen_props_;
     Settings settings_;
     EngineGlowSettings engine_glow_settings_;
+    ExplosionParticles explosion_particles_;
     std::function<std::optional<ModernImage>(const std::string&)> load_image_;
     std::function<void(uint16_t,const simulation::SnesPpuState&,float,std::span<const uint32_t>)> observe_landscape_;
     std::optional<uint64_t> layer_revision_;
@@ -135,11 +163,22 @@ private:
     // art columns (continuous across the +-pi wrap).
     std::optional<double> sky_yaw_;
     double sky_columns_{};
+    // The orbital surface's own clock: source ticks of unpaused gameplay
+    // (modulo its period) and the snapshot revision last counted.
+    std::optional<uint64_t> flow_revision_;
+    uint32_t flow_ticks_{};
     std::optional<float> level_horizon_;
     std::map<int,unsigned> horizon_votes_;
     uint16_t level_background_{};
     bool background_interpolated_{};
     std::optional<uint16_t> fog_background_;
     std::optional<std::array<float,3>> fog_colour_;
+    bool meteor_fog_{};
+    // How many opaque sky-art pixels use each BG palette entry, and whether
+    // the haze follows the palette as it changes (Titania's weather).
+    std::array<uint32_t,128> fog_inks_{};
+    bool fog_tracks_palette_{};
+    // The headset sky's cloud tops continue up the dome (Titania).
+    bool cloud_sky_{};
 };
 }

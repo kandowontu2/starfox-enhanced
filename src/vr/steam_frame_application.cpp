@@ -771,7 +771,7 @@ int starfox::vr::run_steam_frame_application(int argc,char** argv,const Applicat
     const bool initial_extended=live && live->game.peek_meter_state().extended;
     startup.extended=initial_extended;
     if(live) {
-        startup.language=live->game.language();startup.god_mode=live->game.god_mode();
+        startup.language=live->game.language();startup.god_mode=live->game.god_mode();startup.invincibility=live->game.invincibility();
         startup.default_laser=live->game.default_laser();
         startup.msu_available=live->game.msu1_available();startup.msu_music=live->game.msu1_music();
         startup.music_volume=live->game.music_volume();startup.sfx_volume=live->game.sfx_volume();
@@ -919,7 +919,7 @@ int starfox::vr::run_steam_frame_application(int argc,char** argv,const Applicat
                     // runtime menu, which is its VR settings; it never leaves the app.
                     const bool open_chord=controls.menu_chord_pressed;
                     if(focused && !startup.open && !startup_release && open_chord) {
-                        startup.language=live->game.language();startup.god_mode=live->game.god_mode();
+                        startup.language=live->game.language();startup.god_mode=live->game.god_mode();startup.invincibility=live->game.invincibility();
                         startup.default_laser=live->game.default_laser();
                         startup.msu_available=live->game.msu1_available();startup.msu_music=live->game.msu1_music();
                         startup.music_volume=live->game.music_volume();startup.sfx_volume=live->game.sfx_volume();
@@ -968,7 +968,7 @@ int starfox::vr::run_steam_frame_application(int argc,char** argv,const Applicat
                     }
                     if(was_menu) {
                         live->game.set_language(uint8_t(startup.language));
-                        live->game.set_god_mode(startup.god_mode);
+                        live->game.set_god_mode(startup.god_mode);live->game.set_invincibility(startup.invincibility);
                         live->game.set_music_volume(uint8_t(startup.music_volume));
                         live->game.set_msu1_music(startup.msu_music);
                         live->game.set_timing_mode(startup.unlocked_pace?starfox::simulation::TimingMode::unlocked_20_fps

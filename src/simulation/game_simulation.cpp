@@ -1362,6 +1362,18 @@ GameTickResult GameSimulation::tick_pregame_menu(
         set_hipoly_arwings(!hipoly_arwings_);
         queue_sound_effect(0x11U);
     }
+    if (graphics_page && pregame_selection_ == 82U
+        && (menu_input.pressed & (starfox::input::a | starfox::input::select
+            | starfox::input::left | starfox::input::right))) {
+        set_projectile_models(!projectile_models_);
+        queue_sound_effect(0x11U);
+    }
+    if (graphics_page && pregame_selection_ == 83U
+        && (menu_input.pressed & (starfox::input::a | starfox::input::select
+            | starfox::input::left | starfox::input::right))) {
+        set_explosion_models(!explosion_models_);
+        queue_sound_effect(0x11U);
+    }
     if (graphics_page && pregame_selection_ == 81U
         && (menu_input.pressed & (starfox::input::a | starfox::input::select
             | starfox::input::left | starfox::input::right))) {
@@ -1411,7 +1423,16 @@ GameTickResult GameSimulation::tick_pregame_menu(
         } else if (activate) {
             const auto backwards = (menu_input.pressed & starfox::input::left) != 0U;
             switch (pregame_selection_) {
-            case 0U: set_god_mode(!god_mode_); break;
+            case 0U:
+                // OFF, ON (God Mode), INVINCIBILITY; left steps backwards.
+                if (backwards ? invincibility_ : !god_mode_ && !invincibility_) {
+                    set_invincibility(false);set_god_mode(true);
+                } else if (backwards ? !god_mode_ && !invincibility_ : god_mode_) {
+                    set_god_mode(false);set_invincibility(true);
+                } else {
+                    set_god_mode(false);set_invincibility(false);
+                }
+                break;
             case 1U: {
                 const auto levels = selectable_levels();
                 const auto found = std::find(levels.begin(), levels.end(), selected_level_);
@@ -1650,6 +1671,9 @@ GameTickResult GameSimulation::tick_pregame_menu(
         switch (pregame_selection_) {
         case 5U:
             if (msu1_available_) msu1_music_ = !msu1_music_;
+            else if ((menu_input.pressed
+                    & (starfox::input::a | starfox::input::select)) != 0U)
+                msu1_import_requested_ = true;
             break;
         case 6U: rumble_ = !rumble_; break;
         case 7U: {
@@ -1666,18 +1690,24 @@ GameTickResult GameSimulation::tick_pregame_menu(
             const auto available = kHighRenderScales && gpu_fast()
                 ? kRenderScales.size()
                 : std::min(kRenderScales.size(), standard_render_scale_count);
+            // MODERN adds DISPLAY after the largest scale: the screen's own
+            // resolution. render_scale_ keeps the last scale for the others.
+            const bool display_step = modern_renderer();
+            const auto steps = available + (display_step ? 1U : 0U);
             const auto found = std::find(
                 kRenderScales.begin(), kRenderScales.end(), render_scale_);
-            auto index = found == kRenderScales.end()
+            auto index = display_step && modern_display_resolution_ ? available
+                : found == kRenderScales.end()
                 ? std::size_t{}
                 : std::min(static_cast<std::size_t>(
                     std::distance(kRenderScales.begin(), found)), available - 1U);
             if ((menu_input.pressed & starfox::input::left) != 0U) {
-                index = (index + available - 1U) % available;
+                index = (index + steps - 1U) % steps;
             } else {
-                index = (index + 1U) % available;
+                index = (index + 1U) % steps;
             }
-            render_scale_ = kRenderScales[index];
+            modern_display_resolution_ = index == available;
+            if (!modern_display_resolution_) render_scale_ = kRenderScales[index];
             break;
         }
         case 8U: {
@@ -1759,6 +1789,17 @@ GameTickResult GameSimulation::tick_pregame_menu(
     }
     result.audio_port_writes = map_.take_apu_port_writes();
     return result;
+}
+
+void GameSimulation::set_invincibility(bool enabled) noexcept {
+    const auto was_enabled = invincibility_;
+    invincibility_ = enabled;
+    if (!enabled && was_enabled && !god_mode_) {
+        // As set_god_mode: the persistent native flag must be undone too.
+        map_.write_native_byte(player_ship_flags_3_, static_cast<std::uint8_t>(
+            map_.read_native_byte(player_ship_flags_3_) & ~0x08U));
+    }
+    apply_god_mode_state();
 }
 
 void GameSimulation::set_god_mode(bool enabled) noexcept {
@@ -1848,7 +1889,7 @@ bool GameSimulation::launch_selected_level() {
 }
 
 void GameSimulation::apply_god_mode_state() {
-    if (!god_mode_
+    if (!(god_mode_ || invincibility_)
         || (flow_state_ != GameFlowState::gameplay
             && flow_state_ != GameFlowState::training)) {
         return;
@@ -1857,9 +1898,12 @@ void GameSimulation::apply_god_mode_state() {
     // Star Fox EX's PSF3_NOCOLLISIONS flag is already honored by the retail
     // player strategies. Reassert it at the strategy boundary because map
     // transitions and player initialization legitimately clear PSHIPFLAGS3.
-    if(ex_god_mode_ != 0U) map_.write_native_byte(ex_god_mode_,1U);
+    // Invincibility stops here: EX's GODMODE byte and the bomb floor below
+    // belong to God Mode alone.
     map_.write_native_byte(player_ship_flags_3_, static_cast<std::uint8_t>(
         map_.read_native_byte(player_ship_flags_3_) | 0x08U));
+    if (!god_mode_) return;
+    if(ex_god_mode_ != 0U) map_.write_native_byte(ex_god_mode_,1U);
 
     // A newly initialized ship normally starts with three Nova Bombs. Keep
     // that floor while God Mode is active; the exact pre-strategy value is
@@ -2103,12 +2147,23 @@ WindowWipeState GameSimulation::window_wipe_state() const noexcept {
     // expose the value captured where DO_WINDOW_WIPE_L copies it into the
     // SNES window manager rather than rereading the aliased scratch word.
     result.logic = wipe_logic_snapshot_;
+    // MBUMWIPE leaves the source's window layout: M_WINBUF2 feeds WH0 and
+    // M_WINBUF feeds WH1, with the larger x in M_WINBUF and empty rows as
+    // WH0=x, WH1=x-1. Presentation keeps its established form: left <= right,
+    // and empty rows as (x-1, x).
     for (std::size_t line = 0; line < result.left.size(); ++line) {
         const auto displacement = static_cast<std::uint32_t>(line * 2U);
-        result.left[line] = map_.peek_ram_word(
+        const auto first = map_.peek_ram_word(
             wipe_left_buffer_ + displacement).value_or(0);
-        result.right[line] = map_.peek_ram_word(
+        const auto second = map_.peek_ram_word(
             wipe_right_buffer_ + displacement).value_or(0);
+        if (static_cast<std::uint16_t>(first + 1U) == second) {
+            result.left[line] = first;
+            result.right[line] = second;
+        } else {
+            result.left[line] = std::min(first, second);
+            result.right[line] = std::max(first, second);
+        }
     }
     return result;
 }
@@ -6344,6 +6399,15 @@ GameTickResult GameSimulation::tick(const input::TickInput& input) {
                 if (objects_.at(handle).shape == nuke_shape_) {
                     nukes_before_strategies.push_back(handle);
                 }
+            }
+            // God Mode's 4-tick cadence (service_god_nuke) would let this
+            // press launch a new bomb in the same tick the one in flight
+            // detonates on it (nuke_strat). With a bomb in flight the press
+            // only detonates it, as with the retail 50-tick delay: the
+            // player's countdown (s_decbne_var specialdelay) stays above zero.
+            if (!nukes_before_strategies.empty()
+                && map_.read_native_byte(special_weapon_delay_) < 2U) {
+                map_.write_native_byte(special_weapon_delay_, 2U);
             }
         }
         if (starfox_ex_cartridge_

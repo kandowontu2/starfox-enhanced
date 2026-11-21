@@ -1,6 +1,7 @@
 #pragma once
 #include "starfox/modern/sdl_source_scene.hpp"
 #include "starfox/render/shadow_scene.hpp"
+#include "starfox/vr/ray_lighting.hpp"
 #include <functional>
 #include <optional>
 #include <span>
@@ -25,37 +26,11 @@ public:
     // success with object_count() 0.
     bool record(SDL_GPUDevice*,SDL_GPUCommandBuffer*,const SdlSourceScene& world,const vr::EyeCamera& eye,
         render::shadows::Vec3 toward_light,const std::function<bool(uint32_t)>& caster);
-    // A coloured point light (laser, plasma ball, explosion, engine glow or
-    // smart bomb) in native eye space, source units.
-    // `object` is its own entry in objects() (never shadows its own light),
-    // or ~0. `hardness` keeps full brightness out to that fraction of the
-    // radius, then falls off steeply. A `projected` light is a pool on
-    // background surfaces only (ground, corridor, room), centred where the
-    // sun casts its position, `aspect` times longer along `axis`, fading out
-    // `fade_height` above them: an engine's glow under its ship.
-    struct PointLight {
-        std::array<float,3> position{};float radius{};std::array<float,3> colour{};uint32_t object{~0U};
-        std::array<float,3> axis{1,0,0};float aspect{1};float hardness{};bool projected{};float fade_height{};
-        bool background_only{}; // An ordinary light that skips models (a boost flame on floor and walls).
-        // Its own object may block it (an engine's glow cut off by the hull).
-        bool self_shadowed{};
-        // Projected lights: traced from the ground to a point this far up
-        // the sun's rays from the light (native units). Larger = the cut
-        // follows the sun's shadow more closely; smaller = it shrinks
-        // toward the light, which then reaches into the shadow.
-        float lift{};
-        // Projected lights: the pool's radius at fade_height, as a multiple
-        // of its radius on the ground (it widens and dims as the light climbs).
-        float spread{1};
-    };
-    // Emitter classes from the game state (ModernRuntime), each with its
-    // own authored colour and reach.
-    // EmitterBoost: the cartridge's boost flame (BOOSTSHAPE) behind an Arwing.
-    enum Emitter : unsigned {EmitterNone,EmitterLaser,EmitterExplosion,EmitterPlasma,EmitterEngine,EmitterBomb,EmitterArwingLaser,
-        EmitterBoost};
-    using EmitterKind=std::function<unsigned(uint32_t key)>;
-    // The smart bomb's detonation circle (CircleEffectState), screen space.
-    struct BombFlash {float centre_x{},centre_y{},radius{};std::array<float,3> colour{};};
+    // The shared lighting types (vr::ray_lighting.hpp).
+    using PointLight=vr::RayPointLight;
+    using Emitter=vr::RayEmitter;
+    using EmitterKind=vr::RayEmitterKind;
+    using BombFlash=vr::RayBombFlash;
     // After record(): this frame's lights from every world object (packets
     // and their keys), strongest first, at most `limit`, their reach scaled
     // by `radius_scale`; `tick` drives the engine glow's red/yellow flicker.

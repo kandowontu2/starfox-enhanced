@@ -1,4 +1,5 @@
 #pragma once
+#include "starfox/render/texture_override_files.hpp"
 #include "starfox/render/texture_overrides.hpp"
 #include "starfox/simulation/game_simulation.hpp"
 #include <array>
@@ -36,12 +37,8 @@ private:
     std::unordered_set<uint64_t> sprites_;
     std::size_t written_{};
 };
-// Every tex_AAAAAA_l.png / tex_AAAAAA_h.png in `directory` (any size).
-render::TextureOverrides load_texture_overrides(const std::string& directory);
-// Every face_AAAAAA.png in `directory` (any size), keyed by the portrait
-// frame's ROM address (vr::source_portrait_address).
-render::TextureOverrides load_portrait_overrides(const std::string& directory);
-// Every obj_HHHHHHHHHHHHHHHH.png in `directory` (any size), keyed by
-// render::sprite_override_key.
-render::SpriteOverrides load_sprite_overrides(const std::string& directory);
+// Loading the replacements (shared with the PCVR app).
+using render::load_texture_overrides;
+using render::load_portrait_overrides;
+using render::load_sprite_overrides;
 }

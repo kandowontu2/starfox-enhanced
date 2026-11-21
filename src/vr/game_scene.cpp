@@ -4,18 +4,24 @@
 #include "starfox/assets/shape_decoder.hpp"
 #include <algorithm>
 #include <bit>
+#include <cstdlib>
 #include <limits>
 #include <stdexcept>
+#include <string_view>
 
 namespace starfox::vr {
 std::array<std::optional<SourceCorridor>,source_corridor_count> source_corridors(const assets::SymbolMap& symbols) {
     // BGS/PSTRATS use LTUNNEL for both Gekkou states: BG_5_2Z's entry
     // continues into BG_5_2A through WASHENT3. The scripted entry camera can
     // be outside these bounds; native_corridor_scene handles that separately.
+    // BG_2_6B (Venom 2's pipe run, CL_COLON) is not listed: the cartridge's
+    // pipe pieces are that tunnel, climbing about 1,300 units and back, so a
+    // straight box there hid every piece outside it and left the camera in an
+    // empty corridor beside the pipe it was flying through.
     struct Definition {const char* name;const char* prefix;std::uint8_t walls{15};};
     constexpr std::array<Definition,source_corridor_count> definitions{{
         {"BG_1_1I","LTUNNEL_"},{"BG_1_3B","MTUNNEL_"},{"BG_2_3C","STUNNEL_"},
-        {"BG_1_6B","LTUNNEL_"},{"BG_1_7A","LTUNNEL_"},{"BG_2_6B","LTUNNEL_"},
+        {"BG_1_6B","LTUNNEL_"},{"BG_1_7A","LTUNNEL_"},
         {"BG_2_6C","LTUNNEL_"},{"BG_3_4C","LTUNNEL_"},
         {"BG_5_2A","LTUNNEL_"},{"BG_5_2Z","LTUNNEL_"},
         {"BG_2_6A","COLONY_",14}}};
@@ -117,8 +123,11 @@ GameSceneHistory::GameSceneHistory(const simulation::GameSimulation& game,
     if(!title_intro.empty() && !background_lists.empty()
         && (title_intro.front()&0xff0000U)==(background_lists.front()&0xff0000U))
         ex_title_intro_background_=static_cast<uint16_t>(title_intro.front()-background_lists.front());
-    constexpr std::array unique_names{"BG_2_2","BG_3_4B","BG_3_4D","BG_INTRO","BG_1_3I","BG_3_2","BG_1_3C","BG_1_3A"};
-    constexpr std::array orbital_names{"BG_1_5","BG_3_6","BG_5_1E","BG_5_1I","BG_2_2"};
+    // BG_1_3E: Space Armada's exit into open space after the boss.
+    constexpr std::array unique_names{"BG_2_2","BG_3_4B","BG_3_4D","BG_INTRO","BG_1_3I","BG_3_2","BG_1_3C","BG_1_3A","BG_1_3E"};
+    // BG_1_7C: the ending's space demo, on the same LSB atlas as BG_1_5/BG_3_6.
+    // As a flat 224-row panel it showed the pink backdrop above and below.
+    constexpr std::array orbital_names{"BG_1_5","BG_3_6","BG_5_1E","BG_5_1I","BG_2_2","BG_1_7C"};
     for(size_t i=0;i<orbital_names.size();++i) {
         const auto& value=symbols.find(orbital_names[i]);
         if(!value.empty() && !background_lists.empty()
@@ -147,6 +156,9 @@ GameSceneHistory::GameSceneHistory(const simulation::GameSimulation& game,
         for(const auto value:symbols.find("BOSS_8_1C")) if(value<0x10000U) {reactor=value;break;}
         for(const auto address:symbols.find("PLAYER_POSZ"))
             if((address>>16U)==0 || (address>>16U)==0x7eU) {player_posz_address_=address;break;}
+        for(const auto address:symbols.find("BOSSFLAGS"))
+            if((address>>16U)==0 || (address>>16U)==0x7eU) {boss_flags_address_=address;break;}
+        if(const auto bit=first("BF_DYING"); bit && *bit<256U) boss_dying_bit_=uint8_t(*bit);
         bool found=false;
         for(std::size_t i=0;const char* name:{"BG_1_3D","BG_1_3DA"}) {
             const auto& value=symbols.find(name);
@@ -192,6 +204,16 @@ GameSceneHistory::GameSceneHistory(const simulation::GameSimulation& game,
     if(!water.empty() && !background_lists.empty()
         && (water.front()&0xff0000U)==(background_lists.front()&0xff0000U))
         water_background_=static_cast<uint16_t>(water.front()-background_lists.front());
+    {
+        // Do not invent the bridge for source revisions without its constants.
+        const auto constant=[&](const char* name) -> std::optional<int16_t> {
+            const auto& value=symbols.find(name);
+            if(value.empty()) return std::nullopt;
+            return starfox::bit_cast<int16_t>(uint16_t(value.front()));
+        };
+        const auto top=constant("BRIDGE_MINY"),bottom=constant("BRIDGE_MAXY"),view=constant("BRIDGE_VIEWCY");
+        if(top && bottom && view && *top<*view && *view<*bottom) bridge_=SourceBridge{*top,*bottom,*view};
+    }
     for(size_t i=0;i<landscape_names.size();++i) {
         const auto& value=symbols.find(landscape_names[i]);
         if(!value.empty() && !background_lists.empty()
@@ -315,6 +337,7 @@ void GameSceneHistory::capture() {
         next->background_nucleus=room;
     }
     next->wipe=game_.window_wipe_state();
+    next->boss_roll=game_.boss_roll_active();
     if(next->ppu->background_mode==2) for(size_t i=0;i<unique_backgrounds_.size();++i)
         if(unique_backgrounds_[i]!=0 && game_.map().background()==unique_backgrounds_[i])
         {
@@ -323,12 +346,13 @@ void GameSceneHistory::capture() {
             // with one large meteor in the right. Keep that artwork planar
             // and unique while the planet-free stars fill the surround.
             next->background_unique_space=i>=4 || i==1 || i==2;
-            if(i==1 || i==2 || i==4 || i==6 || i==7) next->background_planet_rect={320,88,120,120};
+            if(i==1 || i==2 || i==4 || i==6 || i==7 || i==8) next->background_planet_rect={320,88,120,120};
             if(i==5) next->background_planet_rect={56,360,112,112};
         }
     next->background_scroll_override=game_.map().peek_background_scroll_override();
     next->background_water_surround=next->ppu->background_mode==1 && water_background_!=0
         && game_.map().background()==water_background_;
+    if(next->background_water_surround) next->background_bridge=bridge_;
     // Only verified landscape atlases. Titania's water and tunnel
     // backgrounds use different projection schemes and must not join this set.
     if(next->ppu->background_mode==2) for(std::size_t i=0;i<landscape_backgrounds_.size();++i)
@@ -459,6 +483,19 @@ void GameSceneHistory::capture() {
             next->background_star_sphere=true;
     next->circle=game_.circle_effect_state();
     next->colour_math=game_.colour_math_effect_state();
+    {
+        // The boss-dying flash (bossflash_l: add 0,31,31 on BG1-3 and the
+        // backdrop) turns a headset's whole view cyan every other frame
+        // while a boss blows up. Leave it out; the player-hit flash, which
+        // uses the same colour, is kept (it never coincides with bf_dying).
+        // STARFOX_MODERN_BOSS_FLASH=1 keeps the cartridge's flash.
+        static const bool keep=[] {const char* value=std::getenv("STARFOX_MODERN_BOSS_FLASH");return value && std::string_view(value)=="1";}();
+        const auto& math=next->colour_math;
+        if(!keep && math.active && !math.subtract && !math.half && math.red==0 && math.green==31 && math.blue==31
+            && boss_flags_address_ && boss_dying_bit_
+            && (game_.map().read_native_byte(boss_flags_address_)&boss_dying_bit_)!=0)
+            next->colour_math={};
+    }
     next->ex_title_logo_screen=next->meters.extended
         && next->flow==simulation::GameFlowState::title
         && ex_title_intro_background_!=0

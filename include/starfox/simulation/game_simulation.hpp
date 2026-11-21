@@ -129,7 +129,7 @@ enum class PregamePage {
 inline constexpr std::array<std::uint8_t, 14> main_menu_order{
     0,1,2,3,43,4,5,6,20,21,47,14,15,16};
 inline constexpr std::array<std::uint8_t, 13> two_d_menu_order{8,18,36,37,38,39,40,41,13,24,44,46,23};
-inline constexpr std::array<std::uint8_t, 17> three_d_menu_order{42,7,11,9,30,78,17,79,80,81,12,22,35,33,34,45,23};
+inline constexpr std::array<std::uint8_t, 19> three_d_menu_order{42,7,11,9,30,78,17,79,82,83,80,81,12,22,35,33,34,45,23};
 inline constexpr std::array<std::uint8_t, 32> global_menu_order{
     29,72,32,71,76,77,10,65,66,28,70,27,73,74,61,62,67,63,68,48,49,50,52,53,54,55,56,57,69,59,60,23};
 #if defined(__3DS__)
@@ -151,6 +151,8 @@ inline constexpr bool modern_unsupported_row(unsigned row) noexcept {
     case 8: case 23:  // 2D FILTER, BACK
     case 7: case 11: case 9: // AA QUALITY (as MSAA), VSYNC, RENDER UPSCALE
     case 79: case 80: case 81: // 3D ASTEROIDS, HIGH POLY ARWINGS, DYNAMIC LIGHTING
+    case 82: // 3D PROJECTILES
+    case 83: // 3D EXPLOSIONS
     case 29: case 72: // RAY TRACING (sun shadows), SHADOW SOFTNESS
         return false;
     default: break;
@@ -426,6 +428,11 @@ public:
     [[nodiscard]] std::optional<std::uint16_t>
         model_colour_table_override() const noexcept;
     void set_god_mode(bool enabled) noexcept;
+    // Invincibility: God Mode's survival (the cartridge's PSF3_NOCOLLISIONS)
+    // without its bomb changes: Nova Bombs keep their count, cadence and A
+    // to detonate. The menu's GOD MODE row cycles OFF, ON, INVINCIBILITY.
+    [[nodiscard]] bool invincibility() const noexcept { return invincibility_; }
+    void set_invincibility(bool enabled) noexcept;
     [[nodiscard]] bool infinite_bombs() const noexcept { return infinite_bombs_; }
     [[nodiscard]] bool infinite_lives() const noexcept { return infinite_lives_; }
     void set_infinite_lives(bool value) noexcept { infinite_lives_ = value; }
@@ -517,6 +524,18 @@ public:
     // HIGH POLY ARWINGS (MODERN): the ending model replaces the flight Arwings.
     [[nodiscard]] bool hipoly_arwings() const noexcept { return hipoly_arwings_; }
     void set_hipoly_arwings(bool value) noexcept { hipoly_arwings_ = value; }
+    // 3D PROJECTILES: solid stand-ins for the pulse shot, Nova Bomb and
+    // plasma ball sprites (render::substitute_projectile_model).
+    [[nodiscard]] bool projectile_models() const noexcept { return projectile_models_; }
+    void set_projectile_models(bool value) noexcept { projectile_models_ = value; }
+    // 3D EXPLOSIONS (MODERN only): the fire, smoke and explosion sprites
+    // become particles (vr::ExplosionParticles).
+    [[nodiscard]] bool explosion_models() const noexcept { return explosion_models_; }
+    void set_explosion_models(bool value) noexcept { explosion_models_ = value; }
+    // RENDER UPSCALE's DISPLAY step (MODERN only): MODERN renders at the
+    // screen's own resolution instead of canvas x render scale.
+    [[nodiscard]] bool modern_display_resolution() const noexcept { return modern_display_resolution_; }
+    void set_modern_display_resolution(bool value) noexcept { modern_display_resolution_ = value; }
     // DYNAMIC LIGHTING (MODERN): ray-traced coloured lights from shots and
     // explosions, and the engine glow on the ground. MODERN's ray-traced
     // sun shadows follow RAY TRACING.
@@ -680,6 +699,11 @@ public:
     void set_msu1_available(bool available) noexcept {
         msu1_available_ = available;
         if (!available) msu1_music_ = false;
+    }
+    // MSU-1 MUSIC confirmed (A or SELECT) while the pack is missing: a host
+    // with a file picker offers one. Returns the request and clears it.
+    [[nodiscard]] bool take_msu1_import_request() noexcept {
+        return std::exchange(msu1_import_requested_, false);
     }
     [[nodiscard]] bool rumble() const noexcept { return rumble_; }
     void set_rumble(bool enabled) noexcept { rumble_ = enabled; }
@@ -1340,6 +1364,7 @@ private:
     std::uint8_t runtime_options_video_phase_{};
     Experience experience_{Experience::original};
     bool god_mode_{};
+    bool invincibility_{};
     bool show_fps_{};
     AntiAliasingMode anti_aliasing_mode_{AntiAliasingMode::off};
     std::uint8_t aa_type_{};
@@ -1377,6 +1402,9 @@ private:
     std::uint8_t reflective_surfaces_{};
     render::AsteroidModels asteroid_models_{};
     bool hipoly_arwings_{};
+    bool projectile_models_{};
+    bool explosion_models_{};
+    bool modern_display_resolution_{};
     bool dynamic_lighting_{};
     std::uint8_t dlss_mode_{}; // Host quality preference, not emulated game state.
     std::uint8_t dlss45_mode_{};
@@ -1405,6 +1433,7 @@ private:
     bool modern_available_{};
     bool msu1_music_{};
     bool msu1_available_{true};
+    bool msu1_import_requested_{};
     bool rumble_{true};
     std::uint8_t music_volume_{100U};
     std::uint8_t sfx_volume_{100U};

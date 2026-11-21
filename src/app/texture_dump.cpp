@@ -2,6 +2,7 @@
 #include "starfox/assets/rom.hpp"
 #include "starfox/assets/runtime_bundle.hpp"
 #include "starfox/assets/shape_decoder.hpp"
+#include "starfox/render/asteroid_models.hpp"
 #include "starfox/render/sprite_renderer.hpp"
 #include "starfox/render/texture_overrides.hpp"
 #include "starfox/simulation/game_simulation.hpp"
@@ -371,7 +372,7 @@ void dump_edition(const Edition& edition, const std::filesystem::path& root,
         return text;
     };
     std::ofstream index{directory / "textures.csv"};
-    index << "file,width,height,sampled_sizes,descriptors,shapes\n";
+    index << "file,width,height,sampled_sizes,descriptors,shapes,texel_hash\n";
     for (const auto& [name, entry] : files) {
         const auto& texture = *entry.largest;
         const auto width = static_cast<std::size_t>(texture.u_mask) + 1U;
@@ -380,7 +381,9 @@ void dump_edition(const Edition& edition, const std::filesystem::path& root,
         index << name << ',' << width << ',' << height << ",\""
               << joined(entry.sizes, [](const auto& size) { return size; }) << "\",\""
               << joined(entry.descriptors, [](auto value) { return "$" + hex(value, 4); }) << "\",\""
-              << joined(entry.shapes, [](const auto& shape) { return shape; }) << "\"\n";
+              << joined(entry.shapes, [](const auto& shape) { return shape; }) << "\","
+              // The content hash 3D stand-ins match on (render::asteroid_texture_hash).
+              << hex(starfox::render::asteroid_texture_hash(texture), 8) << '\n';
     }
     const auto portraits = dump_portraits(edition, directory, palette);
     const auto sprites = dump_sprites(edition, directory, map);

@@ -30,11 +30,19 @@ struct SourceCorridorBounds {
     bool operator==(const SourceCorridorBounds&) const=default;
 };
 
+// Titania's bridge (BG_2_3B, PSTRATS playeronbridge): BRIDGE_MINY..MAXY are
+// the overhead span and the deck (cartridge Y down), BRIDGE_VIEWCY the eye
+// height the painting was drawn for.
+struct SourceBridge {
+    std::int16_t top{},bottom{},view{};
+    bool operator==(const SourceBridge&) const=default;
+};
+
 struct SourceCorridor {
     std::uint16_t background{};
     SourceCorridorBounds bounds;
 };
-inline constexpr std::size_t source_corridor_count=11;
+inline constexpr std::size_t source_corridor_count=10;
 
 // Space Armada's boss room (BG_1_3D/DA while the player is in it). The cartridge
 // paints the room as a fixed BG2 picture; its real wall is the ring the
@@ -108,9 +116,13 @@ struct GameSceneSnapshot {
     uint16_t landscape_atlas_origin{232};
     bool background_water_surround{};
     std::optional<SourceCorridorBounds> background_corridor;
+    std::optional<SourceBridge> background_bridge;
     std::optional<SourceNucleusRoom> background_nucleus;
     bool background_space_horizon{};
     bool background_unique_space{};
+    // The ending's boss roll call (ENDSEQ): BG3's high-priority frame and
+    // text cover the 3D bitmap outside its window; BG2 is the window's gradient.
+    bool boss_roll{};
     std::array<unsigned,4> background_planet_rect{};
     bool background_orbital_planet{};
     bool background_orbital_thin{};
@@ -233,11 +245,12 @@ private:
     uint16_t ex_intro_star_background_{};
     uint16_t sector_y_star_background_{};
     uint16_t asteroid_star_background_{};
-    std::array<uint16_t,8> unique_backgrounds_{};
-    std::array<uint16_t,5> orbital_backgrounds_{};
+    std::array<uint16_t,9> unique_backgrounds_{};
+    std::array<uint16_t,6> orbital_backgrounds_{};
     std::array<uint16_t,4> ex_star_backgrounds_{};
     std::array<uint16_t,25> landscape_backgrounds_{};
     uint16_t water_background_{};
+    std::optional<SourceBridge> bridge_;
     uint16_t colony_background_{};
     std::array<uint16_t,source_corridor_count> corridor_backgrounds_{};
     std::array<std::optional<SourceCorridorBounds>,source_corridor_count> corridor_bounds_{};
@@ -250,6 +263,11 @@ private:
     std::array<uint32_t,4> outside_cruiser_strategies_{};
     std::optional<SourceNucleusRoom> nucleus_room_; // centre_z holds the ring's offset ahead of PLAYER_POSZ
     uint32_t player_posz_address_{};
+    // BOSSFLAGS and its bf_dying bit: GSTRATS init_strats_l calls
+    // bossflash_l (full cyan added to BG1-3 and the backdrop) every other
+    // frame while a boss is dying. MODERN leaves that flash out.
+    uint32_t boss_flags_address_{};
+    uint8_t boss_dying_bit_{};
     std::array<uint32_t,3> dust_addresses_{};
     std::array<uint32_t,3> cockpit_hud_addresses_{}; // HUDROT, M_HUDCOLOUR, M_HUDFLAGS (optional)
     std::shared_ptr<const GameSceneSnapshot> older_,previous_,current_;
